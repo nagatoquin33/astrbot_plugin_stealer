@@ -6,6 +6,7 @@ import json
 import os
 import random
 import shutil
+from functools import lru_cache, wraps
 from pathlib import Path
 
 from astrbot.api import AstrBotConfig, logger
@@ -67,6 +68,9 @@ class StealerPlugin(Star):
         self.content_filtration: bool = False
         self.filtration_prompt: str = "符合公序良俗"
         self._scanner_task: asyncio.Task | None = None
+        
+        # 缓存清理阈值
+        self._CACHE_MAX_SIZE = 1000  # 每个缓存的最大条目数
         self.desc_cache_path: Path | None = None
         self.emotion_cache_path: Path | None = None
         self._desc_cache: dict[str, str] = {}
@@ -210,6 +214,7 @@ class StealerPlugin(Star):
         """持久化插件运行配置到配置文件。"""
         if not self.config_path:
             return
+            
         payload = {
             "enabled": self.enabled,
             "auto_send": self.auto_send,
@@ -224,7 +229,14 @@ class StealerPlugin(Star):
             "filtration_prompt": self.filtration_prompt,
             "emoji_only": self.emoji_only,
         }
-        self.config_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        
+        try:
+            def sync_persist_config():
+                self.config_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            
+            await asyncio.to_thread(sync_persist_config)
+        except Exception as e:
+            logger.error(f"保存配置文件失败: {e}")
 
     async def _load_index(self) -> dict:
         """加载分类索引文件。
@@ -232,8 +244,14 @@ class StealerPlugin(Star):
         Returns:
             dict: 键为文件路径，值为包含 category 与 tags 的字典。
         """
+        if not self.index_path:
+            return {}
+        
         try:
-            return json.loads(self.index_path.read_text(encoding="utf-8")) if self.index_path else {}
+            def sync_load_index():
+                return json.loads(self.index_path.read_text(encoding="utf-8"))
+            
+            return await asyncio.to_thread(sync_load_index)
         except Exception:
             return {}
 
@@ -241,18 +259,38 @@ class StealerPlugin(Star):
         """保存分类索引文件。"""
         if not self.index_path:
             return
-        self.index_path.write_text(json.dumps(idx, ensure_ascii=False), encoding="utf-8")
+        
+        try:
+            def sync_save_index():
+                self.index_path.write_text(json.dumps(idx, ensure_ascii=False), encoding="utf-8")
+            
+            await asyncio.to_thread(sync_save_index)
+        except Exception as e:
+            logger.error(f"保存索引文件失败: {e}")
 
     async def _load_aliases(self) -> dict:
+        if not self.alias_path:
+            return {}
+            
         try:
-            return json.loads(self.alias_path.read_text(encoding="utf-8")) if self.alias_path else {}
+            def sync_load_aliases():
+                return json.loads(self.alias_path.read_text(encoding="utf-8"))
+            
+            return await asyncio.to_thread(sync_load_aliases)
         except Exception:
             return {}
 
     async def _save_aliases(self, aliases: dict):
         if not self.alias_path:
             return
-        self.alias_path.write_text(json.dumps(aliases, ensure_ascii=False), encoding="utf-8")
+            
+        try:
+            def sync_save_aliases():
+                self.alias_path.write_text(json.dumps(aliases, ensure_ascii=False), encoding="utf-8")
+            
+            await asyncio.to_thread(sync_save_aliases)
+        except Exception as e:
+            logger.error(f"保存别名文件失败: {e}")
 
     def _inject_persona_prompt(self):
         """在所有人格 system prompt 中追加表情标签使用说明。
@@ -513,11 +551,21 @@ class StealerPlugin(Star):
                 desc = resp1.completion_text.strip()
                 if desc:
                     self._desc_cache[h] = desc
+                    
+                    # 清理描述缓存，保持在阈值以下
+                    if len(self._desc_cache) > self._CACHE_MAX_SIZE:
+                        # 只保留最新的条目
+                        keys_to_keep = list(self._desc_cache.keys())[-self._CACHE_MAX_SIZE:]
+                        self._desc_cache = {k: self._desc_cache[k] for k in keys_to_keep}
+                    
                     if self.desc_cache_path:
                         try:
-                            self.desc_cache_path.write_text(json.dumps(self._desc_cache, ensure_ascii=False), encoding="utf-8")
-                        except Exception:
-                            pass
+                            def sync_save_desc_cache():
+                                self.desc_cache_path.write_text(json.dumps(self._desc_cache, ensure_ascii=False), encoding="utf-8")
+                            
+                            await asyncio.to_thread(sync_save_desc_cache)
+                        except Exception as e:
+                            logger.error(f"保存描述缓存失败: {e}")
             emotion = self._emotion_cache.get(h)
             if not emotion:
                 prov_text = await self._pick_text_provider(event)
@@ -541,12 +589,22 @@ class StealerPlugin(Star):
                 resp2 = await self.context.llm_generate(chat_provider_id=prov_text, prompt=prompt2)
                 emotion = resp2.completion_text.strip()
                 if emotion:
-                    self._emotion_cache[h] = emotion
-                    if self.emotion_cache_path:
-                        try:
-                            self.emotion_cache_path.write_text(json.dumps(self._emotion_cache, ensure_ascii=False), encoding="utf-8")
-                        except Exception:
-                            pass
+                     self._emotion_cache[h] = emotion
+                     
+                     # 清理情绪缓存，保持在阈值以下
+                     if len(self._emotion_cache) > self._CACHE_MAX_SIZE:
+                         # 只保留最新的条目
+                         keys_to_keep = list(self._emotion_cache.keys())[-self._CACHE_MAX_SIZE:]
+                         self._emotion_cache = {k: self._emotion_cache[k] for k in keys_to_keep}
+                     
+                     if self.emotion_cache_path:
+                         try:
+                             def sync_save_emotion_cache():
+                                 self.emotion_cache_path.write_text(json.dumps(self._emotion_cache, ensure_ascii=False), encoding="utf-8")
+                             
+                             await asyncio.to_thread(sync_save_emotion_cache)
+                         except Exception as e:
+                             logger.error(f"保存情绪缓存失败: {e}")
             
             prompt = (
                 '你是专业的表情包情绪分类师，请严格按照以下要求处理：'
@@ -596,16 +654,20 @@ class StealerPlugin(Star):
 
     async def _compute_hash(self, file_path: str) -> str:
         try:
-            with open(file_path, "rb") as f:
-                data = f.read()
-            return hashlib.sha256(data).hexdigest()
+            def sync_compute_hash():
+                with open(file_path, "rb") as f:
+                    data = f.read()
+                return hashlib.sha256(data).hexdigest()
+            return await asyncio.to_thread(sync_compute_hash)
         except Exception:
             return ""
 
     async def _file_to_base64(self, path: str) -> str:
         try:
-            with open(path, "rb") as f:
-                return base64.b64encode(f.read()).decode("utf-8")
+            def sync_file_to_base64():
+                with open(path, "rb") as f:
+                    return base64.b64encode(f.read()).decode("utf-8")
+            return await asyncio.to_thread(sync_file_to_base64)
         except Exception:
             return ""
 
@@ -634,12 +696,21 @@ class StealerPlugin(Star):
         name = f"{int(asyncio.get_event_loop().time()*1000)}_{random.randint(1000,9999)}"
         ext = os.path.splitext(src_path)[1] or ".jpg"
         raw_dest = self.base_dir / "raw" / f"{name}{ext}"
-        shutil.copyfile(src_path, raw_dest)
         cat_dir = self.base_dir / "categories" / category
-        cat_dir.mkdir(parents=True, exist_ok=True)
         cat_dest = cat_dir / f"{name}{ext}"
-        shutil.copyfile(src_path, cat_dest)
-        return cat_dest.as_posix()
+        
+        try:
+            def sync_store_image():
+                # 同步部分
+                cat_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(src_path, raw_dest)
+                shutil.copyfile(src_path, cat_dest)
+                return cat_dest.as_posix()
+            
+            return await asyncio.to_thread(sync_store_image)
+        except Exception as e:
+            logger.error(f"保存图片失败: {e}")
+            return src_path
 
     def _extract_emotions_from_text(self, text: str) -> tuple[list[str], str]:
         """从文本中提取情绪关键词，完全在本地完成，不再请求 LLM。
@@ -851,7 +922,7 @@ class StealerPlugin(Star):
                 ok = await self._filter_image(event, path)
                 if not ok:
                     try:
-                        os.remove(path)
+                        await asyncio.to_thread(os.remove, path)
                     except Exception:
                         pass
                     continue
@@ -859,7 +930,7 @@ class StealerPlugin(Star):
                 # 如果分类为"非表情包"，跳过存储
                 if cat == "非表情包" or emotion == "非表情包":
                     try:
-                        os.remove(path)
+                        await asyncio.to_thread(os.remove, path)
                     except Exception:
                         pass
                     continue
@@ -903,7 +974,7 @@ class StealerPlugin(Star):
                 ok = await self._filter_image(None, f.as_posix())
                 if not ok:
                     try:
-                        os.remove(f.as_posix())
+                        await asyncio.to_thread(os.remove, f.as_posix())
                     except Exception:
                         pass
                     continue
@@ -911,7 +982,7 @@ class StealerPlugin(Star):
                 # 如果分类为"非表情包"，跳过存储
                 if cat == "非表情包" or emotion == "非表情包":
                     try:
-                        os.remove(f.as_posix())
+                        await asyncio.to_thread(os.remove, f.as_posix())
                     except Exception:
                         pass
                     continue
@@ -926,7 +997,7 @@ class StealerPlugin(Star):
                     "emotion": emotion,
                 }
                 try:
-                    os.remove(f.as_posix())
+                    await asyncio.to_thread(os.remove, f.as_posix())
                 except Exception:
                     pass
                 await self._enforce_capacity(idx)
@@ -951,7 +1022,7 @@ class StealerPlugin(Star):
                 rp = items[i][0]
                 try:
                     if os.path.exists(rp):
-                        os.remove(rp)
+                        await asyncio.to_thread(os.remove, rp)
                 except Exception:
                     pass
                 if rp in idx:
