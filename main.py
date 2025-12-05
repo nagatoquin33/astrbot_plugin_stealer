@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import random
+import re
 import shutil
 from functools import lru_cache, wraps
 from pathlib import Path
@@ -43,12 +44,29 @@ class StealerPlugin(Star):
 只返回表情标签，不要添加任何其他内容。文本: {text}"""
     
     # 从外部文件加载的提示词
-    DESCRIPTION_PROMPT = ""
     EMOTION_DETECTION_PROMPT = ""
-    CLASSIFICATION_PROMPT = ""
     
     # 缓存清理阈值
     _CACHE_MAX_SIZE = 1000  # 每个缓存的最大条目数
+    
+    async def _save_cache(self, cache_data: dict, cache_path: Path | None, max_size: int = None):
+        """保存缓存数据到文件。"""
+        if not cache_path or not cache_data:
+            return
+        
+        try:
+            def sync_save():
+                nonlocal cache_data
+                # 确保缓存大小在限制内
+                current_max = max_size if max_size is not None else self._CACHE_MAX_SIZE
+                if len(cache_data) > current_max:
+                    keys_to_keep = list(cache_data.keys())[-current_max:]
+                    cache_data = {k: cache_data[k] for k in keys_to_keep}
+                cache_path.write_text(json.dumps(cache_data, ensure_ascii=False), encoding="utf-8")
+            
+            await asyncio.to_thread(sync_save)
+        except Exception as e:
+            logger.error(f"保存缓存失败: {e}")
     
     # 情绪分类列表（英文标签）
     CATEGORIES = [
@@ -113,6 +131,7 @@ class StealerPlugin(Star):
         self._llm_call_cooldown: float = 2.0  # 2秒冷却时间
         self.emoji_only: bool = True  # 仅偷取表情包开关
         
+
 
 
     def _update_config_from_dict(self, config_dict: dict):
@@ -186,15 +205,13 @@ class StealerPlugin(Star):
         try:
             with open(prompts_file_path, 'r', encoding='utf-8') as f:
                 prompts = json.load(f)
-            self.DESCRIPTION_PROMPT = prompts.get("DESCRIPTION_PROMPT", "")
             self.EMOTION_DETECTION_PROMPT = prompts.get("EMOTION_DETECTION_PROMPT", "")
-            self.CLASSIFICATION_PROMPT = prompts.get("CLASSIFICATION_PROMPT", "")
+            self.IMAGE_CLASSIFICATION_PROMPT = prompts.get("IMAGE_CLASSIFICATION_PROMPT", "")
         except Exception as e:
             logger.error(f"Failed to load prompts file: {e}")
             # 加载失败时使用默认提示词
-            self.DESCRIPTION_PROMPT = "请为这张表情包图片生成简洁、准确、具体的详细描述，10-30字左右，不要包含无关信息。描述要求：1. 明确说明图片的主要内容（人物/动物/物体/风格）2. 详细描述表情特征（如嘴角上扬、眼睛弯成月牙、脸红、流泪、皱眉、瞪眼等）3. 准确写出角色的具体情绪（必须从以下列表选择：开心、害羞、哭泣、愤怒、无语、震惊、困惑、尴尬、奸笑、平静）4. 避免使用模糊词汇如\"搞怪\"、\"有趣\"、\"其他\"等，必须选择具体情绪词例如：\"一个卡通猫角色，眼睛弯成月牙，嘴角上扬，露出开心的笑容\""
             self.EMOTION_DETECTION_PROMPT = "Based on the following description, choose ONE emotion word in English from this exact list: happy, neutral, sad, angry, shy, surprised, smirk, cry, confused, embarrassed. You must select the emotion that best matches the overall feeling described. If multiple emotions are mentioned, choose the most prominent one. Only return the single emotion word, with no other text, punctuation, or explanations. Examples: - Description: A cartoon cat with eyes curved into crescents and an upward smile, looking happy Response: happy - Description: An anime girl with red cheeks, looking down shyly Response: shy - Description: A character with tears streaming down their face, looking sad Response: cry Description: "
-            self.CLASSIFICATION_PROMPT = "你是专业的表情包情绪分类师，请严格按照以下要求处理：1. 观察图片内容，根据表情、动作、氛围判断主要情绪2. 从以下英文情绪标签中选择唯一最匹配的：happy, neutral, sad, angry, shy, surprised, smirk, cry, confused, embarrassed3. 同时提取2-5个能描述图片特征的关键词标签（如cute, smile, blush, tear, angry等）4. 必须返回严格的JSON格式，包含category和tags两个字段5. category字段为选择的情绪标签，tags字段为提取的关键词数组6. 如果是二次元/动漫/卡通角色，必须根据表情实际情绪分类7. 不要添加任何JSON之外的内容，确保JSON可以被程序直接解析错误示例（不要这样做）：- \"我认为这张图片的情绪是happy，标签有cute, smile\"- {category:happy, tags:[\"cute\",\"smile\"]}正确示例：- {\"category\":\"happy\",\"tags\":[\"cute\",\"smile\",\"cartoon\"]}- {\"category\":\"shy\",\"tags\":[\"blush\",\"anime\",\"girl\"]}- {\"category\":\"cry\",\"tags\":[\"tear\",\"sad\",\"cartoon\"]}"
+            self.IMAGE_CLASSIFICATION_PROMPT = "你是专业的表情包图片分析专家，请严格按照以下要求处理这张图片：\n1. 首先仔细观察图片内容，生成简洁准确的详细描述（10-30字）\n2. 基于描述选择最匹配的情绪类别（从以下列表选择：happy, neutral, sad, angry, shy, surprised, smirk, cry, confused, embarrassed）\n3. 提取2-5个能描述图片特征的关键词标签\n4. 必须返回严格的JSON格式，包含description（描述）、category（情绪类别）和tags（关键词数组）三个字段\n5. 不要添加任何JSON之外的内容，确保JSON可以被程序直接解析\n\n示例：\n{\"description\":\"一个卡通猫角色，眼睛弯成月牙，嘴角上扬，露出开心的笑容\",\"category\":\"happy\",\"tags\":[\"cute\",\"smile\",\"cartoon\"]}"
         if not self.index_path.exists():
             self.index_path.write_text(json.dumps({}, ensure_ascii=False), encoding="utf-8")
         if self.alias_path and not self.alias_path.exists():
@@ -303,14 +320,15 @@ class StealerPlugin(Star):
         except Exception as e:
             logger.error(f"保存配置失败: {e}")
 
-    def _sync_save_text_cache(self):
-        """同步保存文本分类缓存到文件。"""
-        try:
-            if self.text_cache_path:
-                with open(self.text_cache_path, "w", encoding="utf-8") as f:
-                    json.dump(self._text_cache, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            logger.error(f"保存文本分类缓存失败: {e}")
+    # 旧的同步保存方法已被统一的_save_cache方法替代
+    # def _sync_save_text_cache(self):
+    #     """同步保存文本分类缓存到文件。"""
+    #     try:
+    #         if self.text_cache_path:
+    #             with open(self.text_cache_path, "w", encoding="utf-8") as f:
+    #                 json.dump(self._text_cache, f, ensure_ascii=False, indent=2)
+    #     except Exception as e:
+    #         logger.error(f"保存文本分类缓存失败: {e}")
 
     async def _load_index(self) -> dict:
         """加载分类索引文件。
@@ -318,14 +336,11 @@ class StealerPlugin(Star):
         Returns:
             dict: 键为文件路径，值为包含 category 与 tags 的字典。
         """
-        if not self.index_path:
+        if not self.index_path or not self.index_path.exists():
             return {}
         
         try:
-            def sync_load_index():
-                return json.loads(self.index_path.read_text(encoding="utf-8"))
-            
-            return await asyncio.to_thread(sync_load_index)
+            return json.loads(self.index_path.read_text(encoding="utf-8"))
         except Exception as e:
             logger.error(f"加载索引失败: {e}")
             return {}
@@ -336,10 +351,7 @@ class StealerPlugin(Star):
             return
         
         try:
-            def sync_save_index():
-                self.index_path.write_text(json.dumps(idx, ensure_ascii=False), encoding="utf-8")
-            
-            await asyncio.to_thread(sync_save_index)
+            await self._save_cache(idx, self.index_path, max_size=None)  # 索引不受缓存大小限制
         except Exception as e:
             logger.error(f"保存索引文件失败: {e}")
 
@@ -516,81 +528,54 @@ class StealerPlugin(Star):
                 if not is_emoji:
                     return "非表情包", [], "", "非表情包"
 
-            desc = self._desc_cache.get(h)
-            if not desc:
-                resp1 = await self.context.llm_generate(
-                    chat_provider_id=prov_id,
-                    prompt=self.DESCRIPTION_PROMPT,
-                    image_urls=[f"file:///{os.path.abspath(file_path)}"],
-                )
-                desc = resp1.completion_text.strip()
-                if desc:
-                    self._desc_cache[h] = desc
-                    
-                    # 清理描述缓存，保持在阈值以下
-                    if len(self._desc_cache) > self._CACHE_MAX_SIZE:
-                        # 只保留最新的条目
-                        keys_to_keep = list(self._desc_cache.keys())[-self._CACHE_MAX_SIZE:]
-                        self._desc_cache = {k: self._desc_cache[k] for k in keys_to_keep}
-                    
-                    if self.desc_cache_path:
-                        try:
-                            def sync_save_desc_cache():
-                                self.desc_cache_path.write_text(json.dumps(self._desc_cache, ensure_ascii=False), encoding="utf-8")
-                            
-                            await asyncio.to_thread(sync_save_desc_cache)
-                        except Exception as e:
-                            logger.error(f"保存描述缓存失败: {e}")
-            emotion = self._emotion_cache.get(h)
-            if not emotion:
-                prov_text = await self._pick_text_provider(event)
-                if not prov_text:
-                    prov_text = prov_id
-                prompt2 = self.EMOTION_DETECTION_PROMPT.format(desc=desc)
-                resp2 = await self.context.llm_generate(chat_provider_id=prov_text, prompt=prompt2)
-                emotion = resp2.completion_text.strip()
-                if emotion:
-                     self._emotion_cache[h] = emotion
-                     
-                     # 清理情绪缓存，保持在阈值以下
-                     if len(self._emotion_cache) > self._CACHE_MAX_SIZE:
-                         # 只保留最新的条目
-                         keys_to_keep = list(self._emotion_cache.keys())[-self._CACHE_MAX_SIZE:]
-                         self._emotion_cache = {k: self._emotion_cache[k] for k in keys_to_keep}
-                     
-                     if self.emotion_cache_path:
-                         try:
-                             def sync_save_emotion_cache():
-                                 self.emotion_cache_path.write_text(json.dumps(self._emotion_cache, ensure_ascii=False), encoding="utf-8")
-                             
-                             await asyncio.to_thread(sync_save_emotion_cache)
-                         except Exception as e:
-                             logger.error(f"保存情绪缓存失败: {e}")
-            
-            prompt = self.CLASSIFICATION_PROMPT
+            # 统一使用合并后的提示词进行图片分类
             resp = await self.context.llm_generate(
                 chat_provider_id=prov_id,
-                prompt=prompt,
+                prompt=self.IMAGE_CLASSIFICATION_PROMPT,
                 image_urls=[f"file:///{os.path.abspath(file_path)}"],
             )
             txt = resp.completion_text.strip()
+            
+            # 解析JSON结果
             cat = "无语"
             tags: list[str] = []
+            desc = ""
+            emotion = ""
+            
             try:
                 data = json.loads(txt)
+                desc = str(data.get("description", "")).strip()
                 c = str(data.get("category", "")).strip()
                 if c:
                     cat = self._normalize_category(c)
+                    emotion = cat  # 默认使用类别作为情绪
                 t = data.get("tags", [])
                 if isinstance(t, list):
                     tags = [str(x) for x in t][:8]
             except Exception:
-                for c in self.categories:
-                    if c in txt:
-                        cat = c
-                        break
-            emo = self._normalize_category(emotion) if emotion else cat
+                logger.warning(f"解析图片分类结果失败: {txt}")
+            
+            # 规范化类别和情绪
             cat = self._normalize_category(cat)
+            emotion = self._normalize_category(emotion) if emotion else cat
+            emo = emotion
+            
+            # 保存描述到缓存
+            if desc and h:
+                self._desc_cache[h] = desc
+                
+                # 清理描述缓存，保持在阈值以下
+                if len(self._desc_cache) > self._CACHE_MAX_SIZE:
+                    keys_to_keep = list(self._desc_cache.keys())[-self._CACHE_MAX_SIZE:]
+                    self._desc_cache = {k: self._desc_cache[k] for k in keys_to_keep}
+                
+                if self.desc_cache_path:
+                    try:
+                        def sync_save_desc_cache():
+                            self.desc_cache_path.write_text(json.dumps(self._desc_cache, ensure_ascii=False), encoding="utf-8")
+                        await asyncio.to_thread(sync_save_desc_cache)
+                    except Exception as e:
+                        logger.error(f"保存描述缓存失败: {e}")
             
             # 保存分类结果到缓存
             if h:
@@ -603,27 +588,18 @@ class StealerPlugin(Star):
                     keys_to_keep = list(self._image_cache.keys())[-self._CACHE_MAX_SIZE:]
                     self._image_cache = {k: self._image_cache[k] for k in keys_to_keep}
                 
-                # 异步保存缓存到文件
                 if self.image_cache_path:
                     try:
                         def sync_save_image_cache():
-                            # 将缓存数据转换为可序列化的格式
-                            cache_data = {}
-                            for hash_key, data in self._image_cache.items():
-                                if isinstance(data, tuple) and len(data) >= 4:
-                                    cache_data[hash_key] = [
-                                        data[0],  # category
-                                        data[1],  # tags
-                                        data[2],  # desc
-                                        data[3]   # emotion
-                                    ]
-                            self.image_cache_path.write_text(json.dumps(cache_data, ensure_ascii=False), encoding="utf-8")
+                            self.image_cache_path.write_text(
+                                json.dumps(self._image_cache, ensure_ascii=False), encoding="utf-8"
+                            )
                         
                         await asyncio.to_thread(sync_save_image_cache)
                     except Exception as e:
-                        logger.error(f"保存图片分类缓存失败: {e}")
+                        logger.error(f"保存图片缓存失败: {e}")
             
-            return cat, tags, desc or "", emo
+            return cat, tags, desc or "", emo or cat
         except Exception as e:
             logger.error(f"视觉分类失败: {e}")
             fallback = "无语" if "无语" in self.categories else self.categories[0]
@@ -688,6 +664,74 @@ class StealerPlugin(Star):
         except Exception as e:
             logger.error(f"保存图片失败: {e}")
             return src_path
+    
+    async def _safe_remove_file(self, file_path: str) -> bool:
+        """安全删除文件，处理可能的异常"""
+        try:
+            await asyncio.to_thread(os.remove, file_path)
+            return True
+        except Exception as e:
+            logger.error(f"删除文件失败: {e}")
+            return False
+    
+    async def _process_image(self, event: AstrMessageEvent | None, file_path: str, is_temp: bool = False, idx: dict | None = None) -> tuple[bool, dict | None]:
+        """统一处理图片的方法，包括过滤、分类、存储和索引更新
+        
+        Args:
+            event: 消息事件对象，可为None
+            file_path: 图片文件路径
+            is_temp: 是否为临时文件，处理后需要删除
+            idx: 可选的索引字典，如果提供则直接使用，否则加载新的
+            
+        Returns:
+            (成功与否, 更新后的索引字典)
+        """
+        try:
+            # 过滤图片
+            ok = await self._filter_image(event, file_path)
+            if not ok:
+                if is_temp:
+                    await self._safe_remove_file(file_path)
+                return False, idx
+            
+            # 分类图片
+            cat, tags, desc, emotion = await self._classify_image(event, file_path)
+            
+            # 如果分类为"非表情包"，跳过存储
+            if cat == "非表情包" or emotion == "非表情包":
+                if is_temp:
+                    await self._safe_remove_file(file_path)
+                return False, idx
+            
+            # 存储图片
+            stored = await self._store_image(file_path, cat)
+            
+            # 更新索引
+            if stored != file_path:  # 确保图片已成功保存
+                # 如果没有提供索引，则加载新的
+                if idx is None:
+                    idx = await self._load_index()
+                
+                idx[stored] = {
+                    "category": cat,
+                    "tags": tags,
+                    "backend_tag": self.backend_tag,
+                    "created_at": int(asyncio.get_event_loop().time()),
+                    "usage_count": 0,
+                    "desc": desc,
+                    "emotion": emotion,
+                }
+                
+                # 删除源文件（如果是临时文件）
+                if is_temp:
+                    await self._safe_remove_file(file_path)
+            
+            return True, idx
+        except Exception as e:
+            logger.error(f"处理图片失败: {e}")
+            if is_temp:
+                await self._safe_remove_file(file_path)
+            return False, idx
 
     def _is_in_parentheses(self, text: str, index: int) -> bool:
         """判断字符串中指定索引位置是否在括号内。
@@ -739,7 +783,6 @@ class StealerPlugin(Star):
             resp = await self.context.llm_generate(chat_provider_id=str(prov_id), prompt=prompt)
             txt = resp.completion_text.strip()
             
-            import re
             # 提取&&emotion&&格式的内容
             match = re.search(r'&&([^&&]+)&&', txt)
             if match:
@@ -755,12 +798,11 @@ class StealerPlugin(Star):
             # 更新缓存
             self._text_cache[text_hash] = result
             # 限制缓存大小
-            if len(self._text_cache) > 1000:  # 保留最多1000条缓存
-                keys_to_remove = list(self._text_cache.keys())[:len(self._text_cache) - 1000]
-                for key in keys_to_remove:
-                    del self._text_cache[key]
+            if len(self._text_cache) > self._CACHE_MAX_SIZE:
+                keys_to_keep = list(self._text_cache.keys())[-self._CACHE_MAX_SIZE:]
+                self._text_cache = {k: self._text_cache[k] for k in keys_to_keep}
             # 异步保存缓存
-            await asyncio.to_thread(self._sync_save_text_cache)
+            await self._save_cache(self._text_cache, self.text_cache_path)
             
             # 更新最后调用时间
             self._last_llm_call_time = current_time
@@ -788,8 +830,6 @@ class StealerPlugin(Star):
         if not text:
             return [], text
 
-        import re
-        
         res: list[str] = []
         seen: set[str] = set()
         cleaned_text = str(text)
@@ -900,40 +940,17 @@ class StealerPlugin(Star):
         """消息监听：偷取消息中的图片并分类存储。"""
         if not self.enabled:
             return
-        imgs = []
-        for comp in event.get_messages():
-            if isinstance(comp, Image):
-                imgs.append(comp)
+            
+        # 收集所有图片组件
+        imgs = [comp for comp in event.message_obj.message if isinstance(comp, Image)]
+        
         for img in imgs:
             try:
                 path = await img.convert_to_file_path()
-                ok = await self._filter_image(event, path)
-                if not ok:
-                    try:
-                        await asyncio.to_thread(os.remove, path)
-                    except Exception as e:
-                         logger.error(f"删除文件失败: {e}")
-                    continue
-                cat, tags, desc, emotion = await self._classify_image(event, path)
-                # 如果分类为"非表情包"，跳过存储
-                if cat == "非表情包" or emotion == "非表情包":
-                    try:
-                        await asyncio.to_thread(os.remove, path)
-                    except Exception as e:
-                        logger.error(f"删除文件失败: {e}")
-                    continue
-                stored = await self._store_image(path, cat)
-                idx = await self._load_index()
-                idx[stored] = {
-                    "category": cat,
-                    "tags": tags,
-                    "backend_tag": self.backend_tag,
-                    "created_at": int(asyncio.get_event_loop().time()),
-                    "usage_count": 0,
-                    "desc": desc,
-                    "emotion": emotion,
-                }
-                await self._save_index(idx)
+                # 使用统一的图片处理方法
+                success, idx = await self._process_image(event, path, is_temp=True)
+                if success and idx:
+                    await self._save_index(idx)
             except Exception as e:
                 logger.error(f"处理图片失败: {e}")
 
@@ -952,50 +969,29 @@ class StealerPlugin(Star):
         try:
             base = Path(get_astrbot_data_path()) / "emoji"
             base.mkdir(parents=True, exist_ok=True)
-            files = []
-            for p in base.iterdir():
-                if p.is_file() and p.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
-                    files.append(p)
+            
+            # 获取所有支持格式的图片文件
+            supported_formats = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+            files = [p for p in base.iterdir() if p.is_file() and p.suffix.lower() in supported_formats]
+            
             if not files:
                 return
+            
+            # 一次性加载索引，避免多次IO操作
             idx = await self._load_index()
+            
             for f in files:
                 try:
-                    ok = await self._filter_image(None, f.as_posix())
-                    if not ok:
-                        try:
-                            await asyncio.to_thread(os.remove, f.as_posix())
-                        except Exception:
-                            pass
-                        continue
-                    cat, tags, desc, emotion = await self._classify_image(None, f.as_posix())
-                    # 如果分类为"非表情包"，跳过存储
-                    if cat == "非表情包" or emotion == "非表情包":
-                        try:
-                            await asyncio.to_thread(os.remove, f.as_posix())
-                        except Exception:
-                            pass
-                        continue
-                    stored = await self._store_image(f.as_posix(), cat)
-                    # 检查_store_image是否成功保存（返回的路径不等于源路径）
-                    if stored != f.as_posix():
-                        idx[stored] = {
-                            "category": cat,
-                            "tags": tags,
-                            "backend_tag": self.backend_tag,
-                            "created_at": int(asyncio.get_event_loop().time()),
-                            "usage_count": 0,
-                            "desc": desc,
-                            "emotion": emotion,
-                        }
-                        try:
-                            await asyncio.to_thread(os.remove, f.as_posix())
-                        except Exception as e:
-                            logger.error(f"删除源文件失败: {e}")
-                    else:
-                        logger.error(f"保存图片失败，源文件未删除: {f.as_posix()}")
+                    # 使用统一的图片处理方法
+                    success, idx = await self._process_image(None, f.as_posix(), is_temp=True, idx=idx)
+                    
+                    # 如果处理失败，尝试删除源文件（可能是不合法内容）
+                    if not success:
+                        await self._safe_remove_file(f.as_posix())
                 except Exception as e:
                     logger.error(f"处理文件失败: {f.as_posix()}, 错误: {e}")
+                    await self._safe_remove_file(f.as_posix())
+            
             # 在处理完所有文件后再检查容量和保存索引
             await self._enforce_capacity(idx)
             await self._save_index(idx)
@@ -1303,4 +1299,7 @@ class StealerPlugin(Star):
         chain = MessageChain().base64_image(b64)
         # 统一使用yield返回结果，保持交互体验一致
         yield event.result_with_message_chain(chain)
+
+
+
 
