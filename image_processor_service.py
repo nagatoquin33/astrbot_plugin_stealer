@@ -2,6 +2,7 @@ import asyncio
 import base64
 import hashlib
 import os
+import re
 import shutil
 import time
 from pathlib import Path
@@ -287,7 +288,7 @@ class ImageProcessorService:
                         else:
                             llm_response_text = str(result)
                             
-                        # 处理直接返回的情绪标签
+                        # 直接处理LLM响应，提示词已要求只返回特定格式结果
                         category = llm_response_text.strip().lower()
                         
                         # 检查分类结果是否在有效类别列表中
@@ -372,7 +373,8 @@ class ImageProcessorService:
                 else:
                     llm_response_text = str(result)
                 
-                if llm_response_text and llm_response_text.strip() == "是":
+                # 直接处理LLM响应，提示词已要求只返回特定格式结果
+                if llm_response_text.strip() == "是":
                     logger.debug("图片未通过内容过滤")
                     return False
                 return True

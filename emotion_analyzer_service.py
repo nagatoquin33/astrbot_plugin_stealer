@@ -125,10 +125,67 @@ class EmotionAnalyzerService:
                     seen.add(emotion)
                     res.append(emotion)
 
-            # 2. 清理文本，移除HTML标签
+            # 2. 替代标记处理（如[emotion]、(emotion)等）
+            # 处理[emotion]格式
+            bracket_pattern = r"\[([^\[\]]+)\]"
+            matches = list(re.finditer(bracket_pattern, cleaned_text))
+            bracket_replacements = []
+            invalid_brackets = []
+
+            for match in matches:
+                original = match.group(0)
+                emotion = match.group(1).strip()
+                norm_cat = self.normalize_category(emotion)
+
+                if norm_cat and norm_cat in valid_categories:
+                    bracket_replacements.append((original, norm_cat))
+                else:
+                    # 记录无效标记，稍后删除
+                    invalid_brackets.append(original)
+
+            # 删除所有无效标记
+            for invalid in invalid_brackets:
+                cleaned_text = cleaned_text.replace(invalid, "", 1)
+
+            for original, emotion in bracket_replacements:
+                cleaned_text = cleaned_text.replace(original, "", 1)
+                if emotion and emotion not in seen:
+                    seen.add(emotion)
+                    res.append(emotion)
+
+            # 处理(emotion)格式
+            paren_pattern = r"\(([^()]+)\)"
+            matches = list(re.finditer(paren_pattern, cleaned_text))
+            paren_replacements = []
+            invalid_parens = []
+
+            for match in matches:
+                original = match.group(0)
+                emotion = match.group(1).strip()
+                norm_cat = self.normalize_category(emotion)
+
+                if norm_cat and norm_cat in valid_categories:
+                    # 需要额外验证，确保不是普通句子的一部分
+                    if self._is_likely_emotion_markup(original, cleaned_text, match.start()):
+                        paren_replacements.append((original, norm_cat))
+                else:
+                    # 记录无效标记，稍后删除
+                    invalid_parens.append(original)
+
+            # 删除所有无效标记
+            for invalid in invalid_parens:
+                cleaned_text = cleaned_text.replace(invalid, "", 1)
+
+            for original, emotion in paren_replacements:
+                cleaned_text = cleaned_text.replace(original, "", 1)
+                if emotion and emotion not in seen:
+                    seen.add(emotion)
+                    res.append(emotion)
+
+            # 3. 清理文本，移除HTML标签
             cleaned_text = re.sub(r"<.*?>", "", cleaned_text)
 
-            # 3. 提取情绪关键词
+            # 4. 提取情绪关键词
             for cat, keywords in self.EMOTION_MAPPING.items():
                 for keyword in keywords:
                     if keyword in cleaned_text:
@@ -144,6 +201,28 @@ class EmotionAnalyzerService:
         except Exception as e:
             logger.error(f"提取文本情绪失败: {e}")
             return [], text
+
+    def _is_likely_emotion_markup(self, original: str, text: str, start_pos: int) -> bool:
+        """
+        判断是否为情绪标记，避免误判普通括号内容
+        
+        Args:
+            original: 原始匹配字符串
+            text: 完整文本
+            start_pos: 匹配开始位置
+        
+        Returns:
+            bool: 是否为情绪标记
+        """
+        # 检查前后是否为单词边界
+        if start_pos > 0 and text[start_pos - 1].isalnum():
+            return False
+        
+        end_pos = start_pos + len(original)
+        if end_pos < len(text) and text[end_pos].isalnum():
+            return False
+        
+        return True
 
     def cleanup(self):
         """清理资源。"""
