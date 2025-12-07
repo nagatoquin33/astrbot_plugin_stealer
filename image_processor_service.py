@@ -21,7 +21,12 @@ class ImageProcessorService:
             plugin_instance: StealerPlugin 实例，用于访问插件的配置和服务
         """
         self.plugin = plugin_instance
-        self.base_dir = str(plugin_instance.base_dir) if hasattr(plugin_instance, 'base_dir') else None
+        # 确保base_dir始终是字符串
+        if hasattr(plugin_instance, 'base_dir') and plugin_instance.base_dir is not None:
+            self.base_dir = str(plugin_instance.base_dir)
+        else:
+            # 如果没有base_dir，尝试从context获取数据目录
+            self.base_dir = None
         self.emoji_mapping = {}
         
         # 尝试从插件实例获取提示词配置，如果不存在则使用默认值
@@ -61,11 +66,18 @@ class ImageProcessorService:
     async def load_emoji_mapping(self):
         """加载表情关键字映射表。"""
         try:
-            map_path = os.path.join(self.plugin.config_dir, "emoji_mapping.json")
-            if os.path.exists(map_path):
-                import json
-                with open(map_path, encoding="utf-8") as f:
-                    self.emoji_mapping = json.load(f)
+            # 尝试获取配置目录
+            config_dir = getattr(self.plugin, "config_dir", None)
+            if config_dir is None and hasattr(self.plugin, "base_dir"):
+                # 如果没有config_dir，使用base_dir作为替代
+                config_dir = str(self.plugin.base_dir)
+            
+            if config_dir:
+                map_path = os.path.join(config_dir, "emoji_mapping.json")
+                if os.path.exists(map_path):
+                    import json
+                    with open(map_path, encoding="utf-8") as f:
+                        self.emoji_mapping = json.load(f)
             else:
                 # 默认的表情关键字映射表
                 self.emoji_mapping = {
@@ -170,10 +182,11 @@ class ImageProcessorService:
                 logger.debug(f"图片分类结果: {category}")
 
                 # 复制图片到对应分类目录
-                cat_dir = os.path.join(self.base_dir, "categories", category)
-                os.makedirs(cat_dir, exist_ok=True)
-                cat_path = os.path.join(cat_dir, os.path.basename(raw_path))
-                shutil.copy2(raw_path, cat_path)
+                if self.base_dir:
+                    cat_dir = os.path.join(self.base_dir, "categories", category)
+                    os.makedirs(cat_dir, exist_ok=True)
+                    cat_path = os.path.join(cat_dir, os.path.basename(raw_path))
+                    shutil.copy2(raw_path, cat_path)
 
                 # 更新索引
                 idx[raw_path] = {
@@ -297,7 +310,7 @@ class ImageProcessorService:
         current_filtration_prompt = filtration_prompt if filtration_prompt else self.content_filtration_prompt
         
         # 确定是否进行内容过滤
-        should_filter = content_filtration if content_filtration is not None else self.plugin.config.get("content_filtration", True)
+        should_filter = content_filtration if content_filtration is not None else getattr(self.plugin, "content_filtration", True)
         
         if not should_filter:
             return True
@@ -311,8 +324,9 @@ class ImageProcessorService:
         logger.debug(f"使用视觉模型 {model} 对图片进行过滤")
 
         # 调用LLM进行内容过滤
-        max_retries = int(self.plugin.config.get("vision_max_retries", 3))
-        retry_delay = float(self.plugin.config.get("vision_retry_delay", 1.0))
+        # 使用插件实例的属性或默认值
+        max_retries = getattr(self.plugin, "vision_max_retries", 3)
+        retry_delay = getattr(self.plugin, "vision_retry_delay", 1.0)
 
         for attempt in range(max_retries):
             try:
@@ -448,7 +462,16 @@ class ImageProcessorService:
             dict: 图片索引
         """
         try:
-            index_path = os.path.join(self.plugin.config_dir, "index.json")
+            # 尝试获取配置目录
+            config_dir = getattr(self.plugin, "config_dir", None)
+            if config_dir is None and hasattr(self.plugin, "base_dir"):
+                # 如果没有config_dir，使用base_dir作为替代
+                config_dir = str(self.plugin.base_dir)
+            
+            if not config_dir:
+                return {}
+                
+            index_path = os.path.join(config_dir, "index.json")
             if os.path.exists(index_path):
                 import json
                 with open(index_path, encoding="utf-8") as f:
@@ -468,7 +491,18 @@ class ImageProcessorService:
             bool: 是否保存成功
         """
         try:
-            index_path = os.path.join(self.plugin.config_dir, "index.json")
+            # 尝试获取配置目录
+            config_dir = getattr(self.plugin, "config_dir", None)
+            if config_dir is None and hasattr(self.plugin, "base_dir"):
+                # 如果没有config_dir，使用base_dir作为替代
+                config_dir = str(self.plugin.base_dir)
+            
+            if not config_dir:
+                return False
+                
+            index_path = os.path.join(config_dir, "index.json")
+            # 确保目录存在
+            os.makedirs(os.path.dirname(index_path), exist_ok=True)
             import json
             with open(index_path, "w", encoding="utf-8") as f:
                 json.dump(idx, f, ensure_ascii=False, indent=4)
