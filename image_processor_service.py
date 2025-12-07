@@ -6,6 +6,7 @@ import re
 import shutil
 import time
 from pathlib import Path
+from astrbot.core.utils.astrbot_path import get_astrbot_root
 from typing import Any
 
 from astrbot.api import logger
@@ -285,8 +286,21 @@ class ImageProcessorService:
                 if self.base_dir and not img_path.startswith(str(self.base_dir)):
                     # 检查是否已经包含了base_dir的相对路径
                     if img_path.startswith("AstrBot/data/plugin_data/"):
-                        # 对于生产环境的相对路径，使用base_dir来构建绝对路径
-                        img_path = os.path.abspath(img_path)
+                        # 对于生产环境的相对路径，使用AstrBot根目录构建绝对路径
+                        try:
+                            astrbot_root = get_astrbot_root()
+                            # 去掉路径中重复的AstrBot/前缀
+                            if img_path.startswith("AstrBot/"):
+                                img_path = img_path[len("AstrBot/"):]
+                            img_path = os.path.abspath(os.path.join(astrbot_root, img_path))
+                        except Exception as e:
+                            logger.error(f"构建图片绝对路径失败: {e}")
+                            # 如果失败，尝试使用base_dir作为备选方案
+                            if self.base_dir:
+                                relative_path = img_path[len("AstrBot/data/plugin_data/"):]
+                                img_path = os.path.abspath(os.path.join(self.base_dir, relative_path))
+                            else:
+                                img_path = os.path.abspath(img_path)
                     else:
                         # 对于其他相对路径，使用base_dir作为前缀
                         img_path = os.path.join(self.base_dir, img_path)

@@ -621,55 +621,77 @@ class StealerPlugin(Star):
             tuple[bool, str]: (是否安全, 规范化后的安全路径)
         """
         try:
-            # 使用 Path.resolve() 来获取规范化的绝对路径，处理所有符号链接和相对路径
+            # 定义允许的基准目录
+            astrbot_data_path = Path(get_astrbot_data_path()).resolve()
+            plugin_base_dir = Path(self.base_dir).resolve()
+            
             path_obj = Path(path)
-
-            if not path_obj.is_absolute():
-                # 确定基准目录
-                base_dir = None
-
-                # 处理 data/ 开头的路径
-                if path.startswith("data/") or path.startswith("data\\"):
-                    base_dir = Path(get_astrbot_data_path())
-                    # 获取相对于 base_dir 的路径部分
-                    relative_path = path[5:].lstrip("/\\")
-                    path_obj = base_dir / relative_path
-                # 处理 AstrBot/ 开头的路径
-                elif path.startswith("AstrBot/") or path.startswith("AstrBot\\"):
-                    base_dir = Path(get_astrbot_root())
-                    # 获取相对于 base_dir 的路径部分
-                    relative_path = path[7:].lstrip("/\\")
-                    if path.startswith("AstrBot\\"):
-                        relative_path = path[8:].lstrip("/\\")
-                    path_obj = base_dir / relative_path
-                # 其他情况使用插件目录作为基准
+            normalized_path = None
+            
+            if path_obj.is_absolute():
+                # 绝对路径：直接检查是否在允许的目录内
+                normalized_path = path_obj.resolve()
+            else:
+                # 相对路径：根据路径前缀解析到安全的基准目录
+                lower_path = path.lower()
+                
+                # 检查是否包含路径遍历攻击
+                if ".." in str(path_obj):
+                    # 直接检查解析后的路径是否仍在预期的父目录内
+                    if lower_path.startswith(("data/", "data\\")):
+                        # 以 data/ 开头的相对路径解析到 astrbot_data_path
+                        relative_part = path[5:]  # 移除 "data/" 前缀
+                        normalized_path = (astrbot_data_path / relative_part).resolve()
+                        # 确保解析后的路径仍在 astrbot_data_path 内
+                        if not normalized_path.is_relative_to(astrbot_data_path):
+                            logger.error(f"路径遍历攻击检测: {path} -> {normalized_path}")
+                            return False, path
+                    elif lower_path.startswith(("astrbot/", "astrbot\\")):
+                        # 以 AstrBot/ 开头的相对路径解析到 astrbot_data_path
+                        relative_part = path[8:]  # 移除 "AstrBot/" 前缀
+                        normalized_path = (astrbot_data_path / relative_part).resolve()
+                        # 确保解析后的路径仍在 astrbot_data_path 内
+                        if not normalized_path.is_relative_to(astrbot_data_path):
+                            logger.error(f"路径遍历攻击检测: {path} -> {normalized_path}")
+                            return False, path
+                    else:
+                        # 其他相对路径解析到 plugin_base_dir
+                        normalized_path = (plugin_base_dir / path).resolve()
+                        # 确保解析后的路径仍在 plugin_base_dir 内
+                        if not normalized_path.is_relative_to(plugin_base_dir):
+                            logger.error(f"路径遍历攻击检测: {path} -> {normalized_path}")
+                            return False, path
                 else:
-                    base_dir = Path(self.base_dir)
-                    path_obj = base_dir / path
-
-            # 解析为绝对路径，处理所有相对部分
-            resolved_path = path_obj.resolve()
-
-            # 验证路径是否在允许的父目录内
-            allowed_parents = [
-                Path(get_astrbot_data_path()),
-                Path(get_astrbot_root()),
-                Path(self.base_dir)
-            ]
-
+                    # 不包含路径遍历的相对路径，正常处理
+                    if lower_path.startswith(("data/", "data\\")):
+                        # 以 data/ 开头的相对路径解析到 astrbot_data_path
+                        relative_part = path[5:]  # 移除 "data/" 前缀
+                        normalized_path = (astrbot_data_path / relative_part).resolve()
+                    elif lower_path.startswith(("astrbot/", "astrbot\\")):
+                        # 以 AstrBot/ 开头的相对路径解析到 astrbot_data_path
+                        relative_part = path[8:]  # 移除 "AstrBot/" 前缀
+                        normalized_path = (astrbot_data_path / relative_part).resolve()
+                    else:
+                        # 其他相对路径解析到 plugin_base_dir
+                        normalized_path = (plugin_base_dir / path).resolve()
+            
+            # 检查路径是否在允许的目录内
             is_safe = False
+            allowed_parents = [astrbot_data_path, plugin_base_dir]
+            
             for parent in allowed_parents:
-                parent_resolved = parent.resolve()
-                # 检查路径是否以允许的父目录为前缀
-                if str(resolved_path).startswith(str(parent_resolved)):
+                try:
+                    normalized_path.relative_to(parent)
                     is_safe = True
                     break
-
+                except ValueError:
+                    pass
+            
             if not is_safe:
-                logger.error(f"路径超出允许范围: {path}")
+                logger.error(f"路径超出允许范围: {path} -> {normalized_path}")
                 return False, path
-
-            return True, str(resolved_path)
+            
+            return True, str(normalized_path)
         except Exception as e:
             logger.error(f"路径安全检查失败: {e}")
             return False, path
