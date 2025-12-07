@@ -268,17 +268,30 @@ class ImageProcessorService:
                     from astrbot.core.provider.manager import ProviderType
                     provider = self.plugin.context.provider_manager.get_using_provider(ProviderType.CHAT_COMPLETION)
                     chat_provider_id = provider.meta().id
-                    provider_type = provider.meta().type
-                    
+
                     # 使用插件配置的视觉模型，如果没有则不指定模型
                     model = self.plugin.vision_model if hasattr(self.plugin, "vision_model") else None
-                    
+
                     logger.debug(f"使用视觉模型 {model} 对图片进行分类")
                     # 使用正确的关键字参数调用llm_generate
+                    # 将本地文件路径转换为file:///格式的URL
+                    import urllib.parse
+                    if img_path and not img_path.startswith(("file:///", "base64://")):
+                        # 对路径进行URL编码
+                        encoded_path = urllib.parse.quote(img_path)
+                        # 在Windows系统上特殊处理
+                        if os.name == "nt":
+                            # Windows路径需要转换为UNC格式
+                            img_url = f"file:///{encoded_path}"
+                        else:
+                            img_url = f"file://{encoded_path}"
+                    else:
+                        img_url = img_path
+
                     result = await self.plugin.context.llm_generate(
                         chat_provider_id=chat_provider_id,
                         prompt=prompt,
-                        image_urls=[img_path] if img_path else None,
+                        image_urls=[img_url] if img_url else None,
                         model=model
                     )
                     if result:
@@ -297,26 +310,26 @@ class ImageProcessorService:
                         category = llm_response_text.strip().lower()
 
                         # 检查分类结果是否在有效类别列表中
-                        
+
                         # 尝试直接匹配
                         if category and category in self.VALID_CATEGORIES:
                             logger.info(f"图片分类结果: {category}")
                             return category
-                        
+
                         # 尝试从响应中提取有效类别（处理LLM可能返回的额外内容）
                         for valid_cat in self.VALID_CATEGORIES:
                             if valid_cat in category:
                                 logger.info(f"从响应中提取分类结果: {valid_cat} (原始响应: {category})")
                                 return valid_cat
-                        
+
                         # 处理可能的格式问题（如引号、括号等）
                         import re
-                        cleaned_response = re.sub(r'[^a-zA-Z\s]', '', category)
+                        cleaned_response = re.sub(r"[^a-zA-Z\s]", "", category)
                         for valid_cat in self.VALID_CATEGORIES:
                             if valid_cat in cleaned_response:
                                 logger.info(f"清理后提取分类结果: {valid_cat} (清理后响应: {cleaned_response})")
                                 return valid_cat
-                        
+
                         logger.warning(f"分类结果不在有效类别列表中: {category}")
                         logger.debug(f"无效的分类结果: {llm_response_text}")
                 except Exception as e:
@@ -374,17 +387,30 @@ class ImageProcessorService:
                 from astrbot.core.provider.manager import ProviderType
                 provider = self.plugin.context.provider_manager.get_using_provider(ProviderType.CHAT_COMPLETION)
                 chat_provider_id = provider.meta().id
-                provider_type = provider.meta().type
-                
+
                 # 使用插件配置的视觉模型，如果没有则不指定模型
                 model = self.plugin.vision_model if hasattr(self.plugin, "vision_model") else None
-                
+
                 logger.debug(f"使用视觉模型 {model} 对图片进行过滤")
                 # 使用正确的关键字参数调用llm_generate
+                # 将本地文件路径转换为file:///格式的URL
+                import urllib.parse
+                if img_path and not img_path.startswith(("file:///", "base64://")):
+                    # 对路径进行URL编码
+                    encoded_path = urllib.parse.quote(img_path)
+                    # 在Windows系统上特殊处理
+                    if os.name == "nt":
+                        # Windows路径需要转换为UNC格式
+                        img_url = f"file:///{encoded_path}"
+                    else:
+                        img_url = f"file://{encoded_path}"
+                else:
+                    img_url = img_path
+
                 result = await self.plugin.context.llm_generate(
                     chat_provider_id=chat_provider_id,
                     prompt=current_filtration_prompt,
-                    image_urls=[img_path] if img_path else None,
+                    image_urls=[img_url] if img_url else None,
                     model=model
                 )
 
