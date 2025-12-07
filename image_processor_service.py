@@ -282,30 +282,42 @@ class ImageProcessorService:
         try:
             # 确保使用绝对路径
             if not os.path.isabs(img_path):
-                # 如果是相对路径，尝试从base_dir构建绝对路径
-                if self.base_dir and not img_path.startswith(str(self.base_dir)):
-                    # 检查是否已经包含了base_dir的相对路径
-                    if img_path.startswith("AstrBot/data/plugin_data/"):
-                        # 对于生产环境的相对路径，使用AstrBot根目录构建绝对路径
+                # 如果是相对路径，尝试构建绝对路径
+                if self.base_dir:
+                    # 规范化路径分隔符，确保兼容性
+                    img_path = img_path.replace("/", os.sep)
+                    
+                    # 优先检查是否是插件数据路径格式
+                    if img_path.startswith(f"AstrBot{os.sep}data{os.sep}plugin_data{os.sep}") or img_path.startswith(f"data{os.sep}plugin_data{os.sep}"):
+                        # 对于插件数据路径，使用AstrBot根目录构建绝对路径
                         try:
                             astrbot_root = get_astrbot_root()
-                            # 去掉路径中重复的AstrBot/前缀
-                            if img_path.startswith("AstrBot/"):
-                                img_path = img_path[len("AstrBot/"):]
-                            img_path = os.path.abspath(os.path.join(astrbot_root, img_path))
-                        except Exception as e:
-                            logger.error(f"构建图片绝对路径失败: {e}")
-                            # 如果失败，尝试使用base_dir作为备选方案
-                            if self.base_dir:
-                                relative_path = img_path[len("AstrBot/data/plugin_data/"):]
-                                img_path = os.path.abspath(os.path.join(self.base_dir, relative_path))
+                            # 去掉路径中重复的AstrBot/前缀（如果存在）
+                            if img_path.startswith(f"AstrBot{os.sep}"):
+                                img_path_relative = img_path[len(f"AstrBot{os.sep}"):]
                             else:
-                                img_path = os.path.abspath(img_path)
+                                img_path_relative = img_path
+                            img_path = os.path.abspath(os.path.join(astrbot_root, img_path_relative))
+                        except Exception as e:
+                            logger.error(f"使用AstrBot根目录构建图片绝对路径失败: {e}")
+                            # 如果失败，直接使用base_dir构建路径
+                            img_path = os.path.abspath(os.path.join(self.base_dir, os.path.basename(img_path)))
+                    elif os.path.basename(img_path) == img_path:
+                        # 如果是简单文件名，放在raw目录下
+                        img_path = os.path.abspath(os.path.join(self.base_dir, "raw", img_path))
                     else:
-                        # 对于其他相对路径，使用base_dir作为前缀
-                        img_path = os.path.join(self.base_dir, img_path)
+                        # 其他相对路径，直接使用base_dir作为前缀
+                        img_path = os.path.abspath(os.path.join(self.base_dir, img_path))
                 else:
-                    img_path = os.path.abspath(img_path)
+                    # 如果没有base_dir，尝试使用AstrBot根目录构建绝对路径
+                    try:
+                        astrbot_root = get_astrbot_root()
+                        img_path = os.path.abspath(os.path.join(astrbot_root, img_path))
+                    except Exception as e:
+                        logger.error(f"构建图片绝对路径失败: {e}")
+                        img_path = os.path.abspath(img_path)
+            else:
+                img_path = img_path
 
             if not os.path.exists(img_path):
                 logger.error(f"图片文件不存在: {img_path}")
