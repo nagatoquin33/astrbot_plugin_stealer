@@ -99,7 +99,7 @@ class StealerPlugin(Star):
         # 初始化人格注入相关属性
         self.prompt_head: str = ""
         self.prompt_tail: str = ""
-        self.persona_backup: dict = {}
+        self.persona_backup: list = []
 
         # 初始化服务类
         self.config_service = ConfigService(
@@ -267,6 +267,9 @@ class StealerPlugin(Star):
             self.task_scheduler.create_task("scanner_loop", self._scanner_loop())
 
             # 加载并注入人格
+            import copy
+            personas = self.context.provider_manager.personas
+            self.persona_backup = copy.deepcopy(personas)
             await self._reload_personas()
 
         except Exception as e:
@@ -277,20 +280,13 @@ class StealerPlugin(Star):
         """插件销毁生命周期钩子。清理任务。"""
 
         try:
+            # 恢复人格
+            personas = self.context.provider_manager.personas
+            for persona, persona_backup in zip(personas, self.persona_backup):
+                persona["prompt"] = persona_backup["prompt"]
+            
             # 使用任务调度器停止扫描任务
             self.task_scheduler.cancel_task("scanner_loop")
-
-            # 恢复原始人格
-            if hasattr(self.context, 'persona_manager') and self.persona_backup:
-                # 遍历备份的人格ID和原始系统提示，逐个更新人格配置
-                for persona_id, original_prompt in self.persona_backup.items():
-                    try:
-                        await self.context.persona_manager.update_persona(
-                            persona_id=persona_id,
-                            system_prompt=original_prompt
-                        )
-                    except Exception as e:
-                        logger.error(f"恢复人格 {persona_id} 失败: {e}")
 
             # 清理各服务资源
             self.cache_service.cleanup()
@@ -317,38 +313,12 @@ class StealerPlugin(Star):
             # 生成系统提示添加内容
             sys_prompt_add = f"\n\n根据对话内容选择一个最匹配的情绪类别：{categories_str}。"
 
-            # 获取当前人格配置
-            if hasattr(self.context, 'persona_manager'):
-                # 获取所有人格
-                all_personas = await self.context.persona_manager.get_all_personas()
-                
-                # 首次调用时备份原始人格
-                if not self.persona_backup:
-                    self.persona_backup = {}
-                    for persona in all_personas:
-                        self.persona_backup[persona.persona_id] = persona.system_prompt
+            # 获取当前人格配置并注入
+            personas = self.context.provider_manager.personas
+            for persona, persona_backup in zip(personas, self.persona_backup):
+                persona["prompt"] = persona_backup["prompt"] + sys_prompt_add
 
-                # 遍历人格配置，在原始人格的基础上添加情绪选择提醒
-                for persona in all_personas:
-                    # 检查是否已经注入过情绪提醒
-                    if "根据对话内容选择一个最匹配的情绪类别" in persona.system_prompt:
-                        continue
-                        
-                    # 在原始人格的基础上添加情绪选择提醒
-                    original_prompt = self.persona_backup.get(persona.persona_id, persona.system_prompt)
-                    new_prompt = original_prompt + sys_prompt_add
-                    
-                    # 使用PersonaManager的update_persona方法更新人格配置
-                    await self.context.persona_manager.update_persona(
-                        persona_id=persona.persona_id,
-                        system_prompt=new_prompt,
-                        begin_dialogs=persona.begin_dialogs,
-                        tools=persona.tools
-                    )
-
-                logger.info("已成功注入情绪选择提醒到人格配置中")
-            else:
-                logger.error("无法访问persona_manager")
+            logger.info("已成功注入情绪选择提醒到人格配置中")
         except Exception as e:
             logger.error(f"注入情绪选择提醒失败: {e}")
 
