@@ -179,30 +179,30 @@ class ImageProcessorService:
             if filter_result:
                 # 图片分类
                 category = await self._classify_image(event, raw_path)
-                # 处理分类失败的情况，使用默认分类
-                if category is None:
-                    category = "unknown"
-                    logger.warning(f"图片分类失败，使用默认分类: {category}")
-                else:
+                if category is not None:
                     logger.debug(f"图片分类结果: {category}")
 
-                # 复制图片到对应分类目录
-                if self.base_dir:
-                    cat_dir = os.path.join(self.base_dir, "categories", category)
-                    os.makedirs(cat_dir, exist_ok=True)
-                    cat_path = os.path.join(cat_dir, os.path.basename(raw_path))
-                    shutil.copy2(raw_path, cat_path)
+                    # 复制图片到对应分类目录
+                    if self.base_dir:
+                        cat_dir = os.path.join(self.base_dir, "categories", category)
+                        os.makedirs(cat_dir, exist_ok=True)
+                        cat_path = os.path.join(cat_dir, os.path.basename(raw_path))
+                        shutil.copy2(raw_path, cat_path)
 
-                # 更新索引
-                idx[raw_path] = {
-                    "hash": hash_val,
-                    "category": category,
-                    "created_at": int(time.time()),
-                    "usage_count": 0,
-                    "last_used": 0
-                }
+                    # 更新索引
+                    idx[raw_path] = {
+                        "hash": hash_val,
+                        "category": category,
+                        "created_at": int(time.time()),
+                        "usage_count": 0,
+                        "last_used": 0
+                    }
 
-                return True, idx
+                    return True, idx
+                else:
+                    logger.warning("图片分类失败，图片将留在raw目录等待清理")
+                    # 分类失败时，图片留在raw目录，不添加到索引，不占用配额
+                    return False, None
             else:
                 logger.debug("图片未通过内容过滤，已删除")
                 await self._safe_remove_file(raw_path)
