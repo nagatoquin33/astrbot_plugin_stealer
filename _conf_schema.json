@@ -56,11 +56,12 @@
   "raw_retention_hours": {
     "description": "raw目录中图片的保留期限（小时）",
     "type": "int",
-    "default": 24
+    "default": 1
   },
   "raw_clean_interval": {
     "description": "raw目录的清理时间间隔（分钟）",
     "type": "int",
-    "default": 60
+    "default": 30
   }
 }
+

@@ -1,6 +1,5 @@
 import hashlib
 import json
-import os
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +21,7 @@ class CacheService:
         if not cache_dir:
             from astrbot.core.star.star_tools import StarTools
             cache_dir = Path(StarTools.get_data_dir()) / "cache"
-        
+
         self._cache_dir = Path(cache_dir)
         try:
             self._cache_dir.mkdir(parents=True, exist_ok=True)

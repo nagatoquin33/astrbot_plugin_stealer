@@ -5,12 +5,15 @@ import os
 import random
 import shutil
 from pathlib import Path
-from typing import Optional, Dict, Any, Tuple, List
+from typing import Any
 
 from astrbot.api import AstrBotConfig, logger
-from astrbot.api.event import AstrMessageEvent, MessageChain
-from astrbot.api.event import filter
-from astrbot.api.event.filter import (EventMessageType, PlatformAdapterType, PermissionType)
+from astrbot.api.event import AstrMessageEvent, MessageChain, filter
+from astrbot.api.event.filter import (
+    EventMessageType,
+    PermissionType,
+    PlatformAdapterType,
+)
 from astrbot.api.message_components import Image, Plain
 from astrbot.api.star import Context, Star, StarTools, register
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path, get_astrbot_root
@@ -80,11 +83,6 @@ class StealerPlugin(Star):
         "sigh",  # 叹气分类
         "speechless",  # 无语分类
     ]
-
-    # 预先声明类属性，避免实例化时出现AttributeError
-    _EMOTION_MAPPING = {}
-
-    # 情绪类别映射 - 实例属性，在 initialize 方法中从文件加载
 
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
         super().__init__(context)
@@ -215,21 +213,6 @@ class StealerPlugin(Star):
             self.categories_dir.mkdir(parents=True, exist_ok=True)
             self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-            # 加载情绪映射文件
-            try:
-                # 使用__file__获取当前脚本所在目录，即插件安装目录
-                plugin_dir = Path(__file__).parent
-                mapping_path = plugin_dir / "emotion_mapping.json"
-                if mapping_path.exists():
-                    with open(mapping_path, encoding="utf-8") as f:
-                        self._EMOTION_MAPPING = json.load(f)
-                        logger.info(f"已加载情绪映射文件: {mapping_path}")
-                else:
-                    logger.warning(f"情绪映射文件不存在: {mapping_path}")
-            except Exception as e:
-                logger.error(f"加载情绪映射文件失败: {e}")
-                self._EMOTION_MAPPING = {}
-
             # 加载提示词文件
             try:
                 # 使用__file__获取当前脚本所在目录，即插件安装目录
@@ -240,9 +223,9 @@ class StealerPlugin(Star):
                         prompts = json.load(f)
                         self.IMAGE_CLASSIFICATION_PROMPT = prompts.get("IMAGE_CLASSIFICATION_PROMPT", self.IMAGE_CLASSIFICATION_PROMPT)
                         logger.info(f"已加载提示词文件: {prompts_path}")
-                        
+
                         # 更新ImageProcessorService的提示词
-                        if hasattr(self, 'image_processor_service') and hasattr(self.image_processor_service, 'image_classification_prompt'):
+                        if hasattr(self, "image_processor_service") and hasattr(self.image_processor_service, "image_classification_prompt"):
                             self.image_processor_service.image_classification_prompt = self.IMAGE_CLASSIFICATION_PROMPT
                 else:
                     logger.warning(f"提示词文件不存在: {prompts_path}")
@@ -287,7 +270,7 @@ class StealerPlugin(Star):
             personas = self.context.provider_manager.personas
             for persona, persona_backup in zip(personas, self.persona_backup):
                 persona["prompt"] = persona_backup["prompt"]
-            
+
             # 使用任务调度器停止扫描任务
             self.task_scheduler.cancel_task("scanner_loop")
 
@@ -312,7 +295,7 @@ class StealerPlugin(Star):
 
             # 构建情绪分类字符串
             categories_str = ", ".join(self.categories)
-            
+
             # 生成系统提示添加内容
             # 替换提示词中的占位符
             head_with_categories = self.prompt_head.replace("{categories}", categories_str)
@@ -359,7 +342,7 @@ class StealerPlugin(Star):
 
 
 
-    async def _load_index(self) -> Dict[str, Any]:
+    async def _load_index(self) -> dict[str, Any]:
         """加载分类索引文件。
 
         Returns:
@@ -368,7 +351,7 @@ class StealerPlugin(Star):
         try:
             # 使用缓存服务加载索引
             return self.cache_service.get_cache("index_cache") or {}
-        except IOError as e:
+        except OSError as e:
             logger.error(f"索引文件IO错误: {e}")
             return {}
         except json.JSONDecodeError as e:
@@ -378,17 +361,17 @@ class StealerPlugin(Star):
             logger.error(f"加载索引失败: {e}", exc_info=True)
             return {}
 
-    async def _save_index(self, idx: Dict[str, Any]):
+    async def _save_index(self, idx: dict[str, Any]):
         """保存分类索引文件。"""
         try:
             # 使用缓存服务保存索引
             self.cache_service.set_cache("index_cache", idx)
-        except IOError as e:
+        except OSError as e:
             logger.error(f"索引文件IO错误: {e}")
         except Exception as e:
             logger.error(f"保存索引文件失败: {e}", exc_info=True)
 
-    async def _load_aliases(self) -> Dict[str, str]:
+    async def _load_aliases(self) -> dict[str, str]:
         """加载分类别名文件。
 
         Returns:
@@ -396,7 +379,7 @@ class StealerPlugin(Star):
         """
         try:
             return self.config_service.get_aliases()
-        except IOError as e:
+        except OSError as e:
             logger.error(f"别名文件IO错误: {e}")
             return {}
         except json.JSONDecodeError as e:
@@ -406,11 +389,11 @@ class StealerPlugin(Star):
             logger.error(f"加载别名失败: {e}", exc_info=True)
             return {}
 
-    async def _save_aliases(self, aliases: Dict[str, str]):
+    async def _save_aliases(self, aliases: dict[str, str]):
         """保存分类别名文件。"""
         try:
             self.config_service.update_aliases(aliases)
-        except IOError as e:
+        except OSError as e:
             logger.error(f"别名文件IO错误: {e}")
         except Exception as e:
             logger.error(f"保存别名文件失败: {e}", exc_info=True)
@@ -429,7 +412,7 @@ class StealerPlugin(Star):
         """
         return self.image_processor_service._is_likely_emoji_by_metadata(file_path)
 
-    async def _classify_image(self, event: Optional[AstrMessageEvent], file_path: str) -> Tuple[str, List[str], str, str]:
+    async def _classify_image(self, event: AstrMessageEvent | None, file_path: str) -> tuple[str, list[str], str, str]:
         """调用多模态模型对图片进行情绪分类与标签抽取。
 
         Args:
@@ -450,19 +433,19 @@ class StealerPlugin(Star):
             return result
         except FileNotFoundError as e:
             logger.error(f"图片文件不存在: {e}", exc_info=True)
-            fallback = "无语" if "无语" in self.categories else "其它"
+            fallback = "speechless" if "speechless" in self.categories else "其它"
             return fallback, [], "", fallback
         except PermissionError as e:
             logger.error(f"图片文件权限错误: {e}", exc_info=True)
-            fallback = "无语" if "无语" in self.categories else "其它"
+            fallback = "speechless" if "speechless" in self.categories else "其它"
             return fallback, [], "", fallback
         except (ValueError, TypeError) as e:
             logger.error(f"图片分类参数错误: {e}", exc_info=True)
-            fallback = "无语" if "无语" in self.categories else "其它"
+            fallback = "speechless" if "speechless" in self.categories else "其它"
             return fallback, [], "", fallback
         except Exception as e:
             logger.error(f"图片分类失败: {e}", exc_info=True)
-            fallback = "无语" if "无语" in self.categories else "其它"
+            fallback = "speechless" if "speechless" in self.categories else "其它"
             return fallback, [], "", fallback
 
     async def _compute_hash(self, file_path: str) -> str:
@@ -506,7 +489,7 @@ class StealerPlugin(Star):
             logger.error(f"删除文件失败: {e}")
             return False
 
-    async def _process_image(self, event: Optional[AstrMessageEvent], file_path: str, is_temp: bool = False, idx: Optional[Dict[str, Any]] = None) -> Tuple[bool, Optional[Dict[str, Any]]]:
+    async def _process_image(self, event: AstrMessageEvent | None, file_path: str, is_temp: bool = False, idx: dict[str, Any] | None = None) -> tuple[bool, dict[str, Any] | None]:
         """统一处理图片的方法，包括过滤、分类、存储和索引更新
 
         Args:
@@ -525,7 +508,7 @@ class StealerPlugin(Star):
                 if is_temp:
                     await self._safe_remove_file(file_path)  # 清理临时文件
                 return False, idx
-            
+
             # 委托给ImageProcessorService类处理
             success, updated_idx = await self.image_processor_service.process_image(
                 event=event,
@@ -556,7 +539,7 @@ class StealerPlugin(Star):
             logger.error(f"文件操作错误: {e}")
         except Exception as e:
             logger.error(f"处理图片失败: {e}", exc_info=True)  # 记录完整堆栈信息
-        
+
         # 异常情况下的清理和返回
         if is_temp:
             await self._safe_remove_file(file_path)
@@ -582,7 +565,7 @@ class StealerPlugin(Star):
 
         return parentheses_count > 0 or bracket_count > 0
 
-    async def _classify_text_category(self, event: Optional[AstrMessageEvent], text: str) -> str:
+    async def _classify_text_category(self, event: AstrMessageEvent | None, text: str) -> str:
         """调用文本模型判断文本情绪并映射到插件分类。"""
         try:
             # 委托给EmotionAnalyzerService类进行文本情绪分类
@@ -598,7 +581,7 @@ class StealerPlugin(Star):
             logger.error(f"文本情绪分类失败: {e}", exc_info=True)
             return ""
 
-    async def _extract_emotions_from_text(self, event: Optional[AstrMessageEvent], text: str) -> Tuple[List[str], str]:
+    async def _extract_emotions_from_text(self, event: AstrMessageEvent | None, text: str) -> tuple[list[str], str]:
         """从文本中提取情绪关键词，本地提取不到时使用 LLM。
 
         委托给 EmotionAnalyzerService 类处理
@@ -615,7 +598,7 @@ class StealerPlugin(Star):
             logger.error(f"提取文本情绪失败: {e}", exc_info=True)
             return [], text
 
-    async def _pick_vision_provider(self, event: Optional[AstrMessageEvent]) -> Optional[str]:
+    async def _pick_vision_provider(self, event: AstrMessageEvent | None) -> str | None:
         if self.vision_provider_id:
             return self.vision_provider_id
         if event is None:
@@ -640,11 +623,11 @@ class StealerPlugin(Star):
         try:
             # 使用 Path.resolve() 来获取规范化的绝对路径，处理所有符号链接和相对路径
             path_obj = Path(path)
-            
+
             if not path_obj.is_absolute():
                 # 确定基准目录
                 base_dir = None
-                
+
                 # 处理 data/ 开头的路径
                 if path.startswith("data/") or path.startswith("data\\"):
                     base_dir = Path(get_astrbot_data_path())
@@ -663,17 +646,17 @@ class StealerPlugin(Star):
                 else:
                     base_dir = Path(self.base_dir)
                     path_obj = base_dir / path
-            
+
             # 解析为绝对路径，处理所有相对部分
             resolved_path = path_obj.resolve()
-            
+
             # 验证路径是否在允许的父目录内
             allowed_parents = [
                 Path(get_astrbot_data_path()),
                 Path(get_astrbot_root()),
                 Path(self.base_dir)
             ]
-            
+
             is_safe = False
             for parent in allowed_parents:
                 parent_resolved = parent.resolve()
@@ -681,11 +664,11 @@ class StealerPlugin(Star):
                 if str(resolved_path).startswith(str(parent_resolved)):
                     is_safe = True
                     break
-            
+
             if not is_safe:
                 logger.error(f"路径超出允许范围: {path}")
                 return False, path
-            
+
             return True, str(resolved_path)
         except Exception as e:
             logger.error(f"路径安全检查失败: {e}")
@@ -1085,6 +1068,8 @@ class StealerPlugin(Star):
             except Exception as e:
                 yield event.plain_result(f"图片 {i+1}: 处理出错: {str(e)}")
                 logger.error(f"调试图片处理失败: {e}", exc_info=True)
+
+
 
 
 

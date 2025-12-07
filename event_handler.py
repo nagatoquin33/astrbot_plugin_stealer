@@ -2,15 +2,13 @@ import asyncio
 import os
 import random
 import time
-from typing import Optional, List
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
-from astrbot.api.message_components import Image, Plain
 from astrbot.api.event.filter import (
-    platform_adapter_type, event_message_type, on_decorating_result,
-    EventMessageType, PlatformAdapterType
+    on_decorating_result,
 )
+from astrbot.api.message_components import Image, Plain
 
 
 class EventHandler:
@@ -37,7 +35,7 @@ class EventHandler:
             return
 
         # 收集所有图片组件
-        imgs: List[Image] = [comp for comp in message_event.message_obj.message if isinstance(comp, Image)]
+        imgs: list[Image] = [comp for comp in message_event.message_obj.message if isinstance(comp, Image)]
 
         for img in imgs:
             try:

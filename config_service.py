@@ -1,15 +1,16 @@
 import json
 from pathlib import Path
-from typing import Any, Optional, List
+from typing import Any
+
+from pydantic import BaseModel, Field, model_validator
 
 from astrbot.api import AstrBotConfig, logger
-from pydantic import BaseModel, Field, model_validator
 
 
 class PluginConfig(BaseModel):
     """插件配置的Pydantic模型，用于简化配置验证逻辑。"""
     auto_send: bool = Field(default=True, description="是否自动随聊追加表情包")
-    vision_provider_id: Optional[str] = Field(default=None, description="视觉模型提供商ID")
+    vision_provider_id: str | None = Field(default=None, description="视觉模型提供商ID")
     emoji_chance: float = Field(default=0.4, description="触发表情动作的基础概率")
     max_reg_num: int = Field(default=100, description="允许注册的最大表情数量")
     do_replace: bool = Field(default=True, description="达到上限时是否替换旧表情")
@@ -20,29 +21,29 @@ class PluginConfig(BaseModel):
     emoji_only: bool = Field(default=True, description="是否仅偷取聊天表情包")
     raw_retention_hours: int = Field(default=24, description="raw目录图片保留期限")
     raw_clean_interval: int = Field(default=3600, description="raw目录清理时间间隔")
-    categories: List[str] = Field(default_factory=lambda: ["happy", "sad", "angry", "shy", "surprised", "smirk", "cry", "confused", "embarrassed", "love", "disgust", "fear", "excitement", "tired"], description="分类列表")
+    categories: list[str] = Field(default_factory=lambda: ["happy", "sad", "angry", "shy", "surprised", "smirk", "cry", "confused", "embarrassed", "love", "disgust", "fear", "excitement", "tired"], description="分类列表")
     config_version: str = Field(default="1.0.0", description="配置版本")
-    
-    @model_validator(mode='before')
+
+    @model_validator(mode="before")
     @classmethod
     def validate_fields(cls, data: Any) -> Any:
         """在验证前对字段进行预处理。"""
         if isinstance(data, dict):
             # 确保emoji_chance在0-1之间
-            if 'emoji_chance' in data:
-                data['emoji_chance'] = max(0.0, min(1.0, data['emoji_chance']))
-            
+            if "emoji_chance" in data:
+                data["emoji_chance"] = max(0.0, min(1.0, data["emoji_chance"]))
+
             # 确保maintenance_interval大于0
-            if 'maintenance_interval' in data and data['maintenance_interval'] <= 0:
-                data['maintenance_interval'] = 10
-            
+            if "maintenance_interval" in data and data["maintenance_interval"] <= 0:
+                data["maintenance_interval"] = 10
+
             # 确保max_reg_num大于0
-            if 'max_reg_num' in data and data['max_reg_num'] <= 0:
-                data['max_reg_num'] = 100
-            
+            if "max_reg_num" in data and data["max_reg_num"] <= 0:
+                data["max_reg_num"] = 100
+
             # 确保filtration_prompt不为空
-            if 'filtration_prompt' in data and not data['filtration_prompt']:
-                data['filtration_prompt'] = "符合公序良俗"
+            if "filtration_prompt" in data and not data["filtration_prompt"]:
+                data["filtration_prompt"] = "符合公序良俗"
         return data
 
 class ConfigManager:
@@ -209,7 +210,6 @@ class ConfigService:
         self.config_path = base_dir / "config.json"
         self.astrbot_config = astrbot_config
         self.config_manager = None
-        self._emotion_mapping = {}
 
         # 配置属性
         self.auto_send = True
@@ -222,8 +222,8 @@ class ConfigService:
         self.filtration_prompt = "符合公序良俗"
         self.emoji_only = False
         self.vision_provider_id = None
-        self.raw_retention_hours = 24  # raw目录图片保留期限
-        self.raw_clean_interval = 3600  # raw目录清理时间间隔
+        self.raw_retention_hours = 1  # raw目录图片保留期限
+        self.raw_clean_interval = 1800  # raw目录清理时间间隔（秒）
         self.categories = [
             "happy",
             "sad",
@@ -248,7 +248,6 @@ class ConfigService:
     def initialize(self):
         """初始化配置管理器并加载配置。"""
         self._initialize_config_manager()
-        self._load_emotion_mapping()
         self._load_initial_config()
         self._load_aliases()
 
@@ -294,17 +293,6 @@ class ConfigService:
         except Exception as e:
             logger.error(f"加载别名文件失败: {e}")
 
-    def _load_emotion_mapping(self):
-        """加载情绪映射文件。"""
-        mapping_file_path = Path(__file__).parent / "emotion_mapping.json"
-        try:
-            with open(mapping_file_path, encoding="utf-8") as f:
-                self._emotion_mapping = json.load(f)
-        except Exception as e:
-            logger.error(f"加载情绪映射文件失败: {e}")
-            # 加载失败时使用空映射作为降级方案
-            self._emotion_mapping = {}
-
     def save_aliases(self):
         """保存别名文件。"""
         try:
@@ -338,33 +326,23 @@ class ConfigService:
         try:
             # 特殊处理categories（需要映射和去重）
             if "categories" in config_dict and isinstance(config_dict["categories"], list):
-                cats = config_dict["categories"]
-                # 兼容旧版本配置，将中文/旧标签映射为英文情绪标签，并移除已废弃分类
-                mapped: list[str] = []
-                for c in cats:
-                    norm = self._normalize_category(str(c))
-                    if norm and norm not in mapped:
-                        mapped.append(norm)
-                if mapped:
-                    config_dict["categories"] = mapped
-                    self.categories = mapped
+                categories = config_dict["categories"]
+                # 去重并保持原始顺序
+                seen = set()
+                unique_categories = [cat for cat in categories if not (cat in seen or seen.add(cat))]
+                config_dict["categories"] = unique_categories
 
-            # 使用ConfigManager更新其他配置
-            self.config_manager.update_config(config_dict)
+            # 更新配置管理器
+            for key, value in config_dict.items():
+                self.config_manager.set(key, value)
 
-            # 同步更新实例属性以保持兼容性
-            self.auto_send = self.config_manager.get("auto_send")
-            self.emoji_chance = self.config_manager.get("emoji_chance")
-            self.max_reg_num = self.config_manager.get("max_reg_num")
-            self.do_replace = self.config_manager.get("do_replace")
-            self.maintenance_interval = self.config_manager.get("maintenance_interval")
-            self.steal_emoji = self.config_manager.get("steal_emoji")  # 控制偷取和扫描功能的开关
-            self.content_filtration = self.config_manager.get("content_filtration")
-            self.filtration_prompt = self.config_manager.get("filtration_prompt")
-            self.emoji_only = self.config_manager.get("emoji_only")
-            self.vision_provider_id = self.config_manager.get("vision_provider_id")
+            # 保存到文件
+            self.config_manager.save_config()
+
+            # 更新内存中的配置
+            self._load_initial_config()
         except Exception as e:
-            logger.error(f"更新配置失败: {e}")
+            logger.error(f"从字典更新配置失败: {e}")
 
     def persist_config(self):
         """持久化插件运行配置。"""
@@ -415,21 +393,8 @@ class ConfigService:
         if text in {"其它", "其他", "其他表情", "其他情绪"}:
             return self.categories[0]  # 移除"neutral"后，默认使用第一个分类
 
-        # 同义词 / 近义词映射（中文与英文别名）
-        if text in self._emotion_mapping and self._emotion_mapping[text] in self.categories:
-            return self._emotion_mapping[text]
-
-        # 通过包含关系粗略匹配
-        for key, val in self._emotion_mapping.items():
-            if key in text and val in self.categories:
-                return val
-
-        for cat in self.categories:
-            if cat in text:
-                return cat
-
-        # 默认回退
-        return self.categories[0]  # 移除"neutral"后，默认使用第一个分类
+        # 不再需要同义词/近义词映射，直接返回第一个分类
+        return self.categories[0]
 
     def get_config(self, key: str, default: any = None) -> any:
         """获取配置值。
@@ -466,3 +431,10 @@ class ConfigService:
     def cleanup(self):
         """清理资源。"""
         pass
+
+
+
+
+
+
+

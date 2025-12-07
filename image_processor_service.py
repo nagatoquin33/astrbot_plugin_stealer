@@ -2,6 +2,7 @@ import asyncio
 import base64
 import hashlib
 import os
+import re
 import shutil
 import time
 from pathlib import Path
@@ -213,7 +214,7 @@ class ImageProcessorService:
             return False, None
 
     async def classify_image(self, event: AstrMessageEvent, file_path: str, emoji_only=None, categories=None) -> tuple[str, list[str], str, str]:
-        """使用视觉模型对图片进行分类。
+        """使用视觉模型对图片进行分类并返回详细信息。
 
         Args:
             event: 消息事件
@@ -222,42 +223,81 @@ class ImageProcessorService:
             categories: 分类列表
 
         Returns:
-            tuple: (category, tags, desc, emotion)
+            tuple: (category, tags, desc, emotion)，其中：
+                  - category: 主要分类（emotion类别）
+                  - tags: 图片内容标签列表
+                  - desc: 图片内容描述
+                  - emotion: 情绪标签（与category相同）
         """
         try:
-            # 调用原有的分类方法
+            # 调用原有的分类方法获取情绪类别
             emotion = await self._classify_image(event, file_path)
+            category = emotion if emotion else "speechless"
 
-            # 返回默认值以匹配main.py的预期
-            category = emotion if emotion else "无语"
-            tags = []
+            # 使用增强提示词获取更详细的图片信息
+            detailed_prompt = "请详细描述这张图片的内容，包括：\n"
+            "1. 图片的主要元素和场景\n"
+            "2. 人物的表情、动作（如果有）\n"
+            "3. 图片的风格和色调\n"
+            "4. 图片传达的情绪\n"
+            "\n返回格式：\n"
+            "描述: [详细描述]\n"
+            "标签: [用逗号分隔的标签列表]"
+
+            detailed_response = await self._call_vision_model(file_path, detailed_prompt)
+
+            # 解析详细响应
             desc = ""
+            tags = []
 
+            if detailed_response:
+                # 提取描述
+                desc_match = re.search(r"描述: (.+?)(?:\n|$)", detailed_response, re.DOTALL)
+                if desc_match:
+                    desc = desc_match.group(1).strip()
+
+                # 提取标签
+                tags_match = re.search(r"标签: (.+?)(?:\n|$)", detailed_response)
+                if tags_match:
+                    tags = [tag.strip() for tag in tags_match.group(1).split(",") if tag.strip()]
+
+            # 确保返回格式一致
             return category, tags, desc, emotion
         except Exception as e:
             logger.error(f"图片分类失败: {e}")
-            fallback = "无语" if categories and "无语" in categories else "其它"
+            fallback = "speechless" if categories and "speechless" in categories else "其它"
             return fallback, [], "", fallback
 
-    async def _classify_image(self, event: AstrMessageEvent, img_path: str) -> str:
-        """使用视觉模型对图片进行分类（内部方法）。
+    async def _call_vision_model(self, img_path: str, prompt: str) -> str:
+        """调用视觉模型的共享辅助方法。
 
         Args:
-            event: 消息事件
             img_path: 图片路径
+            prompt: 提示词
 
         Returns:
-            str: 分类结果
+            str: LLM响应文本
         """
         try:
+            # 确保使用绝对路径
+            if not os.path.isabs(img_path):
+                # 如果是相对路径，尝试从base_dir构建绝对路径
+                if self.base_dir and not img_path.startswith(str(self.base_dir)):
+                    # 检查是否已经包含了base_dir的相对路径
+                    if img_path.startswith("AstrBot/data/plugin_data/"):
+                        # 对于生产环境的相对路径，使用base_dir来构建绝对路径
+                        img_path = os.path.abspath(img_path)
+                    else:
+                        # 对于其他相对路径，使用base_dir作为前缀
+                        img_path = os.path.join(self.base_dir, img_path)
+                else:
+                    img_path = os.path.abspath(img_path)
+
             if not os.path.exists(img_path):
                 logger.error(f"图片文件不存在: {img_path}")
-                return "无语"
+                return ""
 
-            # 构建提示词
-            prompt = self.image_classification_prompt
-
-            # 调用LLM生成分类结果
+            # 调用LLM
             # 使用getattr获取配置，避免直接访问不存在的config属性
             max_retries = int(getattr(self.plugin, "vision_max_retries", 3))
             retry_delay = float(getattr(self.plugin, "vision_retry_delay", 1.0))
@@ -272,19 +312,25 @@ class ImageProcessorService:
                     # 使用插件配置的视觉模型，如果没有则不指定模型
                     model = self.plugin.vision_model if hasattr(self.plugin, "vision_model") else None
 
-                    logger.debug(f"使用视觉模型 {model} 对图片进行分类")
-                    # 使用正确的关键字参数调用llm_generate
+                    logger.debug(f"使用视觉模型 {model} 处理图片")
+
                     # 将本地文件路径转换为file:///格式的URL
-                    import urllib.parse
+                    from pathlib import Path
+
                     if img_path and not img_path.startswith(("file:///", "base64://")):
-                        # 对路径进行URL编码
-                        encoded_path = urllib.parse.quote(img_path)
+                        # 获取绝对路径
+                        absolute_path = os.path.abspath(img_path)
+
                         # 在Windows系统上特殊处理
                         if os.name == "nt":
-                            # Windows路径需要转换为UNC格式
-                            img_url = f"file:///{encoded_path}"
+                            # Windows路径需要转换为UNC格式，使用Path对象确保格式正确
+                            path_obj = Path(absolute_path)
+                            # 将Windows路径转换为适合file URL的格式
+                            unc_path = f"file:///{path_obj.as_posix()}"
+                            img_url = unc_path
                         else:
-                            img_url = f"file://{encoded_path}"
+                            # Unix系统直接使用绝对路径
+                            img_url = f"file://{absolute_path}"
                     else:
                         img_url = img_path
 
@@ -305,47 +351,70 @@ class ImageProcessorService:
                             llm_response_text = str(result)
 
                         logger.debug(f"原始LLM响应: {llm_response_text}")
-
-                        # 处理LLM响应，提取有效分类结果
-                        category = llm_response_text.strip().lower()
-
-                        # 检查分类结果是否在有效类别列表中
-
-                        # 尝试直接匹配
-                        if category and category in self.VALID_CATEGORIES:
-                            logger.info(f"图片分类结果: {category}")
-                            return category
-
-                        # 尝试从响应中提取有效类别（处理LLM可能返回的额外内容）
-                        for valid_cat in self.VALID_CATEGORIES:
-                            if valid_cat in category:
-                                logger.info(f"从响应中提取分类结果: {valid_cat} (原始响应: {category})")
-                                return valid_cat
-
-                        # 处理可能的格式问题（如引号、括号等）
-                        import re
-                        cleaned_response = re.sub(r"[^a-zA-Z\s]", "", category)
-                        for valid_cat in self.VALID_CATEGORIES:
-                            if valid_cat in cleaned_response:
-                                logger.info(f"清理后提取分类结果: {valid_cat} (清理后响应: {cleaned_response})")
-                                return valid_cat
-
-                        logger.warning(f"分类结果不在有效类别列表中: {category}")
-                        logger.debug(f"无效的分类结果: {llm_response_text}")
+                        return llm_response_text.strip()
                 except Exception as e:
                     error_msg = str(e)
                     # 检查是否为限流错误
                     is_rate_limit = "429" in error_msg or "RateLimit" in error_msg or "exceeded your current request limit" in error_msg
                     if is_rate_limit:
-                        logger.warning(f"图片分类请求被限流，正在重试 ({attempt+1}/{max_retries})")
+                        logger.warning(f"视觉模型请求被限流，正在重试 ({attempt+1}/{max_retries})")
                         await asyncio.sleep(retry_delay * (2 ** attempt))
                     else:
-                        logger.error(f"图片分类失败 (尝试 {attempt+1}/{max_retries}): {e}")
+                        logger.error(f"视觉模型调用失败 (尝试 {attempt+1}/{max_retries}): {e}")
                         if attempt < max_retries - 1:
                             await asyncio.sleep(retry_delay * (2 ** attempt))
                         else:
                             break
-            logger.error("图片分类失败，达到最大重试次数")
+            logger.error("视觉模型调用失败，达到最大重试次数")
+            return ""
+        except Exception as e:
+            logger.error(f"视觉模型调用失败: {e}")
+            return ""
+
+    async def _classify_image(self, event: AstrMessageEvent, img_path: str) -> str:
+        """使用视觉模型对图片进行分类（内部方法）。
+
+        Args:
+            event: 消息事件
+            img_path: 图片路径
+
+        Returns:
+            str: 分类结果
+        """
+        try:
+            # 构建提示词
+            prompt = self.image_classification_prompt
+
+            # 调用共享的视觉模型方法
+            llm_response_text = await self._call_vision_model(img_path, prompt)
+
+            if not llm_response_text:
+                return None
+
+            # 处理LLM响应，提取有效分类结果
+            category = llm_response_text.strip().lower()
+
+            # 检查分类结果是否在有效类别列表中
+            # 尝试直接匹配
+            if category and category in self.VALID_CATEGORIES:
+                logger.info(f"图片分类结果: {category}")
+                return category
+
+            # 尝试从响应中提取有效类别（处理LLM可能返回的额外内容）
+            for valid_cat in self.VALID_CATEGORIES:
+                if valid_cat in category:
+                    logger.info(f"从响应中提取分类结果: {valid_cat} (原始响应: {category})")
+                    return valid_cat
+
+            # 处理可能的格式问题（如引号、括号等）
+            import re
+            cleaned_response = re.sub(r"[^a-zA-Z\s]", "", category)
+            for valid_cat in self.VALID_CATEGORIES:
+                if valid_cat in cleaned_response:
+                    logger.info(f"清理后提取分类结果: {valid_cat} (清理后响应: {cleaned_response})")
+                    return valid_cat
+
+            logger.warning(f"分类结果不在有效类别列表中: {category}")
             return None
         except Exception as e:
             logger.error(f"图片分类失败: {e}")
@@ -376,106 +445,14 @@ class ImageProcessorService:
             logger.error(f"图片文件不存在: {img_path}")
             return True
 
-        # 调用LLM进行内容过滤
-        # 使用插件实例的属性或默认值
-        max_retries = getattr(self.plugin, "vision_max_retries", 3)
-        retry_delay = getattr(self.plugin, "vision_retry_delay", 1.0)
+        # 调用共享的视觉模型方法
+        llm_response_text = await self._call_vision_model(img_path, current_filtration_prompt)
 
-        for attempt in range(max_retries):
-            try:
-                # 获取当前使用的聊天提供商实例
-                from astrbot.core.provider.manager import ProviderType
-                provider = self.plugin.context.provider_manager.get_using_provider(ProviderType.CHAT_COMPLETION)
-                chat_provider_id = provider.meta().id
-
-                # 使用插件配置的视觉模型，如果没有则不指定模型
-                model = self.plugin.vision_model if hasattr(self.plugin, "vision_model") else None
-
-                logger.debug(f"使用视觉模型 {model} 对图片进行过滤")
-                # 使用正确的关键字参数调用llm_generate
-                # 将本地文件路径转换为file:///格式的URL
-                import urllib.parse
-                if img_path and not img_path.startswith(("file:///", "base64://")):
-                    # 对路径进行URL编码
-                    encoded_path = urllib.parse.quote(img_path)
-                    # 在Windows系统上特殊处理
-                    if os.name == "nt":
-                        # Windows路径需要转换为UNC格式
-                        img_url = f"file:///{encoded_path}"
-                    else:
-                        img_url = f"file://{encoded_path}"
-                else:
-                    img_url = img_path
-
-                result = await self.plugin.context.llm_generate(
-                    chat_provider_id=chat_provider_id,
-                    prompt=current_filtration_prompt,
-                    image_urls=[img_url] if img_url else None,
-                    model=model
-                )
-
-                # 获取实际的文本结果
-                llm_response_text = ""
-                if hasattr(result, "result_chain") and result.result_chain:
-                    llm_response_text = result.result_chain.get_plain_text()
-                elif hasattr(result, "completion_text") and result.completion_text:
-                    llm_response_text = result.completion_text
-                else:
-                    llm_response_text = str(result)
-
-                # 直接处理LLM响应，提示词已要求只返回特定格式结果
-                if llm_response_text.strip() == "是":
-                    logger.debug("图片未通过内容过滤")
-                    return False
-                return True
-            except Exception as e:
-                error_msg = str(e)
-                # 检查是否为限流错误
-                is_rate_limit = "429" in error_msg or "RateLimit" in error_msg or "exceeded your current request limit" in error_msg
-                if is_rate_limit:
-                    logger.warning(f"图片过滤请求被限流，正在重试 ({attempt+1}/{max_retries})")
-                    await asyncio.sleep(retry_delay * (2 ** attempt))
-                else:
-                    logger.error(f"图片过滤失败 (尝试 {attempt+1}/{max_retries}): {e}")
-                    if attempt < max_retries - 1:
-                        await asyncio.sleep(retry_delay * (2 ** attempt))
-                    else:
-                        break
-        logger.error("图片过滤失败，达到最大重试次数，默认允许通过")
+        # 直接处理LLM响应，提示词已要求只返回特定格式结果
+        if llm_response_text.strip() == "是":
+            logger.debug("图片未通过内容过滤")
+            return False
         return True
-
-    async def _extract_emotions_from_text(self, event: AstrMessageEvent, text: str) -> tuple[list, str]:
-        """从文本中提取情绪关键词。
-
-        Args:
-            event: 消息事件
-            text: 文本内容
-
-        Returns:
-            tuple: (情绪关键词列表, 清理后的文本)
-        """
-        try:
-            import re
-
-            # 清理文本
-            cleaned_text = re.sub(r"\[图片.*?\]", "", text)
-            cleaned_text = re.sub(r"\[表情.*?\]", "", cleaned_text)
-            cleaned_text = cleaned_text.strip()
-            if not cleaned_text:
-                return [], cleaned_text
-
-            # 使用情绪映射表提取关键词
-            emotions = []
-            for emotion, keywords in self.emoji_mapping.items():
-                for keyword in keywords:
-                    if keyword in cleaned_text:
-                        emotions.append(emotion)
-                        break
-
-            return list(set(emotions)), cleaned_text
-        except Exception as e:
-            logger.error(f"提取情绪关键词失败: {e}")
-            return [], text
 
     async def _file_to_base64(self, file_path: str) -> str:
         """将文件转换为base64编码。
@@ -548,77 +525,4 @@ class ImageProcessorService:
             logger.error(f"存储图片失败: {e}")
             return src_path
 
-    async def _load_index(self) -> dict:
-        """加载图片索引。
 
-        Returns:
-            dict: 图片索引
-        """
-        try:
-            # 尝试获取配置目录
-            config_dir = getattr(self.plugin, "config_dir", None)
-            if config_dir is None and hasattr(self.plugin, "base_dir"):
-                # 如果没有config_dir，使用base_dir作为替代
-                config_dir = str(self.plugin.base_dir) if self.plugin.base_dir else None
-
-            if not config_dir:
-                return {}
-
-            index_path = os.path.join(config_dir, "index.json")
-            if os.path.exists(index_path):
-                import json
-                with open(index_path, encoding="utf-8") as f:
-                    return json.load(f)
-            return {}
-        except Exception as e:
-            logger.error(f"加载索引失败: {e}")
-            return {}
-
-    async def _save_index(self, idx: dict) -> bool:
-        """保存图片索引。
-
-        Args:
-            idx: 图片索引
-
-        Returns:
-            bool: 是否保存成功
-        """
-        try:
-            # 尝试获取配置目录
-            config_dir = getattr(self.plugin, "config_dir", None)
-            if config_dir is None and hasattr(self.plugin, "base_dir"):
-                # 如果没有config_dir，使用base_dir作为替代
-                config_dir = str(self.plugin.base_dir) if self.plugin.base_dir else None
-
-            if not config_dir:
-                return False
-
-            index_path = os.path.join(config_dir, "index.json")
-            # 确保目录存在
-            os.makedirs(os.path.dirname(index_path), exist_ok=True)
-            import json
-            with open(index_path, "w", encoding="utf-8") as f:
-                json.dump(idx, f, ensure_ascii=False, indent=4)
-            logger.debug("索引文件已保存")
-            return True
-        except Exception as e:
-            logger.error(f"保存索引失败: {e}")
-            return False
-
-    async def _compute_hash(self, file_path: str) -> str:
-        """计算文件哈希值。
-
-        Args:
-            file_path: 文件路径
-
-        Returns:
-            str: 哈希值
-        """
-        try:
-            hasher = hashlib.md5()
-            with open(file_path, "rb") as f:
-                hasher.update(f.read())
-            return hasher.hexdigest()
-        except Exception as e:
-            logger.error(f"计算文件哈希失败: {e}")
-            return ""
