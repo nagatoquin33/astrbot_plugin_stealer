@@ -179,7 +179,12 @@ class ImageProcessorService:
             if filter_result:
                 # 图片分类
                 category = await self._classify_image(event, raw_path)
-                logger.debug(f"图片分类结果: {category}")
+                # 处理分类失败的情况，使用默认分类
+                if category is None:
+                    category = "unknown"
+                    logger.warning(f"图片分类失败，使用默认分类: {category}")
+                else:
+                    logger.debug(f"图片分类结果: {category}")
 
                 # 复制图片到对应分类目录
                 if self.base_dir:
@@ -263,19 +268,36 @@ class ImageProcessorService:
 
             for attempt in range(max_retries):
                 try:
-                    result = await self.plugin.context.llm_generate(event, prompt, image_path=img_path, model=model)
+                    # 获取当前使用的聊天提供商ID
+                    chat_provider_id = await self.plugin.context.provider_manager.get_using_provider_id()
+                    # 使用正确的关键字参数调用llm_generate
+                    result = await self.plugin.context.llm_generate(
+                        chat_provider_id=chat_provider_id,
+                        prompt=prompt,
+                        image_urls=[img_path] if img_path else None,
+                        model=model
+                    )
                     if result:
-                            # 处理直接返回的情绪标签
-                            category = result.strip().lower()
+                        # 获取实际的文本结果
+                        llm_response_text = ""
+                        if hasattr(result, 'result_chain') and result.result_chain:
+                            llm_response_text = result.result_chain.get_plain_text()
+                        elif hasattr(result, 'completion_text') and result.completion_text:
+                            llm_response_text = result.completion_text
+                        else:
+                            llm_response_text = str(result)
                             
-                            # 检查分类结果是否在有效类别列表中
-                            valid_categories = ["happy", "neutral", "sad", "angry", "shy", "surprised", "smirk", "cry", "confused", "embarrassed", "sigh", "speechless"]
-                            if category and category in valid_categories:
-                                logger.info(f"图片分类结果: {category}")
-                                return category
-                            else:
-                                logger.warning(f"分类结果不在有效类别列表中: {category}")
-                            logger.debug(f"无效的分类结果: {result}")
+                        # 处理直接返回的情绪标签
+                        category = llm_response_text.strip().lower()
+                        
+                        # 检查分类结果是否在有效类别列表中
+                        valid_categories = ["happy", "neutral", "sad", "angry", "shy", "surprised", "smirk", "cry", "confused", "embarrassed", "sigh", "speechless"]
+                        if category and category in valid_categories:
+                            logger.info(f"图片分类结果: {category}")
+                            return category
+                        else:
+                            logger.warning(f"分类结果不在有效类别列表中: {category}")
+                        logger.debug(f"无效的分类结果: {llm_response_text}")
                 except Exception as e:
                     error_msg = str(e)
                     # 检查是否为限流错误
@@ -331,8 +353,26 @@ class ImageProcessorService:
 
         for attempt in range(max_retries):
             try:
-                result = await self.plugin.context.llm_generate(event, current_filtration_prompt, image_path=img_path, model=model)
-                if result and result.strip() == "是":
+                # 获取当前使用的聊天提供商ID
+                chat_provider_id = await self.plugin.context.provider_manager.get_using_provider_id()
+                # 使用正确的关键字参数调用llm_generate
+                result = await self.plugin.context.llm_generate(
+                    chat_provider_id=chat_provider_id,
+                    prompt=current_filtration_prompt,
+                    image_urls=[img_path] if img_path else None,
+                    model=model
+                )
+                
+                # 获取实际的文本结果
+                llm_response_text = ""
+                if hasattr(result, 'result_chain') and result.result_chain:
+                    llm_response_text = result.result_chain.get_plain_text()
+                elif hasattr(result, 'completion_text') and result.completion_text:
+                    llm_response_text = result.completion_text
+                else:
+                    llm_response_text = str(result)
+                
+                if llm_response_text and llm_response_text.strip() == "是":
                     logger.debug("图片未通过内容过滤")
                     return False
                 return True
