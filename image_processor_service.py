@@ -31,21 +31,22 @@ class ImageProcessorService:
 
         # 尝试从插件实例获取提示词配置，如果不存在则使用默认值
         self.image_classification_prompt = getattr(plugin_instance, "IMAGE_CLASSIFICATION_PROMPT",
-            """Please carefully analyze the emotion expressed in the image and classify it into one of the following exact English labels:
-- happy: Feeling or showing pleasure or contentment
-- neutral: Showing no strong emotion; calm
-- sad: Feeling or showing sorrow; unhappy
-- angry: Feeling or showing strong annoyance, displeasure, or hostility
-- shy: Nervous or timid in the company of other people
-- surprised: Feeling or showing mild astonishment or shock
-- smirk: A half-smile expressing amusement or disdain
-- cry: Shedding tears, typically from emotion
-- confused: Unable to think clearly; bewildered
-- embarrassed: Feeling self-conscious, ashamed, or awkward
-- sigh: Expressing relief, tiredness, or disappointment with a deep breath
-- speechless: Unable to speak, typically as a result of shock or strong emotion
-
-Only return the single emotion word from the list above. Do NOT include any other text, punctuation, or explanation.""")
+            """Observe the image carefully and identify the core emotion it expresses. Choose one exact label from the list below that best matches: 
+ 
+ - happy 
+ - neutral 
+ - sad 
+ - angry 
+ - shy 
+ - surprised 
+ - smirk 
+ - cry 
+ - confused 
+ - embarrassed 
+ - sigh 
+ - speechless 
+ 
+ Only return the single emotion word from the list above. Do NOT include any other text, punctuation, or explanation.""")
 
         self.content_filtration_prompt = getattr(plugin_instance, "CONTENT_FILTRATION_PROMPT",
             "请判断这张图片是否包含违反规定的内容，仅回复'是'或'否'。如果包含裸露、暴力、敏感或违法内容，回复'是'，否则回复'否'")
@@ -305,16 +306,34 @@ Only return the single emotion word from the list above. Do NOT include any othe
                         else:
                             llm_response_text = str(result)
 
-                        # 直接处理LLM响应，提示词已要求只返回特定格式结果
+                        logger.debug(f"原始LLM响应: {llm_response_text}")
+
+                        # 处理LLM响应，提取有效分类结果
                         category = llm_response_text.strip().lower()
 
                         # 检查分类结果是否在有效类别列表中
                         valid_categories = ["happy", "neutral", "sad", "angry", "shy", "surprised", "smirk", "cry", "confused", "embarrassed", "sigh", "speechless"]
+                        
+                        # 尝试直接匹配
                         if category and category in valid_categories:
                             logger.info(f"图片分类结果: {category}")
                             return category
-                        else:
-                            logger.warning(f"分类结果不在有效类别列表中: {category}")
+                        
+                        # 尝试从响应中提取有效类别（处理LLM可能返回的额外内容）
+                        for valid_cat in valid_categories:
+                            if valid_cat in category:
+                                logger.info(f"从响应中提取分类结果: {valid_cat} (原始响应: {category})")
+                                return valid_cat
+                        
+                        # 处理可能的格式问题（如引号、括号等）
+                        import re
+                        cleaned_response = re.sub(r'[^a-zA-Z\s]', '', category)
+                        for valid_cat in valid_categories:
+                            if valid_cat in cleaned_response:
+                                logger.info(f"清理后提取分类结果: {valid_cat} (清理后响应: {cleaned_response})")
+                                return valid_cat
+                        
+                        logger.warning(f"分类结果不在有效类别列表中: {category}")
                         logger.debug(f"无效的分类结果: {llm_response_text}")
                 except Exception as e:
                     error_msg = str(e)
