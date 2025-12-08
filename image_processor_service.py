@@ -106,21 +106,8 @@ class ImageProcessorService:
 1. **图文一致**：表情和文字情绪相同 -> 直接分类。 
 2. **图文冲突（重点）**：如果表情是笑脸，但文字是“想死”、“无语”，请以**整体表达的含义**为准）。 
 3. **模糊匹配原则**： 
-   - 必须从列表 `{emotion_list}` 中选择唯一标签。 
-   - 映射指南： 
-        - 面部红温、愤怒、不满、皱眉、咬牙切齿 -> 归类为 `angry` (视攻击性而定，若无合适选项选最接近的负面情绪)
-        - 期待、星星眼、点赞、嘴角上扬、猫猫嘴，大笑 -> 归类为 `happy`
-        - 疑惑、问号、挠头、歪头或用手摸下巴 -> 归类为 `confused`
-        - 眼睛瞪大、嘴巴张开、表情震惊、瞳孔放大，抱头 -> 归类为 `surprised`
-        - 流泪、嘴角下垂、眼神暗淡，表情失落 -> 归类为 `sad`
-        - 脸红、扭捏、不敢直视 -> 归类为 `shy`
-        - 坏笑、或者恶搞内容 -> 归类为 `smirk`
-        - 嚎啕大哭、眼泪成河 -> 归类为 `cry`
-        - 脸红、表情尴尬、不知所措 -> 归类为 `embarrassed`
-        - 打哈欠、闭眼、无精打采和有明显睡觉意图 -> 归类为 `sleepy`
-        - 叹气、扶额、表情无奈或者上吊 -> 归类为 `sigh`
-        - 其他不确定的情绪 -> 优先匹配你觉得最接近的标签
-        - 识别表情时，除了观察画面中人物或者动漫人物（动物）的表情之外，还需要注意图中出现的其他元素，如文字、动物、人物的动作等，这些都可能对情绪产生影响。
+      - 必须从列表 `{emotion_list}` 中选择唯一标签。 
+      - 识别表情时，除了观察画面中人物或者动漫人物（动物）的表情之外，还需要注意图中出现的其他元素，如文字、动物、人物的动作等，这些都可能对情绪产生影响。
 
 **[强制约束]**： 
 - 即使图片情绪复杂，也必须强制归类到 `{emotion_list}` 中最接近的一项，严禁输出空值。
@@ -176,20 +163,7 @@ class ImageProcessorService:
    2. **图文冲突（重点）**：如果表情是笑脸，但文字是“想死”、“无语”，请以**整体表达的含义**为准）。 
    3. **模糊匹配原则**： 
       - 必须从列表 `{emotion_list}` 中选择唯一标签。 
-      - 映射指南： 
-        - 面部红温、愤怒、不满、皱眉、咬牙切齿 -> 归类为 `angry` (视攻击性而定，若无合适选项选最接近的负面情绪)
-        - 期待、星星眼、点赞、嘴角上扬、猫猫嘴，大笑 -> 归类为 `happy`
-        - 疑惑、问号、挠头、歪头或用手摸下巴 -> 归类为 `confused`
-        - 眼睛瞪大、嘴巴张开、表情震惊、瞳孔放大，抱头 -> 归类为 `surprised`
-        - 流泪、嘴角下垂、眼神暗淡，表情失落 -> 归类为 `sad`
-        - 脸红、扭捏、不敢直视 -> 归类为 `shy`
-        - 坏笑、或者恶搞内容 -> 归类为 `smirk`
-        - 嚎啕大哭、眼泪成河 -> 归类为 `cry`
-        - 脸红、表情尴尬、不知所措 -> 归类为 `embarrassed`
-        - 打哈欠、闭眼、无精打采和有明显睡觉意图 -> 归类为 `sleepy`
-        - 叹气、扶额、表情无奈或者上吊 -> 归类为 `sigh`
-        - 其他不确定的情绪 -> 优先匹配你觉得最接近的标签
-         - 识别表情时，除了观察画面中人物或者动漫人物（动物）的表情之外，还需要注意图中出现的其他元素，如文字、动物、人物的动作等，这些都可能对情绪产生影响。
+      - 识别表情时，除了观察画面中人物或者动漫人物（动物）的表情之外，还需要注意图中出现的其他元素，如文字、动物、人物的动作等，这些都可能对情绪产生影响。
 
    **[强制约束]**： 
    - 即使图片情绪复杂，也必须强制归类到 `{emotion_list}` 中最接近的一项，严禁输出空值。
@@ -484,7 +458,7 @@ class ImageProcessorService:
 
     async def classify_image(
         self,
-        event: AstrMessageEvent,
+        event: AstrMessageEvent | None,
         file_path: str,
         categories=None,
         backend_tag=None,
@@ -540,7 +514,7 @@ class ImageProcessorService:
                 )
 
                 # 调用视觉模型进行分析
-                response = await self._call_vision_model(file_path, prompt)
+                response = await self._call_vision_model(event, file_path, prompt)
                 logger.debug(f"表情包分析原始响应: {response}")
 
                 # 解析响应结果
@@ -560,7 +534,7 @@ class ImageProcessorService:
                 )
 
                 # 调用视觉模型进行一次性分析
-                response = await self._call_vision_model(file_path, prompt)
+                response = await self._call_vision_model(event, file_path, prompt)
                 logger.debug(f"内容过滤和表情包分析原始响应: {response}")
 
                 # 解析响应结果
@@ -613,10 +587,11 @@ class ImageProcessorService:
             # 根据测试要求，无法分类时返回空字符串
             return "", [], "", ""
 
-    async def _call_vision_model(self, img_path: str, prompt: str) -> str:
+    async def _call_vision_model(self, event: AstrMessageEvent | None, img_path: str, prompt: str) -> str:
         """调用视觉模型的共享辅助方法。
 
         Args:
+            event: 消息事件
             img_path: 图片路径
             prompt: 提示词
 
@@ -647,13 +622,13 @@ class ImageProcessorService:
             # 实现指数退避重试机制
             for attempt in range(max_retries):
                 try:
-                    # 获取当前活动的聊天提供商
-                    from astrbot.core.provider.manager import ProviderType
-
-                    provider = self.plugin.context.provider_manager.get_using_provider(
-                        ProviderType.CHAT_COMPLETION
-                    )
-                    chat_provider_id = provider.meta().id
+                    # 获取当前会话使用的聊天模型ID
+                    if event and hasattr(event, 'unified_msg_origin'):
+                        umo = event.unified_msg_origin
+                        chat_provider_id = await self.plugin.context.get_current_chat_provider_id(umo=umo)
+                    else:
+                        # 如果没有event或unified_msg_origin，使用默认的聊天模型ID
+                        chat_provider_id = getattr(self.plugin, 'default_chat_provider_id', None)
 
                     # 使用配置的视觉模型（如果有）
                     model = (
