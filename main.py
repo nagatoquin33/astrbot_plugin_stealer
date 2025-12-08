@@ -84,7 +84,6 @@ class StealerPlugin(Star):
         "excitement",
         "tired",
         "sigh",  # 叹气分类
-        "speechless",  # 无语分类
     ]
 
     def __init__(self, context: Context, config: AstrBotConfig | None = None):

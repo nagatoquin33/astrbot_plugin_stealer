@@ -36,6 +36,8 @@ class PluginConfig(BaseModel):
             "fear",
             "excitement",
             "tired",
+            "sigh",  # 叹气分类
+
         ],
         description="分类列表",
     )
