@@ -210,6 +210,8 @@ class StealerPlugin(Star):
                     categories=self.categories,
                     content_filtration=self.content_filtration,
                     vision_provider_id=self.vision_provider_id,
+                    emoji_classification_prompt=getattr(self, "EMOJI_CLASSIFICATION_PROMPT", None),
+                    combined_analysis_prompt=getattr(self, "COMBINED_ANALYSIS_PROMPT", None),
                 )
 
                 self.emotion_analyzer_service.update_config(categories=self.categories)
@@ -242,6 +244,11 @@ class StealerPlugin(Star):
                         # 将加载的提示词赋值给插件实例属性
                         for key, value in prompts.items():
                             setattr(self, key, value)
+                        # 更新图片处理器的提示词
+                        self.image_processor_service.update_config(
+                            emoji_classification_prompt=prompts.get("EMOJI_CLASSIFICATION_PROMPT", None),
+                            combined_analysis_prompt=prompts.get("COMBINED_ANALYSIS_PROMPT", None),
+                        )
                 else:
                     logger.warning(f"提示词文件不存在: {prompts_path}")
             except Exception as e:

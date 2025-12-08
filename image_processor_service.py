@@ -104,14 +104,15 @@ class ImageProcessorService:
 3. **模糊匹配原则**： 
    - 必须从列表 `{emotion_list}` 中选择唯一标签。 
    - 映射指南： 
-     - 尴尬、汗颜、无语、翻白眼 -> 归类为 `speechless` 
-     - 面部红温、愤怒、不满 -> 归类为 `angry` (视攻击性而定，若无合适选项选最接近的负面情绪) 
-     - 期待、星星眼、点赞 -> 归类为 `happy` 
-     - 疑惑、黑人问号、挠头 -> 归类为 `confused` 
-     - 张大嘴巴，抱着头不一定是高兴，大概是表示惊呆了 -> 归类为 `surprised` 
+     - 尴尬、汗颜、无语、翻白眼 -> 归类为 `speechless` (仅用于非常明显的无语情绪，谨慎使用)
+     - 面部红温、愤怒、不满 -> 归类为 `angry` (视攻击性而定，若无合适选项选最接近的负面情绪)
+     - 期待、星星眼、点赞 -> 归类为 `happy`
+     - 疑惑、黑人问号、挠头 -> 归类为 `confused`
+     - 张大嘴巴，抱着头不一定是高兴，大概是表示惊呆了 -> 归类为 `surprised`
+     - 其他不确定的情绪 -> 优先匹配你觉得最接近的标签 但不要使用`speechless` 因为它通常用于非常明显的无语情绪
 
 **[强制约束]**： 
-- 即使图片情绪复杂，也必须强制归类到 `{emotion_list}` 中最接近的一项，严禁输出空值。 
+- 即使图片情绪复杂，也必须强制归类到 `{emotion_list}` 中最接近的一项，严禁输出空值，也不能使用`speechless` 因为它通常用于非常明显的无语情绪。 
 
 ---
 
@@ -161,13 +162,14 @@ class ImageProcessorService:
       - 必须从列表 `{emotion_list}` 中选择唯一标签。 
       - 映射指南： 
         - 尴尬、汗颜、无语、翻白眼 -> 归类为 `speechless` (仅用于非常明显的无语情绪，谨慎使用)
-        - 嘲讽、阴阳怪气、不屑 -> 归类为 `surprised` 或 `angry` (视攻击性而定，若无合适选项选最接近的负面情绪)
+        - 面部红温、愤怒、不满 -> 归类为 `angry` (视攻击性而定，若无合适选项选最接近的负面情绪)
         - 期待、星星眼、点赞 -> 归类为 `happy`
         - 疑惑、黑人问号、挠头 -> 归类为 `confused`
-        - 其他不确定的情绪 -> 优先考虑 `sigh` (叹气/无奈) 
+        - 张大嘴巴，抱着头不一定是高兴，大概是表示惊呆了 -> 归类为 `surprised`
+        - 其他不确定的情绪 -> 优先匹配你觉得最接近的标签 但不要使用`speechless` 因为它通常用于非常明显的无语情绪
 
    **[强制约束]**： 
-   - 即使图片情绪复杂，也必须强制归类到 `{emotion_list}` 中最接近的一项，严禁输出空值。 
+   - 即使图片情绪复杂，也必须强制归类到 `{emotion_list}` 中最接近的一项，严禁输出空值，也不能使用`speechless` 因为它通常用于非常明显的无语情绪。 
 
 请严格按照以下格式返回结果，不要添加任何额外内容：
 过滤结果|是否为表情包|情绪分类
@@ -184,7 +186,8 @@ class ImageProcessorService:
         self.vision_provider_id = ""
 
     def update_config(
-        self, categories=None, content_filtration=None, vision_provider_id=None
+        self, categories=None, content_filtration=None, vision_provider_id=None,
+        emoji_classification_prompt=None, combined_analysis_prompt=None
     ):
         """更新图片处理器配置。
 
@@ -192,6 +195,8 @@ class ImageProcessorService:
             categories: 分类列表
             content_filtration: 是否进行内容过滤
             vision_provider_id: 视觉模型提供者ID
+            emoji_classification_prompt: 表情包分类提示词
+            combined_analysis_prompt: 综合分析提示词
         """
         if categories is not None:
             self.categories = categories
@@ -199,6 +204,10 @@ class ImageProcessorService:
             self.content_filtration = content_filtration
         if vision_provider_id is not None:
             self.vision_provider_id = vision_provider_id
+        if emoji_classification_prompt is not None:
+            self.emoji_classification_prompt = emoji_classification_prompt
+        if combined_analysis_prompt is not None:
+            self.combined_analysis_prompt = combined_analysis_prompt
 
     async def process_image(
         self,
