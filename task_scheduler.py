@@ -12,7 +12,9 @@ class TaskScheduler:
         self._tasks: dict[str, asyncio.Task] = {}  # 任务字典，key为任务名称
         self._task_callbacks: dict[str, Callable] = {}  # 任务回调函数
 
-    def create_task(self, name: str, coro, replace_existing: bool = True) -> asyncio.Task | None:
+    def create_task(
+        self, name: str, coro, replace_existing: bool = True
+    ) -> asyncio.Task | None:
         """创建一个新的后台任务。
 
         Args:
@@ -67,7 +69,13 @@ class TaskScheduler:
         for name in list(self._tasks.keys()):
             self.cancel_task(name)
 
-    def schedule_interval_task(self, name: str, callback: Callable, interval: float, replace_existing: bool = True) -> asyncio.Task | None:
+    def schedule_interval_task(
+        self,
+        name: str,
+        callback: Callable,
+        interval: float,
+        replace_existing: bool = True,
+    ) -> asyncio.Task | None:
         """调度一个定期执行的任务。
 
         Args:
@@ -96,7 +104,13 @@ class TaskScheduler:
         # 创建任务
         return self.create_task(name, interval_task(), replace_existing)
 
-    def schedule_interval_task_minutes(self, name: str, callback: Callable, interval_minutes: float, replace_existing: bool = True) -> asyncio.Task | None:
+    def schedule_interval_task_minutes(
+        self,
+        name: str,
+        callback: Callable,
+        interval_minutes: float,
+        replace_existing: bool = True,
+    ) -> asyncio.Task | None:
         """调度一个定期执行的任务（以分钟为单位）。
 
         Args:
@@ -108,7 +122,9 @@ class TaskScheduler:
         Returns:
             创建的任务对象，如果任务已存在且不替换则返回None
         """
-        return self.schedule_interval_task(name, callback, interval_minutes * 60, replace_existing)
+        return self.schedule_interval_task(
+            name, callback, interval_minutes * 60, replace_existing
+        )
 
     def get_task(self, name: str) -> asyncio.Task | None:
         """获取指定名称的任务。

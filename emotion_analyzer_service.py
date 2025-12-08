@@ -16,12 +16,14 @@ class EmotionAnalyzerService:
 
     def __init__(self, plugin_instance):
         self.plugin_instance = plugin_instance
-        self.categories = plugin_instance.categories if hasattr(plugin_instance, "categories") else []
+        self.categories = (
+            plugin_instance.categories if hasattr(plugin_instance, "categories") else []
+        )
 
     def normalize_category(self, category: str) -> str:
         """将任意文本归一化到预定义的情绪分类中。"""
         if not category:
-            return "speechless"
+            return ""
 
         category = category.strip().lower()
 
@@ -30,20 +32,23 @@ class EmotionAnalyzerService:
             if cat.lower() == category:
                 return cat
 
-        # 兜底
-        return "speechless" if "speechless" in self.categories else "其它"
+        # 不进行兜底分类，返回空字符串表示无法分类
+        return ""
 
     async def classify_text_emotion(self, event: AstrMessageEvent, text: str) -> str:
         """调用文本模型判断文本情绪并映射到插件分类。"""
         try:
             # LLM已经通过提示词限制了输出标签格式，不再需要本地规则匹配
             # 直接返回默认值
-            return "speechless" if "speechless" in self.categories else "其它"
+            return ""
         except Exception as e:
             logger.error(f"文本情绪分类失败: {e}")
-            return "speechless" if "speechless" in self.categories else "其它"
+            # 不进行兜底分类，返回空字符串表示无法分类
+            return ""
 
-    async def extract_emotions_from_text(self, event: AstrMessageEvent | None, text: str) -> tuple[list[str], str]:
+    async def extract_emotions_from_text(
+        self, event: AstrMessageEvent | None, text: str
+    ) -> tuple[list[str], str]:
         """从文本中提取情绪关键词。"""
         try:
             res: list[str] = []
@@ -52,86 +57,51 @@ class EmotionAnalyzerService:
             valid_categories = set(self.categories)  # 使用self.categories确保一致性
 
             # 1. 处理显式包裹标记：&&情绪&&
-            matches = list(self.HEX_PATTERN.finditer(cleaned_text))
-
-            # 收集所有匹配项，避免索引偏移问题
-            temp_replacements = []
-            for match in matches:
+            temp_text = cleaned_text
+            for match in self.HEX_PATTERN.finditer(cleaned_text):
                 original = match.group(0)
                 emotion = match.group(1).strip()
                 norm_cat = self.normalize_category(emotion)
 
-                if norm_cat and norm_cat in valid_categories:
-                    temp_replacements.append((original, norm_cat))
-                else:
-                    temp_replacements.append((original, ""))  # 非法或未知情绪静默移除
+                if norm_cat and norm_cat in valid_categories and norm_cat not in seen:
+                    seen.add(norm_cat)
+                    res.append(norm_cat)
+                temp_text = temp_text.replace(original, "", 1)
+            cleaned_text = temp_text
 
-            # 保持原始顺序替换
-            for original, emotion in temp_replacements:
-                cleaned_text = cleaned_text.replace(original, "", 1)
-                if emotion and emotion not in seen:
-                    seen.add(emotion)
-                    res.append(emotion)
-
-            # 2. 替代标记处理（如[emotion]、(emotion)等）
-            # 处理[emotion]格式
-            matches = list(self.BRACKET_PATTERN.finditer(cleaned_text))
-            bracket_replacements = []
-            invalid_brackets = []
-
-            for match in matches:
+            # 2. 处理[emotion]格式
+            temp_text = cleaned_text
+            for match in self.BRACKET_PATTERN.finditer(cleaned_text):
                 original = match.group(0)
                 emotion = match.group(1).strip()
                 norm_cat = self.normalize_category(emotion)
 
-                if norm_cat and norm_cat in valid_categories:
-                    bracket_replacements.append((original, norm_cat))
-                else:
-                    # 记录无效标记，稍后删除
-                    invalid_brackets.append(original)
+                if norm_cat and norm_cat in valid_categories and norm_cat not in seen:
+                    seen.add(norm_cat)
+                    res.append(norm_cat)
+                temp_text = temp_text.replace(original, "", 1)
+            cleaned_text = temp_text
 
-            # 删除所有无效标记
-            for invalid in invalid_brackets:
-                cleaned_text = cleaned_text.replace(invalid, "", 1)
-
-            for original, emotion in bracket_replacements:
-                cleaned_text = cleaned_text.replace(original, "", 1)
-                if emotion and emotion not in seen:
-                    seen.add(emotion)
-                    res.append(emotion)
-
-            # 处理(emotion)格式
-            matches = list(self.PAREN_PATTERN.finditer(cleaned_text))
-            paren_replacements = []
-            invalid_parens = []
-
-            for match in matches:
+            # 3. 处理(emotion)格式
+            temp_text = cleaned_text
+            for match in self.PAREN_PATTERN.finditer(cleaned_text):
                 original = match.group(0)
                 emotion = match.group(1).strip()
                 norm_cat = self.normalize_category(emotion)
 
                 if norm_cat and norm_cat in valid_categories:
                     # 需要额外验证，确保不是普通句子的一部分
-                    if self._is_likely_emotion_markup(original, cleaned_text, match.start()):
-                        paren_replacements.append((original, norm_cat))
-                else:
-                    # 记录无效标记，稍后删除
-                    invalid_parens.append(original)
+                    if self._is_likely_emotion_markup(
+                        original, cleaned_text, match.start()
+                    ):
+                        if norm_cat not in seen:
+                            seen.add(norm_cat)
+                            res.append(norm_cat)
+                temp_text = temp_text.replace(original, "", 1)
+            cleaned_text = temp_text
 
-            # 删除所有无效标记
-            for invalid in invalid_parens:
-                cleaned_text = cleaned_text.replace(invalid, "", 1)
-
-            for original, emotion in paren_replacements:
-                cleaned_text = cleaned_text.replace(original, "", 1)
-                if emotion and emotion not in seen:
-                    seen.add(emotion)
-                    res.append(emotion)
-
-            # 3. 清理文本，移除HTML标签
+            # 4. 清理文本，移除HTML标签和多余空格
             cleaned_text = self.HTML_TAG_PATTERN.sub("", cleaned_text)
-
-            # 4. 清理多余的空格
             cleaned_text = self.WHITESPACE_PATTERN.sub(" ", cleaned_text).strip()
 
             return res, cleaned_text
@@ -139,7 +109,9 @@ class EmotionAnalyzerService:
             logger.error(f"提取文本情绪失败: {e}")
             return [], text
 
-    def _is_likely_emotion_markup(self, original: str, text: str, start_pos: int) -> bool:
+    def _is_likely_emotion_markup(
+        self, original: str, text: str, start_pos: int
+    ) -> bool:
         """
         判断是否为情绪标记，避免误判普通括号内容
 
@@ -169,14 +141,3 @@ class EmotionAnalyzerService:
     def cleanup(self):
         """清理资源。"""
         pass
-
-
-
-
-
-
-
-
-
-
-

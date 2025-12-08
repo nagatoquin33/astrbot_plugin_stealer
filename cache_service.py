@@ -20,6 +20,7 @@ class CacheService:
         """
         if not cache_dir:
             from astrbot.core.star.star_tools import StarTools
+
             cache_dir = Path(StarTools.get_data_dir()) / "cache"
 
         self._cache_dir = Path(cache_dir)
@@ -33,9 +34,9 @@ class CacheService:
         # 初始化不同类型的缓存
         self._caches: dict[str, dict[str, Any]] = {
             "image_cache": {},  # 图片分类缓存
-            "text_cache": {},   # 文本情绪分类缓存
+            "text_cache": {},  # 文本情绪分类缓存
             "index_cache": {},  # 索引缓存
-            "desc_cache": {}    # 描述缓存
+            "desc_cache": {},  # 描述缓存
         }
 
         # 加载持久化的缓存
@@ -82,7 +83,7 @@ class CacheService:
             cache: 要清理的缓存字典
         """
         if len(cache) > self._CACHE_MAX_SIZE:
-            keys_to_keep = list(cache.keys())[-self._CACHE_MAX_SIZE:]
+            keys_to_keep = list(cache.keys())[-self._CACHE_MAX_SIZE :]
             items_to_keep = {k: cache[k] for k in keys_to_keep}
             cache.clear()
             cache.update(items_to_keep)
@@ -206,7 +207,9 @@ class CacheService:
             return self._caches[cache_name].copy()
         return {}
 
-    def set_cache(self, cache_name: str, cache_data: dict[str, Any], persist: bool = True) -> None:
+    def set_cache(
+        self, cache_name: str, cache_data: dict[str, Any], persist: bool = True
+    ) -> None:
         """设置指定类型的缓存字典。
 
         Args:

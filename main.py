@@ -37,9 +37,12 @@ except Exception:  # pragma: no cover - 仅作为兼容分支
     PILImage = None
 
 
-
-
-@register("astrbot_plugin_stealer", "nagatoquin33", "自动偷取并分类表情包，在合适时机发送", "1.0.0")
+@register(
+    "astrbot_plugin_stealer",
+    "nagatoquin33",
+    "自动偷取并分类表情包，在合适时机发送",
+    "1.0.0",
+)
 class StealerPlugin(Star):
     """表情包偷取与发送插件。
 
@@ -53,7 +56,9 @@ class StealerPlugin(Star):
     BACKEND_TAG = "emoji_stealer"
 
     # 提示词常量
-    IMAGE_FILTER_PROMPT = "根据以下审核准则判断图片是否符合: {filtration_rule}。只返回是或否。"
+    IMAGE_FILTER_PROMPT = (
+        "根据以下审核准则判断图片是否符合: {filtration_rule}。只返回是或否。"
+    )
     TEXT_EMOTION_PROMPT_TEMPLATE = """请基于这段文本的情绪选择一个最匹配的类别: {categories}。
 请使用&&emotion&&格式返回，例如&&happy&&、&&sad&&。
 只返回表情标签，不要添加任何其他内容。文本: {text}"""
@@ -94,14 +99,15 @@ class StealerPlugin(Star):
 
         # 初始化人格注入相关属性
         # 直接集成提示词，不在设置界面显示
-        self.prompt_head: str = "你需要根据用户的情绪选择不同的回复方式，情绪分类包括：{categories}。"
+        self.prompt_head: str = (
+            "你需要根据用户的情绪选择不同的回复方式，情绪分类包括：{categories}。"
+        )
         self.prompt_tail: str = "请根据对话内容选择最合适的情绪标签，并在回复内容前添加情绪标签，标签使用&&包裹，例如：&&happy&&你好啊！"
         self.persona_backup: list = []
 
         # 初始化服务类
         self.config_service = ConfigService(
-            base_dir=self.base_dir,
-            astrbot_config=config
+            base_dir=self.base_dir, astrbot_config=config
         )
         self.config_service.initialize()
 
@@ -120,7 +126,9 @@ class StealerPlugin(Star):
 
         # 添加缺失的兼容mainv2的配置项
 
-        self.max_raw_emoji_size = getattr(self.config_service, "max_raw_emoji_size", 3 * 1024 * 1024)
+        self.max_raw_emoji_size = getattr(
+            self.config_service, "max_raw_emoji_size", 3 * 1024 * 1024
+        )
         self.steal_type = getattr(self.config_service, "steal_type", "both")
 
         # 获取分类列表
@@ -148,8 +156,6 @@ class StealerPlugin(Star):
 
     # _clean_cache方法已迁移到CacheService类
 
-
-
     def _update_config_from_dict(self, config_dict: dict):
         """从配置字典更新插件配置。"""
         if not config_dict:
@@ -165,32 +171,48 @@ class StealerPlugin(Star):
                 self.emoji_chance = self.config_service.get_config("emoji_chance")
                 self.max_reg_num = self.config_service.get_config("max_reg_num")
                 self.do_replace = self.config_service.get_config("do_replace")
-                self.maintenance_interval = self.config_service.get_config("maintenance_interval")
-                self.content_filtration = self.config_service.get_config("content_filtration")
-        
-                self.vision_provider_id = str(self.config_service.get_config("vision_provider_id")) if self.config_service.get_config("vision_provider_id") else None
-                self.raw_retention_hours = self.config_service.get_config("raw_retention_hours")
-                self.raw_clean_interval = self.config_service.get_config("raw_clean_interval")
+                self.maintenance_interval = self.config_service.get_config(
+                    "maintenance_interval"
+                )
+                self.content_filtration = self.config_service.get_config(
+                    "content_filtration"
+                )
+
+                self.vision_provider_id = (
+                    str(self.config_service.get_config("vision_provider_id"))
+                    if self.config_service.get_config("vision_provider_id")
+                    else None
+                )
+                self.raw_retention_hours = self.config_service.get_config(
+                    "raw_retention_hours"
+                )
+                self.raw_clean_interval = self.config_service.get_config(
+                    "raw_clean_interval"
+                )
 
                 # 更新兼容mainv2的配置属性
-        
-                self.max_raw_emoji_size = config_dict.get("max_raw_emoji_size", getattr(self.config_service, "max_raw_emoji_size", 3 * 1024 * 1024))
-                self.steal_type = config_dict.get("steal_type", getattr(self.config_service, "steal_type", "both"))
+
+                self.max_raw_emoji_size = config_dict.get(
+                    "max_raw_emoji_size",
+                    getattr(self.config_service, "max_raw_emoji_size", 3 * 1024 * 1024),
+                )
+                self.steal_type = config_dict.get(
+                    "steal_type", getattr(self.config_service, "steal_type", "both")
+                )
 
                 # 更新分类列表
-                self.categories = self.config_service.get_config("categories") or self.CATEGORIES
+                self.categories = (
+                    self.config_service.get_config("categories") or self.CATEGORIES
+                )
 
                 # 更新其他服务的配置
                 self.image_processor_service.update_config(
                     categories=self.categories,
                     content_filtration=self.content_filtration,
                     vision_provider_id=self.vision_provider_id,
-
                 )
 
-                self.emotion_analyzer_service.update_config(
-                    categories=self.categories
-                )
+                self.emotion_analyzer_service.update_config(categories=self.categories)
 
                 # 重新加载人格注入
                 asyncio.create_task(self._reload_personas())
@@ -230,13 +252,27 @@ class StealerPlugin(Star):
             self.emoji_chance = self.config_service.get_config("emoji_chance")
             self.max_reg_num = self.config_service.get_config("max_reg_num")
             self.do_replace = self.config_service.get_config("do_replace")
-            self.maintenance_interval = self.config_service.get_config("maintenance_interval")
-            self.content_filtration = self.config_service.get_config("content_filtration")
-    
-            self.vision_provider_id = str(self.config_service.get_config("vision_provider_id")) if self.config_service.get_config("vision_provider_id") else None
-            self.raw_retention_hours = self.config_service.get_config("raw_retention_hours")
-            self.raw_clean_interval = self.config_service.get_config("raw_clean_interval")
-            self.categories = self.config_service.get_config("categories") or self.CATEGORIES
+            self.maintenance_interval = self.config_service.get_config(
+                "maintenance_interval"
+            )
+            self.content_filtration = self.config_service.get_config(
+                "content_filtration"
+            )
+
+            self.vision_provider_id = (
+                str(self.config_service.get_config("vision_provider_id"))
+                if self.config_service.get_config("vision_provider_id")
+                else None
+            )
+            self.raw_retention_hours = self.config_service.get_config(
+                "raw_retention_hours"
+            )
+            self.raw_clean_interval = self.config_service.get_config(
+                "raw_clean_interval"
+            )
+            self.categories = (
+                self.config_service.get_config("categories") or self.CATEGORIES
+            )
 
             # 初始化子目录
             for category in self.categories:
@@ -290,7 +326,9 @@ class StealerPlugin(Star):
 
             # 生成系统提示添加内容
             # 替换提示词中的占位符
-            head_with_categories = self.prompt_head.replace("{categories}", categories_str)
+            head_with_categories = self.prompt_head.replace(
+                "{categories}", categories_str
+            )
             sys_prompt_add = f"\n\n{head_with_categories}\n{self.prompt_tail}"
 
             # 获取当前人格配置并注入
@@ -310,19 +348,18 @@ class StealerPlugin(Star):
         try:
             # 使用配置服务更新并保存配置
             config_updates = {
-            "auto_send": self.auto_send,
-            "categories": self.categories,
-            "backend_tag": self.backend_tag,
-            "emoji_chance": self.emoji_chance,
-            "max_reg_num": self.max_reg_num,
-            "do_replace": self.do_replace,
-            "maintenance_interval": self.maintenance_interval,
-            "content_filtration": self.content_filtration,
-
-            "vision_provider_id": self.vision_provider_id,
-            "raw_retention_hours": self.raw_retention_hours,
-            "raw_clean_interval": self.raw_clean_interval,
-            "enabled": self.enabled
+                "auto_send": self.auto_send,
+                "categories": self.categories,
+                "backend_tag": self.backend_tag,
+                "emoji_chance": self.emoji_chance,
+                "max_reg_num": self.max_reg_num,
+                "do_replace": self.do_replace,
+                "maintenance_interval": self.maintenance_interval,
+                "content_filtration": self.content_filtration,
+                "vision_provider_id": self.vision_provider_id,
+                "raw_retention_hours": self.raw_retention_hours,
+                "raw_clean_interval": self.raw_clean_interval,
+                "enabled": self.enabled,
             }
 
             self.config_service.update_config(config_updates)
@@ -330,8 +367,6 @@ class StealerPlugin(Star):
 
         except Exception as e:
             logger.error(f"保存配置失败: {e}")
-
-
 
     async def _load_index(self) -> dict[str, Any]:
         """加载分类索引文件。
@@ -389,31 +424,15 @@ class StealerPlugin(Star):
         except Exception as e:
             logger.error(f"保存别名文件失败: {e}", exc_info=True)
 
+        # _normalize_category 方法已迁移到 EmotionAnalyzer 类
 
-
-    # _normalize_category 方法已迁移到 EmotionAnalyzer 类
-
-
-
-
-        except FileNotFoundError as e:
-            logger.error(f"图片文件不存在: {e}", exc_info=True)
-            fallback = "speechless" if "speechless" in self.categories else "其它"
-            return fallback, [], "", fallback
-        except PermissionError as e:
-            logger.error(f"图片文件权限错误: {e}", exc_info=True)
-            fallback = "speechless" if "speechless" in self.categories else "其它"
-            return fallback, [], "", fallback
-        except (ValueError, TypeError) as e:
-            logger.error(f"图片分类参数错误: {e}", exc_info=True)
-            fallback = "speechless" if "speechless" in self.categories else "其它"
-            return fallback, [], "", fallback
-        except Exception as e:
-            logger.error(f"图片分类失败: {e}", exc_info=True)
-            fallback = "speechless" if "speechless" in self.categories else "其它"
-            return fallback, [], "", fallback
-
-    async def _process_image(self, event: AstrMessageEvent | None, file_path: str, is_temp: bool = False, idx: dict[str, Any] | None = None) -> tuple[bool, dict[str, Any] | None]:
+    async def _process_image(
+        self,
+        event: AstrMessageEvent | None,
+        file_path: str,
+        is_temp: bool = False,
+        idx: dict[str, Any] | None = None,
+    ) -> tuple[bool, dict[str, Any] | None]:
         """统一处理图片的方法，包括过滤、分类、存储和索引更新
 
         Args:
@@ -433,9 +452,8 @@ class StealerPlugin(Star):
                 is_temp=is_temp,
                 idx=idx,
                 categories=self.categories,
-
                 content_filtration=self.content_filtration,
-                backend_tag=self.backend_tag
+                backend_tag=self.backend_tag,
             )
 
             # 如果没有提供索引，我们需要加载完整的索引
@@ -481,11 +499,15 @@ class StealerPlugin(Star):
 
         return parentheses_count > 0 or bracket_count > 0
 
-    async def _classify_text_category(self, event: AstrMessageEvent | None, text: str) -> str:
+    async def _classify_text_category(
+        self, event: AstrMessageEvent | None, text: str
+    ) -> str:
         """调用文本模型判断文本情绪并映射到插件分类。"""
         try:
             # 委托给EmotionAnalyzerService类进行文本情绪分类
-            result = await self.emotion_analyzer_service.classify_text_emotion(event, text)
+            result = await self.emotion_analyzer_service.classify_text_emotion(
+                event, text
+            )
             return result
         except ValueError as e:
             logger.error(f"文本分类参数错误: {e}")
@@ -497,13 +519,17 @@ class StealerPlugin(Star):
             logger.error(f"文本情绪分类失败: {e}", exc_info=True)
             return ""
 
-    async def _extract_emotions_from_text(self, event: AstrMessageEvent | None, text: str) -> tuple[list[str], str]:
+    async def _extract_emotions_from_text(
+        self, event: AstrMessageEvent | None, text: str
+    ) -> tuple[list[str], str]:
         """从文本中提取情绪关键词，本地提取不到时使用 LLM。
 
         委托给 EmotionAnalyzerService 类处理
         """
         try:
-            return await self.emotion_analyzer_service.extract_emotions_from_text(event, text)
+            return await self.emotion_analyzer_service.extract_emotions_from_text(
+                event, text
+            )
         except ValueError as e:
             logger.error(f"情绪提取参数错误: {e}")
             return [], text
@@ -520,12 +546,12 @@ class StealerPlugin(Star):
         if event is None:
             return None
         try:
-            return await self.context.get_current_chat_provider_id(event.unified_msg_origin)
+            return await self.context.get_current_chat_provider_id(
+                event.unified_msg_origin
+            )
         except Exception as e:
             logger.error(f"获取视觉模型提供者失败: {e}")
             return None
-
-
 
     def _is_safe_path(self, path: str) -> tuple[bool, str]:
         """检查路径是否安全，防止路径遍历攻击。
@@ -540,17 +566,17 @@ class StealerPlugin(Star):
             # 定义允许的基准目录
             astrbot_data_path = Path(get_astrbot_data_path()).resolve()
             plugin_base_dir = Path(self.base_dir).resolve()
-            
+
             path_obj = Path(path)
             normalized_path = None
-            
+
             if path_obj.is_absolute():
                 # 绝对路径：直接检查是否在允许的目录内
                 normalized_path = path_obj.resolve()
             else:
                 # 相对路径：根据路径前缀解析到安全的基准目录
                 lower_path = path.lower()
-                
+
                 # 检查是否包含路径遍历攻击
                 if ".." in str(path_obj):
                     # 直接检查解析后的路径是否仍在预期的父目录内
@@ -560,7 +586,9 @@ class StealerPlugin(Star):
                         normalized_path = (astrbot_data_path / relative_part).resolve()
                         # 确保解析后的路径仍在 astrbot_data_path 内
                         if not normalized_path.is_relative_to(astrbot_data_path):
-                            logger.error(f"路径遍历攻击检测: {path} -> {normalized_path}")
+                            logger.error(
+                                f"路径遍历攻击检测: {path} -> {normalized_path}"
+                            )
                             return False, path
                     elif lower_path.startswith(("astrbot/", "astrbot\\")):
                         # 以 AstrBot/ 开头的相对路径解析到 astrbot_data_path
@@ -568,14 +596,18 @@ class StealerPlugin(Star):
                         normalized_path = (astrbot_data_path / relative_part).resolve()
                         # 确保解析后的路径仍在 astrbot_data_path 内
                         if not normalized_path.is_relative_to(astrbot_data_path):
-                            logger.error(f"路径遍历攻击检测: {path} -> {normalized_path}")
+                            logger.error(
+                                f"路径遍历攻击检测: {path} -> {normalized_path}"
+                            )
                             return False, path
                     else:
                         # 其他相对路径解析到 plugin_base_dir
                         normalized_path = (plugin_base_dir / path).resolve()
                         # 确保解析后的路径仍在 plugin_base_dir 内
                         if not normalized_path.is_relative_to(plugin_base_dir):
-                            logger.error(f"路径遍历攻击检测: {path} -> {normalized_path}")
+                            logger.error(
+                                f"路径遍历攻击检测: {path} -> {normalized_path}"
+                            )
                             return False, path
                 else:
                     # 不包含路径遍历的相对路径，正常处理
@@ -590,11 +622,11 @@ class StealerPlugin(Star):
                     else:
                         # 其他相对路径解析到 plugin_base_dir
                         normalized_path = (plugin_base_dir / path).resolve()
-            
+
             # 检查路径是否在允许的目录内
             is_safe = False
             allowed_parents = [astrbot_data_path, plugin_base_dir]
-            
+
             for parent in allowed_parents:
                 try:
                     normalized_path.relative_to(parent)
@@ -602,11 +634,11 @@ class StealerPlugin(Star):
                     break
                 except ValueError:
                     pass
-            
+
             if not is_safe:
                 logger.error(f"路径超出允许范围: {path} -> {normalized_path}")
                 return False, path
-            
+
             return True, str(normalized_path)
         except Exception as e:
             logger.error(f"路径安全检查失败: {e}")
@@ -624,8 +656,6 @@ class StealerPlugin(Star):
         # 委托给 EventHandler 类处理
         await self.event_handler._scanner_loop()
 
-
-
     # 已移除_scan_register_emoji_folder方法（扫描系统表情包目录功能，无实际用途）
 
     async def _clean_raw_directory(self):
@@ -637,10 +667,6 @@ class StealerPlugin(Star):
         """执行容量控制，删除低使用频率/旧文件。"""
         # 委托给 EventHandler 类处理
         await self.event_handler._enforce_capacity(idx)
-
-
-
-
 
     @filter.on_decorating_result()
     async def before_send(self, event: AstrMessageEvent, *args, **kwargs):
@@ -662,7 +688,9 @@ class StealerPlugin(Star):
         # 先执行标签清理，无论是否发送表情包都需要清理标签
         if cleaned_text != text:
             # 创建新的结果对象并更新内容
-            new_result = event.make_result().set_result_content_type(result.result_content_type)
+            new_result = event.make_result().set_result_content_type(
+                result.result_content_type
+            )
 
             # 添加除了Plain文本外的其他组件
             for comp in result.chain:
@@ -713,7 +741,9 @@ class StealerPlugin(Star):
             # 目录不存在时，仍需使用清理后的文本
             if cleaned_text != text:
                 # 创建新的结果对象并更新内容
-                new_result = event.make_result().set_result_content_type(result.result_content_type)
+                new_result = event.make_result().set_result_content_type(
+                    result.result_content_type
+                )
 
                 # 添加除了Plain文本外的其他组件
                 for comp in result.chain:
@@ -734,7 +764,9 @@ class StealerPlugin(Star):
             # 目录为空时，仍需使用清理后的文本
             if cleaned_text != text:
                 # 创建新的结果对象并更新内容
-                new_result = event.make_result().set_result_content_type(result.result_content_type)
+                new_result = event.make_result().set_result_content_type(
+                    result.result_content_type
+                )
 
                 # 添加除了Plain文本外的其他组件
                 for comp in result.chain:
@@ -750,16 +782,18 @@ class StealerPlugin(Star):
             return
 
         logger.debug(f"从'{category}'目录中找到 {len(files)} 张图片")
-        pick = random.choice(files)
-        idx = await self._load_index()
-        rec = idx.get(pick.as_posix())
-        if isinstance(rec, dict):
-            rec["usage_count"] = int(rec.get("usage_count", 0)) + 1
-            rec["last_used"] = int(asyncio.get_event_loop().time())
-            idx[pick.as_posix()] = rec
-            await self._save_index(idx)
+        picked_image = random.choice(files)
+        image_index = await self._load_index()
+        image_record = image_index.get(picked_image.as_posix())
+        if isinstance(image_record, dict):
+            image_record["usage_count"] = int(image_record.get("usage_count", 0)) + 1
+            image_record["last_used"] = int(asyncio.get_event_loop().time())
+            image_index[picked_image.as_posix()] = image_record
+            await self._save_index(image_index)
         # 创建新的结果对象并更新内容
-        new_result = event.make_result().set_result_content_type(result.result_content_type)
+        new_result = event.make_result().set_result_content_type(
+            result.result_content_type
+        )
 
         # 添加除了Plain文本外的其他组件
         for comp in result.chain:
@@ -771,8 +805,8 @@ class StealerPlugin(Star):
             new_result.message(cleaned_text.strip())
 
         # 添加图片
-        b64 = await self._file_to_base64(pick.as_posix())
-        new_result.base64_image(b64)
+        base64_data = await self._file_to_base64(picked_image.as_posix())
+        new_result.base64_image(base64_data)
 
         # 设置新的结果对象
         event.set_result(new_result)
@@ -797,8 +831,6 @@ class StealerPlugin(Star):
         """关闭自动发送功能。"""
         return await self.command_handler.auto_off(event)
 
-
-
     @filter.command("meme set_vision")
     async def set_vision(self, event: AstrMessageEvent, provider_id: str = ""):
         if not provider_id:
@@ -808,16 +840,10 @@ class StealerPlugin(Star):
         self._persist_config()
         yield event.plain_result(f"已设置视觉模型: {provider_id}")
 
-
-
     @filter.command("meme show_providers")
     async def show_providers(self, event: AstrMessageEvent):
         vp = self.vision_provider_id or "当前会话"
         yield event.plain_result(f"视觉模型: {vp}")
-
-
-
-
 
     @filter.command("meme status")
     async def status(self, event: AstrMessageEvent):
@@ -855,62 +881,100 @@ class StealerPlugin(Star):
         return sorted(s)
 
     async def get_descriptions(self) -> list[str]:
-        idx = await self._load_index()
-        res = []
-        for v in idx.values():
-            if isinstance(v, dict):
-                d = v.get("desc")
-                if isinstance(d, str) and d:
-                    res.append(d)
-        return res
+        image_index = await self._load_index()
+        descriptions = []
+        for record in image_index.values():
+            if isinstance(record, dict):
+                description = record.get("desc")
+                if isinstance(description, str) and description:
+                    descriptions.append(description)
+        return descriptions
 
     async def _load_all_records(self) -> list[tuple[str, dict]]:
         idx = await self._load_index()
-        return [(k, v) for k, v in idx.items() if isinstance(v, dict) and os.path.exists(k)]
+        return [
+            (k, v) for k, v in idx.items() if isinstance(v, dict) and os.path.exists(k)
+        ]
 
-    async def get_random_paths(self, count: int | None = 1) -> list[tuple[str, str, str]]:
-        recs = await self._load_all_records()
-        if not recs:
+    async def get_random_paths(
+        self, count: int | None = 1
+    ) -> list[tuple[str, str, str]]:
+        all_records = await self._load_all_records()
+        if not all_records:
             return []
-        n = max(1, int(count or 1))
-        pick = random.sample(recs, min(n, len(recs)))
-        res = []
-        for p, v in pick:
-            d = str(v.get("desc", ""))
-            emo = str(v.get("emotion", v.get("category", self.categories[0] if self.categories else "开心")))
-            res.append((p, d, emo))
-        return res
+        sample_count = max(1, int(count or 1))
+        picked_records = random.sample(all_records, min(sample_count, len(all_records)))
+        results = []
+        for image_path, record_dict in picked_records:
+            description = str(record_dict.get("desc", ""))
+            emotion = str(
+                record_dict.get(
+                    "emotion",
+                    record_dict.get(
+                        "category", self.categories[0] if self.categories else "开心"
+                    ),
+                )
+            )
+            results.append((image_path, description, emotion))
+        return results
 
     async def get_by_emotion_path(self, emotion: str) -> tuple[str, str, str] | None:
-        recs = await self._load_all_records()
-        cands = []
-        for p, v in recs:
-            emo = str(v.get("emotion", v.get("category", "")))
-            tags = v.get("tags", [])
-            if emotion and (emotion == emo or (isinstance(tags, list) and emotion in [str(t) for t in tags])):
-                cands.append((p, v))
-        if not cands:
+        all_records = await self._load_all_records()
+        candidates = []
+        for image_path, record_dict in all_records:
+            record_emotion = str(record_dict.get("emotion", record_dict.get("category", "")))
+            record_tags = record_dict.get("tags", [])
+            if emotion and (
+                emotion == record_emotion
+                or (isinstance(record_tags, list) and emotion in [str(tag) for tag in record_tags])
+            ):
+                candidates.append((image_path, record_dict))
+        if not candidates:
             return None
-        p, v = random.choice(cands)
-        return (p, str(v.get("desc", "")), str(v.get("emotion", v.get("category", self.categories[0] if self.categories else "开心"))))
+        picked_path, picked_record = random.choice(candidates)
+        return (
+            picked_path,
+            str(picked_record.get("desc", "")),
+            str(
+                picked_record.get(
+                    "emotion",
+                    picked_record.get(
+                        "category", self.categories[0] if self.categories else "开心"
+                    ),
+                )
+            ),
+        )
 
-    async def get_by_description_path(self, description: str) -> tuple[str, str, str] | None:
-        recs = await self._load_all_records()
-        cands = []
-        for p, v in recs:
-            d = str(v.get("desc", ""))
-            if description and description in d:
-                cands.append((p, v))
-        if not cands:
-            for p, v in recs:
-                tags = v.get("tags", [])
-                if isinstance(tags, list):
-                    if any(str(description) in str(t) for t in tags):
-                        cands.append((p, v))
-        if not cands:
+    async def get_by_description_path(
+        self, description: str
+    ) -> tuple[str, str, str] | None:
+        all_records = await self._load_all_records()
+        candidates = []
+        for image_path, record_dict in all_records:
+            desc_text = str(record_dict.get("desc", ""))
+            if description and description in desc_text:
+                candidates.append((image_path, record_dict))
+        if not candidates:
+            for image_path, record_dict in all_records:
+                record_tags = record_dict.get("tags", [])
+                if isinstance(record_tags, list):
+                    if any(str(description) in str(tag) for tag in record_tags):
+                        candidates.append((image_path, record_dict))
+        if not candidates:
             return None
-        p, v = random.choice(cands)
-        return (p, str(v.get("desc", "")), str(v.get("emotion", v.get("category", self.categories[0] if self.categories else "开心"))))
+        picked_path, picked_record = random.choice(candidates)
+        return (
+            picked_path,
+            str(picked_record.get("desc", "")),
+            str(
+                picked_record.get(
+                    "emotion",
+                    picked_record.get(
+                        "category", self.categories[0] if self.categories else "开心"
+                    ),
+                )
+            ),
+        )
 
     @filter.permission_type(PermissionType.ADMIN)
     @filter.command("meme push")
@@ -955,55 +1019,53 @@ class StealerPlugin(Star):
             try:
                 # 转换图片到临时文件路径
                 temp_path = await img.convert_to_file_path()
-                yield event.plain_result(f"图片 {i+1}: 临时路径: {temp_path}")
+                yield event.plain_result(f"图片 {i + 1}: 临时路径: {temp_path}")
 
                 # 检查路径安全性
                 is_safe, safe_path = self._is_safe_path(temp_path)
                 if not is_safe:
-                    yield event.plain_result(f"图片 {i+1}: 路径不安全，跳过处理")
+                    yield event.plain_result(f"图片 {i + 1}: 路径不安全，跳过处理")
                     continue
 
                 temp_path = safe_path
-                yield event.plain_result(f"图片 {i+1}: 安全路径: {temp_path}")
+                yield event.plain_result(f"图片 {i + 1}: 安全路径: {temp_path}")
 
                 # 确保临时文件存在且可访问
                 if not os.path.exists(temp_path):
-                    yield event.plain_result(f"图片 {i+1}: 临时文件不存在，跳过处理")
+                    yield event.plain_result(f"图片 {i + 1}: 临时文件不存在，跳过处理")
                     continue
 
                 # 使用统一的图片处理方法
-                yield event.plain_result(f"图片 {i+1}: 开始处理...")
+                yield event.plain_result(f"图片 {i + 1}: 开始处理...")
                 success, idx = await self._process_image(event, temp_path, is_temp=True)
 
                 if success:
                     if idx:
                         await self._save_index(idx)
-                        yield event.plain_result(f"图片 {i+1}: 处理成功！已保存到索引")
+                        yield event.plain_result(
+                            f"图片 {i + 1}: 处理成功！已保存到索引"
+                        )
                         # 显示处理结果
                         for img_path, img_info in idx.items():
                             if os.path.exists(img_path):
-                                yield event.plain_result(f"图片 {i+1}: 保存路径: {img_path}")
-                                yield event.plain_result(f"图片 {i+1}: 分类: {img_info.get('category', '未知')}")
-                                yield event.plain_result(f"图片 {i+1}: 情绪: {img_info.get('emotion', '未知')}")
-                                yield event.plain_result(f"图片 {i+1}: 描述: {img_info.get('desc', '无')}")
+                                yield event.plain_result(
+                                    f"图片 {i + 1}: 保存路径: {img_path}"
+                                )
+                                yield event.plain_result(
+                                    f"图片 {i + 1}: 分类: {img_info.get('category', '未知')}"
+                                )
+                                yield event.plain_result(
+                                    f"图片 {i + 1}: 情绪: {img_info.get('emotion', '未知')}"
+                                )
+                                yield event.plain_result(
+                                    f"图片 {i + 1}: 描述: {img_info.get('desc', '无')}"
+                                )
                     else:
-                        yield event.plain_result(f"图片 {i+1}: 处理成功，但没有生成索引")
+                        yield event.plain_result(
+                            f"图片 {i + 1}: 处理成功，但没有生成索引"
+                        )
                 else:
-                    yield event.plain_result(f"图片 {i+1}: 处理失败")
+                    yield event.plain_result(f"图片 {i + 1}: 处理失败")
             except Exception as e:
-                yield event.plain_result(f"图片 {i+1}: 处理出错: {str(e)}")
+                yield event.plain_result(f"图片 {i + 1}: 处理出错: {str(e)}")
                 logger.error(f"调试图片处理失败: {e}", exc_info=True)
-
-
-
-
-
-
-
-
-
-
-
-
-
-

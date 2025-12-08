@@ -9,6 +9,7 @@ from astrbot.api import AstrBotConfig, logger
 
 class PluginConfig(BaseModel):
     """插件配置的Pydantic模型，用于简化配置验证逻辑。"""
+
     auto_send: bool = Field(default=True, description="是否自动随聊追加表情包")
     vision_provider_id: str | None = Field(default=None, description="视觉模型提供商ID")
     emoji_chance: float = Field(default=0.4, description="触发表情动作的基础概率")
@@ -19,7 +20,25 @@ class PluginConfig(BaseModel):
     content_filtration: bool = Field(default=False, description="是否开启内容审核")
     raw_retention_hours: int = Field(default=24, description="raw目录图片保留期限")
     raw_clean_interval: int = Field(default=3600, description="raw目录清理时间间隔")
-    categories: list[str] = Field(default_factory=lambda: ["happy", "sad", "angry", "shy", "surprised", "smirk", "cry", "confused", "embarrassed", "love", "disgust", "fear", "excitement", "tired"], description="分类列表")
+    categories: list[str] = Field(
+        default_factory=lambda: [
+            "happy",
+            "sad",
+            "angry",
+            "shy",
+            "surprised",
+            "smirk",
+            "cry",
+            "confused",
+            "embarrassed",
+            "love",
+            "disgust",
+            "fear",
+            "excitement",
+            "tired",
+        ],
+        description="分类列表",
+    )
     config_version: str = Field(default="1.0.0", description="配置版本")
 
     @model_validator(mode="before")
@@ -39,13 +58,18 @@ class PluginConfig(BaseModel):
             if "max_reg_num" in data and data["max_reg_num"] <= 0:
                 data["max_reg_num"] = 100
 
-
         return data
+
 
 class ConfigManager:
     """统一的配置管理器，负责配置的加载、更新、验证和持久化。"""
 
-    def __init__(self, config_path: Path, schema_path: Path, astrbot_config: AstrBotConfig | None = None):
+    def __init__(
+        self,
+        config_path: Path,
+        schema_path: Path,
+        astrbot_config: AstrBotConfig | None = None,
+    ):
         """初始化配置管理器。"""
         self.config_path = config_path
         self.schema_path = schema_path
@@ -59,7 +83,9 @@ class ConfigManager:
         self.defaults = self._extract_defaults()
 
         # 从schema中获取版本信息，若未提供则使用默认版本
-        self.CONFIG_VERSION = self.schema.get("config_version", {}).get("default", "1.0.0")
+        self.CONFIG_VERSION = self.schema.get("config_version", {}).get(
+            "default", "1.0.0"
+        )
 
         # 当前配置
         self.config = self.defaults.copy()
@@ -139,7 +165,9 @@ class ConfigManager:
                 for key, props in self.schema.items():
                     if key in self.config:
                         # 重新验证每个配置项
-                        self.config[key] = self._validate_config({key: self.config[key]}).get(key)
+                        self.config[key] = self._validate_config(
+                            {key: self.config[key]}
+                        ).get(key)
                     else:
                         # 添加缺失的配置项
                         self.config[key] = self.defaults[key]
@@ -191,6 +219,7 @@ class ConfigManager:
     def get_config_dict(self) -> dict[str, Any]:
         """获取完整的配置字典。"""
         return self.config.copy()
+
 
 class ConfigService:
     """配置管理服务，负责插件配置的加载、更新和持久化。"""
@@ -250,7 +279,7 @@ class ConfigService:
         self.config_manager = ConfigManager(
             config_path=self.config_path,
             schema_path=Path(__file__).parent / "_conf_schema.json",
-            astrbot_config=self.astrbot_config
+            astrbot_config=self.astrbot_config,
         )
 
     def _load_initial_config(self):
@@ -263,7 +292,9 @@ class ConfigService:
         self.max_reg_num = self.config_manager.get("max_reg_num")
         self.do_replace = self.config_manager.get("do_replace")
         self.maintenance_interval = self.config_manager.get("maintenance_interval")
-        self.steal_emoji = self.config_manager.get("steal_emoji")  # 控制偷取和扫描功能的开关
+        self.steal_emoji = self.config_manager.get(
+            "steal_emoji"
+        )  # 控制偷取和扫描功能的开关
         self.content_filtration = self.config_manager.get("content_filtration")
         self.vision_provider_id = self.config_manager.get("vision_provider_id")
         self.raw_retention_hours = self.config_manager.get("raw_retention_hours")
@@ -317,11 +348,15 @@ class ConfigService:
 
         try:
             # 特殊处理categories（需要映射和去重）
-            if "categories" in config_dict and isinstance(config_dict["categories"], list):
+            if "categories" in config_dict and isinstance(
+                config_dict["categories"], list
+            ):
                 categories = config_dict["categories"]
                 # 去重并保持原始顺序
                 seen = set()
-                unique_categories = [cat for cat in categories if not (cat in seen or seen.add(cat))]
+                unique_categories = [
+                    cat for cat in categories if not (cat in seen or seen.add(cat))
+                ]
                 config_dict["categories"] = unique_categories
 
             # 更新配置管理器
@@ -345,13 +380,13 @@ class ConfigService:
             # 更新ConfigManager中的配置值
             config_updates = {
                 "auto_send": self.auto_send,
-            "categories": self.categories,
-            "emoji_chance": self.emoji_chance,
-            "max_reg_num": self.max_reg_num,
-            "do_replace": self.do_replace,
-            "maintenance_interval": self.maintenance_interval,
-            "content_filtration": self.content_filtration,
-            "vision_provider_id": self.vision_provider_id
+                "categories": self.categories,
+                "emoji_chance": self.emoji_chance,
+                "max_reg_num": self.max_reg_num,
+                "do_replace": self.do_replace,
+                "maintenance_interval": self.maintenance_interval,
+                "content_filtration": self.content_filtration,
+                "vision_provider_id": self.vision_provider_id,
             }
 
             # 更新并保存配置
@@ -416,15 +451,8 @@ class ConfigService:
             if hasattr(self, key):
                 setattr(self, key, value)
         except Exception as e:
-                logger.error(f"设置配置失败: {e}")
+            logger.error(f"设置配置失败: {e}")
 
     def cleanup(self):
         """清理资源。"""
         pass
-
-
-
-
-
-
-

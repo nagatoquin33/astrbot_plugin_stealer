@@ -16,8 +16,21 @@ from astrbot.api.event import AstrMessageEvent
 class ImageProcessorService:
     """图片处理服务类，负责处理所有与图片相关的操作。"""
 
-    # 有效分类列表作为类常量
-    VALID_CATEGORIES = ["happy", "neutral", "sad", "angry", "shy", "surprised", "smirk", "cry", "confused", "embarrassed", "sigh", "speechless"]
+    # 有效分类集合作为类常量
+    VALID_CATEGORIES = {
+        "happy",
+        "neutral",
+        "sad",
+        "angry",
+        "shy",
+        "surprised",
+        "smirk",
+        "cry",
+        "confused",
+        "embarrassed",
+        "sigh",
+        "speechless",
+    }
 
     def __init__(self, plugin_instance):
         """初始化图片处理服务。
@@ -27,15 +40,27 @@ class ImageProcessorService:
         """
         self.plugin = plugin_instance
         # 确保base_dir始终是字符串
-        if hasattr(plugin_instance, "base_dir") and plugin_instance.base_dir is not None:
+        if (
+            hasattr(plugin_instance, "base_dir")
+            and plugin_instance.base_dir is not None
+        ):
             self.base_dir = str(plugin_instance.base_dir)
         else:
             # 如果没有base_dir，尝试从context获取数据目录
             self.base_dir = None
 
+        # 图片分类结果缓存，key为图片哈希，value为分类结果元组
+        self._image_cache = {}
+        # 缓存过期时间（秒），默认1小时
+        self._cache_expire_time = getattr(
+            plugin_instance, "image_cache_expire_time", 3600
+        )
+
         # 尝试从插件实例获取提示词配置，如果不存在则使用默认值
         # 表情包识别和分类的合并提示词（不包含内容过滤）
-        self.emoji_classification_prompt = getattr(plugin_instance, "EMOJI_CLASSIFICATION_PROMPT",
+        self.emoji_classification_prompt = getattr(
+            plugin_instance,
+            "EMOJI_CLASSIFICATION_PROMPT",
             """你是一个图片分析专家，需要完成表情包判断和情绪分类任务。请按照以下要求进行分析：
 
 1. 表情包判断：判断这张图片是否为聊天表情包（emoji/meme/sticker）。
@@ -48,10 +73,13 @@ class ImageProcessorService:
 
 示例：
 是|happy
-否|非表情包""")
-        
+否|非表情包""",
+        )
+
         # 内容过滤+表情包识别+分类的三合一合并提示词
-        self.combined_analysis_prompt = getattr(plugin_instance, "COMBINED_ANALYSIS_PROMPT",
+        self.combined_analysis_prompt = getattr(
+            plugin_instance,
+            "COMBINED_ANALYSIS_PROMPT",
             """你是一个图片分析专家，需要同时完成内容过滤和表情包分类任务。请按照以下要求进行分析：
 
 1. 内容过滤：请判断这张图片是否包含违反规定的内容。
@@ -68,14 +96,17 @@ class ImageProcessorService:
 示例：
 通过|是|happy
 过滤不通过|否|none
-通过|否|非表情包""")
-        
+通过|否|非表情包""",
+        )
+
         # 配置参数
         self.categories = []
         self.content_filtration = False
         self.vision_provider_id = ""
 
-    def update_config(self, categories=None, content_filtration=None, vision_provider_id=None):
+    def update_config(
+        self, categories=None, content_filtration=None, vision_provider_id=None
+    ):
         """更新图片处理器配置。
 
         Args:
@@ -90,8 +121,6 @@ class ImageProcessorService:
         if vision_provider_id is not None:
             self.vision_provider_id = vision_provider_id
 
-
-
     async def process_image(
         self,
         event: AstrMessageEvent | None,
@@ -100,7 +129,7 @@ class ImageProcessorService:
         idx: dict[str, Any] | None = None,
         categories: list[str] | None = None,
         content_filtration: bool | None = None,
-        backend_tag: str | None = None
+        backend_tag: str | None = None,
     ) -> tuple[bool, dict[str, Any] | None]:
         """统一处理图片：存储、分类、过滤。
 
@@ -126,58 +155,130 @@ class ImageProcessorService:
             return False, None
 
         # 计算图片哈希作为唯一标识符
-        hasher = hashlib.md5()
-        with open(file_path, "rb") as f:
-            hasher.update(f.read())
-        hash_val = hasher.hexdigest()
+        hash_val = await self._compute_hash(file_path)
 
-        # 检查图片是否已存在
+        # 检查图片是否已存在（索引中）
         for k, v in idx.items():
             if isinstance(v, dict) and v.get("hash") == hash_val:
-                logger.debug(f"图片已存在: {hash_val}")
+                logger.debug(f"图片已存在于索引中: {hash_val}")
                 if is_temp and os.path.exists(file_path):
                     await self._safe_remove_file(file_path)
                 return False, None
 
-        # 存储图片到raw目录
+        # 检查图片是否已存在于缓存中
+        if hash_val in self._image_cache:
+            cached_result = self._image_cache[hash_val]
+            # 检查缓存是否过期
+            if time.time() - cached_result["timestamp"] < self._cache_expire_time:
+                logger.debug(
+                    f"图片分类结果已缓存: {hash_val} -> {cached_result['category']}"
+                )
+
+                category = cached_result["category"]
+                tags = cached_result["tags"]
+                desc = cached_result["desc"]
+                emotion = cached_result["emotion"]
+
+                # 缓存结果处理：跳过VLM调用，直接使用缓存
+                if category == "过滤不通过" or emotion == "过滤不通过":
+                    logger.debug(f"图片内容过滤不通过（缓存），跳过存储: {hash_val}")
+                    if is_temp and os.path.exists(file_path):
+                        await self._safe_remove_file(file_path)  # 清理临时文件
+                    return False, None
+
+                # 处理非表情包的缓存结果
+                if category == "非表情包" or emotion == "非表情包":
+                    logger.debug(f"图片非表情包（缓存），跳过存储: {hash_val}")
+                    if is_temp and os.path.exists(file_path):
+                        await self._safe_remove_file(file_path)  # 清理临时文件
+                    return False, None
+
+                # 处理有效分类的缓存结果
+                if category and category in self.VALID_CATEGORIES:
+                    logger.debug(f"图片分类结果有效（缓存）: {category}")
+
+                    # 存储图片到raw目录（如果还没有存储的话）
+                    if self.base_dir:
+                        raw_dir = os.path.join(self.base_dir, "raw")
+                        os.makedirs(raw_dir, exist_ok=True)  # 确保目录存在
+                        ext = base_path.suffix.lower() if base_path.suffix else ".jpg"
+                        filename = (
+                            f"{int(time.time())}_{hash_val[:8]}{ext}"  # 生成唯一文件名
+                        )
+                        raw_path = os.path.join(raw_dir, filename)
+                        if is_temp:
+                            shutil.move(file_path, raw_path)  # 临时文件直接移动
+                        else:
+                            shutil.copy2(
+                                file_path, raw_path
+                            )  # 非临时文件复制（保留元数据）
+                    else:
+                        raw_path = file_path
+
+                    # 复制图片到对应分类目录
+                    if self.base_dir:
+                        cat_dir = os.path.join(self.base_dir, "categories", category)
+                        os.makedirs(cat_dir, exist_ok=True)
+                        cat_path = os.path.join(cat_dir, os.path.basename(raw_path))
+                        shutil.copy2(raw_path, cat_path)  # 复制到分类目录
+
+                    # 更新图片索引（用于管理和检索）
+                    idx[raw_path] = {
+                        "hash": hash_val,
+                        "category": category,
+                        "created_at": int(time.time()),
+                        "usage_count": 0,
+                        "last_used": 0,
+                    }
+                    return True, idx
+                else:
+                    # 处理无法分类的缓存结果
+                    logger.debug(f"图片无法分类（缓存），留在raw目录: {hash_val}")
+                    if is_temp:
+                        # 已经存储到raw目录，无需删除
+                        pass
+                    return False, None
+            else:
+                # 缓存过期，从缓存中移除
+                del self._image_cache[hash_val]
+
+        # 首次处理：将图片存储到raw目录
         if self.base_dir:
             raw_dir = os.path.join(self.base_dir, "raw")
-            os.makedirs(raw_dir, exist_ok=True)
+            os.makedirs(raw_dir, exist_ok=True)  # 确保raw目录存在
             ext = base_path.suffix.lower() if base_path.suffix else ".jpg"
-            filename = f"{int(time.time())}_{hash_val[:8]}{ext}"
+            filename = f"{int(time.time())}_{hash_val[:8]}{ext}"  # 生成包含时间戳和哈希前缀的唯一文件名
             raw_path = os.path.join(raw_dir, filename)
             if is_temp:
-                shutil.move(file_path, raw_path)
+                shutil.move(file_path, raw_path)  # 移动临时文件
             else:
-                shutil.copy2(file_path, raw_path)
+                shutil.copy2(file_path, raw_path)  # 复制非临时文件
         else:
             raw_path = file_path
 
-        # 过滤和分类图片（合并为一次VLM调用）
+        # 过滤和分类图片（合并为一次VLM调用以提高效率）
         try:
-            # 调用classify_image方法，该方法已实现：
-            # 1. 当开启内容过滤时，先进行内容过滤
-            # 2. 然后进行表情包判断和情绪分类（合并一步完成）
+            # 调用分类方法：包含内容过滤、表情包判断和情绪分类
             category, tags, desc, emotion = await self.classify_image(
-                event=event, 
-                file_path=raw_path, 
-                categories=categories, 
-                content_filtration=content_filtration
+                event=event,
+                file_path=raw_path,
+                categories=categories,
+                content_filtration=content_filtration,
             )
             logger.debug(f"图片分类结果: category={category}, emotion={emotion}")
 
-            # 处理过滤不通过的情况
+            # 处理内容过滤不通过的情况
             if category == "过滤不通过" or emotion == "过滤不通过":
                 logger.debug(f"图片内容过滤不通过，跳过存储: {raw_path}")
                 if is_temp:
-                    await self._safe_remove_file(raw_path)
+                    await self._safe_remove_file(raw_path)  # 清理临时文件
                 return False, None
 
             # 处理非表情包的情况
             if category == "非表情包" or emotion == "非表情包":
                 logger.debug(f"图片非表情包，跳过存储: {raw_path}")
                 if is_temp:
-                    await self._safe_remove_file(raw_path)
+                    await self._safe_remove_file(raw_path)  # 清理临时文件
                 return False, None
 
             # 处理有效分类结果
@@ -191,24 +292,50 @@ class ImageProcessorService:
                     cat_path = os.path.join(cat_dir, os.path.basename(raw_path))
                     shutil.copy2(raw_path, cat_path)
 
-                # 更新索引
+                # 更新图片索引
                 idx[raw_path] = {
                     "hash": hash_val,
                     "category": category,
                     "created_at": int(time.time()),
                     "usage_count": 0,
-                    "last_used": 0
+                    "last_used": 0,
+                }
+
+                # 将结果存入缓存，避免重复处理
+                self._image_cache[hash_val] = {
+                    "category": category,
+                    "tags": tags,
+                    "desc": desc,
+                    "emotion": emotion,
+                    "timestamp": time.time(),
                 }
 
                 return True, idx
             else:
-                logger.warning(f"图片分类结果无效: {category}，图片将留在raw目录等待清理")
+                logger.warning(
+                    f"图片分类结果无效: {category}，图片将留在raw目录等待清理"
+                )
+
+                # 将无法分类的结果也存入缓存，避免重复处理
+                self._image_cache[hash_val] = {
+                    "category": category,
+                    "tags": tags,
+                    "desc": desc,
+                    "emotion": emotion,
+                    "timestamp": time.time(),
+                }
+
                 # 分类失败时，图片留在raw目录，不添加到索引，不占用配额
                 return False, None
         except Exception as e:
-            logger.error(f"处理图片失败: {e}")
-            await self._safe_remove_file(raw_path)
-            return False, None
+            # 异常处理：记录详细上下文并确保资源正确释放
+            error_msg = f"处理图片失败 [图片路径: {raw_path}]: {e}"
+            logger.error(error_msg)
+            # 确保临时文件被正确清理
+            if is_temp:
+                await self._safe_remove_file(raw_path)
+            # 重新抛出异常，添加更多上下文信息
+            raise Exception(error_msg) from e
 
     def _is_likely_emoji_by_metadata(self, file_path: str) -> bool:
         """根据图片元数据判断是否可能是表情包。
@@ -231,7 +358,9 @@ class ImageProcessorService:
             with PILImage.open(file_path) as img:
                 width, height = img.size
                 # 检查图片尺寸是否符合表情包特征
-                if max(width, height) > 2000 or min(width, height) < 20:  # 降低最小尺寸限制从50到20
+                if (
+                    max(width, height) > 2000 or min(width, height) < 20
+                ):  # 降低最小尺寸限制从50到20
                     return False
                 # 检查图片宽高比
                 aspect_ratio = max(width, height) / min(width, height)
@@ -241,7 +370,14 @@ class ImageProcessorService:
         except Exception:
             return True
 
-    async def classify_image(self, event: AstrMessageEvent, file_path: str, categories=None, backend_tag=None, content_filtration=None) -> tuple[str, list[str], str, str]:
+    async def classify_image(
+        self,
+        event: AstrMessageEvent,
+        file_path: str,
+        categories=None,
+        backend_tag=None,
+        content_filtration=None,
+    ) -> tuple[str, list[str], str, str]:
         """使用视觉模型对图片进行分类并返回详细信息。
 
         Args:
@@ -261,12 +397,12 @@ class ImageProcessorService:
         try:
             # 确保file_path是绝对路径
             file_path = os.path.abspath(file_path)
-            
+
             # 检查文件是否存在
             if not os.path.exists(file_path):
-                logger.error(f"分类图片时文件不存在: {file_path}")
-                fallback = categories[0] if categories else "speechless"
-                return fallback, [], "", fallback
+                error_msg = f"分类图片时文件不存在: {file_path}"
+                logger.error(error_msg)
+                raise FileNotFoundError(error_msg)
 
             # 先用元数据做一次快速过滤，明显不是表情图片的直接跳过
             is_likely_emoji = self._is_likely_emoji_by_metadata(file_path)
@@ -275,27 +411,33 @@ class ImageProcessorService:
                 return "非表情包", [], "", "非表情包"
 
             # 确定是否进行内容过滤
-            should_filter = content_filtration if content_filtration is not None else getattr(self.plugin, "content_filtration", True)
-            
+            should_filter = (
+                content_filtration
+                if content_filtration is not None
+                else getattr(self.plugin, "content_filtration", True)
+            )
+
             # 构建情绪类别列表字符串
             emotion_list_str = ", ".join(self.VALID_CATEGORIES)
-            
+
             # 如果不进行内容过滤，直接进行表情包识别和分类
             if not should_filter:
                 # 使用表情包识别和分类的合并提示词
-                prompt = self.emoji_classification_prompt.format(emotion_list=emotion_list_str)
-                
+                prompt = self.emoji_classification_prompt.format(
+                    emotion_list=emotion_list_str
+                )
+
                 # 调用视觉模型进行分析
                 response = await self._call_vision_model(file_path, prompt)
                 logger.debug(f"表情包分析原始响应: {response}")
-                
+
                 # 解析响应结果
-                parts = response.strip().split('|')
+                parts = response.strip().split("|")
                 if len(parts) < 2:
-                    logger.error(f"表情包分析响应格式错误: {response}")
-                    fallback = categories[0] if categories else "speechless"
-                    return fallback, [], "", fallback
-                
+                    error_msg = f"表情包分析响应格式错误: {response}"
+                    logger.error(error_msg)
+                    raise ValueError(error_msg)
+
                 filter_result = "通过"
                 is_emoji_result = parts[0].strip()
                 emotion_result = parts[1].strip()
@@ -304,22 +446,21 @@ class ImageProcessorService:
                 prompt = self.combined_analysis_prompt.format(
                     emotion_list=emotion_list_str
                 )
-                
+
                 # 调用视觉模型进行一次性分析
                 response = await self._call_vision_model(file_path, prompt)
                 logger.debug(f"内容过滤和表情包分析原始响应: {response}")
-                
+
                 # 解析响应结果
-                parts = response.strip().split('|')
+                parts = response.strip().split("|")
                 if len(parts) < 3:
-                    logger.error(f"内容过滤和表情包分析响应格式错误: {response}")
-                    fallback = categories[0] if categories else "speechless"
-                    return fallback, [], "", fallback
-                
+                    error_msg = f"内容过滤和表情包分析响应格式错误: {response}"
+                    logger.error(error_msg)
+                    raise ValueError(error_msg)
+
                 filter_result = parts[0].strip()
                 is_emoji_result = parts[1].strip()
                 emotion_result = parts[2].strip()
-
 
             # 处理过滤结果
             if filter_result == "过滤不通过":
@@ -339,7 +480,8 @@ class ImageProcessorService:
                         category = valid_cat
                         break
                 else:
-                    category = "speechless"
+                    # 不进行兜底分类，返回空字符串表示无法分类
+                    return "", [], "", ""
 
                 # 如果不是表情包，返回特定标识
                 if is_emoji_result.lower() != "是":
@@ -352,9 +494,11 @@ class ImageProcessorService:
             # 确保返回格式一致，情绪标签与分类相同
             return category, tags, desc, category
         except Exception as e:
-            logger.error(f"图片分类失败: {e}")
-            fallback = categories[0] if categories else "speechless"
-            return fallback, [], "", fallback
+            # 添加更多上下文信息
+            error_msg = f"图片分类失败 [图片路径: {file_path}]: {e}"
+            logger.error(error_msg)
+            # 重新抛出异常，添加更多上下文信息
+            raise Exception(error_msg) from e
 
     async def _call_vision_model(self, img_path: str, prompt: str) -> str:
         """调用视觉模型的共享辅助方法。
@@ -365,81 +509,113 @@ class ImageProcessorService:
 
         Returns:
             str: LLM响应文本
+
+        Raises:
+            Exception: 当视觉模型调用失败时抛出，包含详细的错误信息和上下文
         """
         try:
-            # 简单的路径处理：确保使用绝对路径
+            # 路径处理和验证：确保使用绝对路径并检查文件存在性
             if not os.path.isabs(img_path):
-                # 如果是相对路径，检查是否有base_dir
+                # 如果是相对路径，根据base_dir构建绝对路径
                 if self.base_dir:
                     img_path = os.path.abspath(os.path.join(self.base_dir, img_path))
                 else:
                     img_path = os.path.abspath(img_path)
 
             if not os.path.exists(img_path):
-                logger.error(f"图片文件不存在: {img_path}")
-                return ""
+                error_msg = f"图片文件不存在: {img_path}"
+                logger.error(error_msg)
+                raise FileNotFoundError(error_msg)
 
-            # 调用LLM
-            # 使用getattr获取配置，避免直接访问不存在的config属性
+            # 获取重试配置：使用getattr避免直接访问不存在的属性
             max_retries = int(getattr(self.plugin, "vision_max_retries", 3))
             retry_delay = float(getattr(self.plugin, "vision_retry_delay", 1.0))
 
+            # 实现指数退避重试机制
             for attempt in range(max_retries):
                 try:
-                    # 获取当前使用的聊天提供商实例
+                    # 获取当前活动的聊天提供商
                     from astrbot.core.provider.manager import ProviderType
-                    provider = self.plugin.context.provider_manager.get_using_provider(ProviderType.CHAT_COMPLETION)
+
+                    provider = self.plugin.context.provider_manager.get_using_provider(
+                        ProviderType.CHAT_COMPLETION
+                    )
                     chat_provider_id = provider.meta().id
 
-                    # 使用插件配置的视觉模型，如果没有则不指定模型
-                    model = self.plugin.vision_model if hasattr(self.plugin, "vision_model") else None
+                    # 使用配置的视觉模型（如果有）
+                    model = (
+                        self.plugin.vision_model
+                        if hasattr(self.plugin, "vision_model")
+                        else None
+                    )
 
                     logger.debug(f"使用视觉模型 {model} 处理图片")
 
-                    # 将本地文件路径转换为file:///格式的URL
+                    # 构建图片的file:///格式URL供LLM访问
                     file_url = f"file:///{os.path.abspath(img_path)}"
                     logger.debug(f"构建的图片URL: {file_url}")
 
+                    # 调用LLM生成服务
                     result = await self.plugin.context.llm_generate(
                         chat_provider_id=chat_provider_id,
                         prompt=prompt,
                         image_urls=[file_url],
-                        model=model
+                        model=model,
                     )
+
                     if result:
-                        # 获取实际的文本结果
+                        # 提取响应文本：支持不同的响应格式
                         llm_response_text = ""
                         if hasattr(result, "result_chain") and result.result_chain:
+                            # 优先从result_chain获取格式化文本
                             llm_response_text = result.result_chain.get_plain_text()
-                        elif hasattr(result, "completion_text") and result.completion_text:
+                        elif (
+                            hasattr(result, "completion_text")
+                            and result.completion_text
+                        ):
+                            # 其次从completion_text获取
                             llm_response_text = result.completion_text
                         else:
+                            # 最后使用字符串转换作为兜底
                             llm_response_text = str(result)
 
                         logger.debug(f"原始LLM响应: {llm_response_text}")
                         return llm_response_text.strip()
                 except Exception as e:
                     error_msg = str(e)
-                    # 检查是否为限流错误
-                    is_rate_limit = "429" in error_msg or "RateLimit" in error_msg or "exceeded your current request limit" in error_msg
+                    # 检查是否为限流错误（HTTP 429或包含限流关键词）
+                    is_rate_limit = (
+                        "429" in error_msg
+                        or "RateLimit" in error_msg
+                        or "exceeded your current request limit" in error_msg
+                    )
                     if is_rate_limit:
-                        logger.warning(f"视觉模型请求被限流，正在重试 ({attempt+1}/{max_retries})")
-                        await asyncio.sleep(retry_delay * (2 ** attempt))
+                        logger.warning(
+                            f"视觉模型请求被限流，正在重试 ({attempt + 1}/{max_retries})"
+                        )
                     else:
-                        logger.error(f"视觉模型调用失败 (尝试 {attempt+1}/{max_retries}): {e}")
-                        if attempt < max_retries - 1:
-                            await asyncio.sleep(retry_delay * (2 ** attempt))
-                        else:
-                            break
-            logger.error("视觉模型调用失败，达到最大重试次数")
-            return ""
+                        logger.error(
+                            f"视觉模型调用失败 (尝试 {attempt + 1}/{max_retries}): {e}"
+                        )
+
+                    # 指数退避策略：每次重试延迟时间翻倍
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(retry_delay * (2**attempt))
+                    else:
+                        # 最后一次尝试失败，抛出异常并保留原始异常上下文
+                        raise Exception(
+                            f"视觉模型调用失败（已重试{max_retries}次）: {e}"
+                        ) from e
+
+            # 达到最大重试次数（理论上不会到达这里，因为最后一次尝试会抛出异常）
+            error_msg = f"视觉模型调用失败，达到最大重试次数（{max_retries}次）"
+            logger.error(error_msg)
+            raise Exception(error_msg)
         except Exception as e:
-            logger.error(f"视觉模型调用失败: {e}")
-            return ""
-
-
-
-
+            # 添加上下文信息并重新抛出异常
+            error_msg = f"视觉模型调用失败 [图片路径: {img_path}]: {e}"
+            logger.error(error_msg)
+            raise Exception(error_msg) from e
 
     async def _compute_hash(self, file_path: str) -> str:
         """计算文件的MD5哈希值。
@@ -455,6 +631,12 @@ class ImageProcessorService:
             with open(file_path, "rb") as f:
                 hasher.update(f.read())
             return hasher.hexdigest()
+        except FileNotFoundError as e:
+            logger.error(f"文件不存在: {e}")
+            return ""
+        except PermissionError as e:
+            logger.error(f"文件权限错误: {e}")
+            return ""
         except Exception as e:
             logger.error(f"计算哈希值失败: {e}")
             return ""
@@ -521,7 +703,9 @@ class ImageProcessorService:
             # 如果文件已存在，生成新文件名
             if os.path.exists(dest_path):
                 base_name, ext = os.path.splitext(filename)
-                dest_path = os.path.join(cat_dir, f"{base_name}_{int(time.time())}{ext}")
+                dest_path = os.path.join(
+                    cat_dir, f"{base_name}_{int(time.time())}{ext}"
+                )
 
             shutil.copy2(src_path, dest_path)
             logger.debug(f"图片已存储到分类目录: {dest_path}")
@@ -529,5 +713,3 @@ class ImageProcessorService:
         except Exception as e:
             logger.error(f"存储图片失败: {e}")
             return src_path
-
-

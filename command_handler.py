@@ -51,34 +51,48 @@ class CommandHandler:
 
     async def show_providers(self, event: AstrMessageEvent):
         """显示当前视觉模型。"""
-        vp = self.plugin.vision_provider_id or "当前会话"
-        return event.plain_result(f"视觉模型: {vp}")
-
-
+        vision_provider = self.plugin.vision_provider_id or "当前会话"
+        return event.plain_result(f"视觉模型: {vision_provider}")
 
     async def status(self, event: AstrMessageEvent):
         """显示当前偷取状态与后台标识。"""
-        st_on = "开启" if self.plugin.enabled else "关闭"
-        st_auto = "开启" if self.plugin.auto_send else "关闭"
+        stealing_status = "开启" if self.plugin.enabled else "关闭"
+        auto_send_status = "开启" if self.plugin.auto_send else "关闭"
 
-        idx = await self.plugin._load_index()
+        image_index = await self.plugin._load_index()
         # 添加视觉模型信息
-        vision_model = self.plugin.vision_provider_id or "未设置（将使用当前会话默认模型）"
+        vision_model = (
+            self.plugin.vision_provider_id or "未设置（将使用当前会话默认模型）"
+        )
         return event.plain_result(
-            f"偷取: {st_on}\n自动发送: {st_auto}\n已注册数量: {len(idx)}\n概率: {self.plugin.emoji_chance}\n上限: {self.plugin.max_reg_num}\n替换: {self.plugin.do_replace}\n维护周期: {self.plugin.maintenance_interval}min\n审核: {self.plugin.content_filtration}\n视觉模型: {vision_model}"
+            f"偷取: {stealing_status}\n自动发送: {auto_send_status}\n已注册数量: {len(image_index)}\n概率: {self.plugin.emoji_chance}\n上限: {self.plugin.max_reg_num}\n替换: {self.plugin.do_replace}\n维护周期: {self.plugin.maintenance_interval}min\n审核: {self.plugin.content_filtration}\n视觉模型: {vision_model}"
         )
 
     async def push(self, event: AstrMessageEvent, category: str = "", alias: str = ""):
-        """手动推送指定分类的表情包。"""
+        """手动推送指定分类的表情包。支持使用分类名称或别名。"""
         if not self.plugin.base_dir:
             return event.plain_result("插件未正确配置，缺少图片存储目录")
+        
+        # 初始化目标分类变量
+        target_category = None
+        
+        # 如果提供了别名，优先使用别名查找实际分类
         if alias:
             aliases = await self.plugin._load_aliases()
             if alias in aliases:
-                aliases[alias]
+                # 别名存在，映射到实际分类名称
+                target_category = aliases[alias]
             else:
-                return event.plain_result("别名不存在")
-        cat = category or (self.plugin.categories[0] if self.plugin.categories else "happy")
+                return event.plain_result("未找到指定的别名")
+        
+        # 如果没有提供别名或别名不存在，使用分类参数
+        # 如果分类参数也为空，则使用默认分类
+        target_category = target_category or category or (
+            self.plugin.categories[0] if self.plugin.categories else "happy"
+        )
+        
+        # 将目标分类赋值给cat变量，保持后续代码兼容性
+        cat = target_category
         cat_dir = self.plugin.base_dir / "categories" / cat
         if not cat_dir.exists() or not cat_dir.is_dir():
             return event.plain_result(f"分类 {cat} 不存在")
@@ -93,64 +107,70 @@ class CommandHandler:
     async def debug_image(self, event: AstrMessageEvent):
         """调试命令：处理当前消息中的图片并显示详细信息。"""
         # 收集所有图片组件
-        imgs = [comp for comp in event.message_obj.message if isinstance(comp, Image)]
+        image_components = [comp for comp in event.message_obj.message if isinstance(comp, Image)]
 
-        if not imgs:
+        if not image_components:
             return event.plain_result("当前消息中没有图片")
 
         # 处理第一张图片
-        img = imgs[0]
+        first_image = image_components[0]
         try:
             # 转换图片到临时文件路径
-            temp_path = await img.convert_to_file_path()
+            temp_file_path = await first_image.convert_to_file_path()
 
             # 检查路径安全性
-            is_safe, safe_path = self.plugin._is_safe_path(temp_path)
+            is_safe, safe_file_path = self.plugin._is_safe_path(temp_file_path)
             if not is_safe:
                 return event.plain_result("图片路径不安全")
 
-            temp_path = safe_path
+            temp_file_path = safe_file_path
 
             # 确保临时文件存在且可访问
-            if not Path(temp_path).exists():
+            if not Path(temp_file_path).exists():
                 return event.plain_result("临时文件不存在")
 
             # 开始调试处理
-            result_msg = "=== 图片调试信息 ===\n"
+            result_message = "=== 图片调试信息 ===\n"
 
             # 1. 基本信息
-            file_path = Path(temp_path)
-            size = file_path.stat().st_size
-            result_msg += f"文件大小: {size / 1024:.2f} KB\n"
+            image_path = Path(temp_file_path)
+            file_size = image_path.stat().st_size
+            result_message += f"文件大小: {file_size / 1024:.2f} KB\n"
 
             # 2. 元数据过滤结果
             # 直接使用plugin中的PILImage引用
             if self.plugin.PILImage is not None:
                 try:
-                    with self.plugin.PILImage.open(temp_path) as im:
-                        width, height = im.size
-                    result_msg += f"分辨率: {width}x{height}\n"
-                    aspect_ratio = max(width, height) / min(width, height) if min(width, height) > 0 else 0
-                    result_msg += f"宽高比: {aspect_ratio:.2f}\n"
+                    with self.plugin.PILImage.open(temp_file_path) as image:
+                        width, height = image.size
+                    result_message += f"分辨率: {width}x{height}\n"
+                    aspect_ratio = (
+                        max(width, height) / min(width, height)
+                        if min(width, height) > 0
+                        else 0
+                    )
+                    result_message += f"宽高比: {aspect_ratio:.2f}\n"
                 except Exception as e:
-                    result_msg += f"获取图片信息失败: {e}\n"
+                    result_message += f"获取图片信息失败: {e}\n"
 
             # 3. 多模态分析结果
-            result_msg += "\n=== 多模态分析结果 ===\n"
+            result_message += "\n=== 多模态分析结果 ===\n"
 
             # 处理图片
-            success, idx = await self.plugin._process_image(event, temp_path, is_temp=True, idx=None)
-            if success and idx:
-                for file_path, info in idx.items():
-                    if isinstance(info, dict):
-                        result_msg += f"分类: {info.get('category', '未知')}\n"
-                        result_msg += f"情绪: {info.get('emotion', '未知')}\n"
-                        result_msg += f"标签: {info.get('tags', [])}\n"
-                        result_msg += f"描述: {info.get('desc', '无')}\n"
+            success, image_index = await self.plugin._process_image(
+                event, temp_file_path, is_temp=True, idx=None
+            )
+            if success and image_index:
+                for processed_file_path, image_info in image_index.items():
+                    if isinstance(image_info, dict):
+                        result_message += f"分类: {image_info.get('category', '未知')}\n"
+                        result_message += f"情绪: {image_info.get('emotion', '未知')}\n"
+                        result_message += f"标签: {image_info.get('tags', [])}\n"
+                        result_message += f"描述: {image_info.get('desc', '无')}\n"
             else:
-                result_msg += "图片处理失败\n"
+                result_message += "图片处理失败\n"
 
-            return event.plain_result(result_msg)
+            return event.plain_result(result_message)
 
         except Exception as e:
             logger.error(f"调试图片失败: {e}")
