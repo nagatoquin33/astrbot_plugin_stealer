@@ -54,30 +54,18 @@ class CommandHandler:
         vp = self.plugin.vision_provider_id or "当前会话"
         return event.plain_result(f"视觉模型: {vp}")
 
-    async def meme_emoji_only(self, event: AstrMessageEvent, enable: str = ""):
-        """切换是否仅偷取表情包模式。"""
-        if enable.lower() in ["on", "开启", "true"]:
-            self.plugin.emoji_only = True
-            self.plugin._persist_config()
-            return event.plain_result("已开启仅偷取表情包模式")
-        elif enable.lower() in ["off", "关闭", "false"]:
-            self.plugin.emoji_only = False
-            self.plugin._persist_config()
-            return event.plain_result("已关闭仅偷取表情包模式")
-        else:
-            status = "开启" if self.plugin.emoji_only else "关闭"
-            return event.plain_result(f"当前仅偷取表情包模式: {status}")
+
 
     async def status(self, event: AstrMessageEvent):
         """显示当前偷取状态与后台标识。"""
         st_on = "开启" if self.plugin.enabled else "关闭"
         st_auto = "开启" if self.plugin.auto_send else "关闭"
-        st_emoji_only = "开启" if self.plugin.emoji_only else "关闭"
+
         idx = await self.plugin._load_index()
         # 添加视觉模型信息
         vision_model = self.plugin.vision_provider_id or "未设置（将使用当前会话默认模型）"
         return event.plain_result(
-            f"偷取: {st_on}\n自动发送: {st_auto}\n仅偷取表情包: {st_emoji_only}\n已注册数量: {len(idx)}\n概率: {self.plugin.emoji_chance}\n上限: {self.plugin.max_reg_num}\n替换: {self.plugin.do_replace}\n维护周期: {self.plugin.maintenance_interval}min\n审核: {self.plugin.content_filtration}\n视觉模型: {vision_model}"
+            f"偷取: {st_on}\n自动发送: {st_auto}\n已注册数量: {len(idx)}\n概率: {self.plugin.emoji_chance}\n上限: {self.plugin.max_reg_num}\n替换: {self.plugin.do_replace}\n维护周期: {self.plugin.maintenance_interval}min\n审核: {self.plugin.content_filtration}\n视觉模型: {vision_model}"
         )
 
     async def push(self, event: AstrMessageEvent, category: str = "", alias: str = ""):

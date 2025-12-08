@@ -8,7 +8,7 @@
   "maintenance_interval": 10,
   "content_filtration": false,
   "filtration_prompt": "符合公序良俗",
-  "emoji_only": true,
+
   "raw_retention_hours": 1,
   "raw_clean_interval": 30,
   "categories": [

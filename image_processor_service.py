@@ -32,22 +32,51 @@ class ImageProcessorService:
         else:
             # 如果没有base_dir，尝试从context获取数据目录
             self.base_dir = None
-        self.emoji_mapping = {}
 
         # 尝试从插件实例获取提示词配置，如果不存在则使用默认值
-        self.image_classification_prompt = getattr(plugin_instance, "IMAGE_CLASSIFICATION_PROMPT",
-            """你是一个表情包情感分析专家。请分析图像内容，并严格从以下情感标签中选择最准确的一项输出：happy, neutral, sad, angry, shy, surprised, smirk, cry, confused, embarrassed, sigh, speechless。""")
+        # 表情包识别和分类的合并提示词（不包含内容过滤）
+        self.emoji_classification_prompt = getattr(plugin_instance, "EMOJI_CLASSIFICATION_PROMPT",
+            """你是一个图片分析专家，需要完成表情包判断和情绪分类任务。请按照以下要求进行分析：
 
-        self.content_filtration_prompt = getattr(plugin_instance, "CONTENT_FILTRATION_PROMPT",
-            "请判断这张图片是否包含违反规定的内容，仅回复'是'或'否'。如果包含裸露、暴力、敏感或违法内容，回复'是'，否则回复'否'")
+1. 表情包判断：判断这张图片是否为聊天表情包（emoji/meme/sticker）。
+   - 表情包通常具有以下特征：尺寸相对较小，画面主体清晰突出，可能包含少量文字、夸张表情或动作，宽高比通常在1:2到2:1之间，风格简洁明了。
+   - 如果不是表情包，返回'非表情包'。
+2. 情绪分类：如果是表情包，从以下情感标签中选择最准确的一项：{emotion_list}。
+
+请按照以下格式返回结果：
+是否为表情包|情绪分类
+
+示例：
+是|happy
+否|非表情包""")
+        
+        # 内容过滤+表情包识别+分类的三合一合并提示词
+        self.combined_analysis_prompt = getattr(plugin_instance, "COMBINED_ANALYSIS_PROMPT",
+            """你是一个图片分析专家，需要同时完成内容过滤和表情包分类任务。请按照以下要求进行分析：
+
+1. 内容过滤：请判断这张图片是否包含违反规定的内容。
+   如果包含裸露、暴力、敏感或违法内容，返回'过滤不通过'。否则返回'通过'。
+
+2. 表情包判断：如果内容过滤通过，进一步判断这张图片是否为聊天表情包（emoji/meme/sticker）。
+   - 表情包通常具有以下特征：尺寸相对较小，画面主体清晰突出，可能包含少量文字、夸张表情或动作，宽高比通常在1:2到2:1之间，风格简洁明了。
+   - 如果不是表情包，返回'非表情包'。
+3. 情绪分类：如果是表情包，从以下情感标签中选择最准确的一项：{emotion_list}。
+
+请按照以下格式返回结果：
+过滤结果|是否为表情包|情绪分类
+
+示例：
+通过|是|happy
+过滤不通过|否|none
+通过|否|非表情包""")
+        
         # 配置参数
         self.categories = []
         self.content_filtration = False
         self.filtration_prompt = ""
         self.vision_provider_id = ""
-        self.emoji_only = False
 
-    def update_config(self, categories=None, content_filtration=None, filtration_prompt=None, vision_provider_id=None, emoji_only=None):
+    def update_config(self, categories=None, content_filtration=None, filtration_prompt=None, vision_provider_id=None):
         """更新图片处理器配置。
 
         Args:
@@ -55,7 +84,6 @@ class ImageProcessorService:
             content_filtration: 是否进行内容过滤
             filtration_prompt: 内容过滤提示
             vision_provider_id: 视觉模型提供者ID
-            emoji_only: 是否只处理表情
         """
         if categories is not None:
             self.categories = categories
@@ -65,43 +93,8 @@ class ImageProcessorService:
             self.filtration_prompt = filtration_prompt
         if vision_provider_id is not None:
             self.vision_provider_id = vision_provider_id
-        if emoji_only is not None:
-            self.emoji_only = emoji_only
 
-    async def load_emoji_mapping(self):
-        """加载表情关键字映射表。"""
-        try:
-            # 尝试获取配置目录
-            config_dir = getattr(self.plugin, "config_dir", None)
-            if config_dir is None and hasattr(self.plugin, "base_dir"):
-                # 如果没有config_dir，使用base_dir作为替代
-                config_dir = str(self.plugin.base_dir) if self.plugin.base_dir is not None else None
 
-            if config_dir:
-                map_path = os.path.join(config_dir, "emoji_mapping.json")
-                if os.path.exists(map_path):
-                    import json
-                    with open(map_path, encoding="utf-8") as f:
-                        self.emoji_mapping = json.load(f)
-            else:
-                # 默认的表情关键字映射表
-                self.emoji_mapping = {
-                    "开心": ["开心", "高兴", "快乐", "愉悦", "欢喜", "兴奋", "愉快", "愉悦", "欢快", "喜悦", "欢乐", "喜笑颜开", "眉开眼笑", "笑逐颜开", "哈哈大笑", "大笑", "傻笑", "痴笑", "笑哈哈", "笑", "乐呵呵"],
-                    "难过": ["难过", "悲伤", "伤心", "哀伤", "悲痛", "沮丧", "忧郁", "忧伤", "哀愁", "悲凉", "悲切", "心如刀割", "肝肠寸断", "伤心欲绝", "悲痛欲绝", "哀痛", "哀戚", "愁眉苦脸", "闷闷不乐"],
-                    "愤怒": ["愤怒", "生气", "恼火", "发火", "恼怒", "恼火", "愤恨", "愤慨", "愤然", "勃然大怒", "怒不可遏", "怒火中烧", "火冒三丈", "暴跳如雷", "气急败坏", "怒气冲天", "气冲冲", "气呼呼"],
-                    "惊讶": ["惊讶", "吃惊", "震惊", "惊诧", "讶异", "意外", "意想不到", "大吃一惊", "目瞪口呆", "瞠目结舌", "震惊", "惊悉", "惊呆了", "惊了", "惊到", "惊", "讶"],
-                    "恶心": ["恶心", "厌恶", "反感", "厌烦", "腻烦", "憎恶", "嫌恶", "讨厌", "反感", "恶感", "作呕", "反胃", "倒胃口", "讨厌", "嫌"]
-                }
-        except Exception as e:
-            logger.error(f"加载表情映射表失败: {e}")
-            # 使用默认映射表
-            self.emoji_mapping = {
-                "开心": ["开心", "高兴", "快乐", "愉悦", "欢喜", "兴奋", "愉快", "愉悦", "欢快", "喜悦", "欢乐", "喜笑颜开", "眉开眼笑", "笑逐颜开", "哈哈大笑", "大笑", "傻笑", "痴笑", "笑哈哈", "笑", "乐呵呵"],
-                "难过": ["难过", "悲伤", "伤心", "哀伤", "悲痛", "沮丧", "忧郁", "忧伤", "哀愁", "悲凉", "悲切", "心如刀割", "肝肠寸断", "伤心欲绝", "悲痛欲绝", "哀痛", "哀戚", "愁眉苦脸", "闷闷不乐"],
-                "愤怒": ["愤怒", "生气", "恼火", "发火", "恼怒", "恼火", "愤恨", "愤慨", "愤然", "勃然大怒", "怒不可遏", "怒火中烧", "火冒三丈", "暴跳如雷", "气急败坏", "怒气冲天", "气冲冲", "气呼呼"],
-                "惊讶": ["惊讶", "吃惊", "震惊", "惊诧", "讶异", "意外", "意想不到", "大吃一惊", "目瞪口呆", "瞠目结舌", "震惊", "惊悉", "惊呆了", "惊了", "惊到", "惊", "讶"],
-                "恶心": ["恶心", "厌恶", "反感", "厌烦", "腻烦", "憎恶", "嫌恶", "讨厌", "反感", "恶感", "作呕", "反胃", "倒胃口", "讨厌", "嫌"]
-            }
 
     async def process_image(
         self,
@@ -110,9 +103,7 @@ class ImageProcessorService:
         is_temp: bool = False,
         idx: dict[str, Any] | None = None,
         categories: list[str] | None = None,
-        emoji_only: bool | None = None,
         content_filtration: bool | None = None,
-        filtration_prompt: str | None = None,
         backend_tag: str | None = None
     ) -> tuple[bool, dict[str, Any] | None]:
         """统一处理图片：存储、分类、过滤。
@@ -123,9 +114,7 @@ class ImageProcessorService:
             is_temp: 是否为临时文件
             idx: 索引字典
             categories: 分类列表
-            emoji_only: 是否只处理表情
             content_filtration: 是否进行内容过滤
-            filtration_prompt: 内容过滤提示
             backend_tag: 后端标签
 
         Returns:
@@ -168,60 +157,103 @@ class ImageProcessorService:
         else:
             raw_path = file_path
 
-        # 过滤图片
+        # 过滤和分类图片（合并为一次VLM调用）
         try:
-            # 使用传入的过滤参数
-            filter_result = await self._filter_image(
-                event,
-                raw_path,
-                filtration_prompt=filtration_prompt,
+            # 调用classify_image方法，该方法已实现：
+            # 1. 当开启内容过滤时，先进行内容过滤
+            # 2. 然后进行表情包判断和情绪分类（合并一步完成）
+            category, tags, desc, emotion = await self.classify_image(
+                event=event, 
+                file_path=raw_path, 
+                categories=categories, 
                 content_filtration=content_filtration
             )
+            logger.debug(f"图片分类结果: category={category}, emotion={emotion}")
 
-            if filter_result:
-                # 图片分类
-                category = await self._classify_image(event, raw_path)
-                if category is not None:
-                    logger.debug(f"图片分类结果: {category}")
+            # 处理过滤不通过的情况
+            if category == "过滤不通过" or emotion == "过滤不通过":
+                logger.debug(f"图片内容过滤不通过，跳过存储: {raw_path}")
+                if is_temp:
+                    await self._safe_remove_file(raw_path)
+                return False, None
 
-                    # 复制图片到对应分类目录
-                    if self.base_dir:
-                        cat_dir = os.path.join(self.base_dir, "categories", category)
-                        os.makedirs(cat_dir, exist_ok=True)
-                        cat_path = os.path.join(cat_dir, os.path.basename(raw_path))
-                        shutil.copy2(raw_path, cat_path)
+            # 处理非表情包的情况
+            if category == "非表情包" or emotion == "非表情包":
+                logger.debug(f"图片非表情包，跳过存储: {raw_path}")
+                if is_temp:
+                    await self._safe_remove_file(raw_path)
+                return False, None
 
-                    # 更新索引
-                    idx[raw_path] = {
-                        "hash": hash_val,
-                        "category": category,
-                        "created_at": int(time.time()),
-                        "usage_count": 0,
-                        "last_used": 0
-                    }
+            # 处理有效分类结果
+            if category and category in self.VALID_CATEGORIES:
+                logger.debug(f"图片分类结果有效: {category}")
 
-                    return True, idx
-                else:
-                    logger.warning("图片分类失败，图片将留在raw目录等待清理")
-                    # 分类失败时，图片留在raw目录，不添加到索引，不占用配额
-                    return False, None
+                # 复制图片到对应分类目录
+                if self.base_dir:
+                    cat_dir = os.path.join(self.base_dir, "categories", category)
+                    os.makedirs(cat_dir, exist_ok=True)
+                    cat_path = os.path.join(cat_dir, os.path.basename(raw_path))
+                    shutil.copy2(raw_path, cat_path)
+
+                # 更新索引
+                idx[raw_path] = {
+                    "hash": hash_val,
+                    "category": category,
+                    "created_at": int(time.time()),
+                    "usage_count": 0,
+                    "last_used": 0
+                }
+
+                return True, idx
             else:
-                logger.debug("图片未通过内容过滤，已删除")
-                await self._safe_remove_file(raw_path)
+                logger.warning(f"图片分类结果无效: {category}，图片将留在raw目录等待清理")
+                # 分类失败时，图片留在raw目录，不添加到索引，不占用配额
                 return False, None
         except Exception as e:
             logger.error(f"处理图片失败: {e}")
             await self._safe_remove_file(raw_path)
             return False, None
 
-    async def classify_image(self, event: AstrMessageEvent, file_path: str, emoji_only=None, categories=None) -> tuple[str, list[str], str, str]:
+    def _is_likely_emoji_by_metadata(self, file_path: str) -> bool:
+        """根据图片元数据判断是否可能是表情包。
+
+        Args:
+            file_path: 图片文件路径
+
+        Returns:
+            是否可能是表情包
+        """
+        try:
+            from PIL import Image as PILImage
+        except ImportError:
+            PILImage = None
+
+        if PILImage is None:
+            return True  # 没有PIL时默认通过
+
+        try:
+            with PILImage.open(file_path) as img:
+                width, height = img.size
+                # 检查图片尺寸是否符合表情包特征
+                if max(width, height) > 2000 or min(width, height) < 20:  # 降低最小尺寸限制从50到20
+                    return False
+                # 检查图片宽高比
+                aspect_ratio = max(width, height) / min(width, height)
+                if aspect_ratio > 5:
+                    return False
+                return True
+        except Exception:
+            return True
+
+    async def classify_image(self, event: AstrMessageEvent, file_path: str, categories=None, backend_tag=None, content_filtration=None) -> tuple[str, list[str], str, str]:
         """使用视觉模型对图片进行分类并返回详细信息。
 
         Args:
             event: 消息事件
             file_path: 图片路径
-            emoji_only: 是否只处理表情
             categories: 分类列表
+            backend_tag: 后端标签
+            content_filtration: 是否进行内容过滤（可选）
 
         Returns:
             tuple: (category, tags, desc, emotion)，其中：
@@ -231,42 +263,101 @@ class ImageProcessorService:
                   - emotion: 情绪标签（与category相同）
         """
         try:
-            # 调用原有的分类方法获取情绪类别
-            emotion = await self._classify_image(event, file_path)
-            category = emotion if emotion else "speechless"
+            # 确保file_path是绝对路径
+            file_path = os.path.abspath(file_path)
+            
+            # 检查文件是否存在
+            if not os.path.exists(file_path):
+                logger.error(f"分类图片时文件不存在: {file_path}")
+                fallback = categories[0] if categories else "speechless"
+                return fallback, [], "", fallback
 
-            # 使用增强提示词获取更详细的图片信息
-            detailed_prompt = "请详细描述这张图片的内容，包括：\n"
-            "1. 图片的主要元素和场景\n"
-            "2. 人物的表情、动作（如果有）\n"
-            "3. 图片的风格和色调\n"
-            "4. 图片传达的情绪\n"
-            "\n返回格式：\n"
-            "描述: [详细描述]\n"
-            "标签: [用逗号分隔的标签列表]"
+            # 先用元数据做一次快速过滤，明显不是表情图片的直接跳过
+            is_likely_emoji = self._is_likely_emoji_by_metadata(file_path)
+            logger.debug(f"元数据判断是否为表情包: {is_likely_emoji}")
+            if not is_likely_emoji:
+                return "非表情包", [], "", "非表情包"
 
-            detailed_response = await self._call_vision_model(file_path, detailed_prompt)
+            # 确定是否进行内容过滤
+            should_filter = content_filtration if content_filtration is not None else getattr(self.plugin, "content_filtration", True)
+            
+            # 构建情绪类别列表字符串
+            emotion_list_str = ", ".join(self.VALID_CATEGORIES)
+            
+            # 如果不进行内容过滤，直接进行表情包识别和分类
+            if not should_filter:
+                # 使用表情包识别和分类的合并提示词
+                prompt = self.emoji_classification_prompt.format(emotion_list=emotion_list_str)
+                
+                # 调用视觉模型进行分析
+                response = await self._call_vision_model(file_path, prompt)
+                logger.debug(f"表情包分析原始响应: {response}")
+                
+                # 解析响应结果
+                parts = response.strip().split('|')
+                if len(parts) < 2:
+                    logger.error(f"表情包分析响应格式错误: {response}")
+                    fallback = categories[0] if categories else "speechless"
+                    return fallback, [], "", fallback
+                
+                filter_result = "通过"
+                is_emoji_result = parts[0].strip()
+                emotion_result = parts[1].strip()
+            else:
+                # 使用内容过滤和表情包分析的合并提示词
+                prompt = self.combined_analysis_prompt.format(
+                    emotion_list=emotion_list_str
+                )
+                
+                # 调用视觉模型进行一次性分析
+                response = await self._call_vision_model(file_path, prompt)
+                logger.debug(f"内容过滤和表情包分析原始响应: {response}")
+                
+                # 解析响应结果
+                parts = response.strip().split('|')
+                if len(parts) < 3:
+                    logger.error(f"内容过滤和表情包分析响应格式错误: {response}")
+                    fallback = categories[0] if categories else "speechless"
+                    return fallback, [], "", fallback
+                
+                filter_result = parts[0].strip()
+                is_emoji_result = parts[1].strip()
+                emotion_result = parts[2].strip()
 
-            # 解析详细响应
+
+            # 处理过滤结果
+            if filter_result == "过滤不通过":
+                return "过滤不通过", [], "", "过滤不通过"
+
+            # 处理表情包判断结果
+            if is_emoji_result.lower() != "是" and emotion_result != "非表情包":
+                return "非表情包", [], "", "非表情包"
+
+            # 处理情绪分类结果
+            if emotion_result in self.VALID_CATEGORIES:
+                category = emotion_result
+            else:
+                # 尝试从响应中提取有效类别
+                for valid_cat in self.VALID_CATEGORIES:
+                    if valid_cat in response.lower():
+                        category = valid_cat
+                        break
+                else:
+                    category = "speechless"
+
+                # 如果不是表情包，返回特定标识
+                if is_emoji_result.lower() != "是":
+                    return "非表情包", [], "", "非表情包"
+
+            # 不使用VLM进行详细描述，直接返回空的描述和标签
             desc = ""
             tags = []
 
-            if detailed_response:
-                # 提取描述
-                desc_match = re.search(r"描述: (.+?)(?:\n|$)", detailed_response, re.DOTALL)
-                if desc_match:
-                    desc = desc_match.group(1).strip()
-
-                # 提取标签
-                tags_match = re.search(r"标签: (.+?)(?:\n|$)", detailed_response)
-                if tags_match:
-                    tags = [tag.strip() for tag in tags_match.group(1).split(",") if tag.strip()]
-
-            # 确保返回格式一致
-            return category, tags, desc, emotion
+            # 确保返回格式一致，情绪标签与分类相同
+            return category, tags, desc, category
         except Exception as e:
             logger.error(f"图片分类失败: {e}")
-            fallback = "speechless" if categories and "speechless" in categories else "其它"
+            fallback = categories[0] if categories else "speechless"
             return fallback, [], "", fallback
 
     async def _call_vision_model(self, img_path: str, prompt: str) -> str:
@@ -280,54 +371,13 @@ class ImageProcessorService:
             str: LLM响应文本
         """
         try:
-            # 确保使用绝对路径
+            # 简单的路径处理：确保使用绝对路径
             if not os.path.isabs(img_path):
-                # 如果是相对路径，尝试构建绝对路径
-                # 规范化路径分隔符，确保兼容性（无论self.base_dir是否存在）
-                img_path = img_path.replace("/", os.sep)
-                
+                # 如果是相对路径，检查是否有base_dir
                 if self.base_dir:
-                    # 优先检查是否是插件数据路径格式
-                    if img_path.startswith(f"AstrBot{os.sep}data{os.sep}plugin_data{os.sep}") or img_path.startswith(f"data{os.sep}plugin_data{os.sep}"):
-                        # 对于插件数据路径，使用AstrBot根目录构建绝对路径
-                        try:
-                            astrbot_root = get_astrbot_root()
-                            # 去掉路径中重复的AstrBot/前缀（如果存在）
-                            if img_path.startswith(f"AstrBot{os.sep}"):
-                                img_path_relative = img_path[len(f"AstrBot{os.sep}"):]
-                            else:
-                                img_path_relative = img_path
-                            img_path = os.path.abspath(os.path.join(astrbot_root, img_path_relative))
-                        except Exception as e:
-                            logger.error(f"使用AstrBot根目录构建图片绝对路径失败: {e}")
-                            # 如果失败，直接使用base_dir构建路径
-                            img_path = os.path.abspath(os.path.join(self.base_dir, os.path.basename(img_path)))
-                    elif os.path.basename(img_path) == img_path:
-                        # 如果是简单文件名，放在raw目录下
-                        img_path = os.path.abspath(os.path.join(self.base_dir, "raw", img_path))
-                    else:
-                        # 其他相对路径，直接使用base_dir作为前缀
-                        img_path = os.path.abspath(os.path.join(self.base_dir, img_path))
+                    img_path = os.path.abspath(os.path.join(self.base_dir, img_path))
                 else:
-                    # 如果没有base_dir，尝试使用AstrBot根目录构建绝对路径
-                    try:
-                        astrbot_root = get_astrbot_root()
-                        
-                        # 检查是否是插件数据路径格式（即使没有base_dir也需要处理）
-                        if img_path.startswith(f"AstrBot{os.sep}data{os.sep}plugin_data{os.sep}") or img_path.startswith(f"data{os.sep}plugin_data{os.sep}"):
-                            # 去掉路径中重复的AstrBot/前缀（如果存在）
-                            if img_path.startswith(f"AstrBot{os.sep}"):
-                                img_path_relative = img_path[len(f"AstrBot{os.sep}"):]
-                            else:
-                                img_path_relative = img_path
-                            img_path = os.path.abspath(os.path.join(astrbot_root, img_path_relative))
-                        else:
-                            img_path = os.path.abspath(os.path.join(astrbot_root, img_path))
-                    except Exception as e:
-                        logger.error(f"构建图片绝对路径失败: {e}")
-                        img_path = os.path.abspath(img_path)
-            else:
-                img_path = img_path
+                    img_path = os.path.abspath(img_path)
 
             if not os.path.exists(img_path):
                 logger.error(f"图片文件不存在: {img_path}")
@@ -351,31 +401,13 @@ class ImageProcessorService:
                     logger.debug(f"使用视觉模型 {model} 处理图片")
 
                     # 将本地文件路径转换为file:///格式的URL
-                    from pathlib import Path
-
-                    img_url = ""
-                    if img_path and not img_path.startswith(("file:///", "base64://")):
-                        # 确保使用绝对路径构建URL
-                        # 此时img_path已经是绝对路径了，直接使用
-                        absolute_path = img_path
-                        path_obj = Path(absolute_path)
-                        
-                        # 根据操作系统构建正确的file URL
-                        if os.name == "nt":
-                            # Windows系统需要特殊处理
-                            unc_path = f"file:///{path_obj.as_posix()}"
-                            img_url = unc_path
-                        else:
-                            # Unix系统直接使用绝对路径
-                            img_url = f"file://{absolute_path}"
-                        logger.debug(f"构建的图片URL: {img_url}")
-                    else:
-                        img_url = img_path
+                    file_url = f"file:///{os.path.abspath(img_path)}"
+                    logger.debug(f"构建的图片URL: {file_url}")
 
                     result = await self.plugin.context.llm_generate(
                         chat_provider_id=chat_provider_id,
                         prompt=prompt,
-                        image_urls=[img_url] if img_url else None,
+                        image_urls=[file_url],
                         model=model
                     )
                     if result:
@@ -409,88 +441,27 @@ class ImageProcessorService:
             logger.error(f"视觉模型调用失败: {e}")
             return ""
 
-    async def _classify_image(self, event: AstrMessageEvent, img_path: str) -> str:
-        """使用视觉模型对图片进行分类（内部方法）。
+
+
+
+
+    async def _compute_hash(self, file_path: str) -> str:
+        """计算文件的MD5哈希值。
 
         Args:
-            event: 消息事件
-            img_path: 图片路径
+            file_path: 文件路径
 
         Returns:
-            str: 分类结果
+            str: MD5哈希值
         """
         try:
-            # 构建提示词
-            prompt = self.image_classification_prompt
-
-            # 调用共享的视觉模型方法
-            llm_response_text = await self._call_vision_model(img_path, prompt)
-
-            if not llm_response_text:
-                return None
-
-            # 处理LLM响应，提取有效分类结果
-            category = llm_response_text.strip().lower()
-
-            # 检查分类结果是否在有效类别列表中
-            # 尝试直接匹配
-            if category and category in self.VALID_CATEGORIES:
-                logger.info(f"图片分类结果: {category}")
-                return category
-
-            # 尝试从响应中提取有效类别（处理LLM可能返回的额外内容）
-            for valid_cat in self.VALID_CATEGORIES:
-                if valid_cat in category:
-                    logger.info(f"从响应中提取分类结果: {valid_cat} (原始响应: {category})")
-                    return valid_cat
-
-            # 处理可能的格式问题（如引号、括号等）
-            import re
-            cleaned_response = re.sub(r"[^a-zA-Z\s]", "", category)
-            for valid_cat in self.VALID_CATEGORIES:
-                if valid_cat in cleaned_response:
-                    logger.info(f"清理后提取分类结果: {valid_cat} (清理后响应: {cleaned_response})")
-                    return valid_cat
-
-            logger.warning(f"分类结果不在有效类别列表中: {category}")
-            return None
+            hasher = hashlib.md5()
+            with open(file_path, "rb") as f:
+                hasher.update(f.read())
+            return hasher.hexdigest()
         except Exception as e:
-            logger.error(f"图片分类失败: {e}")
-            return None
-
-    async def _filter_image(self, event: AstrMessageEvent, img_path: str, filtration_prompt=None, content_filtration=None) -> bool:
-        """使用LLM过滤图片内容。
-
-        Args:
-            event: 消息事件
-            img_path: 图片路径
-            filtration_prompt: 内容过滤提示（可选）
-            content_filtration: 是否进行内容过滤（可选）
-
-        Returns:
-            bool: 是否通过过滤
-        """
-        # 使用传入的过滤提示或默认提示
-        current_filtration_prompt = filtration_prompt if filtration_prompt else self.content_filtration_prompt
-
-        # 确定是否进行内容过滤
-        should_filter = content_filtration if content_filtration is not None else getattr(self.plugin, "content_filtration", True)
-
-        if not should_filter:
-            return True
-
-        if not os.path.exists(img_path):
-            logger.error(f"图片文件不存在: {img_path}")
-            return True
-
-        # 调用共享的视觉模型方法
-        llm_response_text = await self._call_vision_model(img_path, current_filtration_prompt)
-
-        # 直接处理LLM响应，提示词已要求只返回特定格式结果
-        if llm_response_text.strip() == "是":
-            logger.debug("图片未通过内容过滤")
-            return False
-        return True
+            logger.error(f"计算哈希值失败: {e}")
+            return ""
 
     async def _file_to_base64(self, file_path: str) -> str:
         """将文件转换为base64编码。

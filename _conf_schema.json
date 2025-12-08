@@ -47,12 +47,7 @@
     "type": "string",
     "default": "符合公序良俗"
   },
-  "emoji_only": {
-    "description": "是否仅偷取聊天表情包（过滤普通图片/截图/长图）",
-    "type": "bool",
-    "hint": "建议保持开启：结合多模态判断和尺寸/长宽比过滤，仅保存典型聊天用表情包",
-    "default": true
-  },
+
   "raw_retention_hours": {
     "description": "raw目录中图片的保留期限（小时）",
     "type": "int",
