@@ -340,6 +340,24 @@ class ConfigService:
         self._aliases = aliases
         self.save_aliases()
 
+    def update_config(self, updates: dict[str, Any]) -> bool:
+        """更新配置并同步到实例属性。"""
+        if not updates or not self.config_manager:
+            return False
+
+        try:
+            # 使用配置管理器更新配置
+            success = self.config_manager.update_config(updates)
+            
+            if success:
+                # 重新加载配置到实例属性
+                self._load_initial_config()
+            
+            return success
+        except Exception as e:
+            logger.error(f"更新ConfigService配置失败: {e}")
+            return False
+
     def update_config_from_dict(self, config_dict: dict):
         """从配置字典更新插件配置。"""
         if not config_dict or not self.config_manager:

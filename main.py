@@ -349,14 +349,15 @@ class StealerPlugin(Star):
                 "max_reg_num": self.max_reg_num,
                 "do_replace": self.do_replace,
                 "maintenance_interval": self.maintenance_interval,
+                "steal_emoji": self.steal_emoji,
                 "content_filtration": self.content_filtration,
                 "vision_provider_id": self.vision_provider_id,
                 "raw_retention_minutes": self.raw_retention_minutes,
                 "enabled": self.enabled,
             }
 
+            # 使用ConfigService的update_config方法确保配置同步
             self.config_service.update_config(config_updates)
-            self.config_service.save_config()
 
         except Exception as e:
             logger.error(f"保存配置失败: {e}")
@@ -801,7 +802,9 @@ class StealerPlugin(Star):
         if not provider_id:
             yield event.plain_result("请提供视觉模型的 provider_id")
             return
+        # 同时更新实例属性和配置服务中的值，确保同步
         self.vision_provider_id = provider_id
+        self.config_service.vision_provider_id = provider_id
         self._persist_config()
         yield event.plain_result(f"已设置视觉模型: {provider_id}")
 
