@@ -884,6 +884,11 @@ class StealerPlugin(Star):
             f"偷取: {st_on}\n自动发送: {st_auto}\n已注册数量: {len(idx)}\n概率: {self.emoji_chance}\n上限: {self.max_reg_num}\n替换: {self.do_replace}\n维护周期: {self.maintenance_interval}min\n审核: {self.content_filtration}\n视觉模型: {vision_model}"
         )
 
+    @filter.command("meme clean")
+    async def clean(self, event: AstrMessageEvent):
+        """手动清理过期的原始图片文件。"""
+        return await self.command_handler.clean(event)
+
     async def get_count(self) -> int:
         idx = await self._load_index()
         return len(idx)

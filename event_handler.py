@@ -198,9 +198,6 @@ class EventHandler:
 
     async def _scanner_loop(self):
         """扫描循环，处理定期维护任务。"""
-        # 初始化raw目录清理计时器
-        last_raw_clean_time = time.time()
-
         while True:
             try:
                 await asyncio.sleep(max(1, int(self.plugin.maintenance_interval)) * 60)
@@ -212,14 +209,8 @@ class EventHandler:
                     await self._enforce_capacity(image_index)
                     await self.plugin._save_index(image_index)
 
-                    # 检查是否需要清理raw目录（根据raw_clean_interval配置）
-                    current_time = time.time()
-                    clean_interval_seconds = (
-                        max(1, int(self.plugin.raw_clean_interval)) * 60
-                    )
-                    if current_time - last_raw_clean_time >= clean_interval_seconds:
-                        await self._clean_raw_directory()
-                        last_raw_clean_time = current_time
+                    # 执行raw目录清理（直接检查并清理过期文件）
+                    await self._clean_raw_directory()
 
             except (FileNotFoundError, PermissionError) as e:
                 logger.error(f"扫描循环文件操作错误: {e}")
@@ -274,7 +265,7 @@ class EventHandler:
 
                                 if file_time < cutoff_time:
                                     if await self.plugin._safe_remove_file(
-                                        file_path.as_posix()
+                                        str(file_path)
                                     ):
                                         deleted_count += 1
                                         logger.debug(f"已删除过期文件: {file_path}")

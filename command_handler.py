@@ -175,3 +175,21 @@ class CommandHandler:
         except Exception as e:
             logger.error(f"调试图片失败: {e}")
             return event.plain_result(f"调试失败: {str(e)}")
+
+    async def clean(self, event: AstrMessageEvent):
+        """手动触发清理操作，清理过期的原始图片文件。"""
+        try:
+            # 加载图片索引
+            image_index = await self.plugin._load_index()
+            
+            # 执行容量控制
+            await self.plugin._enforce_capacity(image_index)
+            await self.plugin._save_index(image_index)
+            
+            # 执行raw目录清理
+            await self.plugin._clean_raw_directory()
+            
+            return event.plain_result("手动清理完成")
+        except Exception as e:
+            logger.error(f"手动清理失败: {e}")
+            return event.plain_result(f"清理失败: {str(e)}")
