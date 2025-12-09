@@ -192,6 +192,18 @@ class ConfigManager:
             # 版本迁移逻辑 - 实现实际的迁移规则
             # 1.0.0版本迁移：确保所有配置项都有正确的类型和默认值
             if current_version < "1.0.0":
+                # 迁移旧的 maintenance_interval 到新的独立任务配置
+                if "maintenance_interval" in self.config:
+                    old_interval = self.config.pop("maintenance_interval")
+                    # 如果新配置不存在，使用旧值
+                    if "raw_cleanup_interval" not in self.config:
+                        self.config["raw_cleanup_interval"] = old_interval
+                    if "capacity_control_interval" not in self.config:
+                        self.config["capacity_control_interval"] = old_interval * 2
+                    logger.info(
+                        f"已迁移 maintenance_interval ({old_interval}) 到独立任务配置"
+                    )
+
                 # 检查并迁移所有配置项
                 for key, props in self.schema.items():
                     if key in self.config:

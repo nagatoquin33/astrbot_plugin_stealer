@@ -5,10 +5,17 @@
   "emoji_chance": 0.4,
   "max_reg_num": 100,
   "do_replace": true,
-  "maintenance_interval": 10,
+  "raw_cleanup_interval": 30,
+  "capacity_control_interval": 60,
+  "enable_raw_cleanup": true,
+  "enable_capacity_control": true,
+  "steal_emoji": true,
   "content_filtration": false,
-
   "raw_retention_minutes": 60,
+  "image_processing_mode": "probability",
+  "image_processing_probability": 0.3,
+  "image_processing_interval": 60,
+  "image_processing_cooldown": 30,
   "categories": [
     "happy",
     "neutral",
@@ -21,5 +28,6 @@
     "confused",
     "embarrassed",
     "sigh"
-  ]
+  ],
+  "config_version": "1.0.0"
 }
