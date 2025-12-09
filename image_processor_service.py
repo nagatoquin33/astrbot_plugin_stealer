@@ -653,17 +653,20 @@ class ImageProcessorService:
                             chat_provider_id = await self.plugin.context.get_current_chat_provider_id(umo=umo)
                             logger.debug(f"从事件获取的聊天模型ID: {chat_provider_id}")
 
-                    # 如果没有获取到聊天模型ID，使用默认配置
-                    if not chat_provider_id:
+                    # 获取配置的视觉模型 provider_id
+                    vision_provider_id = getattr(self.plugin.config_service, "vision_provider_id", None)
+                    
+                    # 如果配置了视觉模型，使用它；否则使用当前会话的 provider
+                    if vision_provider_id:
+                        chat_provider_id = vision_provider_id
+                        logger.debug(f"使用配置的视觉模型 provider_id: {chat_provider_id}")
+                    elif not chat_provider_id:
+                        # 如果既没有配置视觉模型，也没有从事件获取到 provider，使用默认配置
                         chat_provider_id = getattr(self.plugin, "default_chat_provider_id", None)
                         logger.debug(f"使用默认聊天模型ID: {chat_provider_id}")
 
-                    # 使用配置的视觉模型（如果有）
-                    model = getattr(self.plugin.config_service, "vision_provider_id", None)
-                    logger.debug(f"使用视觉模型: {model}")
-
-                    # 检查是否配置了VLM
-                    if not model:
+                    # 检查是否有可用的 provider
+                    if not chat_provider_id:
                         error_msg = "未配置视觉模型(vision_provider_id)，无法进行图片分析"
                         logger.error(error_msg)
                         raise ValueError(error_msg)
@@ -673,11 +676,11 @@ class ImageProcessorService:
                     logger.debug(f"构建的图片URL: {file_url}")
 
                     # 调用LLM生成服务
+                    # 注意：不传递 model 参数，让 provider 使用其默认模型
                     result = await self.plugin.context.llm_generate(
                         chat_provider_id=chat_provider_id,
                         prompt=prompt,
                         image_urls=[file_url],
-                        model=model,
                     )
 
                     if result:
