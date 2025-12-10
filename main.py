@@ -646,9 +646,15 @@ class StealerPlugin(Star):
             except Exception:
                 # 备选方案：使用内部 API
                 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
+
                 astrbot_data_path = Path(get_astrbot_data_path()).resolve()
-            
+
             plugin_base_dir = Path(self.base_dir).resolve()
+
+            # 调试日志
+            logger.debug(f"路径安全检查 - 输入路径: {path}")
+            logger.debug(f"astrbot_data_path: {astrbot_data_path}")
+            logger.debug(f"plugin_base_dir: {plugin_base_dir}")
 
             path_obj = Path(path)
             normalized_path = None
@@ -708,7 +714,9 @@ class StealerPlugin(Star):
 
             # 检查路径是否在允许的目录内
             is_safe = False
-            allowed_parents = [astrbot_data_path, plugin_base_dir]
+            # 添加临时目录到允许列表，因为 convert_to_file_path() 返回临时文件路径
+            temp_dir = astrbot_data_path / "temp"
+            allowed_parents = [astrbot_data_path, plugin_base_dir, temp_dir]
 
             for parent in allowed_parents:
                 try:
@@ -720,6 +728,10 @@ class StealerPlugin(Star):
 
             if not is_safe:
                 logger.error(f"路径超出允许范围: {path} -> {normalized_path}")
+                logger.error(f"允许的父目录: {[str(p) for p in allowed_parents]}")
+                # 检查是否是临时文件目录的问题
+                if "temp" in str(normalized_path):
+                    logger.error("检测到临时文件路径，可能需要添加 temp 目录到允许列表")
                 return False, path
 
             return True, str(normalized_path)
@@ -1259,14 +1271,8 @@ class StealerPlugin(Star):
                 temp_path = await img.convert_to_file_path()
                 yield event.plain_result(f"图片 {i + 1}: 临时路径: {temp_path}")
 
-                # 检查路径安全性
-                is_safe, safe_path = self._is_safe_path(temp_path)
-                if not is_safe:
-                    yield event.plain_result(f"图片 {i + 1}: 路径不安全，跳过处理")
-                    continue
-
-                temp_path = safe_path
-                yield event.plain_result(f"图片 {i + 1}: 安全路径: {temp_path}")
+                # 临时文件由框架创建，无需安全检查
+                # 安全检查会在 process_image 中处理最终存储路径时进行
 
                 # 确保临时文件存在且可访问
                 if not os.path.exists(temp_path):

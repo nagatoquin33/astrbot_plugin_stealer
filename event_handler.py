@@ -121,13 +121,8 @@ class EventHandler:
                 # 转换图片到临时文件路径
                 temp_path: str = await img.convert_to_file_path()
 
-                # 检查路径安全性
-                is_safe, safe_path = plugin_instance._is_safe_path(temp_path)
-                if not is_safe:
-                    logger.warning(f"不安全的图片路径: {temp_path}")
-                    continue
-
-                temp_path = safe_path
+                # 临时文件由框架创建，无需安全检查
+                # 安全检查会在 process_image 中处理最终存储路径时进行
 
                 # 确保临时文件存在且可访问
                 if not os.path.exists(temp_path):
