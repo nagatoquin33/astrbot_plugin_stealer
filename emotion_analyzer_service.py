@@ -38,56 +38,53 @@ class EmotionAnalyzerService:
     async def extract_emotions_from_text(
         self, event: AstrMessageEvent | None, text: str
     ) -> tuple[list[str], str]:
-        """从文本中提取情绪关键词。"""
+        """从文本中提取情绪关键词。
+
+        针对LLM输出的单个&&emotion&&标签进行优化处理。
+        """
         try:
             res: list[str] = []
-            seen: set[str] = set()
             cleaned_text = str(text)
-            valid_categories = set(self.categories)  # 使用self.categories确保一致性
+            valid_categories = set(self.categories)
 
-            # 1. 处理显式包裹标记：&&情绪&&
-            temp_text = cleaned_text
-            for match in self.HEX_PATTERN.finditer(cleaned_text):
-                original = match.group(0)
-                emotion = match.group(1).strip()
+            # 1. 优先处理&&情绪&&格式（LLM主要输出格式）
+            hex_match = self.HEX_PATTERN.search(cleaned_text)
+            if hex_match:
+                emotion = hex_match.group(1).strip()
                 norm_cat = self.normalize_category(emotion)
-
-                if norm_cat and norm_cat in valid_categories and norm_cat not in seen:
-                    seen.add(norm_cat)
-                    res.append(norm_cat)
-                temp_text = temp_text.replace(original, "", 1)
-            cleaned_text = temp_text
-
-            # 2. 处理[emotion]格式
-            temp_text = cleaned_text
-            for match in self.BRACKET_PATTERN.finditer(cleaned_text):
-                original = match.group(0)
-                emotion = match.group(1).strip()
-                norm_cat = self.normalize_category(emotion)
-
-                if norm_cat and norm_cat in valid_categories and norm_cat not in seen:
-                    seen.add(norm_cat)
-                    res.append(norm_cat)
-                temp_text = temp_text.replace(original, "", 1)
-            cleaned_text = temp_text
-
-            # 3. 处理(emotion)格式
-            temp_text = cleaned_text
-            for match in self.PAREN_PATTERN.finditer(cleaned_text):
-                original = match.group(0)
-                emotion = match.group(1).strip()
-                norm_cat = self.normalize_category(emotion)
-
                 if norm_cat and norm_cat in valid_categories:
-                    # 需要额外验证，确保不是普通句子的一部分
-                    if self._is_likely_emotion_markup(
-                        original, cleaned_text, match.start()
+                    res.append(norm_cat)
+                # 移除标签
+                cleaned_text = self.HEX_PATTERN.sub("", cleaned_text)
+
+            # 2. 如果没找到&&格式，尝试其他格式
+            if not res:
+                # 处理[emotion]格式
+                bracket_match = self.BRACKET_PATTERN.search(cleaned_text)
+                if bracket_match:
+                    emotion = bracket_match.group(1).strip()
+                    norm_cat = self.normalize_category(emotion)
+                    if norm_cat and norm_cat in valid_categories:
+                        res.append(norm_cat)
+                    # 移除标签
+                    cleaned_text = self.BRACKET_PATTERN.sub("", cleaned_text)
+
+            # 3. 最后尝试(emotion)格式，但需要验证
+            if not res:
+                paren_match = self.PAREN_PATTERN.search(cleaned_text)
+                if paren_match:
+                    emotion = paren_match.group(1).strip()
+                    norm_cat = self.normalize_category(emotion)
+                    if (
+                        norm_cat
+                        and norm_cat in valid_categories
+                        and self._is_likely_emotion_markup(
+                            paren_match.group(0), cleaned_text, paren_match.start()
+                        )
                     ):
-                        if norm_cat not in seen:
-                            seen.add(norm_cat)
-                            res.append(norm_cat)
-                temp_text = temp_text.replace(original, "", 1)
-            cleaned_text = temp_text
+                        res.append(norm_cat)
+                        # 移除标签
+                        cleaned_text = self.PAREN_PATTERN.sub("", cleaned_text, count=1)
 
             # 4. 清理文本，移除HTML标签和多余空格
             cleaned_text = self.HTML_TAG_PATTERN.sub("", cleaned_text)
