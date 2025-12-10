@@ -19,7 +19,7 @@ class CacheService:
             cache_dir: 缓存文件存储目录，如果为None则使用默认目录
         """
         if not cache_dir:
-            from astrbot.core.star.star_tools import StarTools
+            from astrbot.api.star import StarTools
 
             cache_dir = Path(StarTools.get_data_dir("astrbot_plugin_stealer")) / "cache"
 
@@ -62,19 +62,23 @@ class CacheService:
             cache_name: 缓存类型名称
         """
         if cache_name not in self._caches:
+            logger.warning(f"缓存类型 {cache_name} 不存在，无法保存")
             return
 
         try:
             # 确保缓存目录存在
             self._cache_dir.mkdir(parents=True, exist_ok=True)
             cache_file = self._cache_dir / f"{cache_name}.json"
+
+            # 记录保存前的数据量
+            data_size = len(self._caches[cache_name])
+            logger.debug(f"准备保存缓存 {cache_name}，数据量: {data_size}")
+
             with open(cache_file, "w", encoding="utf-8") as f:
                 json.dump(self._caches[cache_name], f, ensure_ascii=False, indent=2)
-            logger.info(f"缓存文件 {cache_file} 保存成功")
+            logger.info(f"缓存文件 {cache_file} 保存成功，数据量: {data_size}")
         except Exception as e:
-            logger.error(f"保存缓存文件 {cache_file} 失败: {e}")
-            # 如果保存失败，不再尝试备选目录
-            logger.error(f"保存缓存文件失败，不再尝试备选目录: {e}")
+            logger.error(f"保存缓存文件 {cache_file} 失败: {e}", exc_info=True)
 
     def _clean_cache(self, cache: dict[str, Any]) -> None:
         """清理缓存，保持在最大大小以下。

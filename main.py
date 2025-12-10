@@ -16,7 +16,7 @@ from astrbot.api.event.filter import (
 )
 from astrbot.api.message_components import Image, Plain
 from astrbot.api.star import Context, Star, StarTools, register
-from astrbot.core.utils.astrbot_path import get_astrbot_data_path
+
 
 from .cache_service import CacheService
 
@@ -639,7 +639,15 @@ class StealerPlugin(Star):
         """
         try:
             # 定义允许的基准目录
-            astrbot_data_path = Path(get_astrbot_data_path()).resolve()
+            # 优先使用公开 API，如果失败则使用内部 API 作为备选
+            try:
+                # 使用 StarTools.get_data_dir() 的父目录来获取 data 目录路径
+                astrbot_data_path = StarTools.get_data_dir().parent.resolve()
+            except Exception:
+                # 备选方案：使用内部 API
+                from astrbot.core.utils.astrbot_path import get_astrbot_data_path
+                astrbot_data_path = Path(get_astrbot_data_path()).resolve()
+            
             plugin_base_dir = Path(self.base_dir).resolve()
 
             path_obj = Path(path)
