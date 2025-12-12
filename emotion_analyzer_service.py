@@ -9,10 +9,7 @@ class EmotionAnalyzerService:
 
     # 正则表达式模式常量
     HEX_PATTERN = re.compile(r"&&([^&]+?)&&")
-    BRACKET_PATTERN = re.compile(r"\[([^\[\]]+)\]")
-    PAREN_PATTERN = re.compile(r"\(([^()]+)\)")
-    HTML_TAG_PATTERN = re.compile(r"<.*?>")
-    WHITESPACE_PATTERN = re.compile(r"\s+")
+    SINGLE_HEX_PATTERN = re.compile(r"&([^&\s]+?)&")  # 匹配单个&包裹的标签
 
     def __init__(self, plugin_instance):
         self.plugin_instance = plugin_instance
@@ -58,9 +55,9 @@ class EmotionAnalyzerService:
                 temp_text = temp_text.replace(original, "", 1)
             cleaned_text = temp_text
 
-            # 2. 处理[emotion]格式
+            # 2. 处理单个&包裹的标记：&情绪&
             temp_text = cleaned_text
-            for match in self.BRACKET_PATTERN.finditer(cleaned_text):
+            for match in self.SINGLE_HEX_PATTERN.finditer(cleaned_text):
                 original = match.group(0)
                 emotion = match.group(1).strip()
                 norm_cat = self.normalize_category(emotion)
@@ -68,59 +65,15 @@ class EmotionAnalyzerService:
                 if norm_cat and norm_cat in valid_categories and norm_cat not in seen:
                     seen.add(norm_cat)
                     res.append(norm_cat)
-                temp_text = temp_text.replace(original, "", 1)
+                    temp_text = temp_text.replace(original, "", 1)
             cleaned_text = temp_text
-
-            # 3. 处理(emotion)格式
-            temp_text = cleaned_text
-            for match in self.PAREN_PATTERN.finditer(cleaned_text):
-                original = match.group(0)
-                emotion = match.group(1).strip()
-                norm_cat = self.normalize_category(emotion)
-
-                if norm_cat and norm_cat in valid_categories:
-                    # 需要额外验证，确保不是普通句子的一部分
-                    if self._is_likely_emotion_markup(
-                        original, cleaned_text, match.start()
-                    ):
-                        if norm_cat not in seen:
-                            seen.add(norm_cat)
-                            res.append(norm_cat)
-                temp_text = temp_text.replace(original, "", 1)
-            cleaned_text = temp_text
-
-            # 4. 清理文本，移除HTML标签和多余空格
-            cleaned_text = self.HTML_TAG_PATTERN.sub("", cleaned_text)
-            cleaned_text = self.WHITESPACE_PATTERN.sub(" ", cleaned_text).strip()
 
             return res, cleaned_text
         except Exception as e:
             logger.error(f"提取文本情绪失败: {e}")
             return [], text
 
-    def _is_likely_emotion_markup(
-        self, original: str, text: str, start_pos: int
-    ) -> bool:
-        """
-        判断是否为情绪标记，避免误判普通括号内容
 
-        Args:
-            original: 原始匹配字符串
-            text: 完整文本
-            start_pos: 匹配开始位置
-
-        Returns:
-            bool: 是否为情绪标记
-        """
-        # 检查前后是否为单词边界
-        if start_pos > 0 and text[start_pos - 1].isalnum():
-            return False
-
-        end_pos = start_pos + len(original)
-        if end_pos < len(text) and text[end_pos].isalnum():
-            return False
-
-        return True
 
     def update_config(self, categories=None):
         """更新配置参数"""
