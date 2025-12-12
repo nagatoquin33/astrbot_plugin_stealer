@@ -56,27 +56,84 @@ class CommandHandler:
         yield event.plain_result(f"视觉模型: {vision_provider}")
 
     async def status(self, event: AstrMessageEvent):
-        """显示当前偷取状态与后台标识。"""
-        stealing_status = "开启" if self.plugin.enabled else "关闭"
+        """显示插件状态和详细的表情包统计信息。"""
+        stealing_status = "开启" if self.plugin.steal_emoji else "关闭"
         auto_send_status = "开启" if self.plugin.auto_send else "关闭"
 
         image_index = await self.plugin._load_index()
+        total_count = len(image_index)
+        
         # 添加视觉模型信息
         vision_model = (
             self.plugin.vision_provider_id or "未设置（将使用当前会话默认模型）"
         )
-        status_text = f"偷取: {stealing_status}\n"
+        
+        # 基础状态信息
+        status_text = "🔧 插件状态:\n"
+        status_text += f"偷取: {stealing_status}\n"
         status_text += f"自动发送: {auto_send_status}\n"
-        status_text += f"已注册数量: {len(image_index)}\n"
         status_text += f"概率: {self.plugin.emoji_chance}\n"
-        status_text += f"上限: {self.plugin.max_reg_num}\n"
         status_text += f"替换: {self.plugin.do_replace}\n"
         status_text += f"审核: {self.plugin.content_filtration}\n"
         status_text += f"视觉模型: {vision_model}\n\n"
-        status_text += "后台任务:\n"
+        
+        # 后台任务状态
+        status_text += "⚙️ 后台任务:\n"
         status_text += f"Raw清理: {'启用' if self.plugin.enable_raw_cleanup else '禁用'} ({self.plugin.raw_cleanup_interval}min)\n"
-        status_text += f"容量控制: {'启用' if self.plugin.enable_capacity_control else '禁用'} ({self.plugin.capacity_control_interval}min)"
+        status_text += f"容量控制: {'启用' if self.plugin.enable_capacity_control else '禁用'} ({self.plugin.capacity_control_interval}min)\n\n"
+        
+        # 表情包统计信息
+        if total_count == 0:
+            status_text += "📊 表情包统计:\n暂无表情包数据"
+        else:
+            # 按分类统计
+            category_stats = {}
+            usage_stats = []
+            
+            for img_path, img_info in image_index.items():
+                if isinstance(img_info, dict):
+                    # 统计分类
+                    category = img_info.get('category', '未分类')
+                    category_stats[category] = category_stats.get(category, 0) + 1
+                    
+                    # 收集使用统计
+                    usage_count = img_info.get('usage_count', 0)
+                    img_name = Path(img_path).name
+                    usage_stats.append((img_name, usage_count, category))
+            
+            # 构建统计信息
+            status_text += "📊 表情包统计:\n"
+            status_text += f"总数量: {total_count}/{self.plugin.max_reg_num} ({total_count/self.plugin.max_reg_num*100:.1f}%)\n\n"
+            
+            # 分类统计 - 只显示前3个最多的分类
+            status_text += "📂 分类统计 (前3):\n"
+            sorted_categories = sorted(category_stats.items(), key=lambda x: x[1], reverse=True)
+            for category, count in sorted_categories[:3]:
+                percentage = count / total_count * 100
+                status_text += f"  {category}: {count}张 ({percentage:.1f}%)\n"
+            
+            if len(sorted_categories) > 3:
+                status_text += f"  ...还有{len(sorted_categories)-3}个分类\n"
+            
+            # 使用统计 - 显示前3个最常用的
+            status_text += "\n🔥 最常用表情 (前3):\n"
+            usage_stats.sort(key=lambda x: x[1], reverse=True)
+            top_used = usage_stats[:3]
+            
+            if any(stat[1] > 0 for stat in top_used):
+                for i, (name, count, category) in enumerate(top_used, 1):
+                    if count > 0:
+                        status_text += f"  {i}. {name[:15]}{'...' if len(name) > 15 else ''} - {count}次 [{category}]\n"
+            else:
+                status_text += "  暂无使用记录\n"
+            
+            # 存储统计
+            raw_count = len(list(self.plugin.raw_dir.glob("*"))) if self.plugin.raw_dir.exists() else 0
+            status_text += f"\n💾 存储信息:\n"
+            status_text += f"  原始图片: {raw_count}张 | 分类图片: {total_count}张"
+        
         yield event.plain_result(status_text)
+
 
     async def push(self, event: AstrMessageEvent, category: str = "", alias: str = ""):
         """手动推送指定分类的表情包。支持使用分类名称或别名。"""

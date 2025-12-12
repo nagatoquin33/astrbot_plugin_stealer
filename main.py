@@ -426,7 +426,6 @@ class StealerPlugin(Star):
                 "content_filtration": self.content_filtration,
                 "vision_provider_id": self.vision_provider_id,
                 "raw_retention_minutes": self.raw_retention_minutes,
-                "enabled": self.enabled,
             }
 
             # 使用ConfigService的update_config方法确保配置同步
@@ -987,22 +986,26 @@ class StealerPlugin(Star):
     @filter.command("meme on")
     async def meme_on(self, event: AstrMessageEvent):
         """开启偷表情包功能。"""
-        yield await self.command_handler.meme_on(event)
+        async for result in self.command_handler.meme_on(event):
+            yield result
 
     @filter.command("meme off")
     async def meme_off(self, event: AstrMessageEvent):
         """关闭偷表情包功能。"""
-        yield await self.command_handler.meme_off(event)
+        async for result in self.command_handler.meme_off(event):
+            yield result
 
     @filter.command("meme auto_on")
     async def auto_on(self, event: AstrMessageEvent):
         """开启自动发送功能。"""
-        yield await self.command_handler.auto_on(event)
+        async for result in self.command_handler.auto_on(event):
+            yield result
 
     @filter.command("meme auto_off")
     async def auto_off(self, event: AstrMessageEvent):
         """关闭自动发送功能。"""
-        yield await self.command_handler.auto_off(event)
+        async for result in self.command_handler.auto_off(event):
+            yield result
 
     @filter.command("meme set_vision")
     async def set_vision(self, event: AstrMessageEvent, provider_id: str = ""):
@@ -1018,7 +1021,7 @@ class StealerPlugin(Star):
     @filter.command("meme status")
     async def status(self, event: AstrMessageEvent):
         """显示当前偷取状态与后台标识。"""
-        st_on = "开启" if self.enabled else "关闭"
+        st_on = "开启" if self.steal_emoji else "关闭"
         st_auto = "开启" if self.auto_send else "关闭"
 
         idx = await self._load_index()
@@ -1041,66 +1044,67 @@ class StealerPlugin(Star):
 
         yield event.plain_result(status_text)
 
+
     @filter.command("meme clean")
     async def clean(self, event: AstrMessageEvent):
         """手动清理过期的原始图片文件。"""
-        yield await self.command_handler.clean(event)
+        async for result in self.command_handler.clean(event):
+            yield result
 
-    @filter.command("meme throttle_status")
-    async def throttle_status(self, event: AstrMessageEvent):
-        """显示图片处理节流状态。"""
-        yield await self.command_handler.throttle_status(event)
 
-    @filter.command("meme throttle_mode")
-    async def set_throttle_mode(self, event: AstrMessageEvent, mode: str = ""):
-        """设置图片处理节流模式。"""
-        yield await self.command_handler.set_throttle_mode(event, mode)
 
-    @filter.command("meme throttle_probability")
-    async def set_throttle_probability(
-        self, event: AstrMessageEvent, probability: str = ""
-    ):
-        """设置概率模式的处理概率。"""
-        yield await self.command_handler.set_throttle_probability(event, probability)
+    @filter.command("meme throttle")
+    async def throttle_config(self, event: AstrMessageEvent, action: str = "", value: str = ""):
+        """配置图片处理节流。用法: /meme throttle <mode|probability|interval|cooldown> <值>"""
+        if not action:
+            # 显示当前节流状态
+            async for result in self.command_handler.throttle_status(event):
+                yield result
+        elif action == "mode":
+            async for result in self.command_handler.set_throttle_mode(event, value):
+                yield result
+        elif action == "probability":
+            async for result in self.command_handler.set_throttle_probability(event, value):
+                yield result
+        elif action == "interval":
+            async for result in self.command_handler.set_throttle_interval(event, value):
+                yield result
+        elif action == "cooldown":
+            async for result in self.command_handler.set_throttle_cooldown(event, value):
+                yield result
+        else:
+            yield event.plain_result("用法: /meme throttle <mode|probability|interval|cooldown> <值>\n或 /meme throttle 查看状态")
 
-    @filter.command("meme throttle_interval")
-    async def set_throttle_interval(self, event: AstrMessageEvent, interval: str = ""):
-        """设置间隔模式的处理间隔。"""
-        yield await self.command_handler.set_throttle_interval(event, interval)
 
-    @filter.command("meme throttle_cooldown")
-    async def set_throttle_cooldown(self, event: AstrMessageEvent, cooldown: str = ""):
-        """设置冷却模式的冷却时间。"""
-        yield await self.command_handler.set_throttle_cooldown(event, cooldown)
 
-    @filter.command("meme task_status")
-    async def task_status(self, event: AstrMessageEvent):
-        """显示后台任务状态。"""
-        yield await self.command_handler.task_status(event)
-
-    @filter.command("meme raw_cleanup")
-    async def toggle_raw_cleanup(self, event: AstrMessageEvent, action: str = ""):
-        """启用/禁用raw目录清理任务。"""
-        yield await self.command_handler.toggle_raw_cleanup(event, action)
-
-    @filter.command("meme capacity_control")
-    async def toggle_capacity_control(self, event: AstrMessageEvent, action: str = ""):
-        """启用/禁用容量控制任务。"""
-        yield await self.command_handler.toggle_capacity_control(event, action)
-
-    @filter.command("meme raw_cleanup_interval")
-    async def set_raw_cleanup_interval(
-        self, event: AstrMessageEvent, interval: str = ""
-    ):
-        """设置raw清理周期。"""
-        yield await self.command_handler.set_raw_cleanup_interval(event, interval)
-
-    @filter.command("meme capacity_interval")
-    async def set_capacity_control_interval(
-        self, event: AstrMessageEvent, interval: str = ""
-    ):
-        """设置容量控制周期。"""
-        yield await self.command_handler.set_capacity_control_interval(event, interval)
+    @filter.command("meme task")
+    async def task_config(self, event: AstrMessageEvent, task_type: str = "", action: str = "", value: str = ""):
+        """配置后台任务。用法: /meme task <cleanup|capacity> <on|off|interval> [值]"""
+        if not task_type:
+            # 显示任务状态（已合并到 status 中）
+            yield event.plain_result("使用 /meme status 查看任务状态")
+            return
+            
+        if task_type == "cleanup":
+            if action == "on" or action == "off":
+                async for result in self.command_handler.toggle_raw_cleanup(event, action):
+                    yield result
+            elif action == "interval":
+                async for result in self.command_handler.set_raw_cleanup_interval(event, value):
+                    yield result
+            else:
+                yield event.plain_result("用法: /meme task cleanup <on|off|interval> [分钟数]")
+        elif task_type == "capacity":
+            if action == "on" or action == "off":
+                async for result in self.command_handler.toggle_capacity_control(event, action):
+                    yield result
+            elif action == "interval":
+                async for result in self.command_handler.set_capacity_control_interval(event, value):
+                    yield result
+            else:
+                yield event.plain_result("用法: /meme task capacity <on|off|interval> [分钟数]")
+        else:
+            yield event.plain_result("用法: /meme task <cleanup|capacity> <on|off|interval> [值]")
 
     async def get_count(self) -> int:
         idx = await self._load_index()
@@ -1249,9 +1253,8 @@ class StealerPlugin(Star):
             return
         pick = random.choice(files)
         b64 = await self.image_processor_service._file_to_base64(pick.as_posix())
-        chain = MessageChain().base64_image(b64)
-        # 统一使用yield返回结果，保持交互体验一致
-        yield event.result_with_message_chain(chain)
+        # 直接发送base64图片
+        yield event.make_result().base64_image(b64)
 
     @filter.permission_type(PermissionType.ADMIN)
     @filter.command("meme debug_image")

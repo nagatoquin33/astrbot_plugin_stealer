@@ -40,7 +40,8 @@
 本插件设计灵活，支持自动使用当前会话的视觉模型，无需额外配置即可开始使用。
 
 ## 📝 更新历史
-version: 1.0.2：修改正则，现在应该不会吞掉换行和方圆括号这一类符号了，同时加强对&&的匹配
+version: 1.0.2：修改正则，现在应该不会吞掉换行和[]()这一类符号了，同时加强对&&的匹配
+version: 1.0.3：修复指令状态，去除无用指令，改进状态显示
 
 
 ## 🚀 功能特点
@@ -180,29 +181,33 @@ version: 1.0.2：修改正则，现在应该不会吞掉换行和方圆括号这
 | `/meme off` | 关闭偷表情包功能 |
 | `/meme auto_on` | 开启自动随聊表情 |
 | `/meme auto_off` | 关闭自动随聊表情 |
-| `/meme status` | 查看插件状态 |
+| `/meme status` | 查看插件状态和表情包统计 |
 | `/meme set_vision <provider_id>` | 设置视觉模型 |
 | `/meme clean` | 手动触发清理 |
 
-### 节流控制指令 🆕
+### 高级配置指令
 
 | 指令 | 描述 |
 |------|------|
-| `/meme throttle_status` | 查看节流状态 |
-| `/meme throttle_mode <模式>` | 设置节流模式（always/probability/interval/cooldown） |
-| `/meme throttle_probability <概率>` | 设置处理概率（0.0-1.0） |
-| `/meme throttle_interval <秒数>` | 设置处理间隔 |
-| `/meme throttle_cooldown <秒数>` | 设置冷却时间 |
+| `/meme throttle [action] [value]` | 配置图片处理节流 |
+| `/meme task [type] [action] [value]` | 配置后台任务 |
 
-### 后台任务指令 🆕
+#### 节流配置示例
+```bash
+/meme throttle                    # 查看节流状态
+/meme throttle mode probability   # 设置概率模式
+/meme throttle probability 0.3    # 设置30%处理概率
+/meme throttle interval 60        # 设置60秒间隔
+/meme throttle cooldown 30        # 设置30秒冷却
+```
 
-| 指令 | 描述 |
-|------|------|
-| `/meme task_status` | 查看后台任务状态 |
-| `/meme raw_cleanup <on\|off>` | 启用/禁用raw清理任务 |
-| `/meme capacity_control <on\|off>` | 启用/禁用容量控制任务 |
-| `/meme raw_cleanup_interval <分钟>` | 设置raw清理周期 |
-| `/meme capacity_interval <分钟>` | 设置容量控制周期 |
+#### 任务配置示例
+```bash
+/meme task cleanup on             # 启用清理任务
+/meme task cleanup interval 30    # 设置清理周期30分钟
+/meme task capacity off           # 禁用容量控制
+/meme task capacity interval 60   # 设置容量控制周期60分钟
+```
 
 ### 管理员指令
 
@@ -325,4 +330,3 @@ version: 1.0.2：修改正则，现在应该不会吞掉换行和方圆括号这
 如果觉得这个插件有用，欢迎给个 ⭐ Star！
 
 </div>
-
