@@ -693,42 +693,80 @@ class ImageProcessorService:
                         logger.error(error_msg)
                         raise ValueError(error_msg)
 
-                    # 构建图片的file:///格式URL供LLM访问
-                    file_url = f"file:///{img_path}"
-                    logger.debug(f"构建的图片URL: {file_url}")
+                    # 根据AstrBot开发文档，使用正确的VLM调用方式
+                    logger.debug(f"准备调用VLM，图片路径: {img_path}")
 
-                    # 调用LLM生成服务
-                    # 注意：不传递 model 参数，让 provider 使用其默认模型
-                    result = await self.plugin.context.llm_generate(
-                        chat_provider_id=chat_provider_id,
-                        prompt=prompt,
-                        image_urls=[file_url],
-                    )
+                    try:
+                        # 方法1：尝试使用新的API方式
+                        provider_manager = self.plugin.context.provider_manager
+                        
+                        # 获取指定的provider实例
+                        provider = provider_manager.get_provider(chat_provider_id)
+                        if not provider:
+                            raise ValueError(f"未找到指定的provider: {chat_provider_id}")
+                        
+                        # 检查provider是否支持视觉功能
+                        if not hasattr(provider, 'text_chat') or not provider.text_chat:
+                            raise ValueError(f"Provider {chat_provider_id} 不支持文本聊天功能")
+                        
+                        # 构建消息，包含图片
+                        from astrbot.api.message_components import MessageChain, Plain, Image
+                        
+                        # 创建消息链
+                        message_chain = MessageChain()
+                        message_chain.append(Plain(prompt))
+                        message_chain.append(Image(file_path=img_path))
+                        
+                        # 调用provider的text_chat方法
+                        result = await provider.text_chat.text_chat(
+                            message_chain=message_chain,
+                            session_id="vision_analysis",  # 使用固定的session_id
+                            model_name=None  # 使用默认模型
+                        )
+                        
+                    except Exception as api_error:
+                        logger.warning(f"新API调用失败，尝试备用方法: {api_error}")
+                        
+                        # 方法2：备用方法 - 使用原来的llm_generate方式
+                        try:
+                            # 构建图片的file:///格式URL供LLM访问
+                            file_url = f"file:///{img_path}"
+                            logger.debug(f"使用备用方法，构建的图片URL: {file_url}")
+
+                            # 调用LLM生成服务
+                            result = await self.plugin.context.llm_generate(
+                                chat_provider_id=chat_provider_id,
+                                prompt=prompt,
+                                image_urls=[file_url],
+                            )
+                        except Exception as backup_error:
+                            logger.error(f"备用方法也失败: {backup_error}")
+                            raise backup_error
 
                     if result:
-                        # 提取响应文本：支持不同的响应格式
+                        # 处理不同类型的响应
                         llm_response_text = ""
-                        if hasattr(result, "result_chain") and result.result_chain:
-                            # 优先从result_chain获取格式化文本
+                        
+                        if hasattr(result, 'get_plain_text'):
+                            # 如果result是MessageChain，直接获取纯文本
+                            llm_response_text = result.get_plain_text()
+                            logger.debug(f"从MessageChain获取的响应文本: {llm_response_text}")
+                        elif hasattr(result, "result_chain") and result.result_chain:
+                            # 如果是旧API返回的结果格式
                             llm_response_text = result.result_chain.get_plain_text()
-                            logger.debug(
-                                f"从result_chain获取的响应文本: {llm_response_text}"
-                            )
-                        elif (
-                            hasattr(result, "completion_text")
-                            and result.completion_text
-                        ):
+                            logger.debug(f"从result_chain获取的响应文本: {llm_response_text}")
+                        elif hasattr(result, "completion_text") and result.completion_text:
                             # 其次从completion_text获取
                             llm_response_text = result.completion_text
-                            logger.debug(
-                                f"从completion_text获取的响应文本: {llm_response_text}"
-                            )
+                            logger.debug(f"从completion_text获取的响应文本: {llm_response_text}")
+                        elif isinstance(result, str):
+                            # 如果result是字符串
+                            llm_response_text = result
+                            logger.debug(f"直接获取的字符串响应: {llm_response_text}")
                         else:
-                            # 最后使用字符串转换作为兜底
+                            # 兜底处理
                             llm_response_text = str(result)
-                            logger.debug(
-                                f"使用字符串转换获取的响应文本: {llm_response_text}"
-                            )
+                            logger.debug(f"使用字符串转换获取的响应文本: {llm_response_text}")
 
                         logger.debug(f"最终处理的LLM响应: {llm_response_text}")
                         return llm_response_text.strip()
