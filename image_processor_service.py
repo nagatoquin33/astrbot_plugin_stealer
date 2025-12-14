@@ -698,12 +698,12 @@ class ImageProcessorService:
                     logger.debug(f"准备调用VLM，provider_id: {chat_provider_id}")
 
                     # 根据开发文档，构建包含文本和图片的消息
-                    from astrbot.api.message_components import MessageItem, MessageItemType
+                    from astrbot.api.message_components import Plain, Image
                     
                     # 构建消息链
                     message_items = [
-                        MessageItem(type=MessageItemType.TEXT, content=prompt),
-                        MessageItem(type=MessageItemType.IMAGE, content=img_path)
+                        Plain(text=prompt),
+                        Image.fromFileSystem(img_path)
                     ]
 
                     # 方法1：尝试使用Context的AI服务调用
