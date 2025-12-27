@@ -1,4 +1,5 @@
-{  "auto_send": {
+{
+  "auto_send": {
     "description": "是否自动随聊追加表情包",
     "type": "bool",
     "default": true
@@ -9,8 +10,6 @@
     "hint": "选择支持图片输入的提供商 ID（如 Gemini,豆包,qwen vl 等）",
     "_special": "select_provider"
   },
-
-
   "emoji_chance": {
     "description": "触发表情动作的基础概率",
     "type": "float",
@@ -51,43 +50,139 @@
     "type": "bool",
     "default": true
   },
-
   "content_filtration": {
     "description": "是否开启内容审核",
     "type": "bool",
     "default": false
   },
-
   "raw_retention_minutes": {
     "description": "raw目录中图片的保留期限（分钟）",
     "type": "int",
     "default": 60
   },
-
   "image_processing_mode": {
     "description": "图片处理模式：always(总是处理), probability(概率处理), interval(间隔处理), cooldown(冷却时间)",
     "type": "string",
     "default": "probability",
-    "enum": ["always", "probability", "interval", "cooldown"]
+    "options": ["always", "probability", "interval", "cooldown"]
   },
-
   "image_processing_probability": {
     "description": "概率模式下处理图片的概率（0.0-1.0）",
     "type": "float",
     "default": 0.3
   },
-
   "image_processing_interval": {
     "description": "间隔模式下处理图片的间隔秒数",
     "type": "int",
     "default": 60
   },
-
   "image_processing_cooldown": {
     "description": "冷却模式下两次处理之间的最小间隔秒数",
     "type": "int",
     "default": 30
+  },
+  
+  "_enhanced_storage_section": {
+    "description": "=== 增强存储系统配置 ===",
+    "type": "text",
+    "invisible": true
+  },
+  
+  "enable_lifecycle_tracking": {
+    "description": "启用文件生命周期跟踪",
+    "type": "bool",
+    "default": true
+  },
+  "enable_intelligent_cleanup": {
+    "description": "启用智能清理管理",
+    "type": "bool",
+    "default": true
+  },
+  "enable_statistics_tracking": {
+    "description": "启用统计数据跟踪",
+    "type": "bool",
+    "default": true
+  },
+  "enable_quota_management": {
+    "description": "启用存储配额管理",
+    "type": "bool",
+    "default": true
+  },
+  "enable_duplicate_detection": {
+    "description": "启用增强重复检测",
+    "type": "bool",
+    "default": true
+  },
+  
+  "quota_strategy": {
+    "description": "配额管理策略",
+    "type": "string",
+    "default": "hybrid",
+    "options": ["count_based", "size_based", "hybrid"],
+    "labels": ["基于数量", "基于大小", "混合策略"]
+  },
+  "max_total_size_mb": {
+    "description": "最大总存储大小（MB）",
+    "type": "int",
+    "default": 5000
+  },
+  "quota_warning_threshold": {
+    "description": "配额警告阈值（0.0-1.0）",
+    "type": "float",
+    "default": 0.8
+  },
+  "quota_critical_threshold": {
+    "description": "配额严重阈值（0.0-1.0）",
+    "type": "float",
+    "default": 0.95
+  },
+  
+  "cleanup_check_interval": {
+    "description": "清理检查间隔（秒）",
+    "type": "int",
+    "default": 300
+  },
+  "statistics_aggregation_interval": {
+    "description": "统计聚合间隔（秒）",
+    "type": "int",
+    "default": 3600
+  },
+  "statistics_retention_days": {
+    "description": "统计数据保留天数",
+    "type": "int",
+    "default": 90
+  },
+  
+  "enable_transaction_logging": {
+    "description": "启用事务日志记录",
+    "type": "bool",
+    "default": true
+  },
+  "max_retry_attempts": {
+    "description": "最大重试次数",
+    "type": "int",
+    "default": 3
+  },
+  "circuit_breaker_threshold": {
+    "description": "断路器失败阈值",
+    "type": "int",
+    "default": 5
+  },
+  
+  "enable_async_processing": {
+    "description": "启用异步处理",
+    "type": "bool",
+    "default": true
+  },
+  "processing_queue_size": {
+    "description": "处理队列大小",
+    "type": "int",
+    "default": 100
+  },
+  "batch_operation_size": {
+    "description": "批量操作大小",
+    "type": "int",
+    "default": 50
   }
-
 }
 

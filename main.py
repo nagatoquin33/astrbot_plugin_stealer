@@ -132,6 +132,13 @@ class StealerPlugin(Star):
         for category in self.categories:
             (self.categories_dir / category).mkdir(parents=True, exist_ok=True)
 
+        # 初始化增强存储系统
+        self.db_manager = None
+        self.lifecycle_manager = None
+        self.statistics_tracker = None
+        self.cleanup_manager = None
+        self.quota_manager = None
+
         # 初始化核心服务类
         self.cache_service = CacheService(self.cache_dir)
         self.command_handler = CommandHandler(self)
@@ -265,6 +272,9 @@ class StealerPlugin(Star):
             self.categories_dir.mkdir(parents=True, exist_ok=True)
             self.cache_dir.mkdir(parents=True, exist_ok=True)
 
+            # 初始化增强存储系统
+            await self._initialize_enhanced_storage()
+
             # 加载提示词文件
             try:
                 # 使用__file__获取当前脚本所在目录，即插件安装目录
@@ -326,6 +336,68 @@ class StealerPlugin(Star):
             logger.error(f"初始化插件失败: {e}")
             raise
 
+    async def _initialize_enhanced_storage(self):
+        """初始化增强存储系统"""
+        try:
+            # 创建存储目录
+            storage_dir = self.base_dir / "storage"
+            storage_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 初始化数据库管理器
+            from .storage.database import DatabaseManager
+            from .storage.lifecycle_manager import FileLifecycleManager
+            from .storage.statistics_tracker import StatisticsTracker
+            from .storage.cleanup_manager import CleanupManager
+            from .storage.quota_manager import StorageQuotaManager
+            
+            db_path = storage_dir / "enhanced_storage.db"
+            self.db_manager = DatabaseManager(db_path)
+            await self.db_manager.initialize()
+            
+            # 初始化生命周期管理器
+            self.lifecycle_manager = FileLifecycleManager(self.db_manager)
+            
+            # 初始化统计跟踪器
+            self.statistics_tracker = StatisticsTracker(self.db_manager)
+            
+            # 初始化清理管理器
+            self.cleanup_manager = CleanupManager(
+                database_manager=self.db_manager,
+                lifecycle_manager=self.lifecycle_manager,
+                statistics_tracker=self.statistics_tracker
+            )
+            
+            # 初始化配额管理器
+            self.quota_manager = StorageQuotaManager(
+                database_manager=self.db_manager,
+                lifecycle_manager=self.lifecycle_manager,
+                cleanup_manager=self.cleanup_manager,
+                statistics_tracker=self.statistics_tracker
+            )
+            
+            # 更新图片处理服务以使用新的存储系统
+            self.image_processor_service.set_enhanced_storage(
+                lifecycle_manager=self.lifecycle_manager,
+                statistics_tracker=self.statistics_tracker
+            )
+            
+            # 更新事件处理器以使用新的存储系统
+            self.event_handler.set_enhanced_storage(
+                cleanup_manager=self.cleanup_manager,
+                quota_manager=self.quota_manager
+            )
+            
+            logger.info("增强存储系统初始化完成")
+            
+        except Exception as e:
+            logger.error(f"初始化增强存储系统失败: {e}")
+            # 不抛出异常，允许插件在没有增强存储的情况下运行
+            self.db_manager = None
+            self.lifecycle_manager = None
+            self.statistics_tracker = None
+            self.cleanup_manager = None
+            self.quota_manager = None
+
     async def terminate(self):
         """插件销毁生命周期钩子。清理任务。"""
 
@@ -338,6 +410,22 @@ class StealerPlugin(Star):
             # 使用任务调度器停止所有后台任务
             self.task_scheduler.cancel_task("raw_cleanup_loop")
             self.task_scheduler.cancel_task("capacity_control_loop")
+
+            # 清理增强存储系统
+            if hasattr(self, "quota_manager") and self.quota_manager:
+                await self.quota_manager.cleanup()
+
+            if hasattr(self, "cleanup_manager") and self.cleanup_manager:
+                await self.cleanup_manager.cleanup()
+
+            if hasattr(self, "statistics_tracker") and self.statistics_tracker:
+                await self.statistics_tracker.cleanup()
+
+            if hasattr(self, "lifecycle_manager") and self.lifecycle_manager:
+                await self.lifecycle_manager.cleanup()
+
+            if hasattr(self, "db_manager") and self.db_manager:
+                await self.db_manager.close()
 
             # 清理各服务资源
             if hasattr(self, "cache_service") and self.cache_service:

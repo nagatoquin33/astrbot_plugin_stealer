@@ -6,10 +6,16 @@ import re
 import shutil
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
+
+# 导入新的增强存储系统
+from .storage.database import DatabaseManager
+from .storage.lifecycle_manager import FileLifecycleManager
+from .storage.statistics_tracker import StatisticsTracker
+from .storage.models import ProcessingStatus, ProcessingEventType, LifecycleRecord
 
 
 class ImageProcessorService:
@@ -52,6 +58,10 @@ class ImageProcessorService:
         else:
             # 如果没有base_dir，尝试从context获取数据目录
             self.base_dir = None
+
+        # 增强存储系统组件
+        self.lifecycle_manager = None
+        self.statistics_tracker = None
 
         # 图片分类结果缓存，key为图片哈希，value为分类结果元组
         self._image_cache = {}
@@ -185,6 +195,17 @@ class ImageProcessorService:
         self.content_filtration = False
         self.vision_provider_id = ""
 
+    def set_enhanced_storage(self, lifecycle_manager=None, statistics_tracker=None):
+        """设置增强存储系统组件
+        
+        Args:
+            lifecycle_manager: 文件生命周期管理器
+            statistics_tracker: 统计跟踪器
+        """
+        self.lifecycle_manager = lifecycle_manager
+        self.statistics_tracker = statistics_tracker
+        logger.debug("ImageProcessorService 已设置增强存储系统组件")
+
     def update_config(
         self,
         categories=None,
@@ -248,6 +269,375 @@ class ImageProcessorService:
 
         # 计算图片哈希作为唯一标识符
         hash_val = await self._compute_hash(file_path)
+
+        # 如果启用了增强存储系统，使用新的处理流程
+        if self.lifecycle_manager and self.statistics_tracker:
+            return await self._process_image_enhanced(
+                event, file_path, is_temp, idx, categories, content_filtration, backend_tag, hash_val
+            )
+
+        # 否则使用原有的处理流程
+        return await self._process_image_legacy(
+            event, file_path, is_temp, idx, categories, content_filtration, backend_tag, hash_val
+        )
+
+    async def _process_image_enhanced(
+        self,
+        event: AstrMessageEvent | None,
+        file_path: str,
+        is_temp: bool,
+        idx: dict[str, Any],
+        categories: list[str] | None,
+        content_filtration: bool | None,
+        backend_tag: str | None,
+        hash_val: str,
+    ) -> tuple[bool, dict[str, Any] | None]:
+        """使用增强存储系统处理图片"""
+        try:
+            # 记录处理开始事件
+            await self.statistics_tracker.record_processing_event(
+                ProcessingEventType.IMAGE_STORED,
+                metadata={"file_path": file_path, "is_temp": is_temp}
+            )
+
+            # 创建生命周期记录
+            record_id = await self.lifecycle_manager.create_lifecycle_record(
+                image_path=file_path,
+                metadata={"hash": hash_val, "is_temp": is_temp}
+            )
+
+            if not record_id:
+                logger.error(f"创建生命周期记录失败: {file_path}")
+                return False, None
+
+            # 更新状态为处理中
+            await self.lifecycle_manager.update_processing_status(
+                record_id, ProcessingStatus.PROCESSING
+            )
+
+            start_time = time.time()
+
+            # 检查图片是否已存在（基于哈希值）
+            existing_record = await self._check_duplicate_by_hash(hash_val)
+            if existing_record:
+                logger.debug(f"图片已存在（基于哈希）: {hash_val}")
+                if is_temp and os.path.exists(file_path):
+                    await self.plugin._safe_remove_file(file_path)
+                
+                # 标记为重复
+                await self.lifecycle_manager.update_processing_status(
+                    record_id, ProcessingStatus.FAILED, failure_reason="重复图片"
+                )
+                return False, None
+
+            # 检查缓存
+            if hash_val in self._image_cache:
+                cached_result = self._image_cache[hash_val]
+                if time.time() - cached_result["timestamp"] < self._cache_expire_time:
+                    logger.debug(f"使用缓存结果: {hash_val}")
+                    category = cached_result["category"]
+                    
+                    if category == "过滤不通过" or category == "非表情包":
+                        await self.lifecycle_manager.update_processing_status(
+                            record_id, ProcessingStatus.FAILED, failure_reason=category
+                        )
+                        if is_temp and os.path.exists(file_path):
+                            await self.plugin._safe_remove_file(file_path)
+                        return False, None
+                    
+                    # 处理成功的缓存结果
+                    return await self._handle_successful_classification(
+                        record_id, file_path, is_temp, category, cached_result, start_time, idx
+                    )
+
+            # 存储到raw目录
+            raw_path = await self._store_to_raw_directory(file_path, is_temp, hash_val)
+            if not raw_path:
+                await self.lifecycle_manager.update_processing_status(
+                    record_id, ProcessingStatus.FAILED, failure_reason="存储失败"
+                )
+                return False, None
+
+            # 分类图片
+            category, tags, desc, emotion = await self.classify_image(
+                event=event,
+                file_path=raw_path,
+                categories=categories,
+                content_filtration=content_filtration,
+            )
+
+            processing_time = time.time() - start_time
+
+            # 处理分类结果
+            if category == "过滤不通过" or emotion == "过滤不通过":
+                await self.lifecycle_manager.update_processing_status(
+                    record_id, ProcessingStatus.FAILED, failure_reason="内容过滤不通过"
+                )
+                await self.statistics_tracker.record_processing_event(
+                    ProcessingEventType.IMAGE_FAILED,
+                    metadata={"reason": "内容过滤不通过", "processing_time": processing_time}
+                )
+                if is_temp:
+                    await self.plugin._safe_remove_file(raw_path)
+                return False, None
+
+            if category == "非表情包" or emotion == "非表情包":
+                await self.lifecycle_manager.update_processing_status(
+                    record_id, ProcessingStatus.FAILED, failure_reason="非表情包"
+                )
+                await self.statistics_tracker.record_processing_event(
+                    ProcessingEventType.IMAGE_FAILED,
+                    metadata={"reason": "非表情包", "processing_time": processing_time}
+                )
+                if is_temp:
+                    await self.plugin._safe_remove_file(raw_path)
+                return False, None
+
+            if category and category in self.VALID_CATEGORIES:
+                # 成功分类
+                cached_result = {
+                    "category": category,
+                    "tags": tags,
+                    "desc": desc,
+                    "emotion": emotion,
+                    "timestamp": time.time(),
+                }
+                
+                return await self._handle_successful_classification(
+                    record_id, raw_path, False, category, cached_result, start_time, idx
+                )
+            else:
+                # 分类失败
+                await self.lifecycle_manager.update_processing_status(
+                    record_id, ProcessingStatus.FAILED, failure_reason="分类失败"
+                )
+                await self.statistics_tracker.record_processing_event(
+                    ProcessingEventType.IMAGE_FAILED,
+                    metadata={"reason": "分类失败", "processing_time": processing_time}
+                )
+                
+                # 缓存失败结果
+                self._image_cache[hash_val] = {
+                    "category": category or "未知",
+                    "tags": tags,
+                    "desc": desc,
+                    "emotion": emotion,
+                    "timestamp": time.time(),
+                }
+                
+                return False, None
+
+        except Exception as e:
+            logger.error(f"增强存储处理图片失败: {e}")
+            if 'record_id' in locals():
+                await self.lifecycle_manager.update_processing_status(
+                    record_id, ProcessingStatus.FAILED, failure_reason=str(e)
+                )
+            return False, None
+
+    async def _process_image_legacy(
+        self,
+        event: AstrMessageEvent | None,
+        file_path: str,
+        is_temp: bool,
+        idx: dict[str, Any],
+        categories: list[str] | None,
+        content_filtration: bool | None,
+        backend_tag: str | None,
+        hash_val: str,
+    ) -> tuple[bool, dict[str, Any] | None]:
+        """使用原有系统处理图片（保持向后兼容）"""
+        # 检查图片是否已存在（索引中）
+        for k, v in idx.items():
+            if isinstance(v, dict) and v.get("hash") == hash_val:
+                logger.debug(f"图片已存在于索引中: {hash_val}")
+                if is_temp and os.path.exists(file_path):
+                    await self.plugin._safe_remove_file(file_path)
+                return False, None
+
+        # 检查图片是否已存在于持久化索引中
+        if hasattr(self.plugin, "cache_service"):
+            persistent_idx = self.plugin.cache_service.get_cache("index_cache")
+            for k, v in persistent_idx.items():
+                if isinstance(v, dict) and v.get("hash") == hash_val:
+                    logger.debug(f"图片已存在于持久化索引中: {hash_val}")
+                    if is_temp and os.path.exists(file_path):
+                        await self.plugin._safe_remove_file(file_path)
+                    return False, None
+
+        # 检查图片是否已存在于缓存中
+        if hash_val in self._image_cache:
+            cached_result = self._image_cache[hash_val]
+            # 检查缓存是否过期
+            if time.time() - cached_result["timestamp"] < self._cache_expire_time:
+                logger.debug(
+                    f"图片分类结果已缓存: {hash_val} -> {cached_result['category']}"
+                )
+
+                category = cached_result["category"]
+                tags = cached_result["tags"]
+                desc = cached_result["desc"]
+                emotion = cached_result["emotion"]
+
+                # 缓存结果处理：跳过VLM调用，直接使用缓存
+                if category == "过滤不通过" or emotion == "过滤不通过":
+                    logger.debug(f"图片内容过滤不通过（缓存），跳过存储: {hash_val}")
+                    if is_temp and os.path.exists(file_path):
+                        await self.plugin._safe_remove_file(file_path)  # 清理临时文件
+                    return False, None
+
+                # 处理非表情包的缓存结果
+                if category == "非表情包" or emotion == "非表情包":
+                    logger.debug(f"图片非表情包（缓存），跳过存储: {hash_val}")
+                    if is_temp and os.path.exists(file_path):
+                        await self.plugin._safe_remove_file(file_path)  # 清理临时文件
+                    return False, None
+
+                # 处理有效分类的缓存结果
+                if category and category in self.VALID_CATEGORIES:
+                    logger.debug(f"图片分类结果有效（缓存）: {category}")
+
+                    # 存储图片到raw目录（如果还没有存储的话）
+                    if self.base_dir:
+                        raw_dir = os.path.join(self.base_dir, "raw")
+                        os.makedirs(raw_dir, exist_ok=True)  # 确保目录存在
+                        base_path = Path(file_path)
+                        ext = base_path.suffix.lower() if base_path.suffix else ".jpg"
+                        filename = (
+                            f"{int(time.time())}_{hash_val[:8]}{ext}"  # 生成唯一文件名
+                        )
+                        raw_path = os.path.join(raw_dir, filename)
+                        if is_temp:
+                            shutil.move(file_path, raw_path)  # 临时文件直接移动
+                        else:
+                            shutil.copy2(
+                                file_path, raw_path
+                            )  # 非临时文件复制（保留元数据）
+                    else:
+                        raw_path = file_path
+
+                    # 复制图片到对应分类目录
+                    if self.base_dir:
+                        cat_dir = os.path.join(self.base_dir, "categories", category)
+                        os.makedirs(cat_dir, exist_ok=True)
+                        cat_path = os.path.join(cat_dir, os.path.basename(raw_path))
+                        shutil.copy2(raw_path, cat_path)  # 复制到分类目录
+
+                    # 更新图片索引（用于管理和检索）
+                    idx[raw_path] = {
+                        "hash": hash_val,
+                        "category": category,
+                        "created_at": int(time.time()),
+                        "usage_count": 0,
+                        "last_used": 0,
+                    }
+                    return True, idx
+                else:
+                    # 处理无法分类的缓存结果
+                    logger.debug(f"图片无法分类（缓存），留在raw目录: {hash_val}")
+                    if is_temp:
+                        # 已经存储到raw目录，无需删除
+                        pass
+                    return False, None
+            else:
+                # 缓存过期，从缓存中移除
+                del self._image_cache[hash_val]
+
+        # 首次处理：将图片存储到raw目录
+        if self.base_dir:
+            raw_dir = os.path.join(self.base_dir, "raw")
+            os.makedirs(raw_dir, exist_ok=True)  # 确保raw目录存在
+            base_path = Path(file_path)
+            ext = base_path.suffix.lower() if base_path.suffix else ".jpg"
+            filename = f"{int(time.time())}_{hash_val[:8]}{ext}"  # 生成包含时间戳和哈希前缀的唯一文件名
+            raw_path = os.path.join(raw_dir, filename)
+            if is_temp:
+                shutil.move(file_path, raw_path)  # 移动临时文件
+            else:
+                shutil.copy2(file_path, raw_path)  # 复制非临时文件
+        else:
+            raw_path = file_path
+
+        # 过滤和分类图片（合并为一次VLM调用以提高效率）
+        try:
+            # 调用分类方法：包含内容过滤、表情包判断和情绪分类
+            category, tags, desc, emotion = await self.classify_image(
+                event=event,
+                file_path=raw_path,
+                categories=categories,
+                content_filtration=content_filtration,
+            )
+            logger.debug(f"图片分类结果: category={category}, emotion={emotion}")
+
+            # 处理内容过滤不通过的情况
+            if category == "过滤不通过" or emotion == "过滤不通过":
+                logger.debug(f"图片内容过滤不通过，跳过存储: {raw_path}")
+                if is_temp:
+                    await self.plugin._safe_remove_file(raw_path)  # 清理临时文件
+                return False, None
+
+            # 处理非表情包的情况
+            if category == "非表情包" or emotion == "非表情包":
+                logger.debug(f"图片非表情包，跳过存储: {raw_path}")
+                if is_temp:
+                    await self.plugin._safe_remove_file(raw_path)  # 清理临时文件
+                return False, None
+
+            # 处理有效分类结果
+            if category and category in self.VALID_CATEGORIES:
+                logger.debug(f"图片分类结果有效: {category}")
+
+                # 复制图片到对应分类目录
+                if self.base_dir:
+                    cat_dir = os.path.join(self.base_dir, "categories", category)
+                    os.makedirs(cat_dir, exist_ok=True)
+                    cat_path = os.path.join(cat_dir, os.path.basename(raw_path))
+                    shutil.copy2(raw_path, cat_path)
+
+                # 更新图片索引
+                idx[raw_path] = {
+                    "hash": hash_val,
+                    "category": category,
+                    "created_at": int(time.time()),
+                    "usage_count": 0,
+                    "last_used": 0,
+                }
+
+                # 将结果存入缓存，避免重复处理
+                self._image_cache[hash_val] = {
+                    "category": category,
+                    "tags": tags,
+                    "desc": desc,
+                    "emotion": emotion,
+                    "timestamp": time.time(),
+                }
+
+                return True, idx
+            else:
+                logger.warning(
+                    f"图片分类结果无效: {category}，图片将留在raw目录等待清理"
+                )
+
+                # 将无法分类的结果也存入缓存，避免重复处理
+                self._image_cache[hash_val] = {
+                    "category": category,
+                    "tags": tags,
+                    "desc": desc,
+                    "emotion": emotion,
+                    "timestamp": time.time(),
+                }
+
+                # 分类失败时，图片留在raw目录，不添加到索引，不占用配额
+                return False, None
+        except Exception as e:
+            # 异常处理：记录详细上下文并确保资源正确释放
+            error_msg = f"处理图片失败 [图片路径: {raw_path}]: {e}"
+            logger.error(error_msg)
+            # 确保临时文件被正确清理
+            if is_temp:
+                await self.plugin._safe_remove_file(raw_path)
+            # 重新抛出异常，添加更多上下文信息
+            raise Exception(error_msg) from e
 
         # 检查图片是否已存在（索引中）
         for k, v in idx.items():
@@ -438,6 +828,102 @@ class ImageProcessorService:
                 await self.plugin._safe_remove_file(raw_path)
             # 重新抛出异常，添加更多上下文信息
             raise Exception(error_msg) from e
+
+    async def _check_duplicate_by_hash(self, hash_val: str) -> Optional[LifecycleRecord]:
+        """检查是否存在相同哈希值的图片"""
+        if not self.lifecycle_manager:
+            return None
+            
+        try:
+            # 获取所有已完成的记录
+            completed_records = await self.lifecycle_manager.get_files_by_status(ProcessingStatus.COMPLETED)
+            for record in completed_records:
+                if record.md5_hash == hash_val:
+                    return record
+            return None
+        except Exception as e:
+            logger.error(f"检查重复图片失败: {e}")
+            return None
+
+    async def _store_to_raw_directory(self, file_path: str, is_temp: bool, hash_val: str) -> Optional[str]:
+        """将图片存储到raw目录"""
+        try:
+            if not self.base_dir:
+                return file_path
+                
+            raw_dir = os.path.join(self.base_dir, "raw")
+            os.makedirs(raw_dir, exist_ok=True)
+            
+            base_path = Path(file_path)
+            ext = base_path.suffix.lower() if base_path.suffix else ".jpg"
+            filename = f"{int(time.time())}_{hash_val[:8]}{ext}"
+            raw_path = os.path.join(raw_dir, filename)
+            
+            if is_temp:
+                shutil.move(file_path, raw_path)
+            else:
+                shutil.copy2(file_path, raw_path)
+                
+            return raw_path
+        except Exception as e:
+            logger.error(f"存储到raw目录失败: {e}")
+            return None
+
+    async def _handle_successful_classification(
+        self,
+        record_id: str,
+        raw_path: str,
+        is_temp: bool,
+        category: str,
+        cached_result: dict,
+        start_time: float,
+        idx: dict[str, Any]
+    ) -> tuple[bool, dict[str, Any]]:
+        """处理成功分类的图片"""
+        try:
+            processing_time = time.time() - start_time
+            
+            # 复制到分类目录
+            categorized_path = None
+            if self.base_dir:
+                cat_dir = os.path.join(self.base_dir, "categories", category)
+                os.makedirs(cat_dir, exist_ok=True)
+                categorized_path = os.path.join(cat_dir, os.path.basename(raw_path))
+                shutil.copy2(raw_path, categorized_path)
+
+            # 更新生命周期记录
+            await self.lifecycle_manager.update_processing_status(
+                record_id,
+                ProcessingStatus.COMPLETED,
+                category=category,
+                categorized_file_path=categorized_path
+            )
+
+            # 记录统计事件
+            await self.statistics_tracker.record_processing_event(
+                ProcessingEventType.IMAGE_PROCESSED,
+                metadata={"category": category, "processing_time": processing_time, "success": True}
+            )
+
+            # 更新索引（保持向后兼容）
+            idx[raw_path] = {
+                "hash": cached_result.get("hash", ""),
+                "category": category,
+                "created_at": int(time.time()),
+                "usage_count": 0,
+                "last_used": 0,
+                "record_id": record_id,  # 添加记录ID以便后续查询
+            }
+
+            # 缓存结果
+            hash_val = await self._compute_hash(raw_path)
+            self._image_cache[hash_val] = cached_result
+
+            return True, idx
+
+        except Exception as e:
+            logger.error(f"处理成功分类失败: {e}")
+            return False, None
 
     def _is_likely_emoji_by_metadata(self, file_path: str) -> bool:
         """根据图片元数据判断是否可能是表情包。

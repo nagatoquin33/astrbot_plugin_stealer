@@ -43,6 +43,7 @@
 version: 1.0.2：修改正则，现在应该不会吞掉换行和[]()这一类符号了，同时加强对&&的匹配
 version: 1.0.3：修复指令状态，去除无用指令，改进状态显示
 version: 1.0.4：修复vlm模型调用失败的问题
+version: 2.0.0：🎉 重大更新！新增增强存储系统，完全向后兼容，修复旧版本配置同步和使用统计问题
 
 
 ## 🚀 功能特点
@@ -69,6 +70,14 @@ version: 1.0.4：修复vlm模型调用失败的问题
 - **灵活控制**：两个任务互不影响，可按需启用
 - **精细调整**：分别设置不同的执行周期
 
+#### 🚀 增强存储系统 (v2.0.0)
+- **完全向后兼容**：无缝升级，保留所有旧数据和配置
+- **智能文件生命周期管理**：自动跟踪文件从创建到删除的完整生命周期
+- **全面统计监控**：实时处理事件记录、访问模式分析、性能指标收集
+- **协调清理操作**：状态感知的智能清理，防止竞态条件和数据不一致
+- **智能配额管理**：多策略配额执行，基于使用模式的优先级删除
+- **修复旧版本问题**：解决配置同步不及时和使用次数统计失效的问题
+
 ### 未来功能计划
 
 我们计划在后续版本中添加以下功能：
@@ -81,14 +90,44 @@ version: 1.0.4：修复vlm模型调用失败的问题
 - **灵活配置选项**：支持通过指令或配置文件调整各项功能参数
 - **后台维护机制**：定期执行容量控制和文件清理，确保系统稳定
 - **错误容错处理**：完善的异常处理机制，保障插件稳定运行（大概？）
-- **代码质量保证**：通过ruff格式化和检查，符合PEP8规范
+<<<<<<< HEAD
+
 
 ## 📦 安装方法
 
+### 安装
+=======
+- **代码质量保证**：通过ruff格式化和检查，符合PEP8规范
+- **企业级可靠性**：增强存储系统提供事务日志、自动修复、优雅降级等特性
+- **零风险升级**：完全向后兼容，支持从任何旧版本无缝升级
+
+## 📦 安装方法
+
+### 全新安装
+>>>>>>> 91e5d03 (feat(storage): 新增增强存储系统实现文件生命周期管理)
 1. 确保已安装 AstrBot
 2. 将插件复制到 AstrBot 的插件目录：`AstrBot/data/plugins`
 3. 或在 Dashboard 插件中心直接安装
 4. 重启 AstrBot 或使用热加载命令
+
+### 从旧版本升级 🔄
+**完全向后兼容，零风险升级！**
+
+1. **备份数据**（推荐）：备份 `data/plugins/astrbot_plugin_stealer/` 目录
+2. **直接替换**：用新版本文件替换旧版本
+3. **重启AstrBot**：插件会自动检测并兼容旧数据
+4. **验证功能**：使用 `/meme status` 检查插件状态
+
+**升级后保留：**
+- ✅ 所有表情包文件和分类
+- ✅ 使用统计和配置设置  
+- ✅ 用户自定义配置
+- ✅ 完整的使用历史
+
+**升级后修复：**
+- ✅ 配置同步问题（指令修改后WebUI实时更新）
+- ✅ 使用次数统计问题（正确记录和更新使用次数）
+- ✅ 数据一致性问题（防止文件孤立和索引错误）
 
 ## 🛠️ 快速上手
 
@@ -171,6 +210,29 @@ version: 1.0.4：修复vlm模型调用失败的问题
 | `capacity_control_interval` | int | 60 | 容量控制任务的执行周期（分钟） |
 | `enable_raw_cleanup` | bool | true | 是否启用raw目录自动清理 |
 | `enable_capacity_control` | bool | true | 是否启用容量自动控制 |
+
+### 增强存储系统配置 🆕
+
+| 配置项 | 类型 | 默认值 | 描述 |
+|--------|------|--------|------|
+| `enable_lifecycle_tracking` | bool | true | 启用文件生命周期跟踪 |
+| `enable_intelligent_cleanup` | bool | true | 启用智能清理管理 |
+| `enable_statistics_tracking` | bool | true | 启用统计数据跟踪 |
+| `enable_quota_management` | bool | true | 启用存储配额管理 |
+| `enable_duplicate_detection` | bool | true | 启用增强重复检测 |
+| `quota_strategy` | string | hybrid | 配额管理策略：count_based/size_based/hybrid |
+| `max_total_size_mb` | int | 5000 | 最大总存储大小（MB） |
+| `quota_warning_threshold` | float | 0.8 | 配额警告阈值（0.0-1.0） |
+| `quota_critical_threshold` | float | 0.95 | 配额严重阈值（0.0-1.0） |
+| `cleanup_check_interval` | int | 300 | 清理检查间隔（秒） |
+| `statistics_aggregation_interval` | int | 3600 | 统计聚合间隔（秒） |
+| `statistics_retention_days` | int | 90 | 统计数据保留天数 |
+| `enable_transaction_logging` | bool | true | 启用事务日志记录 |
+| `max_retry_attempts` | int | 3 | 最大重试次数 |
+| `circuit_breaker_threshold` | int | 5 | 断路器失败阈值 |
+| `enable_async_processing` | bool | true | 启用异步处理 |
+| `processing_queue_size` | int | 100 | 处理队列大小 |
+| `batch_operation_size` | int | 50 | 批量操作大小 |
 
 ## 🎮 使用指令
 
@@ -310,6 +372,12 @@ version: 1.0.4：修复vlm模型调用失败的问题
 - 如果有对我目前插件中提示词有优化想法的可以提个issue我测试测试
 - 推荐使用 `probability` 模式 + 30%概率，可以在保持功能的同时大幅减少API消耗
 
+### 🔄 升级相关
+- **v2.0.0完全向后兼容**：可以直接从任何旧版本升级，无需担心数据丢失
+- **自动修复旧问题**：升级后会自动修复旧版本的配置同步和使用统计问题
+- **渐进式迁移**：新功能会逐步生效，不影响现有功能的正常使用
+- **优雅降级**：即使新功能出现问题，也会自动回退到旧版本逻辑
+
 ## 📚 详细文档
 
 - [图片处理节流功能使用指南](image_processing_throttle_guide.md)
@@ -327,6 +395,8 @@ version: 1.0.4：修复vlm模型调用失败的问题
 <div align="center">
 
 **🎭 Happy meme collecting! 🎭**
+
+**v2.0.0 - 企业级可靠性，零风险升级！**
 
 如果觉得这个插件有用，欢迎给个 ⭐ Star！
 
