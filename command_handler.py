@@ -1,3 +1,4 @@
+import os
 import random
 from pathlib import Path
 
@@ -88,44 +89,26 @@ class CommandHandler:
         else:
             # 按分类统计
             category_stats = {}
-            usage_stats = []
             
             for img_path, img_info in image_index.items():
                 if isinstance(img_info, dict):
                     # 统计分类
                     category = img_info.get('category', '未分类')
                     category_stats[category] = category_stats.get(category, 0) + 1
-                    
-                    # 收集使用统计
-                    usage_count = img_info.get('usage_count', 0)
-                    img_name = Path(img_path).name
-                    usage_stats.append((img_name, usage_count, category))
             
             # 构建统计信息
             status_text += "📊 表情包统计:\n"
             status_text += f"总数量: {total_count}/{self.plugin.max_reg_num} ({total_count/self.plugin.max_reg_num*100:.1f}%)\n\n"
             
-            # 分类统计 - 只显示前3个最多的分类
-            status_text += "📂 分类统计 (前3):\n"
+            # 分类统计 - 只显示前5个最多的分类
+            status_text += "📂 分类统计 (前5):\n"
             sorted_categories = sorted(category_stats.items(), key=lambda x: x[1], reverse=True)
-            for category, count in sorted_categories[:3]:
+            for category, count in sorted_categories[:5]:
                 percentage = count / total_count * 100
                 status_text += f"  {category}: {count}张 ({percentage:.1f}%)\n"
             
-            if len(sorted_categories) > 3:
-                status_text += f"  ...还有{len(sorted_categories)-3}个分类\n"
-            
-            # 使用统计 - 显示前3个最常用的
-            status_text += "\n🔥 最常用表情 (前3):\n"
-            usage_stats.sort(key=lambda x: x[1], reverse=True)
-            top_used = usage_stats[:3]
-            
-            if any(stat[1] > 0 for stat in top_used):
-                for i, (name, count, category) in enumerate(top_used, 1):
-                    if count > 0:
-                        status_text += f"  {i}. {name[:15]}{'...' if len(name) > 15 else ''} - {count}次 [{category}]\n"
-            else:
-                status_text += "  暂无使用记录\n"
+            if len(sorted_categories) > 5:
+                status_text += f"  ...还有{len(sorted_categories)-5}个分类\n"
             
             # 存储统计
             raw_count = len(list(self.plugin.raw_dir.glob("*"))) if self.plugin.raw_dir.exists() else 0
@@ -511,8 +494,359 @@ class CommandHandler:
         except ValueError:
             yield event.plain_result("无效的冷却时间，请输入正整数")
 
+    async def migrate_legacy_data(self, event: AstrMessageEvent):
+        """手动迁移旧版本数据。"""
+        try:
+            yield event.plain_result("开始检查和迁移旧版本数据...")
+            
+            # 强制重新迁移数据
+            migrated_data = await self.plugin._migrate_legacy_data()
+            
+            if migrated_data:
+                yield event.plain_result(f"✅ 成功迁移 {len(migrated_data)} 条记录")
+                
+                # 显示迁移的分类统计
+                category_stats = {}
+                for record in migrated_data.values():
+                    if isinstance(record, dict):
+                        category = record.get('category', '未分类')
+                        category_stats[category] = category_stats.get(category, 0) + 1
+                
+                if category_stats:
+                    stats_text = "迁移的分类统计:\n"
+                    for category, count in sorted(category_stats.items()):
+                        stats_text += f"  {category}: {count}张\n"
+                    yield event.plain_result(stats_text)
+            else:
+                yield event.plain_result("ℹ️ 未发现需要迁移的数据")
+                
+        except Exception as e:
+            logger.error(f"手动迁移失败: {e}")
+            yield event.plain_result(f"❌ 迁移失败: {str(e)}")
+
     def cleanup(self):
         """清理资源。"""
         # CommandHandler 主要是无状态的，清理插件引用即可
         self.plugin = None
         logger.debug("CommandHandler 资源已清理")
+
+    async def list_images(self, event: AstrMessageEvent, category: str = "", limit: str = "10"):
+        """列出表情包，支持按分类筛选。
+        
+        Args:
+            event: 消息事件
+            category: 可选的分类筛选
+            limit: 显示数量限制，默认10张
+        """
+        try:
+            max_limit = int(limit)
+            if max_limit < 1:
+                max_limit = 10
+        except ValueError:
+            max_limit = 10
+
+        image_index = await self.plugin._load_index()
+        
+        if not image_index:
+            yield event.plain_result("暂无表情包数据")
+            return
+
+        # 筛选图片
+        filtered_images = []
+        for img_path, img_info in image_index.items():
+            if isinstance(img_info, dict):
+                img_category = img_info.get('category', '未分类')
+                
+                # 如果指定了分类，只显示该分类的图片
+                if category and img_category != category:
+                    continue
+                
+                # 检查文件是否存在
+                if not Path(img_path).exists():
+                    continue
+                
+                filtered_images.append({
+                    'path': img_path,
+                    'name': Path(img_path).name,
+                    'category': img_category,
+                    'created_at': img_info.get('created_at', 0)
+                })
+
+        if not filtered_images:
+            if category:
+                yield event.plain_result(f"分类 '{category}' 中暂无表情包")
+            else:
+                yield event.plain_result("暂无有效的表情包文件")
+            return
+
+        # 按创建时间排序（最新的在前）
+        filtered_images.sort(key=lambda x: x['created_at'], reverse=True)
+        
+        # 限制显示数量
+        display_images = filtered_images[:max_limit]
+        
+        # 构建标题信息
+        title = f"📋 表情包列表 ({len(display_images)}/{len(filtered_images)})"
+        if category:
+            title += f" - 分类: {category}"
+        
+        # 先发送标题
+        yield event.plain_result(title + "\n💡 使用 /meme delete <序号> 删除指定图片")
+        
+        # 逐个发送图片和信息
+        for i, img in enumerate(display_images, 1):
+            try:
+                # 读取图片并转换为base64
+                b64 = await self.plugin.image_processor_service._file_to_base64(img['path'])
+                
+                # 构建图片信息
+                info_text = f"{i:2d}. {img['name'][:20]}{'...' if len(img['name']) > 20 else ''}\n"
+                info_text += f"分类: {img['category']}"
+                
+                # 发送图片和信息
+                result = event.make_result().base64_image(b64).message(info_text)
+                yield result
+                
+            except Exception as e:
+                # 如果图片读取失败，只发送文本信息
+                logger.warning(f"读取图片失败 {img['path']}: {e}")
+                info_text = f"{i:2d}. {img['name']} [图片读取失败]\n"
+                info_text += f"分类: {img['category']}"
+                yield event.plain_result(info_text)
+        
+        if len(filtered_images) > max_limit:
+            yield event.plain_result(f"...还有 {len(filtered_images) - max_limit} 张图片")
+
+    async def list_images_text_only(self, event: AstrMessageEvent, category: str = "", limit: str = "10"):
+        """列出表情包（仅文本模式），支持按分类筛选。
+        
+        Args:
+            event: 消息事件
+            category: 可选的分类筛选
+            limit: 显示数量限制，默认10张
+        """
+        try:
+            max_limit = int(limit)
+            if max_limit < 1:
+                max_limit = 10
+        except ValueError:
+            max_limit = 10
+
+        image_index = await self.plugin._load_index()
+        
+        if not image_index:
+            yield event.plain_result("暂无表情包数据")
+            return
+
+        # 筛选图片
+        filtered_images = []
+        for img_path, img_info in image_index.items():
+            if isinstance(img_info, dict):
+                img_category = img_info.get('category', '未分类')
+                
+                # 如果指定了分类，只显示该分类的图片
+                if category and img_category != category:
+                    continue
+                
+                # 检查文件是否存在
+                if not Path(img_path).exists():
+                    continue
+                
+                filtered_images.append({
+                    'path': img_path,
+                    'name': Path(img_path).name,
+                    'category': img_category,
+                    'created_at': img_info.get('created_at', 0)
+                })
+
+        if not filtered_images:
+            if category:
+                yield event.plain_result(f"分类 '{category}' 中暂无表情包")
+            else:
+                yield event.plain_result("暂无有效的表情包文件")
+            return
+
+        # 按创建时间排序（最新的在前）
+        filtered_images.sort(key=lambda x: x['created_at'], reverse=True)
+        
+        # 限制显示数量
+        display_images = filtered_images[:max_limit]
+        
+        # 构建显示文本
+        title = f"📋 表情包列表 ({len(display_images)}/{len(filtered_images)})"
+        if category:
+            title += f" - 分类: {category}"
+        
+        result_text = title + "\n\n"
+        
+        for i, img in enumerate(display_images, 1):
+            name = img['name']
+            # 截断过长的文件名
+            if len(name) > 20:
+                name = name[:17] + "..."
+            
+            result_text += f"{i:2d}. {name}\n"
+            result_text += f"    分类: {img['category']}\n"
+        
+        if len(filtered_images) > max_limit:
+            result_text += f"\n...还有 {len(filtered_images) - max_limit} 张图片"
+        
+        result_text += f"\n\n💡 使用 /meme delete <序号> 删除指定图片"
+        
+        yield event.plain_result(result_text)
+
+    async def delete_image(self, event: AstrMessageEvent, identifier: str = ""):
+        """删除指定的表情包。
+        
+        Args:
+            event: 消息事件
+            identifier: 图片标识符，可以是序号、文件名或路径
+        """
+        if not identifier:
+            yield event.plain_result(
+                "用法: /meme delete <序号|文件名>\n"
+                "先使用 /meme list 查看图片列表获取序号"
+            )
+            return
+
+        image_index = await self.plugin._load_index()
+        
+        if not image_index:
+            yield event.plain_result("暂无表情包数据")
+            return
+
+        # 获取所有有效图片
+        valid_images = []
+        for img_path, img_info in image_index.items():
+            if isinstance(img_info, dict) and Path(img_path).exists():
+                valid_images.append({
+                    'path': img_path,
+                    'name': Path(img_path).name,
+                    'category': img_info.get('category', '未分类'),
+                    'created_at': img_info.get('created_at', 0)
+                })
+
+        # 按创建时间排序（与list命令保持一致，最新的在前）
+        valid_images.sort(key=lambda x: x['created_at'], reverse=True)
+
+        target_image = None
+
+        # 尝试按序号查找
+        try:
+            index = int(identifier) - 1  # 转换为0基索引
+            if 0 <= index < len(valid_images):
+                target_image = valid_images[index]
+        except ValueError:
+            # 不是数字，尝试按文件名查找
+            for img in valid_images:
+                if img['name'] == identifier or img['name'].startswith(identifier):
+                    target_image = img
+                    break
+
+        if not target_image:
+            yield event.plain_result(
+                f"未找到图片: {identifier}\n"
+                "请使用 /meme list 查看可用的图片列表"
+            )
+            return
+
+        # 执行删除操作
+        success = await self._delete_image_files(target_image['path'])
+        
+        if success:
+            # 从索引中移除
+            if target_image['path'] in image_index:
+                del image_index[target_image['path']]
+                await self.plugin._save_index(image_index)
+            
+            # 如果使用增强存储系统，同时更新数据库
+            if (hasattr(self.plugin, 'lifecycle_manager') and 
+                self.plugin.lifecycle_manager):
+                try:
+                    await self._delete_from_enhanced_storage(target_image['path'])
+                except Exception as e:
+                    logger.warning(f"更新增强存储系统失败: {e}")
+            
+            yield event.plain_result(
+                f"✅ 已删除表情包:\n"
+                f"文件: {target_image['name']}\n"
+                f"分类: {target_image['category']}"
+            )
+        else:
+            yield event.plain_result(f"❌ 删除失败: {target_image['name']}")
+
+    async def _delete_image_files(self, img_path: str) -> bool:
+        """删除图片文件（raw目录和categories目录）。
+        
+        Args:
+            img_path: 图片路径
+            
+        Returns:
+            bool: 是否删除成功
+        """
+        try:
+            deleted_files = []
+            
+            # 删除主文件（通常在raw目录）
+            if Path(img_path).exists():
+                Path(img_path).unlink()
+                deleted_files.append(img_path)
+                logger.info(f"已删除主文件: {img_path}")
+            
+            # 查找并删除categories目录中的对应文件
+            if hasattr(self.plugin, 'categories_dir') and self.plugin.categories_dir:
+                img_name = Path(img_path).name
+                
+                # 遍历所有分类目录
+                for category_dir in self.plugin.categories_dir.iterdir():
+                    if category_dir.is_dir():
+                        category_file = category_dir / img_name
+                        if category_file.exists():
+                            category_file.unlink()
+                            deleted_files.append(str(category_file))
+                            logger.info(f"已删除分类文件: {category_file}")
+            
+            logger.info(f"删除操作完成，共删除 {len(deleted_files)} 个文件")
+            return len(deleted_files) > 0
+            
+        except Exception as e:
+            logger.error(f"删除图片文件失败: {e}")
+            return False
+
+    async def _delete_from_enhanced_storage(self, img_path: str):
+        """从增强存储系统中删除记录。
+        
+        Args:
+            img_path: 图片路径
+        """
+        try:
+            if not (hasattr(self.plugin, 'lifecycle_manager') and 
+                   self.plugin.lifecycle_manager):
+                return
+            
+            # 查找对应的生命周期记录
+            records = await self.plugin.lifecycle_manager.get_files_by_path(img_path)
+            
+            for record in records:
+                # 标记为删除状态
+                from .storage.models import ProcessingStatus
+                await self.plugin.lifecycle_manager.update_processing_status(
+                    record.record_id, 
+                    ProcessingStatus.MARKED_FOR_DELETION,
+                    failure_reason="用户手动删除"
+                )
+                
+                # 记录删除事件
+                if (hasattr(self.plugin, 'statistics_tracker') and 
+                    self.plugin.statistics_tracker):
+                    from .storage.models import ProcessingEventType
+                    await self.plugin.statistics_tracker.record_processing_event(
+                        ProcessingEventType.IMAGE_DELETED,
+                        metadata={"file_path": img_path, "deletion_type": "manual"}
+                    )
+            
+            logger.info(f"已更新增强存储系统记录: {img_path}")
+            
+        except Exception as e:
+            logger.error(f"更新增强存储系统失败: {e}")
+            # 不抛出异常，避免影响主删除流程

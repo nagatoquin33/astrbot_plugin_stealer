@@ -169,7 +169,7 @@ class EventHandler:
                 logger.info("使用增强存储系统进行raw目录清理")
                 
                 # 使用清理管理器进行状态感知清理
-                from ..storage.models import RetentionPolicy
+                from .storage.models import RetentionPolicy
                 
                 # 创建保留策略
                 retention_policy = RetentionPolicy(
@@ -271,7 +271,7 @@ class EventHandler:
             logger.error(f"清理目录时发生未预期错误: {e}", exc_info=True)
 
     async def _enforce_capacity(self, image_index: dict):
-        """执行容量控制，删除最不常用的图片。"""
+        """执行容量控制，删除最旧的图片。"""
         try:
             # 如果启用了增强存储系统，使用新的配额管理器
             if self.quota_manager:
@@ -314,18 +314,15 @@ class EventHandler:
                 return
             image_items = []
             for file_path, image_info in image_index.items():
-                usage_count = (
-                    int(image_info.get("usage_count", 0))
-                    if isinstance(image_info, dict)
-                    else 0
-                )
                 created_at = (
                     int(image_info.get("created_at", 0))
                     if isinstance(image_info, dict)
                     else 0
                 )
-                image_items.append((file_path, usage_count, created_at))
-            image_items.sort(key=lambda x: (x[1], x[2]))
+                image_items.append((file_path, created_at))
+            
+            # 按创建时间排序，最旧的在前
+            image_items.sort(key=lambda x: x[1])
 
             # 计算需要删除的数量：当达到上限时一次性删除10个最旧的图片
             # 如果超出数量少于10个，则只删除超出部分

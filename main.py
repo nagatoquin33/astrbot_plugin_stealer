@@ -327,6 +327,12 @@ class StealerPlugin(Star):
                     f"已启动容量控制任务，周期: {self.capacity_control_interval}分钟"
                 )
 
+            # 人格注入维护任务
+            self.task_scheduler.create_task(
+                "persona_maintenance_loop", self._persona_maintenance_loop()
+            )
+            logger.info("已启动人格注入维护任务，周期: 5分钟")
+
             # 加载并注入人格
             personas = self.context.provider_manager.personas
             self.persona_backup = copy.deepcopy(personas)
@@ -404,12 +410,31 @@ class StealerPlugin(Star):
         try:
             # 恢复人格
             personas = self.context.provider_manager.personas
-            for persona, persona_backup in zip(personas, self.persona_backup):
-                persona["prompt"] = persona_backup["prompt"]
+            injection_marker = "<!-- STEALER_PLUGIN_EMOTION_INJECTION -->"
+            
+            for i, persona in enumerate(personas):
+                try:
+                    # 确保备份索引存在
+                    if i >= len(self.persona_backup):
+                        logger.warning(f"备份索引 {i} 不存在，跳过人格恢复")
+                        continue
+                    
+                    persona_backup = self.persona_backup[i]
+                    current_prompt = persona.get("prompt", "")
+                    
+                    # 如果包含我们的注入标记，则恢复到备份状态
+                    if injection_marker in current_prompt:
+                        persona["prompt"] = persona_backup.get("prompt", "")
+                        logger.debug(f"已恢复人格 {i} 到原始状态")
+                    
+                except Exception as e:
+                    logger.error(f"恢复人格 {i} 时出错: {e}")
+                    continue
 
             # 使用任务调度器停止所有后台任务
             self.task_scheduler.cancel_task("raw_cleanup_loop")
             self.task_scheduler.cancel_task("capacity_control_loop")
+            self.task_scheduler.cancel_task("persona_maintenance_loop")
 
             # 清理增强存储系统
             if hasattr(self, "quota_manager") and self.quota_manager:
@@ -469,6 +494,11 @@ class StealerPlugin(Star):
 
         该方法会获取当前的人格配置，在原始人格的基础上添加情绪选择提醒，
         并保存原始人格的备份以便在插件终止时恢复。
+        
+        修复了重复注入和运行久后失效的问题：
+        1. 每次都重新获取当前人格状态作为备份基准
+        2. 检查是否已经注入过，避免重复注入
+        3. 使用标记来识别已注入的人格
         """
         try:
             from astrbot.api import logger
@@ -477,19 +507,56 @@ class StealerPlugin(Star):
             categories_str = ", ".join(self.categories)
 
             # 生成系统提示添加内容
-            # 替换提示词中的占位符
             head_with_categories = self.prompt_head.replace(
                 "{categories}", categories_str
             )
             sys_prompt_add = f"\n\n{head_with_categories}\n{self.prompt_tail}"
-
-            # 获取当前人格配置并注入
+            
+            # 用于识别已注入人格的标记
+            injection_marker = "<!-- STEALER_PLUGIN_EMOTION_INJECTION -->"
+            
+            # 获取当前人格配置
             personas = self.context.provider_manager.personas
-            for persona, persona_backup in zip(personas, self.persona_backup):
-                # 每次都从备份恢复原始状态，避免人格被多次叠加修改
-                persona["prompt"] = persona_backup["prompt"]
-                # 再添加自定义提示词
-                persona["prompt"] += sys_prompt_add
+            
+            # 如果备份为空或长度不匹配，重新创建备份
+            if not self.persona_backup or len(self.persona_backup) != len(personas):
+                logger.info("重新创建人格备份")
+                self.persona_backup = copy.deepcopy(personas)
+            
+            # 注入情绪选择提醒
+            for i, persona in enumerate(personas):
+                try:
+                    # 确保备份索引存在
+                    if i >= len(self.persona_backup):
+                        logger.warning(f"备份索引 {i} 不存在，跳过人格注入")
+                        continue
+                    
+                    persona_backup = self.persona_backup[i]
+                    current_prompt = persona.get("prompt", "")
+                    
+                    # 检查是否已经注入过
+                    if injection_marker in current_prompt:
+                        logger.debug(f"人格 {i} 已经注入过情绪选择提醒，跳过")
+                        continue
+                    
+                    # 从备份恢复原始状态，然后注入
+                    original_prompt = persona_backup.get("prompt", "")
+                    
+                    # 如果当前prompt与备份不同，说明可能被其他插件修改了
+                    # 这种情况下更新备份为当前状态（去除我们的注入内容）
+                    if current_prompt != original_prompt and injection_marker not in current_prompt:
+                        logger.info(f"检测到人格 {i} 被外部修改，更新备份")
+                        self.persona_backup[i]["prompt"] = current_prompt
+                        original_prompt = current_prompt
+                    
+                    # 注入情绪选择提醒
+                    persona["prompt"] = original_prompt + injection_marker + sys_prompt_add
+                    
+                    logger.debug(f"已为人格 {i} 注入情绪选择提醒")
+                    
+                except Exception as e:
+                    logger.error(f"处理人格 {i} 时出错: {e}")
+                    continue
 
             logger.info("已成功注入情绪选择提醒到人格配置中")
         except Exception as e:
@@ -529,8 +596,14 @@ class StealerPlugin(Star):
             Dict[str, Any]: 键为文件路径，值为包含 category 与 tags 的字典。
         """
         try:
-            # 使用缓存服务加载索引
-            return self.cache_service.get_cache("index_cache") or {}
+            # 首先尝试从缓存服务加载索引
+            index_data = self.cache_service.get_cache("index_cache") or {}
+            
+            # 如果缓存为空，尝试从旧版本位置迁移数据
+            if not index_data:
+                index_data = await self._migrate_legacy_data()
+            
+            return index_data
         except OSError as e:
             logger.error(f"索引文件IO错误: {e}")
             return {}
@@ -539,6 +612,134 @@ class StealerPlugin(Star):
             return {}
         except Exception as e:
             logger.error(f"加载索引失败: {e}", exc_info=True)
+            return {}
+
+    async def _migrate_legacy_data(self) -> dict[str, Any]:
+        """迁移旧版本数据到新版本。
+        
+        Returns:
+            Dict[str, Any]: 迁移后的索引数据
+        """
+        try:
+            logger.info("开始检查和迁移旧版本数据...")
+            
+            # 可能的旧版本数据路径
+            possible_paths = [
+                # 旧版本可能使用的路径
+                self.base_dir / "index.json",
+                self.base_dir / "image_index.json", 
+                self.base_dir / "cache" / "index.json",
+                # 其他可能的路径
+                Path("data/plugin_data/astrbot_plugin_stealer/index.json"),
+                Path("data/plugin_data/astrbot_plugin_stealer/image_index.json"),
+            ]
+            
+            migrated_data = {}
+            
+            for old_path in possible_paths:
+                if old_path.exists():
+                    try:
+                        logger.info(f"发现旧版本索引文件: {old_path}")
+                        with open(old_path, 'r', encoding='utf-8') as f:
+                            old_data = json.load(f)
+                        
+                        if isinstance(old_data, dict) and old_data:
+                            logger.info(f"从 {old_path} 迁移了 {len(old_data)} 条记录")
+                            migrated_data.update(old_data)
+                            
+                            # 备份旧文件
+                            backup_path = old_path.with_suffix('.json.backup')
+                            shutil.copy2(old_path, backup_path)
+                            logger.info(f"已备份旧索引文件到: {backup_path}")
+                            
+                    except Exception as e:
+                        logger.error(f"迁移文件 {old_path} 失败: {e}")
+                        continue
+            
+            # 检查categories目录中的图片文件，重建索引
+            if not migrated_data and self.categories_dir.exists():
+                logger.info("尝试从categories目录重建索引...")
+                migrated_data = await self._rebuild_index_from_files()
+            
+            # 如果成功迁移了数据，保存到新的缓存系统
+            if migrated_data:
+                logger.info(f"成功迁移 {len(migrated_data)} 条索引记录")
+                self.cache_service.set_cache("index_cache", migrated_data, persist=True)
+            else:
+                logger.info("未发现需要迁移的旧版本数据")
+            
+            return migrated_data
+            
+        except Exception as e:
+            logger.error(f"数据迁移失败: {e}", exc_info=True)
+            return {}
+
+    async def _rebuild_index_from_files(self) -> dict[str, Any]:
+        """从现有的分类文件重建索引。
+        
+        Returns:
+            Dict[str, Any]: 重建的索引数据
+        """
+        try:
+            rebuilt_index = {}
+            
+            if not self.categories_dir.exists():
+                return rebuilt_index
+            
+            # 遍历所有分类目录
+            for category_dir in self.categories_dir.iterdir():
+                if not category_dir.is_dir():
+                    continue
+                
+                category_name = category_dir.name
+                logger.info(f"重建分类 '{category_name}' 的索引...")
+                
+                # 遍历分类目录中的图片文件
+                for img_file in category_dir.iterdir():
+                    if not img_file.is_file():
+                        continue
+                    
+                    # 检查是否是图片文件
+                    if img_file.suffix.lower() not in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
+                        continue
+                    
+                    # 尝试找到对应的raw文件
+                    raw_path = None
+                    if self.raw_dir.exists():
+                        # 查找同名文件
+                        potential_raw = self.raw_dir / img_file.name
+                        if potential_raw.exists():
+                            raw_path = str(potential_raw)
+                        else:
+                            # 查找相似名称的文件
+                            for raw_file in self.raw_dir.iterdir():
+                                if raw_file.is_file() and raw_file.stem == img_file.stem:
+                                    raw_path = str(raw_file)
+                                    break
+                    
+                    # 如果没找到raw文件，使用categories中的文件路径
+                    if not raw_path:
+                        raw_path = str(img_file)
+                    
+                    # 计算文件哈希
+                    try:
+                        file_hash = await self.image_processor_service._compute_hash(str(img_file))
+                    except:
+                        file_hash = ""
+                    
+                    # 创建索引记录
+                    rebuilt_index[raw_path] = {
+                        "hash": file_hash,
+                        "category": category_name,
+                        "created_at": int(img_file.stat().st_mtime),
+                        "migrated": True  # 标记为迁移数据
+                    }
+            
+            logger.info(f"从文件重建了 {len(rebuilt_index)} 条索引记录")
+            return rebuilt_index
+            
+        except Exception as e:
+            logger.error(f"从文件重建索引失败: {e}", exc_info=True)
             return {}
 
     async def _save_index(self, idx: dict[str, Any]):
@@ -877,6 +1078,46 @@ class StealerPlugin(Star):
                 # 发生错误后继续循环
                 continue
 
+    async def _persona_maintenance_loop(self):
+        """人格注入维护循环任务。
+        
+        定期检查人格注入状态，确保情绪选择提醒始终有效。
+        这可以防止人格在运行过程中被其他插件或系统修改后失效。
+        """
+        while True:
+            try:
+                # 每5分钟检查一次
+                await asyncio.sleep(5 * 60)
+                
+                logger.debug("开始执行人格注入维护检查")
+                
+                # 检查当前人格状态
+                personas = self.context.provider_manager.personas
+                injection_marker = "<!-- STEALER_PLUGIN_EMOTION_INJECTION -->"
+                needs_injection = False
+                
+                for i, persona in enumerate(personas):
+                    current_prompt = persona.get("prompt", "")
+                    if injection_marker not in current_prompt:
+                        needs_injection = True
+                        logger.info(f"检测到人格 {i} 的情绪注入已失效")
+                        break
+                
+                # 如果需要重新注入，执行注入
+                if needs_injection:
+                    logger.info("执行人格注入维护")
+                    await self._reload_personas()
+                else:
+                    logger.debug("人格注入状态正常")
+
+            except asyncio.CancelledError:
+                logger.info("人格注入维护任务已取消")
+                break
+            except Exception as e:
+                logger.error(f"人格注入维护任务发生错误: {e}", exc_info=True)
+                # 发生错误后继续循环
+                continue
+
     # 已移除_scan_register_emoji_folder方法（扫描系统表情包目录功能，无实际用途）
 
     async def _clean_raw_directory(self):
@@ -885,7 +1126,7 @@ class StealerPlugin(Star):
         await self.event_handler._clean_raw_directory()
 
     async def _enforce_capacity(self, idx: dict):
-        """执行容量控制，删除低使用频率/旧文件。"""
+        """执行容量控制，删除最旧的图片。"""
         # 委托给 EventHandler 类处理
         await self.event_handler._enforce_capacity(idx)
 
@@ -975,10 +1216,7 @@ class StealerPlugin(Star):
         if not emoji_path:
             return False
 
-        # 3. 更新使用次数
-        await self._update_usage_count(emoji_path)
-
-        # 4. 发送表情包
+        # 3. 发送表情包
         await self._send_emoji_with_text(event, emoji_path, cleaned_text)
 
         logger.debug("已发送表情包")
@@ -1022,23 +1260,6 @@ class StealerPlugin(Star):
         except Exception as e:
             logger.error(f"选择表情包失败: {e}")
             return None
-
-    async def _update_usage_count(self, emoji_path: str):
-        """更新表情包使用次数。"""
-        try:
-            image_index = await self._load_index()
-            image_record = image_index.get(emoji_path)
-            if isinstance(image_record, dict):
-                old_count = int(image_record.get("usage_count", 0))
-                image_record["usage_count"] = old_count + 1
-                image_record["last_used"] = int(asyncio.get_event_loop().time())
-                image_index[emoji_path] = image_record
-                await self._save_index(image_index)
-                logger.info(
-                    f"已更新表情包使用次数: {Path(emoji_path).name} ({old_count} -> {image_record['usage_count']})"
-                )
-        except Exception as e:
-            logger.error(f"更新使用次数失败: {e}")
 
     async def _send_emoji_with_text(
         self, event: AstrMessageEvent, emoji_path: str, cleaned_text: str
@@ -1404,3 +1625,67 @@ class StealerPlugin(Star):
             except Exception as e:
                 yield event.plain_result(f"图片 {i + 1}: 处理出错: {str(e)}")
                 logger.error(f"调试图片处理失败: {e}", exc_info=True)
+
+    @filter.command("meme list")
+    async def list_images(self, event: AstrMessageEvent, category: str = "", limit: str = "10"):
+        """列出表情包（显示图片）。用法: /meme list [分类] [数量]"""
+        async for result in self.command_handler.list_images(event, category, limit):
+            yield result
+
+    @filter.command("meme list_text")
+    async def list_images_text(self, event: AstrMessageEvent, category: str = "", limit: str = "10"):
+        """列出表情包（仅文本）。用法: /meme list_text [分类] [数量]"""
+        async for result in self.command_handler.list_images_text_only(event, category, limit):
+            yield result
+
+    @filter.permission_type(PermissionType.ADMIN)
+    @filter.command("meme delete")
+    async def delete_image(self, event: AstrMessageEvent, identifier: str = ""):
+        """删除指定表情包。用法: /meme delete <序号|文件名>"""
+        async for result in self.command_handler.delete_image(event, identifier):
+            yield result
+
+    @filter.permission_type(PermissionType.ADMIN)
+    @filter.command("meme migrate")
+    async def migrate_data(self, event: AstrMessageEvent):
+        """迁移旧版本数据。用法: /meme migrate"""
+        async for result in self.command_handler.migrate_legacy_data(event):
+            yield result
+
+    @filter.permission_type(PermissionType.ADMIN)
+    @filter.command("meme reload_persona")
+    async def reload_persona(self, event: AstrMessageEvent):
+        """重新注入人格情绪选择提醒。用法: /meme reload_persona"""
+        try:
+            await self._reload_personas()
+            yield event.plain_result("✅ 已重新注入人格情绪选择提醒")
+        except Exception as e:
+            logger.error(f"重新注入人格失败: {e}")
+            yield event.plain_result(f"❌ 重新注入人格失败: {e}")
+
+    @filter.permission_type(PermissionType.ADMIN)
+    @filter.command("meme persona_status")
+    async def persona_status(self, event: AstrMessageEvent):
+        """检查人格注入状态。用法: /meme persona_status"""
+        try:
+            personas = self.context.provider_manager.personas
+            injection_marker = "<!-- STEALER_PLUGIN_EMOTION_INJECTION -->"
+            
+            status_text = "人格注入状态:\n"
+            
+            for i, persona in enumerate(personas):
+                current_prompt = persona.get("prompt", "")
+                persona_name = persona.get("name", f"人格{i+1}")
+                
+                if injection_marker in current_prompt:
+                    status_text += f"✅ {persona_name}: 已注入\n"
+                else:
+                    status_text += f"❌ {persona_name}: 未注入\n"
+            
+            status_text += f"\n备份状态: {'✅ 正常' if self.persona_backup else '❌ 无备份'}"
+            status_text += f"\n维护任务: ✅ 运行中 (每5分钟检查)"
+            
+            yield event.plain_result(status_text)
+        except Exception as e:
+            logger.error(f"检查人格状态失败: {e}")
+            yield event.plain_result(f"❌ 检查人格状态失败: {e}")
