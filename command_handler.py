@@ -164,7 +164,7 @@ class CommandHandler:
         """调试命令：处理当前消息中的图片并显示详细信息。"""
         # 收集所有图片组件
         image_components = [
-            comp for comp in event.message_obj.message if isinstance(comp, Image)
+            comp for comp in event.get_messages() if isinstance(comp, Image)
         ]
 
         if not image_components:

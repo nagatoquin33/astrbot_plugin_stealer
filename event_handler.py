@@ -115,7 +115,7 @@ class EventHandler:
         # 收集所有图片组件
         imgs: list[Image] = [
             comp
-            for comp in event.message_obj.message
+            for comp in event.get_messages()
             if isinstance(comp, Image)
         ]
 

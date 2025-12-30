@@ -1577,7 +1577,7 @@ class Main(Star):
         """调试命令：处理当前消息中的图片并显示详细信息"""
 
         # 收集所有图片组件
-        imgs = [comp for comp in event.message_obj.message if isinstance(comp, Image)]
+        imgs = [comp for comp in event.get_messages() if isinstance(comp, Image)]
 
         if not imgs:
             yield event.plain_result("当前消息中没有图片")
