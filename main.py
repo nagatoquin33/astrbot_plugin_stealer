@@ -1312,40 +1312,15 @@ class Main(Star):
 
     @filter.command("meme set_vision")
     async def set_vision(self, event: AstrMessageEvent, provider_id: str = ""):
-        if not provider_id:
-            yield event.plain_result("请提供视觉模型的 provider_id")
-            return
-        # 同时更新实例属性和配置服务中的值，确保同步
-        self.vision_provider_id = provider_id
-        self.config_service.vision_provider_id = provider_id
-        self._persist_config()
-        yield event.plain_result(f"已设置视觉模型: {provider_id}")
+        """设置视觉模型。"""
+        async for result in self.command_handler.set_vision(event, provider_id):
+            yield result
 
     @filter.command("meme status")
     async def status(self, event: AstrMessageEvent):
         """显示当前偷取状态与后台标识。"""
-        st_on = "开启" if self.steal_emoji else "关闭"
-        st_auto = "开启" if self.auto_send else "关闭"
-
-        idx = await self._load_index()
-        # 添加视觉模型信息
-        vision_model = self.vision_provider_id or "未设置（将使用当前会话默认模型）"
-
-        status_text = "插件状态:\n"
-        status_text += f"偷取: {st_on}\n"
-        status_text += f"自动发送: {st_auto}\n"
-        status_text += f"已注册数量: {len(idx)}\n"
-        status_text += f"概率: {self.emoji_chance}\n"
-        status_text += f"上限: {self.max_reg_num}\n"
-        status_text += f"替换: {self.do_replace}\n"
-        status_text += f"审核: {self.content_filtration}\n"
-        status_text += f"视觉模型: {vision_model}\n\n"
-        status_text += "后台任务:\n"
-        status_text += f"Raw清理: {'启用' if self.enable_raw_cleanup else '禁用'} ({self.raw_cleanup_interval}min)\n"
-        status_text += f"容量控制: {'启用' if self.enable_capacity_control else '禁用'} ({self.capacity_control_interval}min)\n\n"
-        status_text += "使用 /meme task_status 查看详细任务状态"
-
-        yield event.plain_result(status_text)
+        async for result in self.command_handler.status(event):
+            yield result
 
 
     @filter.command("meme clean")
@@ -1418,6 +1393,9 @@ class Main(Star):
                     yield result
             else:
                 yield event.plain_result("用法: /meme task capacity <on|off|interval> [分钟数]")
+        elif task_type == "status":
+            # 显示任务状态 - 重定向到主状态命令
+            yield event.plain_result("请使用 /meme status 查看完整状态信息")
         else:
             yield event.plain_result("用法: /meme task <cleanup|capacity> <on|off|interval> [值]")
 
@@ -1547,101 +1525,21 @@ class Main(Star):
     @filter.permission_type(PermissionType.ADMIN)
     @filter.command("meme push")
     async def push(self, event: AstrMessageEvent, category: str = "", alias: str = ""):
-        if not self.base_dir:
-            yield event.plain_result("插件未正确配置，缺少图片存储目录")
-            return
-        if alias:
-            aliases = await self._load_aliases()
-            if alias in aliases:
-                category = aliases[alias]
-            else:
-                yield event.plain_result("别名不存在")
-                return
-        cat = category or (self.categories[0] if self.categories else "happy")
-        cat_dir = self.base_dir / "categories" / cat
-        if not cat_dir.exists():
-            yield event.plain_result("分类不存在")
-            return
-        files = [p for p in cat_dir.iterdir() if p.is_file()]
-        if not files:
-            yield event.plain_result("该分类暂无表情包")
-            return
-        pick = random.choice(files)
-        b64 = await self.image_processor_service._file_to_base64(pick.as_posix())
-        # 直接发送base64图片
-        yield event.make_result().base64_image(b64)
+        """手动推送指定分类的表情包。"""
+        async for result in self.command_handler.push(event, category, alias):
+            yield result
 
     @filter.permission_type(PermissionType.ADMIN)
     @filter.command("meme debug_image")
     async def debug_image(self, event: AstrMessageEvent):
         """调试命令：处理当前消息中的图片并显示详细信息"""
-
-        # 收集所有图片组件
-        imgs = [comp for comp in event.get_messages() if isinstance(comp, Image)]
-
-        if not imgs:
-            yield event.plain_result("当前消息中没有图片")
-            return
-
-        for i, img in enumerate(imgs):
-            try:
-                # 转换图片到临时文件路径
-                temp_path = await img.convert_to_file_path()
-                yield event.plain_result(f"图片 {i + 1}: 临时路径: {temp_path}")
-
-                # 临时文件由框架创建，无需安全检查
-                # 安全检查会在 process_image 中处理最终存储路径时进行
-
-                # 确保临时文件存在且可访问
-                if not os.path.exists(temp_path):
-                    yield event.plain_result(f"图片 {i + 1}: 临时文件不存在，跳过处理")
-                    continue
-
-                # 使用统一的图片处理方法
-                yield event.plain_result(f"图片 {i + 1}: 开始处理...")
-                success, idx = await self._process_image(event, temp_path, is_temp=True)
-
-                if success:
-                    if idx:
-                        await self._save_index(idx)
-                        yield event.plain_result(
-                            f"图片 {i + 1}: 处理成功！已保存到索引"
-                        )
-                        # 显示处理结果
-                        for img_path, img_info in idx.items():
-                            if os.path.exists(img_path):
-                                yield event.plain_result(
-                                    f"图片 {i + 1}: 保存路径: {img_path}"
-                                )
-                                yield event.plain_result(
-                                    f"图片 {i + 1}: 分类: {img_info.get('category', '未知')}"
-                                )
-                                yield event.plain_result(
-                                    f"图片 {i + 1}: 情绪: {img_info.get('emotion', '未知')}"
-                                )
-                                yield event.plain_result(
-                                    f"图片 {i + 1}: 描述: {img_info.get('desc', '无')}"
-                                )
-                    else:
-                        yield event.plain_result(
-                            f"图片 {i + 1}: 处理成功，但没有生成索引"
-                        )
-                else:
-                    yield event.plain_result(f"图片 {i + 1}: 处理失败")
-            except Exception as e:
-                yield event.plain_result(f"图片 {i + 1}: 处理出错: {str(e)}")
-                logger.error(f"调试图片处理失败: {e}", exc_info=True)
+        async for result in self.command_handler.debug_image(event):
+            yield result
 
     @filter.command("meme list")
     async def list_images(self, event: AstrMessageEvent, category: str = "", limit: str = "10"):
-        """列出表情包（显示图片）。用法: /meme list [分类] [数量]"""
+        """列出表情包。用法: /meme list [分类] [数量]"""
         async for result in self.command_handler.list_images(event, category, limit):
-            yield result
-
-    @filter.command("meme list_text")
-    async def list_images_text(self, event: AstrMessageEvent, category: str = "", limit: str = "10"):
-        """列出表情包（仅文本）。用法: /meme list_text [分类] [数量]"""
-        async for result in self.command_handler.list_images_text_only(event, category, limit):
             yield result
 
     @filter.permission_type(PermissionType.ADMIN)

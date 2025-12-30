@@ -47,14 +47,11 @@ class CommandHandler:
         if not provider_id:
             yield event.plain_result("请提供视觉模型的 provider_id")
             return
+        # 同时更新实例属性和配置服务中的值，确保同步
         self.plugin.vision_provider_id = provider_id
+        self.plugin.config_service.vision_provider_id = provider_id
         self.plugin._persist_config()
         yield event.plain_result(f"已设置视觉模型: {provider_id}")
-
-    async def show_providers(self, event: AstrMessageEvent):
-        """显示当前视觉模型。"""
-        vision_provider = self.plugin.vision_provider_id or "当前会话"
-        yield event.plain_result(f"视觉模型: {vision_provider}")
 
     async def status(self, event: AstrMessageEvent):
         """显示插件状态和详细的表情包统计信息。"""
@@ -370,41 +367,6 @@ class CommandHandler:
             logger.error(f"容量控制失败: {e}")
             yield event.plain_result(f"容量控制失败: {str(e)}")
 
-    async def task_status(self, event: AstrMessageEvent):
-        """显示后台任务状态。"""
-        status_text = "后台任务状态:\n\n"
-
-        # Raw清理任务
-        raw_cleanup_status = "启用" if self.plugin.enable_raw_cleanup else "禁用"
-        status_text += "📁 Raw目录清理:\n"
-        status_text += f"  状态: {raw_cleanup_status}\n"
-        status_text += f"  周期: {self.plugin.raw_cleanup_interval}分钟\n"
-        status_text += f"  保留期限: {self.plugin.raw_retention_minutes}分钟\n\n"
-
-        # 容量控制任务
-        capacity_status = "启用" if self.plugin.enable_capacity_control else "禁用"
-        status_text += "📊 容量控制:\n"
-        status_text += f"  状态: {capacity_status}\n"
-        status_text += f"  周期: {self.plugin.capacity_control_interval}分钟\n"
-        status_text += f"  上限: {self.plugin.max_reg_num}张\n"
-        status_text += f"  替换: {'是' if self.plugin.do_replace else '否'}\n\n"
-
-        # 任务运行状态
-        raw_task_running = self.plugin.task_scheduler.is_task_running(
-            "raw_cleanup_loop"
-        )
-        capacity_task_running = self.plugin.task_scheduler.is_task_running(
-            "capacity_control_loop"
-        )
-
-        status_text += "运行状态:\n"
-        status_text += f"  Raw清理任务: {'运行中' if raw_task_running else '已停止'}\n"
-        status_text += (
-            f"  容量控制任务: {'运行中' if capacity_task_running else '已停止'}"
-        )
-
-        yield event.plain_result(status_text)
-
     async def toggle_raw_cleanup(self, event: AstrMessageEvent, action: str = ""):
         """启用/禁用raw目录清理任务。"""
         if action not in ["on", "off"]:
@@ -648,13 +610,14 @@ class CommandHandler:
         self.plugin = None
         logger.debug("CommandHandler 资源已清理")
 
-    async def list_images(self, event: AstrMessageEvent, category: str = "", limit: str = "10"):
+    async def list_images(self, event: AstrMessageEvent, category: str = "", limit: str = "10", show_images: bool = True):
         """列出表情包，支持按分类筛选。
         
         Args:
             event: 消息事件
             category: 可选的分类筛选
             limit: 显示数量限制，默认10张
+            show_images: 是否显示图片，默认True
         """
         try:
             max_limit = int(limit)
@@ -703,115 +666,63 @@ class CommandHandler:
         # 限制显示数量
         display_images = filtered_images[:max_limit]
         
-        # 构建标题信息
-        title = f"📋 表情包列表 ({len(display_images)}/{len(filtered_images)})"
-        if category:
-            title += f" - 分类: {category}"
-        
-        # 先发送标题
-        yield event.plain_result(title + "\n💡 使用 /meme delete <序号> 删除指定图片")
-        
-        # 逐个发送图片和信息
-        for i, img in enumerate(display_images, 1):
-            try:
-                # 读取图片并转换为base64
-                b64 = await self.plugin.image_processor_service._file_to_base64(img['path'])
-                
-                # 构建图片信息
-                info_text = f"{i:2d}. {img['name'][:20]}{'...' if len(img['name']) > 20 else ''}\n"
-                info_text += f"分类: {img['category']}"
-                
-                # 发送图片和信息
-                result = event.make_result().base64_image(b64).message(info_text)
-                yield result
-                
-            except Exception as e:
-                # 如果图片读取失败，只发送文本信息
-                logger.warning(f"读取图片失败 {img['path']}: {e}")
-                info_text = f"{i:2d}. {img['name']} [图片读取失败]\n"
-                info_text += f"分类: {img['category']}"
-                yield event.plain_result(info_text)
-        
-        if len(filtered_images) > max_limit:
-            yield event.plain_result(f"...还有 {len(filtered_images) - max_limit} 张图片")
-
-    async def list_images_text_only(self, event: AstrMessageEvent, category: str = "", limit: str = "10"):
-        """列出表情包（仅文本模式），支持按分类筛选。
-        
-        Args:
-            event: 消息事件
-            category: 可选的分类筛选
-            limit: 显示数量限制，默认10张
-        """
-        try:
-            max_limit = int(limit)
-            if max_limit < 1:
-                max_limit = 10
-        except ValueError:
-            max_limit = 10
-
-        image_index = await self.plugin._load_index()
-        
-        if not image_index:
-            yield event.plain_result("暂无表情包数据")
-            return
-
-        # 筛选图片
-        filtered_images = []
-        for img_path, img_info in image_index.items():
-            if isinstance(img_info, dict):
-                img_category = img_info.get('category', '未分类')
-                
-                # 如果指定了分类，只显示该分类的图片
-                if category and img_category != category:
-                    continue
-                
-                # 检查文件是否存在
-                if not Path(img_path).exists():
-                    continue
-                
-                filtered_images.append({
-                    'path': img_path,
-                    'name': Path(img_path).name,
-                    'category': img_category,
-                    'created_at': img_info.get('created_at', 0)
-                })
-
-        if not filtered_images:
+        if show_images:
+            # 显示图片模式
+            # 构建标题信息
+            title = f"📋 表情包列表 ({len(display_images)}/{len(filtered_images)})"
             if category:
-                yield event.plain_result(f"分类 '{category}' 中暂无表情包")
-            else:
-                yield event.plain_result("暂无有效的表情包文件")
-            return
-
-        # 按创建时间排序（最新的在前）
-        filtered_images.sort(key=lambda x: x['created_at'], reverse=True)
-        
-        # 限制显示数量
-        display_images = filtered_images[:max_limit]
-        
-        # 构建显示文本
-        title = f"📋 表情包列表 ({len(display_images)}/{len(filtered_images)})"
-        if category:
-            title += f" - 分类: {category}"
-        
-        result_text = title + "\n\n"
-        
-        for i, img in enumerate(display_images, 1):
-            name = img['name']
-            # 截断过长的文件名
-            if len(name) > 20:
-                name = name[:17] + "..."
+                title += f" - 分类: {category}"
             
-            result_text += f"{i:2d}. {name}\n"
-            result_text += f"    分类: {img['category']}\n"
-        
-        if len(filtered_images) > max_limit:
-            result_text += f"\n...还有 {len(filtered_images) - max_limit} 张图片"
-        
-        result_text += f"\n\n💡 使用 /meme delete <序号> 删除指定图片"
-        
-        yield event.plain_result(result_text)
+            # 先发送标题
+            yield event.plain_result(title + "\n💡 使用 /meme delete <序号> 删除指定图片")
+            
+            # 逐个发送图片和信息
+            for i, img in enumerate(display_images, 1):
+                try:
+                    # 读取图片并转换为base64
+                    b64 = await self.plugin.image_processor_service._file_to_base64(img['path'])
+                    
+                    # 构建图片信息
+                    info_text = f"{i:2d}. {img['name'][:20]}{'...' if len(img['name']) > 20 else ''}\n"
+                    info_text += f"分类: {img['category']}"
+                    
+                    # 发送图片和信息
+                    result = event.make_result().base64_image(b64).message(info_text)
+                    yield result
+                    
+                except Exception as e:
+                    # 如果图片读取失败，只发送文本信息
+                    logger.warning(f"读取图片失败 {img['path']}: {e}")
+                    info_text = f"{i:2d}. {img['name']} [图片读取失败]\n"
+                    info_text += f"分类: {img['category']}"
+                    yield event.plain_result(info_text)
+            
+            if len(filtered_images) > max_limit:
+                yield event.plain_result(f"...还有 {len(filtered_images) - max_limit} 张图片")
+        else:
+            # 纯文本模式
+            # 构建标题信息
+            title = f"📋 表情包列表 ({len(display_images)}/{len(filtered_images)})"
+            if category:
+                title += f" - 分类: {category}"
+            
+            result_text = title + "\n\n"
+            
+            for i, img in enumerate(display_images, 1):
+                name = img['name']
+                # 截断过长的文件名
+                if len(name) > 20:
+                    name = name[:17] + "..."
+                
+                result_text += f"{i:2d}. {name}\n"
+                result_text += f"    分类: {img['category']}\n"
+            
+            if len(filtered_images) > max_limit:
+                result_text += f"\n...还有 {len(filtered_images) - max_limit} 张图片"
+            
+            result_text += f"\n\n💡 使用 /meme delete <序号> 删除指定图片"
+            
+            yield event.plain_result(result_text)
 
     async def delete_image(self, event: AstrMessageEvent, identifier: str = ""):
         """删除指定的表情包。
