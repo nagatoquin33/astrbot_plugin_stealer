@@ -15,7 +15,7 @@ from astrbot.api.event.filter import (
     PlatformAdapterType,
 )
 from astrbot.api.message_components import Image, Plain
-from astrbot.api.star import Context, Star, StarTools, register
+from astrbot.api.star import Context, Star, StarTools
 
 
 from .cache_service import CacheService
@@ -37,13 +37,7 @@ except Exception:  # pragma: no cover - 仅作为兼容分支
     PILImage = None
 
 
-@register(
-    "astrbot_plugin_stealer",
-    "nagatoquin33",
-    "自动偷取并分类表情包，在合适时机发送",
-    "1.0.0",
-)
-class StealerPlugin(Star):
+class Main(Star):
     """表情包偷取与发送插件。
 
     功能：
@@ -1355,9 +1349,21 @@ class StealerPlugin(Star):
 
 
     @filter.command("meme clean")
-    async def clean(self, event: AstrMessageEvent):
-        """手动清理过期的原始图片文件。"""
-        async for result in self.command_handler.clean(event):
+    async def clean(self, event: AstrMessageEvent, mode: str = ""):
+        """手动清理raw目录中的原始图片文件（不影响已分类的表情包）。
+        
+        用法: 
+        /meme clean - 清理所有raw文件
+        /meme clean expired - 只清理过期文件（按保留期限）
+        """
+        async for result in self.command_handler.clean(event, mode):
+            yield result
+
+    @filter.permission_type(PermissionType.ADMIN)
+    @filter.command("meme capacity")
+    async def enforce_capacity(self, event: AstrMessageEvent):
+        """手动执行容量控制，删除最旧的表情包以控制总数量。"""
+        async for result in self.command_handler.enforce_capacity(event):
             yield result
 
 

@@ -234,23 +234,141 @@ class CommandHandler:
             logger.error(f"调试图片失败: {e}")
             yield event.plain_result(f"调试失败: {str(e)}")
 
-    async def clean(self, event: AstrMessageEvent):
-        """手动触发清理操作，清理过期的原始图片文件。"""
+    async def clean(self, event: AstrMessageEvent, mode: str = ""):
+        """手动触发清理操作，清理raw目录中的原始图片文件，不影响已分类的表情包。
+        
+        Args:
+            event: 消息事件
+            mode: 清理模式，空字符串=清理所有，"expired"=只清理过期文件
+        """
+        try:
+            if mode.lower() == "expired":
+                # 只清理过期文件（按保留期限）
+                deleted_count = await self._clean_raw_directory_with_count()
+                yield event.plain_result(f"✅ 已清理过期文件 {deleted_count} 张（保留期限: {self.plugin.raw_retention_minutes}分钟）")
+            else:
+                # 默认清理所有raw文件
+                deleted_count = await self._force_clean_raw_directory()
+                yield event.plain_result(f"✅ raw目录清理完成，共删除 {deleted_count} 张原始图片")
+        except Exception as e:
+            logger.error(f"手动清理失败: {e}")
+            yield event.plain_result(f"❌ 清理失败: {str(e)}")
+    
+    async def _clean_raw_directory_with_count(self) -> int:
+        """按保留期限清理raw目录，返回删除的文件数量。"""
+        try:
+            if not self.plugin.base_dir:
+                logger.warning("插件base_dir未设置，无法清理raw目录")
+                return 0
+                
+            raw_dir = self.plugin.base_dir / "raw"
+            if not raw_dir.exists():
+                logger.info(f"raw目录不存在: {raw_dir}")
+                return 0
+                
+            # 获取raw目录中的所有文件
+            files = list(raw_dir.iterdir())
+            if not files:
+                logger.info(f"raw目录已为空: {raw_dir}")
+                return 0
+                
+            # 设置清理期限
+            import time
+            retention_minutes = int(self.plugin.raw_retention_minutes)
+            current_time = time.time()
+            cutoff_time = current_time - (retention_minutes * 60)
+                
+            # 删除过期文件
+            deleted_count = 0
+            for file_path in files:
+                try:
+                    if file_path.is_file():
+                        # 获取文件修改时间
+                        file_time = file_path.stat().st_mtime
+                        
+                        if file_time < cutoff_time:
+                            if await self.plugin._safe_remove_file(str(file_path)):
+                                deleted_count += 1
+                                logger.debug(f"已删除过期文件: {file_path}")
+                            else:
+                                logger.error(f"删除过期文件失败: {file_path}")
+                except Exception as e:
+                    logger.error(f"处理raw文件时发生错误: {file_path}, 错误: {e}")
+                    
+            logger.info(f"按期限清理raw目录完成，共删除 {deleted_count} 个过期文件")
+            return deleted_count
+            
+        except Exception as e:
+            logger.error(f"按期限清理raw目录失败: {e}")
+            raise
+    
+    async def _force_clean_raw_directory(self) -> int:
+        """强制清理raw目录中的所有文件（忽略保留期限），返回删除的文件数量。"""
+        try:
+            if not self.plugin.base_dir:
+                logger.warning("插件base_dir未设置，无法清理raw目录")
+                return 0
+                
+            raw_dir = self.plugin.base_dir / "raw"
+            if not raw_dir.exists():
+                logger.info(f"raw目录不存在: {raw_dir}")
+                return 0
+                
+            # 获取raw目录中的所有文件
+            files = list(raw_dir.iterdir())
+            if not files:
+                logger.info(f"raw目录已为空: {raw_dir}")
+                return 0
+                
+            # 删除所有文件
+            deleted_count = 0
+            for file_path in files:
+                try:
+                    if file_path.is_file():
+                        if await self.plugin._safe_remove_file(str(file_path)):
+                            deleted_count += 1
+                            logger.debug(f"已强制删除文件: {file_path}")
+                        else:
+                            logger.error(f"强制删除文件失败: {file_path}")
+                except Exception as e:
+                    logger.error(f"处理raw文件时发生错误: {file_path}, 错误: {e}")
+                    
+            logger.info(f"强制清理raw目录完成，共删除 {deleted_count} 个文件")
+            return deleted_count
+            
+        except Exception as e:
+            logger.error(f"强制清理raw目录失败: {e}")
+            raise
+
+    async def enforce_capacity(self, event: AstrMessageEvent):
+        """手动执行容量控制，删除最旧的表情包以控制总数量。"""
         try:
             # 加载图片索引
             image_index = await self.plugin._load_index()
-
+            
+            current_count = len(image_index)
+            max_count = self.plugin.max_reg_num
+            
+            if current_count <= max_count:
+                yield event.plain_result(f"当前表情包数量 {current_count} 未超过限制 {max_count}，无需清理")
+                return
+            
             # 执行容量控制
             await self.plugin._enforce_capacity(image_index)
             await self.plugin._save_index(image_index)
-
-            # 执行raw目录清理
-            await self.plugin._clean_raw_directory()
-
-            yield event.plain_result("手动清理完成")
+            
+            # 重新统计
+            new_count = len(image_index)
+            removed_count = current_count - new_count
+            
+            yield event.plain_result(
+                f"容量控制完成\n"
+                f"删除了 {removed_count} 个最旧的表情包\n"
+                f"当前数量: {new_count}/{max_count}"
+            )
         except Exception as e:
-            logger.error(f"手动清理失败: {e}")
-            yield event.plain_result(f"清理失败: {str(e)}")
+            logger.error(f"容量控制失败: {e}")
+            yield event.plain_result(f"容量控制失败: {str(e)}")
 
     async def task_status(self, event: AstrMessageEvent):
         """显示后台任务状态。"""

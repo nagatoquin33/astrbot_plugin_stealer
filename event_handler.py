@@ -15,7 +15,7 @@ class EventHandler:
         """初始化事件处理服务。
 
         Args:
-            plugin_instance: StealerPlugin 实例，用于访问插件的配置和服务
+            plugin_instance: Main 实例，用于访问插件的配置和服务
         """
         self.plugin = plugin_instance
         self._scanner_task: asyncio.Task | None = None
@@ -102,13 +102,12 @@ class EventHandler:
         logger.warning(f"未知的图片处理模式: {mode}，跳过处理")
         return False
 
-    # 注意：这个方法不需要装饰器，因为在StealerPlugin类中已经使用了装饰器
+    # 注意：这个方法不需要装饰器，因为在Main类中已经使用了装饰器
     # @event_message_type(EventMessageType.ALL)
     # @platform_adapter_type(PlatformAdapterType.ALL)
     async def on_message(self, event: AstrMessageEvent, *args, **kwargs):
         """消息监听：偷取消息中的图片并分类存储。"""
         plugin_instance = self.plugin
-        message_event = event
 
         if not plugin_instance.steal_emoji:
             return
@@ -116,7 +115,7 @@ class EventHandler:
         # 收集所有图片组件
         imgs: list[Image] = [
             comp
-            for comp in message_event.message_obj.message
+            for comp in event.message_obj.message
             if isinstance(comp, Image)
         ]
 
@@ -146,7 +145,7 @@ class EventHandler:
 
                 # 使用统一的图片处理方法
                 success, idx = await plugin_instance._process_image(
-                    message_event, temp_path, is_temp=True
+                    event, temp_path, is_temp=True
                 )
                 if success and idx:
                     await plugin_instance._save_index(idx)
@@ -212,53 +211,55 @@ class EventHandler:
             # 清理raw目录
             if self.plugin.base_dir:
                 raw_dir = self.plugin.base_dir / "raw"
-            if raw_dir.exists():
-                logger.debug(
-                    f"开始清理raw目录: {raw_dir}, 保留期限: {retention_minutes}分钟, 当前时间: {current_time}, 截止时间: {cutoff_time}"
-                )
+                if raw_dir.exists():
+                    logger.debug(
+                        f"开始清理raw目录: {raw_dir}, 保留期限: {retention_minutes}分钟, 当前时间: {current_time}, 截止时间: {cutoff_time}"
+                    )
 
-                # 获取raw目录中的所有文件
-                files = list(raw_dir.iterdir())
-                if not files:
-                    logger.info(f"raw目录已为空: {raw_dir}")
-                else:
-                    # 清理过期文件
-                    deleted_count = 0
-                    for file_path in files:
-                        try:
-                            if file_path.is_file():
-                                # 获取文件修改时间
-                                file_time = file_path.stat().st_mtime
-                                logger.debug(
-                                    f"检查文件: {file_path}, 修改时间: {file_time}, 是否过期: {file_time < cutoff_time}"
+                    # 获取raw目录中的所有文件
+                    files = list(raw_dir.iterdir())
+                    if not files:
+                        logger.info(f"raw目录已为空: {raw_dir}")
+                    else:
+                        # 清理过期文件
+                        deleted_count = 0
+                        for file_path in files:
+                            try:
+                                if file_path.is_file():
+                                    # 获取文件修改时间
+                                    file_time = file_path.stat().st_mtime
+                                    logger.debug(
+                                        f"检查文件: {file_path}, 修改时间: {file_time}, 是否过期: {file_time < cutoff_time}"
+                                    )
+
+                                    if file_time < cutoff_time:
+                                        if await self.plugin._safe_remove_file(
+                                            str(file_path)
+                                        ):
+                                            deleted_count += 1
+                                            logger.debug(f"已删除过期文件: {file_path}")
+                                        else:
+                                            logger.error(f"删除过期文件失败: {file_path}")
+                            except (FileNotFoundError, PermissionError) as e:
+                                logger.error(
+                                    f"处理raw文件时文件操作错误: {file_path}, 错误: {e}"
+                                )
+                            except OSError as e:
+                                logger.error(
+                                    f"处理raw文件时系统错误: {file_path}, 错误: {e}"
+                                )
+                            except Exception as e:
+                                logger.error(
+                                    f"处理raw文件时发生未预期错误: {file_path}, 错误: {e}",
+                                    exc_info=True,
                                 )
 
-                                if file_time < cutoff_time:
-                                    if await self.plugin._safe_remove_file(
-                                        str(file_path)
-                                    ):
-                                        deleted_count += 1
-                                        logger.debug(f"已删除过期文件: {file_path}")
-                                    else:
-                                        logger.error(f"删除过期文件失败: {file_path}")
-                        except (FileNotFoundError, PermissionError) as e:
-                            logger.error(
-                                f"处理raw文件时文件操作错误: {file_path}, 错误: {e}"
-                            )
-                        except OSError as e:
-                            logger.error(
-                                f"处理raw文件时系统错误: {file_path}, 错误: {e}"
-                            )
-                        except Exception as e:
-                            logger.error(
-                                f"处理raw文件时发生未预期错误: {file_path}, 错误: {e}",
-                                exc_info=True,
-                            )
-
-                    logger.info(f"清理raw目录完成，共删除 {deleted_count} 个过期文件")
-                    total_deleted += deleted_count
+                        logger.info(f"清理raw目录完成，共删除 {deleted_count} 个过期文件")
+                        total_deleted += deleted_count
+                else:
+                    logger.info(f"raw目录不存在: {raw_dir}")
             else:
-                logger.info(f"raw目录不存在: {raw_dir}")
+                logger.warning("插件base_dir未设置，无法清理raw目录")
 
             logger.info(f"清理完成，总计删除 {total_deleted} 个过期文件")
         except ValueError as e:

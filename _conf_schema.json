@@ -58,7 +58,7 @@
   "raw_retention_minutes": {
     "description": "raw目录中图片的保留期限（分钟）",
     "type": "int",
-    "default": 60
+    "default": 30
   },
   "image_processing_mode": {
     "description": "图片处理模式：always(总是处理), probability(概率处理), interval(间隔处理), cooldown(冷却时间)",

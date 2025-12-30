@@ -45,6 +45,7 @@ version: 1.0.3：修复指令状态，去除无用指令，改进状态显示
 version: 1.0.4：修复vlm模型调用失败的问题
 version: 2.0.0：🎉 重大更新！新增增强存储系统，完全向后兼容，修复旧版本配置同步和使用统计问题
 version: 2.0.1：🔧 修复清理逻辑混乱和人格注入问题，优化表情包识别准确率
+version: 2.0.3:修复bug
 
 
 ## 🚀 功能特点
@@ -266,7 +267,9 @@ version: 2.0.1：🔧 修复清理逻辑混乱和人格注入问题，优化表�
 | `/meme auto_off` | 关闭自动随聊表情 |
 | `/meme status` | 查看插件状态和表情包统计 |
 | `/meme set_vision <provider_id>` | 设置视觉模型 |
-| `/meme clean` | 手动触发清理 |
+| `/meme clean` | 清理raw目录中的所有文件（不影响已分类的表情包） |
+| `/meme clean expired` | 只清理raw目录中过期的文件（按保留期限） |
+| `/meme capacity` | 手动执行容量控制（删除最旧的表情包） |
 | `/meme list [category] [limit]` | 列出表情包（显示图片） |
 | `/meme list_text [category] [limit]` | 列出表情包（仅文本） |
 
