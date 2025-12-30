@@ -177,11 +177,11 @@ class EventHandler:
                     max_access_age_days=7,  # 默认7天未访问
                 )
                 
-                # 执行清理
+                # 执行清理 - 只清理raw目录，不清理categories目录
                 cleanup_result = await self.cleanup_manager.perform_coordinated_cleanup(
                     retention_policy=retention_policy,
                     raw_directory=self.plugin.base_dir / "raw",
-                    categories_directory=self.plugin.base_dir / "categories"
+                    # 不传入categories_directory参数，避免误删分类文件
                 )
                 
                 logger.info(f"增强清理完成: 删除原始文件 {cleanup_result.raw_files_removed} 个, "
@@ -283,17 +283,44 @@ class EventHandler:
                 if quota_status.is_critical or quota_status.current_count > quota_status.max_count:
                     logger.info(f"配额超限，当前: {quota_status.current_count}, 最大: {quota_status.max_count}")
                     
-                    # 执行配额限制
+                    # 执行配额限制（标记文件为删除）
                     enforcement_result = await self.quota_manager.enforce_quota_limits()
                     
-                    logger.info(f"配额执行完成: 删除文件 {enforcement_result.files_removed} 个, "
+                    # 立即执行清理，删除被标记的文件
+                    if enforcement_result.files_removed > 0:
+                        from .storage.models import RetentionPolicy
+                        
+                        # 创建一个宽松的保留策略，主要用于清理被标记的文件
+                        retention_policy = RetentionPolicy(
+                            max_age_days=365,  # 很长的保留期，不基于时间删除
+                            max_access_age_days=365,
+                        )
+                        
+                        # 执行协调清理，只清理categories目录中被标记的文件
+                        cleanup_result = await self.cleanup_manager.perform_coordinated_cleanup(
+                            retention_policy=retention_policy,
+                            categories_directory=self.plugin.base_dir / "categories"
+                            # 不传入raw_directory，避免清理raw文件
+                        )
+                        
+                        logger.info(f"容量控制清理完成: 删除分类文件 {cleanup_result.categorized_files_removed} 个, "
+                                  f"删除孤立文件 {cleanup_result.orphaned_files_removed} 个, "
+                                  f"释放空间 {cleanup_result.space_freed} 字节")
+                        
+                        # 更新索引以反映删除的文件
+                        # 需要从索引中移除已删除的文件
+                        files_to_remove = []
+                        for file_path in image_index.keys():
+                            if not os.path.exists(file_path):
+                                files_to_remove.append(file_path)
+                        
+                        for file_path in files_to_remove:
+                            del image_index[file_path]
+                            logger.debug(f"从索引中移除已删除文件: {file_path}")
+                    
+                    logger.info(f"配额执行完成: 标记删除文件 {enforcement_result.files_removed} 个, "
                               f"释放空间 {enforcement_result.space_freed} 字节, "
                               f"生成警告 {len(enforcement_result.warnings_generated)} 个")
-                    
-                    # 更新索引以反映删除的文件
-                    for error in enforcement_result.errors:
-                        if error.file_path in image_index:
-                            del image_index[error.file_path]
                 
                 return
             
