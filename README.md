@@ -2,7 +2,7 @@
 
 <div align="center">
 
-<img src="https://count.getloli.com/get/@nagatoquin33?theme=rule34&padding=7&offset=0&align=top&scale=1&pixelated=1&darkmode=auto"alt="Moe Counter">
+<img src="[https://count.getloli.com/get/@nagatoquin33?theme=rule34&padding=7&offset=0&align=top&scale=1&pixelated=1&darkmode=auto](https://count.getloli.com/@nagatoquin33?name=nagatoquin33&theme=rule34&padding=7&offset=0&align=top&scale=1&pixelated=1&darkmode=auto)"alt="Moe Counter">
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 ![Python Version](https://img.shields.io/badge/Python-3.10.14%2B-blue)
@@ -478,6 +478,7 @@
 如果觉得这个插件有用，欢迎给个 ⭐ Star！
 
 </div>
+
 
 
 
