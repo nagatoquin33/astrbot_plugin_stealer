@@ -65,12 +65,12 @@
 1.  **安装**: 在 AstrBot 插件管理中安装 `astrbot_plugin_stealer`。
 2.  **配置视觉模型** (必须):
     ```bash
-    /plugin meme set_vision <provider_id>  # 例如: doubao, gemini, qwenvl...
+    /meme set_vision <provider_id>  # 例如: doubao, gemini, qwenvl...
     ```
 3.  **开启**:
     ```bash
-    /plugin meme on      # 开启偷图
-    /plugin meme auto_on # 开启自动发送
+    / meme on      # 开启偷图
+    / meme auto_on # 开启自动发送
     ```
 
 ## ⚙️ 配置说明
@@ -82,7 +82,7 @@
 | `raw_cleanup_interval` | 30 | 原始缓存清理间隔 (分钟) |
 | `webui_port` | 8899 | WebUI 端口 |
 
-## 🎮 指令列表 (前缀: `/plugin meme`)
+## 🎮 指令列表 (前缀: `/meme`)
 
 | 指令 | 说明 |
 | :--- | :--- |
@@ -100,5 +100,6 @@
 本项目基于 MIT 许可证开源。
 
 [![GitHub license](https://img.shields.io/github/license/nagatoquin33/astrbot_plugin_stealer)](https://github.com/nagatoquin33/astrbot_plugin_stealer/blob/main/LICENSE)
+
 
 
