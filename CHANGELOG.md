@@ -1,0 +1,102 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [2.1.1] - 2026-01-17
+
+### Added
+-  **智能表情选择优化**
+  - 新增使用频率跟踪机制，降低高频表情的选择概率
+  - 添加时间衰减算法，避免短时间内重复发送相同表情
+  - 智能匹配现在考虑使用统计，提升表情多样性
+  - 新增 `scenes` 字段支持，优先匹配适用场景
+
+-  **VLM 提示词全面优化**
+  - 重写情绪分类提示词，细化17种情绪的判断标准
+  - 新增适用场景生成（scenes 字段），提升智能匹配准确率
+  - 优化 troll (发癫/搞怪) 分类标准，减少误判
+  - 改进提示词结构，提升 VLM 分类准确性
+
+-  **使用统计系统**
+  - 索引中新增 `last_used` (最后使用时间) 字段
+  - 索引中新增 `use_count` (使用次数) 字段
+  - 自动记录每张表情的使用情况
+
+-  **平台兼容性改进**
+  - 修复 NapCat/OneBot 动画表情识别问题
+  - 从原始事件中直接读取 `sub_type=1` 标记
+  - 解决 Pydantic 字段映射导致的数据丢失问题
+
+### Changed
+
+- 📝 **LLM Tool 优化**
+  - 重写 `search_emoji` 工具文档，提供详细使用指南
+  - 新增使用场景说明和示例
+  - 改进错误提示和反馈机制
+  - 优化工具返回格式，提升 LLM 理解准确性
+
+### Fixed
+- 🐛 **Bug 修复**
+  - 修复 NapCat 动画表情 `sub_type=1` 识别失败问题
+  - 修复 Image 对象字段名映射问题 (sub_type vs subType)
+  - 修复表情包元数据预处理逻辑
+  - 解决 Pydantic v1 字段别名不匹配导致的数据丢失
+
+- 🔧 **代码质量改进**
+  - 修复所有 ruff 格式检查错误
+  - 移除调试日志输出
+  - 优化错误处理和异常捕获
+  - 改进代码注释和文档
+
+### Technical Details
+- **索引结构更新**
+  ```json
+  {
+    "path/to/emoji.jpg": {
+      "hash": "...",
+      "category": "happy",
+      "desc": "开心的表情",
+      "tags": ["笑", "高兴"],
+      "scenes": ["恭喜", "庆祝"],  // 新增
+      "last_used": 1737123456,      // 新增
+      "use_count": 5                // 新增
+    }
+  }
+  ```
+
+- **智能选择评分系统**
+  - 基础分数计算（场景25 + 描述20 + 标签8）
+  - 时间衰减惩罚（5分钟-15，30分钟-10，1小时-5）
+  - 频率惩罚（次数×0.5，最多-10）
+  - 最终加权随机选择
+
+- **平台表情识别流程**
+  1. 从原始事件读取 `sub_type` (raw_event.message[].data.sub_type)
+  2. 检查 summary 字段包含"表情"关键词
+  3. 检查 Image.subType 属性
+  4. 检查 Image.__dict__ 中的 sub_type
+  5. 通过 toDict() 再次验证
+
+### Migration Notes
+- 自动迁移仅处理 `smirk → troll`
+- 保留 embarrassed 和 sigh 分类
+- 旧数据自动添加使用统计字段（初始值：last_used=0, use_count=0）
+
+
+---
+
+## 📝 更新历史
+- **version: 1.0.2**：修改正则，现在应该不会吞掉换行和[]()这一类符号了，同时加强对&&的匹配
+- **version: 1.0.3**：修复指令状态，去除无用指令，改进状态显示
+- **version: 1.0.4**：修复vlm模型调用失败的问题
+- **version: 2.0.0**：🎉 重大更新！新增增强存储系统，完全向后兼容，修复旧版本配置同步和使用统计问题
+- **version: 2.0.1**：🔧 修复清理逻辑混乱和人格注入问题，优化表情包识别准确率
+- **version: 2.0.3**：修复bug
+- **version: 2.0.7**：🚀 全面代码重构和优化，移除冗余功能，提升性能和稳定性
+- **version: 2.0.8**：✨ 根据AstrBot开发文档进行全面优化，提升代码质量和规范性
+- **version: 2.0.9**：优化注入的提示词，并对残缺标签进行加强处理
+- **version: 2.1.0**：新增表情的简单描述，加入webui可用于表情管理，fc工具和表情智能?匹配
+- **version: 2.1.1**：优化VLM提示词(新增scenes字段+细化分类标准)，智能选择算法(使用频率跟踪+时间衰减)，增加原生表情识别，减少偷错图的事件

@@ -1,4 +1,3 @@
-import os
 import random
 from pathlib import Path
 
@@ -60,12 +59,12 @@ class CommandHandler:
 
         image_index = await self.plugin._load_index()
         total_count = len(image_index)
-        
+
         # 添加视觉模型信息
         vision_model = (
             self.plugin.vision_provider_id or "未设置（将使用当前会话默认模型）"
         )
-        
+
         # 基础状态信息
         status_text = "🔧 插件状态:\n"
         status_text += f"偷取: {stealing_status}\n"
@@ -74,44 +73,44 @@ class CommandHandler:
         status_text += f"替换: {self.plugin.do_replace}\n"
         status_text += f"审核: {self.plugin.content_filtration}\n"
         status_text += f"视觉模型: {vision_model}\n\n"
-        
+
         # 后台任务状态
         status_text += "⚙️ 后台任务:\n"
         status_text += f"Raw清理: {'启用' if self.plugin.enable_raw_cleanup else '禁用'} ({self.plugin.raw_cleanup_interval}min)\n"
         status_text += f"容量控制: {'启用' if self.plugin.enable_capacity_control else '禁用'} ({self.plugin.capacity_control_interval}min)\n\n"
-        
+
         # 表情包统计信息
         if total_count == 0:
             status_text += "📊 表情包统计:\n暂无表情包数据"
         else:
             # 按分类统计
             category_stats = {}
-            
+
             for img_path, img_info in image_index.items():
                 if isinstance(img_info, dict):
                     # 统计分类
-                    category = img_info.get('category', '未分类')
+                    category = img_info.get("category", "未分类")
                     category_stats[category] = category_stats.get(category, 0) + 1
-            
+
             # 构建统计信息
             status_text += "📊 表情包统计:\n"
             status_text += f"总数量: {total_count}/{self.plugin.max_reg_num} ({total_count/self.plugin.max_reg_num*100:.1f}%)\n\n"
-            
+
             # 分类统计 - 只显示前5个最多的分类
             status_text += "📂 分类统计 (前5):\n"
             sorted_categories = sorted(category_stats.items(), key=lambda x: x[1], reverse=True)
             for category, count in sorted_categories[:5]:
                 percentage = count / total_count * 100
                 status_text += f"  {category}: {count}张 ({percentage:.1f}%)\n"
-            
+
             if len(sorted_categories) > 5:
                 status_text += f"  ...还有{len(sorted_categories)-5}个分类\n"
-            
+
             # 存储统计
             raw_count = len(list(self.plugin.raw_dir.glob("*"))) if self.plugin.raw_dir.exists() else 0
-            status_text += f"\n💾 存储信息:\n"
+            status_text += "\n💾 存储信息:\n"
             status_text += f"  原始图片: {raw_count}张 | 分类图片: {total_count}张"
-        
+
         yield event.plain_result(status_text)
 
 
@@ -233,7 +232,7 @@ class CommandHandler:
 
     async def clean(self, event: AstrMessageEvent, mode: str = ""):
         """手动触发清理操作，清理raw目录中的原始图片文件，不影响已分类的表情包。
-        
+
         Args:
             event: 消息事件
             mode: 清理模式，现在只支持清理所有raw文件
@@ -245,25 +244,25 @@ class CommandHandler:
         except Exception as e:
             logger.error(f"手动清理失败: {e}")
             yield event.plain_result(f"❌ 清理失败: {str(e)}")
-    
+
     async def _force_clean_raw_directory(self) -> int:
         """强制清理raw目录中的所有文件（忽略保留期限），返回删除的文件数量。"""
         try:
             if not self.plugin.base_dir:
                 logger.warning("插件base_dir未设置，无法清理raw目录")
                 return 0
-                
+
             raw_dir = self.plugin.base_dir / "raw"
             if not raw_dir.exists():
                 logger.info(f"raw目录不存在: {raw_dir}")
                 return 0
-                
+
             # 获取raw目录中的所有文件
             files = list(raw_dir.iterdir())
             if not files:
                 logger.info(f"raw目录已为空: {raw_dir}")
                 return 0
-                
+
             # 删除所有文件
             deleted_count = 0
             for file_path in files:
@@ -276,10 +275,10 @@ class CommandHandler:
                             logger.error(f"强制删除文件失败: {file_path}")
                 except Exception as e:
                     logger.error(f"处理raw文件时发生错误: {file_path}, 错误: {e}")
-                    
+
             logger.info(f"强制清理raw目录完成，共删除 {deleted_count} 个文件")
             return deleted_count
-            
+
         except Exception as e:
             logger.error(f"强制清理raw目录失败: {e}")
             raise
@@ -289,22 +288,22 @@ class CommandHandler:
         try:
             # 加载图片索引
             image_index = await self.plugin._load_index()
-            
+
             current_count = len(image_index)
             max_count = self.plugin.max_reg_num
-            
+
             if current_count <= max_count:
                 yield event.plain_result(f"当前表情包数量 {current_count} 未超过限制 {max_count}，无需清理")
                 return
-            
+
             # 执行容量控制
             await self.plugin._enforce_capacity(image_index)
             await self.plugin._save_index(image_index)
-            
+
             # 重新统计
             new_count = len(image_index)
             removed_count = current_count - new_count
-            
+
             yield event.plain_result(
                 f"容量控制完成\n"
                 f"删除了 {removed_count} 个最旧的表情包\n"
@@ -525,20 +524,20 @@ class CommandHandler:
         """手动迁移旧版本数据。"""
         try:
             yield event.plain_result("开始检查和迁移旧版本数据...")
-            
+
             # 强制重新迁移数据
             migrated_data = await self.plugin._migrate_legacy_data()
-            
+
             if migrated_data:
                 yield event.plain_result(f"✅ 成功迁移 {len(migrated_data)} 条记录")
-                
+
                 # 显示迁移的分类统计
                 category_stats = {}
                 for record in migrated_data.values():
                     if isinstance(record, dict):
-                        category = record.get('category', '未分类')
+                        category = record.get("category", "未分类")
                         category_stats[category] = category_stats.get(category, 0) + 1
-                
+
                 if category_stats:
                     stats_text = "迁移的分类统计:\n"
                     for category, count in sorted(category_stats.items()):
@@ -546,7 +545,7 @@ class CommandHandler:
                     yield event.plain_result(stats_text)
             else:
                 yield event.plain_result("ℹ️ 未发现需要迁移的数据")
-                
+
         except Exception as e:
             logger.error(f"手动迁移失败: {e}")
             yield event.plain_result(f"❌ 迁移失败: {str(e)}")
@@ -559,7 +558,7 @@ class CommandHandler:
 
     async def list_images(self, event: AstrMessageEvent, category: str = "", limit: str = "10", show_images: bool = True):
         """列出表情包，支持按分类筛选。
-        
+
         Args:
             event: 消息事件
             category: 可选的分类筛选
@@ -574,7 +573,7 @@ class CommandHandler:
             max_limit = 10
 
         image_index = await self.plugin._load_index()
-        
+
         if not image_index:
             yield event.plain_result("暂无表情包数据")
             return
@@ -583,21 +582,21 @@ class CommandHandler:
         filtered_images = []
         for img_path, img_info in image_index.items():
             if isinstance(img_info, dict):
-                img_category = img_info.get('category', '未分类')
-                
+                img_category = img_info.get("category", "未分类")
+
                 # 如果指定了分类，只显示该分类的图片
                 if category and img_category != category:
                     continue
-                
+
                 # 检查文件是否存在
                 if not Path(img_path).exists():
                     continue
-                
+
                 filtered_images.append({
-                    'path': img_path,
-                    'name': Path(img_path).name,
-                    'category': img_category,
-                    'created_at': img_info.get('created_at', 0)
+                    "path": img_path,
+                    "name": Path(img_path).name,
+                    "category": img_category,
+                    "created_at": img_info.get("created_at", 0)
                 })
 
         if not filtered_images:
@@ -608,42 +607,42 @@ class CommandHandler:
             return
 
         # 按创建时间排序（最新的在前）
-        filtered_images.sort(key=lambda x: x['created_at'], reverse=True)
-        
+        filtered_images.sort(key=lambda x: x["created_at"], reverse=True)
+
         # 限制显示数量
         display_images = filtered_images[:max_limit]
-        
+
         if show_images:
             # 显示图片模式
             # 构建标题信息
             title = f"📋 表情包列表 ({len(display_images)}/{len(filtered_images)})"
             if category:
                 title += f" - 分类: {category}"
-            
+
             # 先发送标题
             yield event.plain_result(title + "\n💡 使用 /meme delete <序号> 删除指定图片")
-            
+
             # 逐个发送图片和信息
             for i, img in enumerate(display_images, 1):
                 try:
                     # 读取图片并转换为base64
-                    b64 = await self.plugin.image_processor_service._file_to_base64(img['path'])
-                    
+                    b64 = await self.plugin.image_processor_service._file_to_base64(img["path"])
+
                     # 构建图片信息
                     info_text = f"{i:2d}. {img['name'][:20]}{'...' if len(img['name']) > 20 else ''}\n"
                     info_text += f"分类: {img['category']}"
-                    
+
                     # 发送图片和信息
                     result = event.make_result().base64_image(b64).message(info_text)
                     yield result
-                    
+
                 except Exception as e:
                     # 如果图片读取失败，只发送文本信息
                     logger.warning(f"读取图片失败 {img['path']}: {e}")
                     info_text = f"{i:2d}. {img['name']} [图片读取失败]\n"
                     info_text += f"分类: {img['category']}"
                     yield event.plain_result(info_text)
-            
+
             if len(filtered_images) > max_limit:
                 yield event.plain_result(f"...还有 {len(filtered_images) - max_limit} 张图片")
         else:
@@ -652,28 +651,28 @@ class CommandHandler:
             title = f"📋 表情包列表 ({len(display_images)}/{len(filtered_images)})"
             if category:
                 title += f" - 分类: {category}"
-            
+
             result_text = title + "\n\n"
-            
+
             for i, img in enumerate(display_images, 1):
-                name = img['name']
+                name = img["name"]
                 # 截断过长的文件名
                 if len(name) > 20:
                     name = name[:17] + "..."
-                
+
                 result_text += f"{i:2d}. {name}\n"
                 result_text += f"    分类: {img['category']}\n"
-            
+
             if len(filtered_images) > max_limit:
                 result_text += f"\n...还有 {len(filtered_images) - max_limit} 张图片"
-            
-            result_text += f"\n\n💡 使用 /meme delete <序号> 删除指定图片"
-            
+
+            result_text += "\n\n💡 使用 /meme delete <序号> 删除指定图片"
+
             yield event.plain_result(result_text)
 
     async def delete_image(self, event: AstrMessageEvent, identifier: str = ""):
         """删除指定的表情包。
-        
+
         Args:
             event: 消息事件
             identifier: 图片标识符，可以是序号、文件名或路径
@@ -686,7 +685,7 @@ class CommandHandler:
             return
 
         image_index = await self.plugin._load_index()
-        
+
         if not image_index:
             yield event.plain_result("暂无表情包数据")
             return
@@ -696,14 +695,14 @@ class CommandHandler:
         for img_path, img_info in image_index.items():
             if isinstance(img_info, dict) and Path(img_path).exists():
                 valid_images.append({
-                    'path': img_path,
-                    'name': Path(img_path).name,
-                    'category': img_info.get('category', '未分类'),
-                    'created_at': img_info.get('created_at', 0)
+                    "path": img_path,
+                    "name": Path(img_path).name,
+                    "category": img_info.get("category", "未分类"),
+                    "created_at": img_info.get("created_at", 0)
                 })
 
         # 按创建时间排序（与list命令保持一致，最新的在前）
-        valid_images.sort(key=lambda x: x['created_at'], reverse=True)
+        valid_images.sort(key=lambda x: x["created_at"], reverse=True)
 
         target_image = None
 
@@ -715,7 +714,7 @@ class CommandHandler:
         except ValueError:
             # 不是数字，尝试按文件名查找
             for img in valid_images:
-                if img['name'] == identifier or img['name'].startswith(identifier):
+                if img["name"] == identifier or img["name"].startswith(identifier):
                     target_image = img
                     break
 
@@ -727,14 +726,14 @@ class CommandHandler:
             return
 
         # 执行删除操作
-        success = await self._delete_image_files(target_image['path'])
-        
+        success = await self._delete_image_files(target_image["path"])
+
         if success:
             # 从索引中移除
-            if target_image['path'] in image_index:
-                del image_index[target_image['path']]
+            if target_image["path"] in image_index:
+                del image_index[target_image["path"]]
                 await self.plugin._save_index(image_index)
-            
+
             yield event.plain_result(
                 f"✅ 已删除表情包:\n"
                 f"文件: {target_image['name']}\n"
@@ -745,26 +744,26 @@ class CommandHandler:
 
     async def _delete_image_files(self, img_path: str) -> bool:
         """删除图片文件（raw目录和categories目录）。
-        
+
         Args:
             img_path: 图片路径
-            
+
         Returns:
             bool: 是否删除成功
         """
         try:
             deleted_files = []
-            
+
             # 删除主文件（通常在raw目录）
             if Path(img_path).exists():
                 Path(img_path).unlink()
                 deleted_files.append(img_path)
                 logger.info(f"已删除主文件: {img_path}")
-            
+
             # 查找并删除categories目录中的对应文件
-            if hasattr(self.plugin, 'categories_dir') and self.plugin.categories_dir:
+            if hasattr(self.plugin, "categories_dir") and self.plugin.categories_dir:
                 img_name = Path(img_path).name
-                
+
                 # 遍历所有分类目录
                 for category_dir in self.plugin.categories_dir.iterdir():
                     if category_dir.is_dir():
@@ -773,25 +772,25 @@ class CommandHandler:
                             category_file.unlink()
                             deleted_files.append(str(category_file))
                             logger.info(f"已删除分类文件: {category_file}")
-            
+
             logger.info(f"删除操作完成，共删除 {len(deleted_files)} 个文件")
             return len(deleted_files) > 0
-            
+
         except Exception as e:
             logger.error(f"删除图片文件失败: {e}")
             return False
 
     async def rebuild_index(self, event: AstrMessageEvent):
         """重建索引命令，用于从旧版本迁移或修复索引。
-        
+
         扫描 categories 目录中的所有图片文件，重新构建索引。
         """
         try:
             yield event.plain_result("🔄 开始重建索引，请稍候...")
-            
+
             # 调用插件的重建索引方法
             rebuilt_index = await self.plugin._rebuild_index_from_files()
-            
+
             if not rebuilt_index:
                 yield event.plain_result(
                     "⚠️ 未找到可重建的图片文件。\n"
@@ -799,7 +798,7 @@ class CommandHandler:
                     f"{self.plugin.categories_dir}"
                 )
                 return
-            
+
             # 获取旧索引进行对比
             old_index = await self.plugin._load_index()
             old_count = len(old_index)
@@ -809,17 +808,17 @@ class CommandHandler:
             legacy_metadata_count = 0
             possible_legacy_paths = [
                 self.plugin.base_dir / "index.json",
-                self.plugin.base_dir / "image_index.json", 
+                self.plugin.base_dir / "image_index.json",
                 self.plugin.base_dir / "cache" / "index.json",
                 # 其他可能的路径
                 Path("data/plugin_data/astrbot_plugin_stealer/index.json"),
                 Path("data/plugin_data/astrbot_plugin_stealer/image_index.json"),
             ]
-            
+
             for legacy_path in possible_legacy_paths:
                 if legacy_path.exists():
                     try:
-                        with open(legacy_path, 'r', encoding='utf-8') as f:
+                        with open(legacy_path, encoding="utf-8") as f:
                             legacy_data = json.load(f)
                             if isinstance(legacy_data, dict):
                                 # 将旧数据也尝试合并到 old_index 中，作为元数据来源
@@ -827,7 +826,7 @@ class CommandHandler:
                                 legacy_metadata_count += len(legacy_data)
                     except Exception:
                         pass
-            
+
             # --- 智能合并逻辑开始 ---
             # 1. 建立哈希查找表，用于处理文件路径变更的情况
             old_hash_map = {}
@@ -842,12 +841,12 @@ class CommandHandler:
                      old_name_map[path_obj.name] = v
 
             recovered_count = 0
-            
+
             # 2. 遍历重建的索引，尝试恢复元数据
             for new_path, new_data in rebuilt_index.items():
                 old_data = None
                 new_path_obj = Path(new_path)
-                
+
                 # 优先级1: 路径直接匹配
                 if new_path in old_index:
                     old_data = old_index[new_path]
@@ -857,7 +856,7 @@ class CommandHandler:
                 # 优先级3: 文件名匹配
                 elif new_path_obj.name in old_name_map:
                     old_data = old_name_map[new_path_obj.name]
-                
+
                 # 如果找到了旧数据，恢复关键元数据
                 if old_data and isinstance(old_data, dict):
                     # 只有当旧数据包含有效描述时才恢复，避免覆盖新生成的（如果有）
@@ -869,42 +868,42 @@ class CommandHandler:
                     # 兼容可能存在的其他字段
                     if "source_message" in old_data:
                         new_data["source_message"] = old_data["source_message"]
-                    
+
                     recovered_count += 1
-            
+
             # 3. 使用新的索引作为最终索引（自动清理了不存在的文件记录）
             final_index = rebuilt_index
             # --- 智能合并逻辑结束 ---
-            
+
             # 保存合并后的索引
             await self.plugin._save_index(final_index)
-            
+
             # 统计信息
             new_count = len(final_index)
-            
+
             # 按分类统计
             category_stats = {}
             for img_info in final_index.values():
                 if isinstance(img_info, dict):
-                    cat = img_info.get('category', '未分类')
+                    cat = img_info.get("category", "未分类")
                     category_stats[cat] = category_stats.get(cat, 0) + 1
-            
+
             # 构建结果消息
             result_msg = "✅ 索引重建完成！\n\n"
-            result_msg += f"📊 统计信息:\n"
+            result_msg += "📊 统计信息:\n"
             result_msg += f"  当前索引数量: {old_count}\n"
             if legacy_metadata_count > 0:
                 result_msg += f"  旧版备份数据: {legacy_metadata_count} 条\n"
             result_msg += f"  现有文件数: {new_count}\n"
             result_msg += f"  已恢复元数据: {recovered_count} 条\n"
-            
+
             if category_stats:
-                result_msg += f"\n📂 分类统计:\n"
+                result_msg += "\n📂 分类统计:\n"
                 for cat, count in sorted(category_stats.items(), key=lambda x: x[1], reverse=True):
                     result_msg += f"  {cat}: {count}张\n"
-            
+
             yield event.plain_result(result_msg)
-            
+
         except Exception as e:
             logger.error(f"重建索引失败: {e}", exc_info=True)
             yield event.plain_result(f"❌ 重建索引失败: {str(e)}")

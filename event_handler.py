@@ -30,7 +30,6 @@ class EventHandler:
         Returns:
             bool: 是否应该处理图片
         """
-        import time
 
         mode = self.plugin.image_processing_mode
         current_time = time.time()
@@ -87,6 +86,83 @@ class EventHandler:
         logger.warning(f"未知的图片处理模式: {mode}，跳过处理")
         return False
 
+    def _check_platform_emoji_metadata(self, img: Image, event: AstrMessageEvent | None = None) -> bool:
+        """检查图片元信息，判断是否为平台标记的表情包。
+
+        支持的平台特征：
+        - NapCat/OneBot: subType=1 或 sub_type=1 表示表情包
+        - QQ: summary包含"表情"关键词
+
+        Args:
+            img: 图片组件
+            event: 消息事件对象（可选），用于访问原始消息数据
+
+        Returns:
+            bool: 是否为平台标记的表情包
+        """
+        try:
+            # 方式0: 从原始事件中查找 sub_type (最可靠的方法)
+            if event and hasattr(event, "message_obj") and hasattr(event.message_obj, "raw_message"):
+                raw_event = event.message_obj.raw_message
+                if hasattr(raw_event, "message") and isinstance(raw_event.message, list):
+                    # 遍历原始消息段，找到当前图片对应的消息段
+                    for msg_segment in raw_event.message:
+                        if isinstance(msg_segment, dict) and msg_segment.get("type") == "image":
+                            data = msg_segment.get("data", {})
+                            sub_type = data.get("sub_type")
+                            if sub_type == 1 or sub_type == "1":
+                                logger.debug(f"检测到表情包标记: sub_type={sub_type} (从原始事件)")
+                                return True
+
+                            # 同时检查 summary 字段
+                            summary = data.get("summary", "")
+                            if summary and ("表情" in summary or "emoji" in summary.lower() or "sticker" in summary.lower()):
+                                logger.debug(f"检测到表情包标记: summary='{summary}' (从原始事件)")
+                                return True
+
+            # 方式1: 检查 Image 对象的 subType 字段
+            if hasattr(img, "subType") and img.subType:
+                if img.subType == 1 or img.subType == "1":
+                    logger.debug(f"检测到表情包标记: subType={img.subType}")
+                    return True
+
+            # 方式2: 检查 __dict__ 中的 sub_type
+            if hasattr(img, "__dict__"):
+                img_dict = img.__dict__
+                sub_type_underscore = img_dict.get("sub_type")
+                if sub_type_underscore == 1 or sub_type_underscore == "1":
+                    logger.debug(f"检测到表情包标记: sub_type={sub_type_underscore} (从__dict__)")
+                    return True
+
+            # 方式3: 通过 toDict() 检查
+            try:
+                raw_data = img.toDict()
+                if isinstance(raw_data, dict) and "data" in raw_data:
+                    data = raw_data["data"]
+
+                    sub_type = data.get("sub_type") or data.get("subType")
+                    if sub_type == 1 or sub_type == "1":
+                        logger.debug(f"检测到表情包标记: sub_type={sub_type} (从toDict)")
+                        return True
+
+                    summary = data.get("summary", "")
+                    if summary and ("表情" in summary or "emoji" in summary.lower() or "sticker" in summary.lower()):
+                        logger.debug(f"检测到表情包标记: summary='{summary}'")
+                        return True
+
+                    img_type = data.get("type") or data.get("imageType") or data.get("image_type")
+                    if img_type in ["emoji", "sticker", "face", "meme"]:
+                        logger.debug(f"检测到表情包标记: type='{img_type}'")
+                        return True
+            except Exception as e:
+                logger.debug(f"无法获取图片字典数据: {e}")
+
+            return False
+
+        except Exception as e:
+            logger.debug(f"检查平台表情包元信息失败: {e}")
+            return False
+
     # 注意：这个方法不需要装饰器，因为在Main类中已经使用了装饰器
     # @event_message_type(EventMessageType.ALL)
     # @platform_adapter_type(PlatformAdapterType.ALL)
@@ -94,13 +170,13 @@ class EventHandler:
         """消息监听：偷取消息中的图片并分类存储。"""
         # 调试信息
         logger.debug(f"EventHandler.on_message called with event type: {type(event)}")
-        
+
         # 检查event对象是否正确
-        if not hasattr(event, 'get_messages'):
+        if not hasattr(event, "get_messages"):
             logger.error(f"Event object does not have get_messages method. Type: {type(event)}")
             logger.error(f"Event attributes: {dir(event)}")
             return
-        
+
         plugin_instance = self.plugin
 
         if not plugin_instance.steal_emoji:
@@ -126,6 +202,17 @@ class EventHandler:
 
         for img in imgs:
             try:
+                # 检查图片元信息，只处理平台标记的表情包
+                is_platform_emoji = self._check_platform_emoji_metadata(img, event)
+
+                if not is_platform_emoji:
+                    # 获取 subType 值用于调试日志
+                    sub_type_value = getattr(img, "subType", "unknown")
+                    logger.debug(f"跳过非表情包图片 (subType={sub_type_value})")
+                    continue
+
+                logger.info("检测到平台标记的表情包，开始处理")
+
                 # 转换图片到临时文件路径
                 temp_path: str = await img.convert_to_file_path()
 
@@ -138,8 +225,9 @@ class EventHandler:
                     continue
 
                 # 使用统一的图片处理方法
+                # 传递平台元信息标记，用于优化处理流程
                 success, idx = await plugin_instance._process_image(
-                    event, temp_path, is_temp=True
+                    event, temp_path, is_temp=True, is_platform_emoji=is_platform_emoji
                 )
                 if success and idx:
                     await plugin_instance._save_index(idx)
@@ -159,7 +247,7 @@ class EventHandler:
         try:
             # 使用简化的清理逻辑
             await self._clean_raw_directory_legacy()
-            
+
         except Exception as e:
             logger.error(f"清理raw目录失败: {e}")
 
@@ -208,7 +296,7 @@ class EventHandler:
         try:
             # 使用简化的容量控制逻辑
             await self._enforce_capacity_legacy(image_index)
-            
+
         except Exception as e:
             logger.error(f"执行容量控制失败: {e}")
 
@@ -227,7 +315,7 @@ class EventHandler:
                     else 0
                 )
                 image_items.append((file_path, created_at))
-            
+
             # 按创建时间排序，最旧的在前
             image_items.sort(key=lambda x: x[1])
 

@@ -2,11 +2,10 @@ import asyncio
 import base64
 import hashlib
 import os
-import re
 import shutil
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
@@ -17,21 +16,29 @@ class ImageProcessorService:
 
     # 有效分类集合作为类常量
     VALID_CATEGORIES = {
-        "happy",
-        "sad",
-        "angry",
-        "shy",
-        "surprised",
-        "smirk",
-        "cry",
-        "confused",
-        "embarrassed",
-        "love",
-        "disgust",
-        "fear",
-        "excitement",
-        "tired",
-        "sigh",
+        "happy",       # 开心
+        "sad",         # 难过
+        "angry",       # 生气
+        "cry",         # 大哭
+        "shy",         # 害羞
+        "surprised",   # 惊讶
+        "love",        # 喜爱
+        "fear",        # 害怕
+        "tired",       # 疲惫
+        "disgust",     # 厌恶
+        "excitement",  # 兴奋
+        "embarrassed", # 尴尬
+        "sigh",        # 叹气
+        "thank",       # 感谢 (新增)
+        "confused",    # 困惑 (新增)
+        "dumb",        # 无语/呆 (新增)
+        "troll",       # 发癫/搞怪 (新增)
+    }
+
+    # 分类迁移映射表（用于自动迁移旧版本数据）
+    # 从前前版本迁移到新版本(17分类)
+    CATEGORY_MIGRATION_MAP = {
+        "smirk": "troll",        # 坏笑 -> 发癫
     }
 
     def __init__(self, plugin_instance):
@@ -223,6 +230,102 @@ class ImageProcessorService:
         self.content_filtration = False
         self.vision_provider_id = ""
 
+        # 执行自动迁移检查（在插件启动时运行一次）
+        self._auto_migrate_categories()
+
+    def _auto_migrate_categories(self):
+        """自动迁移旧版本分类到新分类系统。
+
+        该方法会：
+        1. 扫描 categories 目录下的所有旧分类文件夹
+        2. 根据 CATEGORY_MIGRATION_MAP 迁移文件和索引数据
+        3. 删除空的旧分类文件夹
+        4. 确保新分类文件夹存在
+        """
+        if not self.base_dir:
+            return
+
+        categories_dir = Path(self.base_dir) / "categories"
+        if not categories_dir.exists():
+            return
+
+        migrated_files = 0
+        migrated_indices = 0
+
+        # 遍历所有旧分类，执行迁移
+        for old_category, new_category in self.CATEGORY_MIGRATION_MAP.items():
+            old_dir = categories_dir / old_category
+            if not old_dir.exists():
+                continue
+
+            new_dir = categories_dir / new_category
+            new_dir.mkdir(parents=True, exist_ok=True)
+
+            # 迁移图片文件
+            for img_file in old_dir.glob("*"):
+                if img_file.is_file() and img_file.suffix.lower() in [".jpg", ".jpeg", ".png", ".gif", ".webp"]:
+                    target_path = new_dir / img_file.name
+                    # 避免文件名冲突
+                    if target_path.exists():
+                        stem = img_file.stem
+                        suffix = img_file.suffix
+                        counter = 1
+                        while target_path.exists():
+                            target_path = new_dir / f"{stem}_migrated{counter}{suffix}"
+                            counter += 1
+
+                    try:
+                        shutil.move(str(img_file), str(target_path))
+                        migrated_files += 1
+                    except Exception as e:
+                        logger.error(f"迁移文件失败 {img_file} -> {target_path}: {e}")
+
+            # 迁移索引数据
+            old_index = old_dir / "index.json"
+            if old_index.exists():
+                try:
+                    import json
+                    with open(old_index, encoding="utf-8") as f:
+                        old_data = json.load(f)
+
+                    # 更新分类字段
+                    for item in old_data:
+                        if isinstance(item, dict) and item.get("category") == old_category:
+                            item["category"] = new_category
+
+                    # 合并到新索引
+                    new_index = new_dir / "index.json"
+                    if new_index.exists():
+                        with open(new_index, encoding="utf-8") as f:
+                            new_data = json.load(f)
+                        new_data.extend(old_data)
+                    else:
+                        new_data = old_data
+
+                    with open(new_index, "w", encoding="utf-8") as f:
+                        json.dump(new_data, f, ensure_ascii=False, indent=2)
+
+                    old_index.unlink()
+                    migrated_indices += len(old_data)
+                except Exception as e:
+                    logger.error(f"迁移索引失败 {old_index}: {e}")
+
+            # 删除空的旧文件夹
+            try:
+                if old_dir.exists() and not any(old_dir.iterdir()):
+                    old_dir.rmdir()
+                    logger.info(f"已删除空分类文件夹: {old_category}")
+            except Exception as e:
+                logger.warning(f"删除文件夹失败 {old_dir}: {e}")
+
+        # 确保所有新分类文件夹存在
+        for category in self.VALID_CATEGORIES:
+            category_dir = categories_dir / category
+            category_dir.mkdir(parents=True, exist_ok=True)
+
+        if migrated_files > 0 or migrated_indices > 0:
+            logger.info(f"分类迁移完成: 迁移 {migrated_files} 个文件, {migrated_indices} 条索引记录")
+
     def update_config(
         self,
         categories=None,
@@ -260,6 +363,7 @@ class ImageProcessorService:
         categories: list[str] | None = None,
         content_filtration: bool | None = None,
         backend_tag: str | None = None,
+        is_platform_emoji: bool = False,
     ) -> tuple[bool, dict[str, Any] | None]:
         """统一处理图片：存储、分类、过滤。
 
@@ -271,6 +375,7 @@ class ImageProcessorService:
             categories: 分类列表
             content_filtration: 是否进行内容过滤
             backend_tag: 后端标签
+            is_platform_emoji: 是否为平台标记的表情包
 
         Returns:
             tuple: (是否成功, 图片索引)
@@ -289,7 +394,7 @@ class ImageProcessorService:
 
         # 使用简化的处理流程
         return await self._process_image_legacy(
-            event, file_path, is_temp, idx, categories, content_filtration, backend_tag, hash_val
+            event, file_path, is_temp, idx, categories, content_filtration, backend_tag, hash_val, is_platform_emoji
         )
     async def _process_image_legacy(
         self,
@@ -301,8 +406,13 @@ class ImageProcessorService:
         content_filtration: bool | None,
         backend_tag: str | None,
         hash_val: str,
+        is_platform_emoji: bool = False,
     ) -> tuple[bool, dict[str, Any] | None]:
-        """使用原有系统处理图片（保持向后兼容）"""
+        """使用原有系统处理图片（保持向后兼容）
+
+        Args:
+            is_platform_emoji: 是否为平台标记的表情包，如果是则跳过元数据过滤
+        """
         # 检查图片是否已存在（索引中）
         for k, v in idx.items():
             if isinstance(v, dict) and v.get("hash") == hash_val:
@@ -371,12 +481,12 @@ class ImageProcessorService:
                         cat_dir = os.path.join(self.base_dir, "categories", category)
                         os.makedirs(cat_dir, exist_ok=True)
                         cat_path = os.path.join(cat_dir, os.path.basename(raw_path))
-                        
+
                         # 检查文件是否仍然存在
                         if not os.path.exists(raw_path):
                             logger.warning(f"原始文件已不存在（缓存分支），可能被清理: {raw_path}")
                             return False, None
-                        
+
                         try:
                             shutil.copy2(raw_path, cat_path)
                         except FileNotFoundError:
@@ -423,13 +533,26 @@ class ImageProcessorService:
 
         # 过滤和分类图片（合并为一次VLM调用以提高效率）
         try:
-            # 调用分类方法：包含内容过滤、表情包判断和情绪分类
-            category, tags, desc, emotion = await self.classify_image(
-                event=event,
-                file_path=raw_path,
-                categories=categories,
-                content_filtration=content_filtration,
-            )
+            # 如果是平台标记的表情包，跳过元数据过滤环节
+            if is_platform_emoji:
+                logger.info("平台已标记为表情包，跳过元数据预过滤，直接进行VLM分类")
+                # 直接调用VLM分类，跳过 _is_likely_emoji_by_metadata 检查
+                category, tags, desc, emotion, scenes = await self.classify_image(
+                    event=event,
+                    file_path=raw_path,
+                    categories=categories,
+                    content_filtration=content_filtration,
+                    skip_metadata_filter=True,  # 跳过元数据过滤
+                )
+            else:
+                # 正常流程：包含元数据过滤
+                category, tags, desc, emotion, scenes = await self.classify_image(
+                    event=event,
+                    file_path=raw_path,
+                    categories=categories,
+                    content_filtration=content_filtration,
+                )
+
             logger.debug(f"图片分类结果: category={category}, emotion={emotion}")
 
             # 处理内容过滤不通过的情况
@@ -460,7 +583,7 @@ class ImageProcessorService:
                     cat_dir = os.path.join(self.base_dir, "categories", category)
                     os.makedirs(cat_dir, exist_ok=True)
                     cat_path = os.path.join(cat_dir, os.path.basename(raw_path))
-                    
+
                     try:
                         shutil.copy2(raw_path, cat_path)
                     except FileNotFoundError:
@@ -482,6 +605,7 @@ class ImageProcessorService:
                     "category": category,
                     "tags": tags,
                     "desc": desc,
+                    "scenes": scenes,  # 新增：适用场景
                     "created_at": int(time.time()),
                 }
 
@@ -491,6 +615,7 @@ class ImageProcessorService:
                     "tags": tags,
                     "desc": desc,
                     "emotion": emotion,
+                    "scenes": scenes,  # 新增：适用场景
                     "timestamp": time.time(),
                 }
 
@@ -504,6 +629,7 @@ class ImageProcessorService:
                     "tags": tags,
                     "desc": desc,
                     "emotion": emotion,
+                    "scenes": scenes,  # 新增：适用场景
                     "timestamp": time.time(),
                 }
 
@@ -525,7 +651,8 @@ class ImageProcessorService:
         categories=None,
         backend_tag=None,
         content_filtration=None,
-    ) -> tuple[str, list[str], str, str]:
+        skip_metadata_filter: bool = False,
+    ) -> tuple[str, list[str], str, str, list[str]]:
         """使用视觉模型对图片进行分类并返回详细信息。
 
         Args:
@@ -534,13 +661,15 @@ class ImageProcessorService:
             categories: 分类列表
             backend_tag: 后端标签
             content_filtration: 是否进行内容过滤（可选）
+            skip_metadata_filter: 是否跳过元数据过滤（平台已标记时使用）
 
         Returns:
-            tuple: (category, tags, desc, emotion)，其中：
+            tuple: (category, tags, desc, emotion, scenes)，其中：
                   - category: 主要分类（emotion类别）
                   - tags: 图片内容标签列表
                   - desc: 图片内容描述
                   - emotion: 情绪标签（与category相同）
+                  - scenes: 适用场景列表（新增）
         """
         try:
             # 确保file_path是绝对路径
@@ -552,11 +681,14 @@ class ImageProcessorService:
                 logger.error(error_msg)
                 raise FileNotFoundError(error_msg)
 
-            # 先用元数据做一次快速过滤，明显不是表情图片的直接跳过
-            is_likely_emoji = self._is_likely_emoji_by_metadata(file_path)
-            logger.debug(f"元数据判断是否为表情包: {is_likely_emoji}")
-            if not is_likely_emoji:
-                return "非表情包", [], "", "非表情包"
+            # 如果未跳过元数据过滤，先用元数据做一次快速过滤
+            if not skip_metadata_filter:
+                is_likely_emoji = self._is_likely_emoji_by_metadata(file_path)
+                logger.debug(f"元数据判断是否为表情包: {is_likely_emoji}")
+                if not is_likely_emoji:
+                    return "非表情包", [], "", "非表情包"
+            else:
+                logger.debug("跳过元数据过滤（平台已标记为表情包）")
 
             # 确定是否进行内容过滤
             should_filter = (
@@ -579,20 +711,24 @@ class ImageProcessorService:
                 response = await self._call_vision_model(event, file_path, prompt)
                 logger.debug(f"表情包分析原始响应: {response}")
 
-                # 解析响应结果 - 升级为支持标签和描述
-                # 格式: IsEmoji|Emotion|Tags|Description
-                parts = [p.strip() for p in response.strip().split('|')]
-                
+                # 解析响应结果 - 升级为支持标签、描述和适用场景
+                # 格式: IsEmoji|Emotion|Tags|Description|Scenes
+                parts = [p.strip() for p in response.strip().split("|")]
+
                 filter_result = "通过"
                 is_emoji_result = parts[0] if len(parts) > 0 else "否"
                 emotion_result = parts[1] if len(parts) > 1 else "非表情包"
-                
-                # 提取标签和描述（如果有）
+
+                # 提取标签、描述和适用场景（如果有）
                 tags_str = parts[2] if len(parts) > 2 else ""
                 desc_result = parts[3] if len(parts) > 3 else "无描述"
-                
+                scenes_str = parts[4] if len(parts) > 4 else ""
+
                 # 处理标签列表
-                tags_result = [t.strip() for t in tags_str.split(',') if t.strip() and t.strip() != "无"]
+                tags_result = [t.strip() for t in tags_str.split(",") if t.strip() and t.strip() != "无"]
+
+                # 处理适用场景列表（新增）
+                scenes_result = [s.strip() for s in scenes_str.split(",") if s.strip() and s.strip() != "无"]
             else:
                 # 使用内容过滤和表情包分析的合并提示词
                 prompt = self.combined_analysis_prompt.format(
@@ -603,28 +739,32 @@ class ImageProcessorService:
                 response = await self._call_vision_model(event, file_path, prompt)
                 logger.debug(f"内容过滤和表情包分析原始响应: {response}")
 
-                # 解析响应结果 - 升级为支持标签和描述
-                # 格式: Filter|IsEmoji|Emotion|Tags|Description
-                parts = [p.strip() for p in response.strip().split('|')]
-                
+                # 解析响应结果 - 升级为支持标签、描述和适用场景
+                # 格式: Filter|IsEmoji|Emotion|Tags|Description|Scenes
+                parts = [p.strip() for p in response.strip().split("|")]
+
                 filter_result = parts[0] if len(parts) > 0 else "过滤不通过"
                 is_emoji_result = parts[1] if len(parts) > 1 else "否"
                 emotion_result = parts[2] if len(parts) > 2 else "非表情包"
-                
-                # 提取标签和描述（如果有）
+
+                # 提取标签、描述和适用场景（如果有）
                 tags_str = parts[3] if len(parts) > 3 else ""
                 desc_result = parts[4] if len(parts) > 4 else "无描述"
-                
+                scenes_str = parts[5] if len(parts) > 5 else ""
+
                 # 处理标签列表
-                tags_result = [t.strip() for t in tags_str.split(',') if t.strip() and t.strip() != "无"]
+                tags_result = [t.strip() for t in tags_str.split(",") if t.strip() and t.strip() != "无"]
+
+                # 处理适用场景列表（新增）
+                scenes_result = [s.strip() for s in scenes_str.split(",") if s.strip() and s.strip() != "无"]
 
             # 处理过滤结果
             if filter_result == "过滤不通过":
-                return "过滤不通过", [], "", "过滤不通过"
+                return "过滤不通过", [], "", "过滤不通过", []
 
             # 处理表情包判断结果
             if is_emoji_result.lower() != "是" and emotion_result != "非表情包":
-                return "非表情包", [], "", "非表情包"
+                return "非表情包", [], "", "非表情包", []
 
             # 处理情绪分类结果
             if emotion_result in self.VALID_CATEGORIES:
@@ -636,15 +776,15 @@ class ImageProcessorService:
                     if valid_cat in emotion_result:
                         found_category = valid_cat
                         break
-                
+
                 if found_category:
                     category = found_category
                 else:
                     # 如果无法提取有效分类，视为识别失败，直接标记为非表情包以便外部逻辑进行清理
                     logger.warning(f"无法从响应中提取有效情绪分类: {emotion_result}，丢弃该图片")
-                    return "非表情包", [], "", "非表情包"
+                    return "非表情包", [], "", "非表情包", []
 
-            return category, tags_result, desc_result, category
+            return category, tags_result, desc_result, category, scenes_result
 
         except Exception as e:
             # 添加更多上下文信息
@@ -662,7 +802,7 @@ class ImageProcessorService:
                 logger.error("视觉模型调用失败，可能是模型配置错误或API密钥问题")
 
             # 根据测试要求，无法分类时返回空字符串
-            return "", [], "", ""
+            return "", [], "", "", []
 
     def _is_likely_emoji_by_metadata(self, file_path: str) -> bool:
         """根据图片元数据判断是否可能是表情包。
@@ -771,8 +911,8 @@ class ImageProcessorService:
                     logger.debug(f"准备调用VLM，provider_id: {chat_provider_id}")
 
                     # 根据开发文档，构建包含文本和图片的消息
-                    from astrbot.api.message_components import Plain, Image
-                    
+                    from astrbot.api.message_components import Image, Plain
+
                     # 构建消息链
                     message_items = [
                         Plain(text=prompt),
@@ -782,7 +922,7 @@ class ImageProcessorService:
                     # 方法1：尝试使用Context的AI服务调用
                     try:
                         # 检查是否有直接的AI调用方法
-                        if hasattr(self.plugin.context, 'llm_generate'):
+                        if hasattr(self.plugin.context, "llm_generate"):
                             logger.debug("使用context.llm_generate方法")
                             # 使用file://协议传递本地图片路径
                             file_url = f"file:///{img_path.replace(chr(92), '/')}"  # 处理Windows路径
@@ -794,25 +934,25 @@ class ImageProcessorService:
                             logger.debug("context.llm_generate调用成功")
                         else:
                             raise AttributeError("context.llm_generate方法不存在")
-                            
+
                     except Exception as context_error:
                         logger.warning(f"Context方法调用失败: {context_error}")
-                        
+
                         # 方法2：尝试直接使用provider
                         try:
                             logger.debug("尝试直接使用provider")
                             provider_manager = self.plugin.context.provider_manager
-                            
+
                             # 检查provider是否存在
-                            if not hasattr(provider_manager, 'providers') or chat_provider_id not in provider_manager.providers:
+                            if not hasattr(provider_manager, "providers") or chat_provider_id not in provider_manager.providers:
                                 raise ValueError(f"Provider {chat_provider_id} 不存在。请检查配置。")
-                            
+
                             provider = provider_manager.providers[chat_provider_id]
-                            
+
                             # 检查provider是否支持文本聊天
-                            if not hasattr(provider, 'text_chat'):
+                            if not hasattr(provider, "text_chat"):
                                 raise ValueError(f"Provider {chat_provider_id} 不支持文本聊天功能。")
-                            
+
                             # 创建模拟消息对象
                             class MockMessage:
                                 def __init__(self, text, image_path):
@@ -821,17 +961,17 @@ class ImageProcessorService:
                                     self.sender_id = "vision_analysis"
                                     self.session_id = "vision_analysis"
                                     self.unified_msg_origin = None
-                            
+
                             mock_message = MockMessage(prompt, img_path)
-                            
+
                             # 调用provider的text_chat方法
                             result = await provider.text_chat.text_chat(
                                 message=mock_message,
                                 session_id="vision_analysis"
                             )
-                            
+
                             logger.debug("Provider直接调用成功")
-                            
+
                         except Exception as provider_error:
                             logger.error(f"Provider直接调用也失败: {provider_error}")
                             raise Exception(f"所有VLM调用方法都失败。Context错误: {context_error}，Provider错误: {provider_error}")
@@ -839,12 +979,12 @@ class ImageProcessorService:
                     if result:
                         # 处理不同类型的响应
                         llm_response_text = ""
-                        
+
                         if isinstance(result, str):
                             # 如果result是字符串，直接使用
                             llm_response_text = result
                             logger.debug(f"直接获取的字符串响应: {llm_response_text}")
-                        elif hasattr(result, 'get_plain_text'):
+                        elif hasattr(result, "get_plain_text"):
                             # 如果result是MessageChain，直接获取纯文本
                             llm_response_text = result.get_plain_text()
                             logger.debug(f"从MessageChain获取的响应文本: {llm_response_text}")
@@ -978,11 +1118,11 @@ class ImageProcessorService:
 
     async def search_images(self, query: str, limit: int = 1) -> list[tuple[str, str, str]]:
         """根据查询词搜索图片。
-        
+
         Args:
             query: 搜索查询词
             limit: 返回结果数量限制
-            
+
         Returns:
             list[tuple[str, str, str]]: 结果列表，每项为 (文件路径, 描述, 情绪)
         """
@@ -991,38 +1131,38 @@ class ImageProcessorService:
             # 注意：这里我们假设 Main 类会通过 update_index 传递最新的 idx，或者我们直接访问 Main 的 cache_service
             # 为了解耦，最好是 Main 调用 search 时传入 idx，或者 Service 能访问 Index
             # 目前 ImageProcessorService 没有直接访问 persistent index 的能力，只有 process_image 时传入 idx
-            
+
             # 使用 hack 方式：尝试通过 plugin 实例访问
             idx = {}
             if hasattr(self.plugin, "_load_index"):
                 idx = await self.plugin._load_index()
             elif hasattr(self.plugin, "cache_service"):
                  idx = self.plugin.cache_service.get_cache("index_cache")
-            
+
             if not idx:
                 return []
-            
+
             query_tokens = set(query.lower().split())
             candidates = []
-            
+
             for file_path, data in idx.items():
                 if not isinstance(data, dict):
                     continue
-                    
+
                 score = 0
                 desc = str(data.get("desc", "")).lower()
                 tags = [str(t).lower() for t in data.get("tags", [])]
                 category = str(data.get("category", "")).lower()
-                
+
                 query_lower = query.lower()
-                
+
                 # 1. 分类精确匹配（最高优先级）
                 if query_lower == category:
                     score += 20  # 从 3 提升到 20
                 # 分类包含匹配
                 elif query_lower in category or category in query_lower:
                     score += 10
-                
+
                 # 2. 描述完整匹配
                 if query_lower == desc:
                     score += 15
@@ -1032,7 +1172,7 @@ class ImageProcessorService:
                 # 描述词汇匹配
                 elif any(token in desc for token in query_tokens if len(token) > 1):
                     score += 5
-                
+
                 # 3. 标签匹配
                 for tag in tags:
                     if query_lower == tag:
@@ -1044,7 +1184,7 @@ class ImageProcessorService:
                         for token in query_tokens:
                             if len(token) > 1 and token in tag:
                                 score += 1
-                
+
                 if score > 0:
                     candidates.append({
                         "path": file_path,
@@ -1052,16 +1192,16 @@ class ImageProcessorService:
                         "emotion": category,
                         "score": score
                     })
-            
+
             # 按分数排序
             candidates.sort(key=lambda x: x["score"], reverse=True)
-            
+
             result = []
             for item in candidates[:limit]:
                 result.append((item["path"], item["desc"], item["emotion"]))
-                
+
             return result
-            
+
         except Exception as e:
             logger.error(f"搜索图片失败: {e}")
             return []

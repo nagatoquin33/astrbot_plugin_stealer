@@ -11,7 +11,7 @@ class EmotionAnalyzerService:
     # 1. 标准模式：&&happy&& 或 && happy && (允许内含空格)
     # 2. 容错模式：处理可能被Markdown转义的情况，如 \&\&happy\&\&
     HEX_PATTERN = re.compile(r"(?:&&|\\&\\&)\s*([a-zA-Z0-9_]+)\s*(?:&&|\\&\\&)")
-    
+
     # 3. 残缺模式：处理模型输出 &&happy| 或 &&happy\n 这种忘记闭合的情况
     # 仅匹配后跟 |、换行符或字符串结束的情况，避免误伤正常文本
     INCOMPLETE_HEX_PATTERN = re.compile(r"(?:&&|\\&\\&)\s*([a-zA-Z0-9_]+)\s*(?:[|]|\n|$)")

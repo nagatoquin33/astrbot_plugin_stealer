@@ -49,21 +49,23 @@ class PluginConfig(BaseModel):
     webui_port: int = Field(default=8899, description="WebUI监听端口")
     categories: list[str] = Field(
         default_factory=lambda: [
-            "happy",
-            "sad",
-            "angry",
-            "shy",
-            "surprised",
-            "smirk",
-            "cry",
-            "confused",
-            "embarrassed",
-            "love",
-            "disgust",
-            "fear",
-            "excitement",
-            "tired",
-            "sigh",  # 叹气分类
+            "happy",       # 开心
+            "sad",         # 难过
+            "angry",       # 生气
+            "cry",         # 大哭
+            "shy",         # 害羞
+            "surprised",   # 惊讶
+            "love",        # 喜爱
+            "fear",        # 害怕
+            "tired",       # 疲惫
+            "disgust",     # 厌恶
+            "excitement",  # 兴奋
+            "embarrassed", # 尴尬
+            "sigh",        # 叹气
+            "thank",       # 感谢
+            "confused",    # 困惑
+            "dumb",        # 无语/呆
+            "troll",       # 发癫/搞怪
         ],
         description="分类列表",
     )
@@ -336,8 +338,8 @@ class ConfigService:
 
         # === 情绪分类 ===
         self.categories = [
-            "happy", "sad", "angry", "shy", "surprised", "smirk", 
-            "cry", "confused", "embarrassed", "love", "disgust", 
+            "happy", "sad", "angry", "shy", "surprised", "smirk",
+            "cry", "confused", "embarrassed", "love", "disgust",
             "fear", "excitement", "tired"
         ]
 
