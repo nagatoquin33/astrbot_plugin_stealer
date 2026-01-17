@@ -48,7 +48,7 @@
 - **version: 2.0.8**：✨ 根据AstrBot开发文档进行全面优化，提升代码质量和规范性
 - **version: 2.0.9**：优化注入的提示词，并对残缺标签进行加强处理
 - **version: 2.1.0**：新增表情的简单描述，加入webui可用于表情管理，fc工具和表情智能?匹配
-- **version: 2.2.0**：🎯 智能优化三连击！优化VLM提示词(新增scenes字段+细化分类标准)，智能选择算法(使用频率跟踪+时间衰减)，修复NapCat动画表情识别问题
+- **version: 2.2.0**：优化VLM提示词(新增scenes字段+细化分类标准)，智能选择算法(使用频率跟踪+时间衰减)，修复NapCat动画表情识别问题
 
 
 
@@ -101,5 +101,6 @@
 本项目基于 MIT 许可证开源。
 
 [![GitHub license](https://img.shields.io/github/license/nagatoquin33/astrbot_plugin_stealer)](https://github.com/nagatoquin33/astrbot_plugin_stealer/blob/main/LICENSE)
+
 
 
