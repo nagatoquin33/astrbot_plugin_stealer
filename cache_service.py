@@ -1,6 +1,7 @@
 import hashlib
 import json
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 from astrbot.api import logger
@@ -52,8 +53,11 @@ class CacheService:
                         cached_data = json.load(f)
                         if isinstance(cached_data, dict):
                             self._caches[cache_name] = cached_data
+                            logger.info(f"[load_caches] loaded {len(cached_data)} items for {cache_name} from {cache_file}")
                 except Exception as e:
                     logger.error(f"加载缓存文件 {cache_file} 失败: {e}")
+            else:
+                logger.debug(f"[load_caches] cache file not found: {cache_file}")
 
     def _save_cache(self, cache_name: str):
         """保存指定类型的缓存到文件。
@@ -199,30 +203,37 @@ class CacheService:
             self._save_cache(cache_name)
 
     def get_cache(self, cache_name: str) -> dict[str, Any]:
-        """获取指定类型的缓存字典（只读访问）。
+        """获取指定类型的缓存字典（只读视图）。
 
         Args:
             cache_name: 缓存类型名称
 
         Returns:
-            缓存字典的副本
+            只读视图字典，如果不存在则返回空字典
         """
         if cache_name in self._caches:
-            return self._caches[cache_name].copy()
+            proxy = MappingProxyType(self._caches[cache_name])
+            logger.debug(f"[get_cache] {cache_name}: {len(proxy)} items in cache")
+            return proxy
+        logger.debug(f"[get_cache] {cache_name}: not found, returning empty dict")
         return {}
 
     def set_cache(
         self, cache_name: str, cache_data: dict[str, Any], persist: bool = True
     ) -> None:
-        """设置指定类型的缓存字典。
+        """设置指定类型的缓存字典（完全替换模式）。
 
         Args:
             cache_name: 缓存类型名称
-            cache_data: 要设置的缓存数据
+            cache_data: 要设置的缓存数据（完全替换现有数据）
             persist: 是否立即持久化到文件
         """
         if cache_name in self._caches:
-            self._caches[cache_name] = cache_data
+            old_len = len(self._caches[cache_name])
+            new_len = len(cache_data)
+            self._caches[cache_name].clear()
+            self._caches[cache_name].update(cache_data)
+            logger.debug(f"[set_cache] {cache_name}: {old_len} -> {new_len} items")
             if persist:
                 self._save_cache(cache_name)
 

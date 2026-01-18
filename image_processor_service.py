@@ -11,6 +11,73 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
 
+def levenshtein_distance(s1: str, s2: str) -> int:
+    """计算两个字符串之间的编辑距离（Levenshtein距离）。
+    
+    编辑距离是将一个字符串转换为另一个字符串所需的最少编辑操作次数（插入、删除、替换）。
+    
+    Args:
+        s1: 第一个字符串
+        s2: 第二个字符串
+        
+    Returns:
+        int: 编辑距离，值越小表示两个字符串越相似
+    """
+    # 处理空字符串情况
+    if not s1:
+        return len(s2)
+    if not s2:
+        return len(s1)
+    
+    # 创建距离矩阵
+    # dp[i][j] 表示 s1[0..i-1] 到 s2[0..j-1] 的编辑距离
+    dp = [[0] * (len(s2) + 1) for _ in range(len(s1) + 1)]
+    
+    # 初始化第一行和第一列
+    for i in range(len(s1) + 1):
+        dp[i][0] = i
+    for j in range(len(s2) + 1):
+        dp[0][j] = j
+    
+    # 填充距离矩阵
+    for i in range(1, len(s1) + 1):
+        for j in range(1, len(s2) + 1):
+            # 如果当前字符相同，不需要编辑操作
+            if s1[i-1] == s2[j-1]:
+                cost = 0
+            else:
+                cost = 1
+            
+            # 取三种操作（删除、插入、替换）中的最小值
+            dp[i][j] = min(
+                dp[i-1][j] + 1,      # 删除操作
+                dp[i][j-1] + 1,      # 插入操作
+                dp[i-1][j-1] + cost  # 替换操作
+            )
+    
+    return dp[len(s1)][len(s2)]
+
+
+def calculate_similarity(s1: str, s2: str) -> float:
+    """计算两个字符串的相似度（0-1之间）。
+    
+    Args:
+        s1: 第一个字符串
+        s2: 第二个字符串
+        
+    Returns:
+        float: 相似度，1表示完全相同，0表示完全不同
+    """
+    if not s1 and not s2:
+        return 1.0
+    if not s1 or not s2:
+        return 0.0
+    
+    distance = levenshtein_distance(s1, s2)
+    max_len = max(len(s1), len(s2))
+    return 1.0 - (distance / max_len)
+
+
 class ImageProcessorService:
     """图片处理服务类，负责处理所有与图片相关的操作。"""
 
@@ -40,6 +107,39 @@ class ImageProcessorService:
     CATEGORY_MIGRATION_MAP = {
         "smirk": "troll",        # 坏笑 -> 发癫
     }
+
+    # 常见表达 → 分类映射（帮助LLM理解如何搜索）
+    EXPRESSION_TO_CATEGORY = {
+        "tired": ["困了", "累了", "好累", "疲惫", "疲倦", "想睡", "想睡觉", "困死了", "累死了", "精疲力尽", "疲惫不堪", "无精打采"],
+        "happy": ["开心", "高兴", "快乐", "愉快", "爽", "开心死了", "笑死", "乐呵呵", "美滋滋", "爽翻了"],
+        "sad": ["难过", "伤心", "悲伤", "心碎", "哭了", "泪目", "悲痛", "失落", "沮丧", "郁闷"],
+        "angry": ["生气", "愤怒", "恼火", "发火", "怒了", "气死", "气死了", "可恶", "讨厌", "抓狂"],
+        "cry": ["大哭", "哭了", "泪崩", "哭唧唧", "哭晕", "泪流满面", "哭辽"],
+        "shy": ["害羞", "不好意思", "羞涩", "脸红", "羞羞", "腼腆", "娇羞"],
+        "surprised": ["惊讶", "震惊", "惊了", "啥", "卧槽", "我草", "居然", "竟然", "不可思议", "卧了个槽"],
+        "love": ["喜欢", "爱了", "爱你", "么么哒", "亲亲", "心动了", "喜欢死了", "爱死"],
+        "fear": ["害怕", "吓人", "恐怖", "惊悚", "瑟瑟发抖", "怕怕", "恐惧"],
+        "disgust": ["恶心", "嫌弃", "厌恶", "鄙视", "呕吐", "嫌弃", "受不了", "无语"],
+        "excitement": ["兴奋", "激动", "嗨", "太棒了", "给力", "冲冲冲", "冲鸭", "激情"],
+        "embarrassed": ["尴尬", "脚趾抠地", "社死", "丢人", "不好意思", "窘迫"],
+        "sigh": ["叹气", "唉", "无奈", "叹息", "惆怅", "忧伤"],
+        "thank": ["谢谢", "感谢", "感恩", "多谢", "感激", "爱你", "笔芯"],
+        "confused": ["困惑", "疑惑", "不懂", "迷茫", "蒙圈", "黑人问号", "啥情况"],
+        "dumb": ["无语", "呆住", "傻了", "憨憨", "愚蠢", "呆滞", "石化"],
+        "troll": ["搞怪", "发癫", "神经", "犯病", "皮", "欠揍", "骚操作", "脑残"],
+    }
+
+    # 反向映射：关键词 → 分类
+    _KEYWORD_TO_CATEGORY = None
+
+    @classmethod
+    def _get_keyword_map(cls):
+        if cls._KEYWORD_TO_CATEGORY is None:
+            cls._KEYWORD_TO_CATEGORY = {}
+            for category, expressions in cls.EXPRESSION_TO_CATEGORY.items():
+                for expr in expressions:
+                    cls._KEYWORD_TO_CATEGORY[expr] = category
+        return cls._KEYWORD_TO_CATEGORY
 
     def __init__(self, plugin_instance):
         """初始化图片处理服务。
@@ -226,7 +326,10 @@ class ImageProcessorService:
         )
 
         # 配置参数
-        self.categories = []
+        if hasattr(plugin_instance, "config_service") and plugin_instance.config_service:
+            self.categories = list(plugin_instance.config_service.categories or [])
+        else:
+            self.categories = []
         self.content_filtration = False
         self.vision_provider_id = ""
 
@@ -319,7 +422,7 @@ class ImageProcessorService:
                 logger.warning(f"删除文件夹失败 {old_dir}: {e}")
 
         # 确保所有新分类文件夹存在
-        for category in self.VALID_CATEGORIES:
+        for category in self.categories:
             category_dir = categories_dir / category
             category_dir.mkdir(parents=True, exist_ok=True)
 
@@ -458,7 +561,7 @@ class ImageProcessorService:
                     return False, None
 
                 # 处理有效分类的缓存结果
-                if category and category in self.VALID_CATEGORIES:
+                if category and category in self.categories:
                     logger.debug(f"图片分类结果有效（缓存）: {category}")
 
                     # 存储图片到raw目录（如果还没有存储的话）
@@ -570,7 +673,7 @@ class ImageProcessorService:
                 return False, None
 
             # 处理有效分类结果
-            if category and category in self.VALID_CATEGORIES:
+            if category and category in self.categories:
                 logger.debug(f"图片分类结果有效: {category}")
 
                 # 检查文件是否仍然存在（可能被清理任务删除）
@@ -698,7 +801,7 @@ class ImageProcessorService:
             )
 
             # 构建情绪类别列表字符串
-            emotion_list_str = ", ".join(self.VALID_CATEGORIES)
+            emotion_list_str = ", ".join(self.categories)
 
             # 如果不进行内容过滤，直接进行表情包识别和分类
             if not should_filter:
@@ -767,12 +870,12 @@ class ImageProcessorService:
                 return "非表情包", [], "", "非表情包", []
 
             # 处理情绪分类结果
-            if emotion_result in self.VALID_CATEGORIES:
+            if emotion_result in self.categories:
                 category = emotion_result
             else:
                 # 尝试从响应中提取有效类别
                 found_category = None
-                for valid_cat in self.VALID_CATEGORIES:
+                for valid_cat in self.categories:
                     if valid_cat in emotion_result:
                         found_category = valid_cat
                         break
@@ -1116,7 +1219,7 @@ class ImageProcessorService:
             logger.error(f"存储图片失败: {e}")
             return src_path
 
-    async def search_images(self, query: str, limit: int = 1) -> list[tuple[str, str, str]]:
+    async def search_images(self, query: str, limit: int = 1, idx: dict | None = None) -> list[tuple[str, str, str]]:
         """根据查询词搜索图片。
 
         Args:
@@ -1127,23 +1230,22 @@ class ImageProcessorService:
             list[tuple[str, str, str]]: 结果列表，每项为 (文件路径, 描述, 情绪)
         """
         try:
-            # 加载索引
-            # 注意：这里我们假设 Main 类会通过 update_index 传递最新的 idx，或者我们直接访问 Main 的 cache_service
-            # 为了解耦，最好是 Main 调用 search 时传入 idx，或者 Service 能访问 Index
-            # 目前 ImageProcessorService 没有直接访问 persistent index 的能力，只有 process_image 时传入 idx
-
-            # 使用 hack 方式：尝试通过 plugin 实例访问
-            idx = {}
-            if hasattr(self.plugin, "_load_index"):
-                idx = await self.plugin._load_index()
-            elif hasattr(self.plugin, "cache_service"):
-                 idx = self.plugin.cache_service.get_cache("index_cache")
+            if idx is None:
+                if hasattr(self.plugin, "_load_index"):
+                    idx = await self.plugin._load_index()
+                elif hasattr(self.plugin, "cache_service"):
+                    idx = self.plugin.cache_service.get_cache("index_cache") or {}
 
             if not idx:
                 return []
 
-            query_tokens = set(query.lower().split())
-            candidates = []
+            query_lower = query.lower()
+            query_tokens = [t for t in query_lower.split() if len(t) > 1]
+            query_chars = set(query_lower) if len(query_lower) > 1 else set()
+            
+            MAX_STR_LENGTH = 20
+            top_k = limit * 3
+            top_candidates = []
 
             for file_path, data in idx.items():
                 if not isinstance(data, dict):
@@ -1154,53 +1256,92 @@ class ImageProcessorService:
                 tags = [str(t).lower() for t in data.get("tags", [])]
                 category = str(data.get("category", "")).lower()
 
-                query_lower = query.lower()
+                if query_chars:
+                    all_text = category + " " + desc + " " + " ".join(tags)
+                    if not query_chars.intersection(set(all_text)):
+                        continue
 
-                # 1. 分类精确匹配（最高优先级）
                 if query_lower == category:
-                    score += 20  # 从 3 提升到 20
-                # 分类包含匹配
-                elif query_lower in category or category in query_lower:
-                    score += 10
-
-                # 2. 描述完整匹配
+                    score = 20
+                    top_candidates.append((file_path, desc, category, score))
+                    continue
+                
+                if query_lower in category or category in query_lower:
+                    score = 10
+                
                 if query_lower == desc:
-                    score += 15
-                # 描述包含匹配
+                    score = max(score, 15)
                 elif query_lower in desc:
-                    score += 10
-                # 描述词汇匹配
-                elif any(token in desc for token in query_tokens if len(token) > 1):
-                    score += 5
+                    score = max(score, 12)
+                elif query_tokens:
+                    matched = sum(1 for token in query_tokens if token in desc)
+                    score = max(score, matched * 3)
 
-                # 3. 标签匹配
-                for tag in tags:
-                    if query_lower == tag:
-                        score += 8  # 完全匹配
-                    elif query_lower in tag:
-                        score += 5  # 包含匹配
-                    else:
-                        # Token 匹配
-                        for token in query_tokens:
-                            if len(token) > 1 and token in tag:
-                                score += 1
+                if score >= 15:
+                    top_candidates.append((file_path, desc, category, score))
+                    continue
+
+                if query_lower == tags[0] if tags else False:
+                    score = max(score, 12)
+                elif tags and query_lower in tags[0]:
+                    score = max(score, 8)
+                elif query_tokens:
+                    for tag in tags:
+                        matched = sum(1 for token in query_tokens if token in tag)
+                        score = max(score, matched * 2)
+                        if score >= 15:
+                            break
+
+                if score >= 15:
+                    top_candidates.append((file_path, desc, category, score))
+                    continue
+
+                if score >= 12:
+                    if query_tokens:
+                        for tag in tags:
+                            matched = sum(1 for token in query_tokens if token in tag)
+                            score = max(score, matched * 2 + 10)
+                    top_candidates.append((file_path, desc, category, score))
+                    continue
+
+                if score >= 10 and query_tokens:
+                    has_fuzzy = False
+                    for target in [category, desc] + tags[:2]:
+                        if len(target) > 1 and len(query_lower) > 1:
+                            sim = calculate_similarity(query_lower[:MAX_STR_LENGTH], target[:MAX_STR_LENGTH])
+                            if sim >= 0.65:
+                                score = max(score, int(4 + (sim - 0.65) * 12))
+                                has_fuzzy = True
+                                break
+                    if has_fuzzy:
+                        top_candidates.append((file_path, desc, category, score))
+                        continue
 
                 if score > 0:
-                    candidates.append({
-                        "path": file_path,
-                        "desc": desc,
-                        "emotion": category,
-                        "score": score
-                    })
+                    top_candidates.append((file_path, desc, category, score))
 
-            # 按分数排序
-            candidates.sort(key=lambda x: x["score"], reverse=True)
+                if len(top_candidates) > top_k:
+                    top_candidates.sort(key=lambda x: x[3], reverse=True)
+                    top_candidates = top_candidates[:top_k]
 
-            result = []
-            for item in candidates[:limit]:
-                result.append((item["path"], item["desc"], item["emotion"]))
-
-            return result
+            top_candidates.sort(key=lambda x: x[3], reverse=True)
+            results = [(item[0], item[1], item[2]) for item in top_candidates[:limit]]
+            
+            if not results:
+                keyword_map = self._get_keyword_map()
+                if query in keyword_map:
+                    category = keyword_map[query]
+                    logger.debug(f"未找到直接匹配，尝试映射查询 '{query}' -> 分类 '{category}'")
+                    for file_path, data in idx.items():
+                        if not isinstance(data, dict):
+                            continue
+                        cat = str(data.get("category", "")).lower()
+                        if cat == category:
+                            results.append((file_path, str(data.get("desc", "")), cat))
+                            if len(results) >= limit:
+                                break
+            
+            return results
 
         except Exception as e:
             logger.error(f"搜索图片失败: {e}")

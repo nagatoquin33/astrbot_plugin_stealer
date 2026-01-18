@@ -5,9 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.1.1] - 2026-01-17
+2.1.2
+更新了表情包自定义导入和表情分类的自定义，优化了工具的调用逻辑
 
-### Added
+
+
+[2.1.1] - 2026-01-17
+
+ Added
 -  **智能表情选择优化**
   - 新增使用频率跟踪机制，降低高频表情的选择概率
   - 添加时间衰减算法，避免短时间内重复发送相同表情

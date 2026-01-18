@@ -27,8 +27,9 @@ class TaskScheduler:
         """
         if name in self._tasks:
             if replace_existing:
-                # 取消现有任务
-                self.cancel_task(name)
+                old_task = self._tasks.pop(name)
+                if not old_task.done():
+                    old_task.cancel()
             else:
                 return None
 
@@ -41,7 +42,7 @@ class TaskScheduler:
             logger.error(f"创建任务 {name} 失败: {e}")
             return None
 
-    def cancel_task(self, name: str) -> bool:
+    async def cancel_task(self, name: str) -> bool:
         """取消指定名称的任务。
 
         Args:
@@ -56,18 +57,24 @@ class TaskScheduler:
         try:
             task = self._tasks[name]
             if not task.done():
-                task.cancel()
-                logger.info(f"取消任务: {name}")
+                try:
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+                except asyncio.CancelledError:
+                    pass
+                except Exception as e:
+                    logger.error(f"任务 {name} 取消时出错: {e}")
             del self._tasks[name]
+            logger.info(f"取消任务: {name}")
             return True
         except Exception as e:
             logger.error(f"取消任务 {name} 失败: {e}")
             return False
 
-    def cancel_all_tasks(self) -> None:
+    async def cancel_all_tasks(self) -> None:
         """取消所有任务。"""
         for name in list(self._tasks.keys()):
-            self.cancel_task(name)
+            await self.cancel_task(name)
 
     def schedule_interval_task(
         self,
@@ -94,12 +101,18 @@ class TaskScheduler:
         async def interval_task():
             while True:
                 try:
-                    await callback()
+                    await asyncio.shield(callback())
+                except asyncio.CancelledError:
+                    logger.info(f"任务 {name} 被取消，退出循环")
+                    raise
                 except Exception as e:
-                    logger.error(f"执行定期任务 {name} 失败: {e}")
+                    logger.error(f"执行定期任务 {name} 失败: {e}", exc_info=True)
 
-                # 等待下一个执行周期
-                await asyncio.sleep(max(1.0, interval))
+                try:
+                    await asyncio.sleep(max(1.0, interval))
+                except asyncio.CancelledError:
+                    logger.info(f"任务 {name} 在睡眠时被取消")
+                    raise
 
         # 创建任务
         return self.create_task(name, interval_task(), replace_existing)
@@ -157,11 +170,11 @@ class TaskScheduler:
         task = self.get_task(name)
         return task is not None and not task.done()
 
-    def shutdown(self):
+    async def shutdown(self):
         """关闭任务调度器，取消所有任务。"""
-        self.cancel_all_tasks()
+        await self.cancel_all_tasks()
         logger.info("任务调度器已关闭")
 
-    def cleanup(self):
+    async def cleanup(self):
         """清理资源。"""
-        self.shutdown()
+        await self.shutdown()

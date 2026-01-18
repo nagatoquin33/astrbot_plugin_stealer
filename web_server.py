@@ -1,5 +1,9 @@
+import asyncio
+import hashlib
 import logging
 import os
+import uuid
+from datetime import datetime
 from pathlib import Path
 
 from aiohttp import web
@@ -12,7 +16,7 @@ class WebServer:
         self.plugin = plugin
         self.host = host
         self.port = port
-        self.app = web.Application()
+        self.app = web.Application(client_max_size=50 * 1024 * 1024)
         self.runner: web.AppRunner | None = None
         self.site: web.TCPSite | None = None
         self._started = False
@@ -26,12 +30,15 @@ class WebServer:
         self._setup_routes()
 
     def _setup_routes(self):
-        # API 路由
         self.app.router.add_get("/api/images", self.handle_list_images)
         self.app.router.add_delete("/api/images/{hash}", self.handle_delete_image)
+        self.app.router.add_post("/api/images/upload", self.handle_upload_image)
         self.app.router.add_get("/api/stats", self.handle_get_stats)
         self.app.router.add_get("/api/config", self.handle_get_config)
-        self.app.router.add_get("/api/health", self.handle_health_check)  # 健康检查
+        self.app.router.add_get("/api/categories", self.handle_get_categories)
+        self.app.router.add_post("/api/categories", self.handle_update_categories)
+        self.app.router.add_get("/api/emotions", self.handle_get_emotions)
+        self.app.router.add_get("/api/health", self.handle_health_check)
 
         # 静态文件路由
         # 1. 前端页面 - 首页
@@ -231,31 +238,32 @@ class WebServer:
     async def handle_delete_image(self, request):
         """删除图片"""
         image_hash = request.match_info["hash"]
-        # 实现删除逻辑 -> 调用 plugin 的安全删除方法
-        # 需要反向查找 hash 对应的文件路径
-        index = self.plugin.cache_service.get_cache("index_cache") or {}
+        
+        # 获取缓存的可变副本
+        index = self.plugin.cache_service.get_cache("index_cache")
+        if not index:
+            return web.json_response({"error": "Image index not found"}, status=404)
+        
+        # 创建可变副本用于修改
+        index_copy = dict(index)
         target_path = None
 
-        for path_str, meta in index.items():
+        for path_str, meta in index_copy.items():
             if meta.get("hash") == image_hash:
                 target_path = path_str
                 break
 
         if target_path:
-            # 调用插件的删除逻辑
-            # 注意：这需要 main.py 中暴露相关方法，或者我们自己实现
             try:
                 # 1. 删除文件
                 if os.path.exists(target_path):
                     os.remove(target_path)
 
-                # 2. 更新索引
-                if target_path in index:
-                    del index[target_path]
-                    # Fix: Use set_cache (sync) instead of save_cache (non-existent/awaited)
-                    self.plugin.cache_service.set_cache("index_cache", index, persist=True)
-
-                # 3. 清理空目录 (可选)
+                # 2. 更新索引（从副本中删除）
+                if target_path in index_copy:
+                    del index_copy[target_path]
+                    # 保存更新后的索引
+                    self.plugin.cache_service.set_cache("index_cache", index_copy, persist=True)
 
                 return web.json_response({"success": True})
             except Exception as e:
@@ -283,8 +291,148 @@ class WebServer:
         })
 
     async def handle_health_check(self, request):
-        """健康检查端点 - 用于反向代理和监控"""
         return web.json_response({
             "status": "ok",
             "service": "emoji-manager-webui"
         })
+
+    async def handle_upload_image(self, request):
+        try:
+            data = await request.post()
+            
+            if 'file' not in data:
+                return web.json_response({"error": "没有上传文件"}, status=400)
+            
+            uploaded_file = data['file']
+            if not uploaded_file.filename:
+                return web.json_response({"error": "文件名无效"}, status=400)
+            
+            category = data.get('emotion', '').strip()
+            if not category:
+                return web.json_response({"error": "请选择情绪分类"}, status=400)
+            tags_raw = data.get('tags', '').strip()
+            tags = [t.strip() for t in tags_raw.split(',') if t.strip()] if tags_raw else []
+            desc = data.get('desc', '').strip()
+            
+            file_ext = Path(uploaded_file.filename).suffix.lower()
+            allowed_exts = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'}
+            if file_ext not in allowed_exts:
+                return web.json_response({"error": f"不支持的文件类型，允许: {', '.join(allowed_exts)}"}, status=400)
+            
+            file_content = uploaded_file.file.read()
+            file_hash = hashlib.md5(file_content).hexdigest()
+            
+            timestamp = int(datetime.now().timestamp())
+            unique_filename = f"{timestamp}_{uuid.uuid4().hex[:8]}{file_ext}"
+            
+            category_dir = Path(self.data_dir) / "categories" / category
+            category_dir.mkdir(parents=True, exist_ok=True)
+            
+            file_path = category_dir / unique_filename
+            
+            with open(file_path, 'wb') as f:
+                f.write(file_content)
+            
+            index = dict(self.plugin.cache_service.get_cache("index_cache") or {})
+            
+            index[str(file_path)] = {
+                "hash": file_hash,
+                "path": str(file_path),
+                "category": category,
+                "tags": tags,
+                "desc": desc,
+                "created_at": timestamp
+            }
+            
+            self.plugin.cache_service.set_cache("index_cache", index, persist=True)
+            
+            rel_path = file_path.relative_to(self.data_dir)
+            url = f"/images/{rel_path.as_posix()}"
+            
+            return web.json_response({
+                "success": True,
+                "image": {
+                    "hash": file_hash,
+                    "url": url,
+                    "category": category,
+                    "tags": tags,
+                    "desc": desc,
+                    "created_at": timestamp
+                }
+            })
+            
+        except Exception as e:
+            logger.error(f"上传图片失败: {e}", exc_info=True)
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def handle_get_categories(self, request):
+        try:
+            index = dict(self.plugin.cache_service.get_cache("index_cache") or {})
+            categories = {}
+            for meta in index.values():
+                if isinstance(meta, dict):
+                    cat = meta.get("category", "unknown")
+                    categories[cat] = categories.get(cat, 0) + 1
+            return web.json_response({"categories": categories})
+        except Exception as e:
+            logger.error(f"获取分类列表失败: {e}")
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def handle_update_categories(self, request):
+        try:
+            data = await request.json()
+            new_categories_data = data.get("categories", [])
+
+            if not isinstance(new_categories_data, list) or not new_categories_data:
+                return web.json_response({"error": "分类列表无效"}, status=400)
+
+            # 拆分数据：提取 key 列表和 category_info
+            category_keys = []
+            category_info = {}
+            
+            for item in new_categories_data:
+                if isinstance(item, dict) and item.get("key"):
+                    key = item["key"]
+                    category_keys.append(key)
+                    # 只有当有 name 或 desc 时才保存
+                    if item.get("name") or item.get("desc"):
+                        category_info[key] = {
+                            "name": item.get("name", ""),
+                            "desc": item.get("desc", "")
+                        }
+                elif isinstance(item, str):
+                    # 兼容旧格式（直接发送字符串）
+                    category_keys.append(item)
+
+            # 保存到 config_service
+            self.plugin.config_service.categories = category_keys
+            
+            # 更新 category_info
+            if hasattr(self.plugin.config_service, "category_info"):
+                self.plugin.config_service.category_info.update(category_info)
+            
+            self.plugin.config_service.config_manager.save_config()
+
+            if hasattr(self.plugin, "image_processor_service"):
+                self.plugin.image_processor_service.categories = category_keys
+
+            if hasattr(self.plugin, "categories"):
+                self.plugin.categories = category_keys
+
+            if hasattr(self.plugin, "emotion_analyzer_service"):
+                self.plugin.emotion_analyzer_service.update_config(categories=category_keys)
+
+            asyncio.create_task(self.plugin._reload_personas(force=True))
+
+            return web.json_response({"success": True, "categories": category_keys})
+        except Exception as e:
+            logger.error(f"更新分类列表失败: {e}", exc_info=True)
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def handle_get_emotions(self, request):
+        try:
+            category_info = self.plugin.config_service.get_category_info()
+            return web.json_response({"emotions": category_info})
+        except Exception as e:
+            logger.error(f"获取情绪分类失败: {e}")
+            return web.json_response({"error": str(e)}, status=500)

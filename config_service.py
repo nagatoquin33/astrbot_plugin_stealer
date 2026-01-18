@@ -343,6 +343,28 @@ class ConfigService:
             "fear", "excitement", "tired"
         ]
 
+        # 分类名称配置（key -> {name, description}）
+        self.category_info = {
+            "happy": {"name": "开心", "desc": "快乐、高兴、愉悦的情绪"},
+            "sad": {"name": "难过", "desc": "悲伤、沮丧、失落的情绪"},
+            "angry": {"name": "生气", "desc": "愤怒、恼火、不满的情绪"},
+            "shy": {"name": "害羞", "desc": "羞涩、不好意思的情绪"},
+            "surprised": {"name": "惊讶", "desc": "意外、震惊、惊奇的情绪"},
+            "smirk": {"name": "得意", "desc": "得意、坏笑、嘚瑟的情绪"},
+            "cry": {"name": "大哭", "desc": "哭泣、流泪、伤心的情绪"},
+            "confused": {"name": "困惑", "desc": "迷茫、不解、疑惑的情绪"},
+            "embarrassed": {"name": "尴尬", "desc": "窘迫、尴尬、为难的情绪"},
+            "love": {"name": "喜爱", "desc": "喜欢、爱慕、宠溺的情绪"},
+            "disgust": {"name": "厌恶", "desc": "讨厌、反感、嫌弃的情绪"},
+            "fear": {"name": "害怕", "desc": "恐惧、担心、害怕的情绪"},
+            "excitement": {"name": "兴奋", "desc": "激动、亢奋、兴奋的情绪"},
+            "tired": {"name": "疲惫", "desc": "劳累、疲倦、无力的情绪"},
+            "sigh": {"name": "叹气", "desc": "无奈、叹气、失望的情绪"},
+            "thank": {"name": "感谢", "desc": "感谢、道谢、感恩的情绪"},
+            "dumb": {"name": "无语", "desc": "呆滞、无语、傻眼的状态"},
+            "troll": {"name": "搞怪", "desc": "发癫、搞怪、调皮的状态"},
+        }
+
         # 别名配置
         self.alias_path = self.base_dir / "aliases.json"
         self._aliases = {}
@@ -581,3 +603,19 @@ class ConfigService:
     def cleanup(self):
         """清理资源。"""
         pass
+
+    def get_category_info(self) -> list[dict]:
+        """获取所有分类的详细信息。
+
+        Returns:
+            分类信息列表，每项包含 key, name, desc
+        """
+        result = []
+        for cat_key in self.categories:
+            info = self.category_info.get(cat_key, {"name": cat_key, "desc": ""})
+            result.append({
+                "key": cat_key,
+                "name": info.get("name", cat_key),
+                "desc": info.get("desc", "")
+            })
+        return result

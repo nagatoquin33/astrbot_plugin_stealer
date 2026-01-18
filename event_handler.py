@@ -303,10 +303,16 @@ class EventHandler:
     async def _enforce_capacity_legacy(self, image_index: dict):
         """原有的容量控制逻辑（保持向后兼容）"""
         try:
-            if len(image_index) <= int(self.plugin.max_reg_num):
+            max_reg = int(self.plugin.max_reg_num)
+            if max_reg <= 0:
+                logger.warning(f"容量控制上限无效: max_reg_num={max_reg}，跳过容量控制")
+                return
+            
+            if len(image_index) <= max_reg:
                 return
             if not self.plugin.do_replace:
                 return
+                
             image_items = []
             for file_path, image_info in image_index.items():
                 created_at = (
@@ -316,23 +322,23 @@ class EventHandler:
                 )
                 image_items.append((file_path, created_at))
 
-            # 按创建时间排序，最旧的在前
+            if not image_items:
+                return
+                
             image_items.sort(key=lambda x: x[1])
 
-            # 计算需要删除的数量：当达到上限时一次性删除10个最旧的图片
-            # 如果超出数量少于10个，则只删除超出部分
-            remove_count = len(image_index) - int(self.plugin.max_reg_num)
-            remove_count = min(10, remove_count)  # 最多删除10个
+            remove_count = len(image_items) - max_reg
+            remove_count = max(0, remove_count)  # 确保不为负数
+            safe_remove_count = min(remove_count, len(image_items))  # 确保不超出范围
+            
+            logger.info(f"容量控制: 当前 {len(image_items)} 个，上限 {max_reg}，将删除 {safe_remove_count} 个最旧的")
 
-            for i in range(remove_count):
+            for i in range(safe_remove_count):
                 remove_path = image_items[i][0]
                 try:
-                    # 删除raw目录中的原始文件
                     if os.path.exists(remove_path):
                         await self.plugin._safe_remove_file(remove_path)
 
-                    # 删除categories目录中的对应副本
-                    # 从索引中获取分类信息
                     if remove_path in image_index and isinstance(
                         image_index[remove_path], dict
                     ):
@@ -354,9 +360,10 @@ class EventHandler:
                         exc_info=True,
                     )
 
-                # 从索引中删除对应的条目
                 if remove_path in image_index:
                     del image_index[remove_path]
+                    
+            logger.info(f"容量控制完成，删除了 {remove_count} 个表情包，当前数量: {len(image_index)}")
         except ValueError as e:
             logger.error(f"执行容量控制时配置值错误: {e}")
         except (FileNotFoundError, PermissionError) as e:

@@ -153,8 +153,8 @@ class CommandHandler:
             return
         pick = random.choice(files)
         b64 = await self.plugin.image_processor_service._file_to_base64(pick.as_posix())
-        chain = event.make_result().base64_image(b64).message_chain
-        yield event.result_with_message_chain(chain)
+        result = event.make_result().base64_image(b64)
+        yield result
 
     async def debug_image(self, event: AstrMessageEvent):
         """调试命令：处理当前消息中的图片并显示详细信息。"""
@@ -330,7 +330,7 @@ class CommandHandler:
         else:
             self.plugin.enable_raw_cleanup = False
             # 停止任务
-            self.plugin.task_scheduler.cancel_task("raw_cleanup_loop")
+            await self.plugin.task_scheduler.cancel_task("raw_cleanup_loop")
             yield event.plain_result("已禁用raw目录清理任务")
 
         self.plugin._persist_config()
@@ -352,7 +352,7 @@ class CommandHandler:
         else:
             self.plugin.enable_capacity_control = False
             # 停止任务
-            self.plugin.task_scheduler.cancel_task("capacity_control_loop")
+            await self.plugin.task_scheduler.cancel_task("capacity_control_loop")
             yield event.plain_result("已禁用容量控制任务")
 
         self.plugin._persist_config()
@@ -799,13 +799,14 @@ class CommandHandler:
                 )
                 return
 
-            # 获取旧索引进行对比
+            # 获取旧索引进行对比（创建独立副本）
             old_index = await self.plugin._load_index()
             old_count = len(old_index)
 
-            # 尝试加载旧版本遗留文件（Legacy Data）
+            # 尝试加载旧版本遗留文件（Legacy Data）- 独立存储，不修改 old_index
             import json
             legacy_metadata_count = 0
+            legacy_data_map = {}  # 独立存储 legacy 数据
             possible_legacy_paths = [
                 self.plugin.base_dir / "index.json",
                 self.plugin.base_dir / "image_index.json",
@@ -821,24 +822,28 @@ class CommandHandler:
                         with open(legacy_path, encoding="utf-8") as f:
                             legacy_data = json.load(f)
                             if isinstance(legacy_data, dict):
-                                # 将旧数据也尝试合并到 old_index 中，作为元数据来源
-                                old_index.update(legacy_data)
+                                legacy_data_map.update(legacy_data)
                                 legacy_metadata_count += len(legacy_data)
                     except Exception:
                         pass
 
             # --- 智能合并逻辑开始 ---
             # 1. 建立哈希查找表，用于处理文件路径变更的情况
+            # 合并 old_index 和 legacy_data_map 用于查找
+            combined_index = {**old_index, **legacy_data_map}
+            
             old_hash_map = {}
-            for k, v in old_index.items():
+            for k, v in combined_index.items():
                 if isinstance(v, dict) and v.get("hash"):
                     old_hash_map[v["hash"]] = v
             # 同时也建立文件名->数据映射（处理哈希可能变化但文件名没变的情况）
             old_name_map = {}
-            for k, v in old_index.items():
+            for k, v in combined_index.items():
                 if isinstance(v, dict):
                      path_obj = Path(k)
                      old_name_map[path_obj.name] = v
+                     # 同时也用纯文件名（不带扩展名）建立映射
+                     old_name_map[path_obj.stem] = v
 
             recovered_count = 0
 
@@ -848,19 +853,29 @@ class CommandHandler:
                 new_path_obj = Path(new_path)
 
                 # 优先级1: 路径直接匹配
-                if new_path in old_index:
-                    old_data = old_index[new_path]
-                # 优先级2: 哈希匹配
+                if new_path in combined_index:
+                    old_data = combined_index[new_path]
+                # 优先级2: 哈希匹配（最可靠）
                 elif new_data.get("hash") in old_hash_map:
                     old_data = old_hash_map[new_data["hash"]]
-                # 优先级3: 文件名匹配
+                # 优先级3: 文件名匹配（尝试多种格式）
                 elif new_path_obj.name in old_name_map:
                     old_data = old_name_map[new_path_obj.name]
+                elif new_path_obj.stem in old_name_map:
+                    old_data = old_name_map[new_path_obj.stem]
+                # 优先级4: 尝试从路径中提取文件名后匹配
+                else:
+                    for old_path, old_val in combined_index.items():
+                        if isinstance(old_val, dict):
+                            old_path_obj = Path(old_path)
+                            # 比较文件名（忽略大小写扩展名）
+                            if old_path_obj.stem.lower() == new_path_obj.stem.lower():
+                                old_data = old_val
+                                break
 
                 # 如果找到了旧数据，恢复关键元数据
                 if old_data and isinstance(old_data, dict):
-                    # 只有当旧数据包含有效描述时才恢复，避免覆盖新生成的（如果有）
-                    # 但重建索引只生成基础信息，所以这里总是恢复
+                    # 恢复描述和标签
                     if old_data.get("desc"):
                         new_data["desc"] = old_data["desc"]
                     if old_data.get("tags"):
