@@ -38,27 +38,88 @@ except Exception:  # pragma: no cover - 仅作为兼容分支
 
 # ================= Monkey Patch Start =================
 # 修复 AstrBot Token 一次性销毁导致部分客户端无法预览/下载图片的问题
+# 
+# 问题背景：
+# 部分客户端（QQ/NapCat、Lagrange）在下载图片前会先发送 HEAD 请求探测文件，
+# 导致 Token 被提前消费，后续 GET 请求失败返回 404。
+#
+# 优化方案：
+# 1. 使用访问计数而非全局禁用 pop()，减少对其他功能的影响
+# 2. Token 有效期缩短至 60 秒（表情包场景足够使用）
+# 3. 仅对插件注册的 Token 启用多次访问保护
 from astrbot.core.file_token_service import FileTokenService
 import os
+import time
 
-# 定义一个新的 handle_file 方法，不删除 Token
+# 保存原始方法引用
+_original_handle_file = FileTokenService.handle_file
+_original_register_file = FileTokenService.register_file
+
+# 插件专用的 Token 标记集合（使用 set 提高查询效率）
+_plugin_reusable_tokens = set()
+
+async def patched_register_file(self, file_path: str, timeout: float | None = None) -> str:
+    """重写注册方法，为插件的 Token 添加标记"""
+    # 调用原始注册方法
+    file_token = await _original_register_file(self, file_path, timeout)
+    
+    # 检查调用栈，判断是否来自本插件
+    import inspect
+    frame = inspect.currentframe()
+    try:
+        # 向上查找调用栈
+        caller_frame = frame.f_back
+        while caller_frame:
+            caller_file = caller_frame.f_code.co_filename
+            # 如果调用者是本插件，标记为可重复使用
+            if "astrbot_plugin_stealer" in caller_file:
+                _plugin_reusable_tokens.add(file_token)
+                # 为表情包场景设置更短的超时（60秒足够）
+                if timeout is None:
+                    # 重新注册，使用短超时
+                    async with self.lock:
+                        if file_token in self.staged_files:
+                            file_path_stored, _ = self.staged_files[file_token]
+                            expire_time = time.time() + 60  # 60秒超时
+                            self.staged_files[file_token] = (file_path_stored, expire_time)
+                break
+            caller_frame = caller_frame.f_back
+    finally:
+        del frame
+    
+    return file_token
+
 async def patched_handle_file(self, file_token: str) -> str:
+    """优化的 handle_file，仅对插件 Token 启用多次访问"""
     async with self.lock:
         await self._cleanup_expired_tokens()
 
         if file_token not in self.staged_files:
             raise KeyError(f"无效或过期的文件 token: {file_token}")
 
-        # 修改点：使用 [] 读取而不是 pop() 删除
-        # file_path, _ = self.staged_files.pop(file_token) 
-        file_path, _ = self.staged_files[file_token]
+        # 判断是否为插件的可重复使用 Token
+        if file_token in _plugin_reusable_tokens:
+            # 插件 Token：保留不删除，支持多次访问（HEAD + GET）
+            file_path, _ = self.staged_files[file_token]
+        else:
+            # 其他 Token：保持原有的一次性行为
+            file_path, _ = self.staged_files.pop(file_token)
         
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"文件不存在: {file_path}")
         return file_path
 
-# 将核心类的方法替换为新方法
+# 应用补丁
+FileTokenService.register_file = patched_register_file
 FileTokenService.handle_file = patched_handle_file
+
+# 清理函数（在插件卸载时调用）
+def _cleanup_monkey_patch():
+    """恢复原始方法并清理标记集合"""
+    FileTokenService.handle_file = _original_handle_file
+    FileTokenService.register_file = _original_register_file
+    _plugin_reusable_tokens.clear()
+
 # ================= Monkey Patch End =================
 
 
@@ -129,26 +190,8 @@ class Main(Star):
         # 设置PILImage实例属性，供ImageProcessorService使用
         self.PILImage = PILImage
 
-        # 初始化人格注入相关属性
-        # 直接集成提示词，不在设置界面显示
-        # 优化后的结构化 Prompt，提升约束力
-        self.prompt_head: str = (
-            "\n\n# 角色指令：情绪表达\n"
-            "你需要根据对话的上下文和你当前的回复态度，从以下列表中选择一个最匹配的情绪：\n"
-            "[{categories}]\n"
-        )
-        self.prompt_tail: str = (
-            "\n# 输出格式严格要求\n"
-            "1. 必须在回复的**最开头**，使用双浮点号 '&&' 包裹情绪标签。\n"
-            "2. 格式示例：\n"
-            "   &&happy&& 哈哈，这个太有意思了！\n"
-            "   &&sad&& 唉，怎么会这样...\n"
-            "3. 只能使用列表中的情绪词，严禁创造新词。\n"
-            "4. 不要使用 Markdown 代码块或括号，**仅使用 && 符号**。\n"
-        )
-        self.persona_backup: list = []
-        self._persona_injected: bool = False  # 标记是否已注入
-        self._persona_marker: str = "<!-- STEALER_PLUGIN_EMOTION_MARKER_v2 -->"  # 更唯一的标记
+        # 情绪选择标记（用于识别注入的内容）
+        self._persona_marker = "<!-- STEALER_PLUGIN_EMOTION_MARKER_v3 -->"  # 更新版本号
 
         # 初始化服务类
         self.config_service = ConfigService(
@@ -347,8 +390,19 @@ class Main(Star):
 
                 self.emotion_analyzer_service.update_config(categories=self.categories)
 
-                # 重新加载人格注入
-                asyncio.create_task(self._reload_personas())
+                # 为新增的分类创建对应的目录
+                try:
+                    for category in self.categories:
+                        category_path = self.categories_dir / category
+                        if not category_path.exists():
+                            category_path.mkdir(parents=True, exist_ok=True)
+                            logger.info(f"[Config] 已创建新分类目录: {category}")
+                except Exception as e:
+                    logger.warning(f"[Config] 创建分类目录失败: {e}")
+
+                # 注意：不再调用 _reload_personas，因为已改用 LLM 钩子
+                # LLM 钩子会在下次请求时自动使用更新后的分类列表
+                logger.debug("[Config] 配置已更新，下次 LLM 请求将使用新分类")
         except Exception as e:
             logger.error(f"更新配置失败: {e}")
 
@@ -370,7 +424,7 @@ class Main(Star):
                 prompts_path = plugin_dir / "prompts.json"
                 if prompts_path.exists():
                     # 使用异步文件读取
-                    import aiofiles
+                    import aiofiles # type: ignore
                     try:
                         async with aiofiles.open(prompts_path, encoding="utf-8") as f:
                             content = await f.read()
@@ -454,10 +508,9 @@ class Main(Star):
                     f"已启动容量控制任务，周期: {self.capacity_control_interval}分钟"
                 )
 
-            # 加载并注入人格
-            personas = self.context.provider_manager.personas
-            self.persona_backup = [copy.deepcopy(personas[0])] if personas else []
-            await self._reload_personas()
+            # 注意：人格注入已改为使用 LLM 钩子（@filter.on_llm_request），
+            # 不再需要在 initialize() 中注入人格配置
+            logger.info("[Stealer] 插件初始化完成，情绪注入将通过 LLM 请求钩子实现")
 
         except Exception as e:
             logger.error(f"初始化插件失败: {e}")
@@ -468,6 +521,13 @@ class Main(Star):
     async def terminate(self):
         """插件销毁生命周期钩子。清理任务。"""
 
+        # 清理 Monkey Patch（优先执行，避免影响其他清理流程）
+        try:
+            _cleanup_monkey_patch()
+            logger.info("已恢复 FileTokenService 原始行为")
+        except Exception as e:
+            logger.error(f"清理 Monkey Patch 失败: {e}")
+
         # 停止WebUI
         if getattr(self, "web_server", None):
             try:
@@ -476,30 +536,9 @@ class Main(Star):
                 logger.error(f"停止WebUI失败: {e}")
 
         try:
-            # 清理人格注入 - 只移除我们注入的部分，不影响其他插件的修改
-            personas = self.context.provider_manager.personas
-            marker = self._persona_marker
-
-            for persona in personas:
-                try:
-                    current_prompt = persona.get("prompt", "")
-
-                    # 检查是否包含我们的标记
-                    if marker in current_prompt:
-                        # 使用正则移除标记包裹的注入内容
-                        import re
-                        # 移除：\n标记\n内容\n标记\n
-                        pattern = rf"\n\s*{re.escape(marker)}\n.*?\n\s*{re.escape(marker)}\n"
-                        new_prompt = re.sub(pattern, "", current_prompt, flags=re.DOTALL)
-                        persona["prompt"] = new_prompt
-                        logger.debug(f"已清理人格中的情绪注入")
-
-                except Exception as e:
-                    logger.error(f"清理人格时出错: {e}")
-                    continue
-
-            # 重置注入状态
-            self._persona_injected = False
+            # 注意：由于改用 LLM 钩子注入，不再需要清理人格配置
+            # LLM 钩子会在每次请求时独立注入，插件卸载后自动失效
+            logger.info("[Stealer] 使用 LLM 钩子注入，无需清理人格配置")
 
             # 使用任务调度器停止所有后台任务
             await self.task_scheduler.cancel_task("raw_cleanup_loop")
@@ -541,66 +580,6 @@ class Main(Star):
             logger.error(f"终止插件失败: {e}")
 
         return
-
-    async def _reload_personas(self, force: bool = False):
-        """重新加载人格配置并注入情绪选择提醒。
-
-        Args:
-            force: 是否强制重新注入（即使已注入过）
-
-        优化后的注入逻辑，更加兼容其他插件：
-        1. 使用可识别的标记包裹注入内容
-        2. 恢复时只移除我们注入的部分，不影响其他插件的修改
-        3. 支持通过 force 参数强制重新注入
-        """
-        try:
-            from astrbot.api import logger
-
-            personas = self.context.provider_manager.personas
-
-            if not personas:
-                logger.debug("未配置人格，跳过注入")
-                return
-
-            persona = personas[0]
-            current_prompt = persona.get("prompt", "")
-
-            # 如果已注入且不是强制重新注入，则跳过
-            if self._persona_injected and not force:
-                logger.debug("情绪注入已存在，跳过重复注入")
-                return
-
-            # 构建情绪分类字符串
-            categories_str = ", ".join(self.categories)
-
-            # 生成系统提示添加内容
-            head_with_categories = self.prompt_head.replace(
-                "{categories}", categories_str
-            )
-            sys_prompt_add = f"\n\n{head_with_categories}\n{self.prompt_tail}"
-
-            # 如果已有旧注入，先清理
-            if self._persona_marker in current_prompt:
-                import re
-                pattern = rf"\n?{re.escape(self._persona_marker)}\n.*?{re.escape(self._persona_marker)}\n?"
-                current_prompt = re.sub(pattern, "", current_prompt, flags=re.DOTALL)
-                logger.debug("已清理旧的情绪注入")
-
-            # 备份原始prompt（只备份第一个）
-            if not self.persona_backup:
-                self.persona_backup = [copy.deepcopy(persona)]
-            else:
-                self.persona_backup[0]["prompt"] = current_prompt
-
-            # 注入情绪提醒，使用标记包裹
-            injected_content = f"\n{self._persona_marker}\n{sys_prompt_add}\n{self._persona_marker}\n"
-            persona["prompt"] = current_prompt + injected_content
-
-            self._persona_injected = True
-            logger.info(f"已注入情绪选择提醒到人格配置中（force={force}）")
-
-        except Exception as e:
-            logger.error(f"注入情绪选择提醒失败: {e}")
 
     def _persist_config(self):
         """持久化插件运行配置。"""
@@ -1221,24 +1200,79 @@ class Main(Star):
         # 委托给 EventHandler 类处理
         await self.event_handler._enforce_capacity(idx)
 
-    # 情绪标签正则模式 - 支持两种格式
-    EMOTION_TAG_PATTERNS = [
-        r"&&(\w+)&&",           # &&happy&& 格式（简短）
-        r"\[emoji:\s*(\w+)\]",  # [emoji: happy] 格式（可读性好）
-    ]
+    @filter.on_llm_request()
+    async def _inject_emotion_instruction(self, event: AstrMessageEvent, request):
+        """在 LLM 请求时动态注入情绪选择指令。
+        
+        优势：
+        - 不修改全局人格配置，更安全
+        - 每次请求独立注入，互不影响
+        - 可根据场景灵活控制是否注入
+        
+        注意：
+        - auto_send 控制是否被动发送表情包（也就是是否需要情绪注入）
+        - steal_emoji 控制是否偷取（保存）别人的表情包，与人格注入无关
+        """
+        try:
+            # 检查是否启用自动发送（被动发送）
+            # auto_send 控制人格注入，因为只有在需要自动发送时才需要情绪标签
+            if not self.auto_send:
+                logger.debug("[Stealer] 自动发送已禁用，跳过情绪注入")
+                return
+            
+            # 检查分类列表是否为空
+            if not self.categories:
+                logger.debug("[Stealer] 分类列表为空，跳过情绪注入")
+                return
+            
+            # 构建情绪分类字符串
+            categories_str = ", ".join(self.categories)
+            
+            # 生成情绪选择指令
+            emotion_instruction = f"""
+{self._persona_marker}
+# 角色指令：情绪表达
+你需要根据对话的上下文和你当前的回复态度，从以下列表中选择一个最匹配的情绪：
+[{categories_str}]
 
-    @filter.on_decorating_result(priority=-100)
+# 输出格式严格要求
+1. 必须在回复的**最开头**，使用双浮点号 '&&' 包裹情绪标签。
+2. 格式示例：
+   &&happy&& 哈哈，这个太有意思了！
+   &&sad&& 唉，怎么会这样...
+3. 只能使用列表中的情绪词，严禁创造新词。
+4. 不要使用 Markdown 代码块或括号，**仅使用 && 符号**。
+{self._persona_marker}
+"""
+            
+            # 将指令添加到系统提示词
+            if hasattr(request, 'system_prompt'):
+                request.system_prompt = (request.system_prompt or "") + emotion_instruction
+                logger.debug(f"[Stealer] 已注入情绪选择指令 (categories: {len(self.categories)})")
+            else:
+                logger.warning("[Stealer] LLM 请求对象没有 system_prompt 属性")
+                
+        except Exception as e:
+            logger.error(f"[Stealer] 注入情绪选择指令失败: {e}", exc_info=True)
+
+    @filter.on_decorating_result(priority=100)
     async def _prepare_emoji_response(self, event: AstrMessageEvent):
         """准备表情包响应的公共逻辑。
 
-        使用负优先级(-100)确保最高优先级执行（数值越小优先级越高），
-        在所有其他插件之前处理标签清理，避免标签被其他插件误处理。
+        调整优先级为 100（数值越大越晚执行），让其他格式化插件先处理完毕，
+        避免破坏 <ref>、Markdown 等结构化内容。
+
+        处理流程：
+        1. 等待其他插件完成格式化（HTML、Markdown 等）
+        2. 从已格式化的 plain_text 中提取情绪
+        3. 仅清理情绪标签，保留其他格式
+        4. 发送表情包（如果需要）
 
         支持的标签格式：
         - &&happy&& 格式
         - [emoji: happy] 格式
         """
-        logger.info("[Stealer] _prepare_emoji_response 被调用")
+        logger.debug("[Stealer] _prepare_emoji_response 被调用")
 
         # 检查是否为主动发送（工具已发送表情包）
         if event.get_extra("stealer_active_sent"):
@@ -1249,7 +1283,7 @@ class Main(Star):
                 if text.strip():
                     cleaned_text = self._clean_emotion_tags(text)
                     if cleaned_text != text:
-                        self._update_result_with_cleaned_text(event, result, cleaned_text)
+                        self._update_result_with_cleaned_text_safe(event, result, cleaned_text)
                         logger.debug("[Stealer] 已清理主动发送后的情绪标签")
             return False
 
@@ -1260,111 +1294,63 @@ class Main(Star):
                 logger.debug("[Stealer] 结果对象无效，跳过处理")
                 return False
 
-            # 2. 提取和清理文本
-            text = result.get_plain_text() or event.get_message_str() or ""
+            # 2. 提取纯文本（使用 get_plain_text 获取格式化后的文本）
+            # 此时其他插件已经处理完 <ref>、Markdown 等格式
+            text = result.get_plain_text() or ""
             if not text.strip():
-                logger.debug("没有可处理的文本内容，未触发图片发送")
+                logger.debug("[Stealer] 没有可处理的文本内容，跳过")
                 return False
 
-            # 2.5 检查并处理显式的表情包标记 (来自 Tool 调用)
+            # 3. 检查并处理显式的表情包标记 (来自 Tool 调用)
             import re
             explicit_emojis = []
 
             def tag_replacer(match):
                 explicit_emojis.append(match.group(1))
-                return "" # 从文本中移除标记
+                return ""  # 从文本中移除标记
 
             # 标记格式: [ast_emoji:path]
-            # 使用非贪婪匹配
-            text_without_tags = re.sub(r"\[ast_emoji:(.*?)\]", tag_replacer, text)
+            text_without_explicit = re.sub(r"\[ast_emoji:(.*?)\]", tag_replacer, text)
             has_explicit = len(explicit_emojis) > 0
 
-            # 2.6 检查并处理情绪标签 (&&happy&& 或 [发送表情包: happy] 等)
-            emotion_from_tags = self._extract_emotions_from_tags(text_without_tags)
-            text_without_tags = self._clean_emotion_tags(text_without_tags)
+            # 4. 统一使用 EmotionAnalyzerService 提取并清理情绪标签
+            # 这个方法会同时：
+            #   - 提取所有格式的情绪标签（标准、转义、残缺）
+            #   - 清理文本中的标签
+            #   - 返回 (提取到的情绪列表, 清理后的文本)
+            all_emotions, cleaned_text = await self._extract_emotions_from_text(
+                event, text_without_explicit
+            )
 
-            # 3. 委托给情绪分析服务处理情绪提取和标签清理
-            # 传入已移除显式标记和情绪标签的文本
-            emotions_from_llm, cleaned_text = await self._extract_emotions_from_text(event, text_without_tags)
-            text_updated = cleaned_text != text
+            # 5. 判断是否需要更新文本
+            # 只有当清理了标签时才需要更新
+            need_update = (cleaned_text != text)
 
-            # 合并情绪来源：优先使用显式标签中的情绪
-            all_emotions = list(set(emotion_from_tags + emotions_from_llm))
-
-            # 4. 更新结果
+            # 6. 处理显式表情包
             if has_explicit:
-                # 如果有显式表情包，优先发送显式表情包
-                # 这时不再触发自动表情包发送，避免重复
                 await self._send_explicit_emojis(event, explicit_emojis, cleaned_text)
-                logger.info(f"已发送 {len(explicit_emojis)} 张显式表情包")
+                logger.info(f"[Stealer] 已发送 {len(explicit_emojis)} 张显式表情包")
                 return True
 
-            # 4.1 更新结果对象（清理标签）仅当没有显式发送时（显式发送已包含文本更新逻辑）
-            if text_updated:
-                self._update_result_with_cleaned_text(event, result, cleaned_text)
-                logger.debug("已清理情绪标签")
+            # 7. 仅在需要时更新结果对象
+            if need_update:
+                # 使用安全的更新方法，仅清理情绪标签，保留其他组件
+                self._update_result_with_cleaned_text_safe(event, result, cleaned_text)
+                logger.debug("[Stealer] 已清理情绪标签")
 
-            # 5. 检查是否需要发送表情包
+            # 8. 检查是否需要发送表情包
             if not all_emotions:
-                logger.debug("未从文本中提取到情绪关键词，未触发图片发送")
-                return text_updated
+                logger.debug("[Stealer] 未提取到情绪，跳过表情包发送")
+                return need_update
 
-            # 6. 委托给事件处理器检查发送条件和发送表情包
+            # 9. 尝试发送表情包
             emoji_sent = await self._try_send_emoji(event, all_emotions, cleaned_text)
 
-            return text_updated or emoji_sent
+            return need_update or emoji_sent
 
         except Exception as e:
             logger.error(f"[Stealer] 处理表情包响应时发生错误: {e}", exc_info=True)
-            # 即使出错也要返回text_updated，确保标签清理生效
-            return text_updated if "text_updated" in locals() else False
-
-    def _extract_emotions_from_tags(self, text: str) -> list[str]:
-        """从文本中提取情绪标签中的情绪类别。
-
-        支持的格式：
-        - &&happy&&
-        - [emoji: happy]
-
-        Args:
-            text: 原始文本
-
-        Returns:
-            list[str]: 提取到的情绪类别列表
-        """
-        import re
-        emotions = []
-
-        for pattern in self.EMOTION_TAG_PATTERNS:
-            matches = re.findall(pattern, text, re.IGNORECASE)
-            for match in matches:
-                match_lower = match.lower()
-                # 验证是否是有效的情绪类别
-                if match_lower in [c.lower() for c in self.categories]:
-                    emotions.append(match_lower)
-                    logger.debug(f"[Stealer] 从标签中提取到情绪: {match_lower}")
-
-        return emotions
-
-    def _clean_emotion_tags(self, text: str) -> str:
-        """从文本中清理所有情绪标签。
-
-        Args:
-            text: 原始文本
-
-        Returns:
-            str: 清理后的文本
-        """
-        import re
-        cleaned = text
-
-        for pattern in self.EMOTION_TAG_PATTERNS:
-            cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
-
-        # 清理多余的空白字符
-        cleaned = re.sub(r"\s+", " ", cleaned).strip()
-
-        return cleaned
+            return False
 
     def _validate_result(self, result) -> bool:
         """验证结果对象是否有效。"""
@@ -1374,10 +1360,45 @@ class Main(Star):
             and hasattr(result, "get_plain_text")
         )
 
+    def _update_result_with_cleaned_text_safe(
+        self, event: AstrMessageEvent, result, cleaned_text: str
+    ):
+        """安全地更新结果对象，仅修改纯文本组件，保留其他组件不变。
+        
+        这个方法会遍历消息链，只更新 Plain 文本组件的内容，
+        保留图片、引用等其他类型的组件，避免破坏消息结构。
+        
+        Args:
+            event: 消息事件
+            result: 当前结果对象
+            cleaned_text: 清理后的文本
+        """
+        # 查找并更新 Plain 组件
+        text_updated = False
+        for comp in result.chain:
+            if isinstance(comp, Plain) and hasattr(comp, 'text'):
+                # 只更新包含情绪标签的 Plain 组件
+                if comp.text and comp.text.strip():
+                    # 简单替换：将组件文本设置为清理后的文本
+                    # 这样可以保留其他非文本组件（如图片、引用等）
+                    comp.text = cleaned_text
+                    text_updated = True
+                    logger.debug(f"[Stealer] 已更新 Plain 组件: {cleaned_text[:50]}...")
+                    break  # 通常只有一个主文本组件，找到后跳出
+        
+        if not text_updated:
+            # 如果没有找到 Plain 组件，添加一个新的
+            logger.debug("[Stealer] 未找到 Plain 组件，添加新的文本组件")
+            result.message(cleaned_text)
+
     def _update_result_with_cleaned_text(
         self, event: AstrMessageEvent, result, cleaned_text: str
     ):
-        """更新结果对象，使用清理后的文本。"""
+        """更新结果对象，使用清理后的文本（完全重建消息链）。
+        
+        注意：这个方法会重建整个消息链，可能会丢失某些组件。
+        推荐使用 _update_result_with_cleaned_text_safe 代替。
+        """
         new_result = event.make_result().set_result_content_type(
             result.result_content_type
         )
@@ -1954,39 +1975,44 @@ class Main(Star):
     @filter.permission_type(PermissionType.ADMIN)
     @filter.command("meme reload_persona")
     async def reload_persona(self, event: AstrMessageEvent):
-        """重新注入人格情绪选择提醒。用法: /meme reload_persona"""
-        try:
-            await self._reload_personas()
-            yield event.plain_result("✅ 已重新注入人格情绪选择提醒")
-        except Exception as e:
-            logger.error(f"重新注入人格失败: {e}")
-            yield event.plain_result(f"❌ 重新注入人格失败: {e}")
+        """[已废弃] 重新注入人格情绪选择提醒。
+        
+        注意：现在使用 LLM 钩子自动注入，无需手动操作。
+        用法: /meme reload_persona
+        """
+        yield event.plain_result(
+            "ℹ️ 此命令已废弃\n\n"
+            "插件现在使用 LLM 请求钩子自动注入情绪指令，\n"
+            "每次 LLM 请求时会自动添加情绪选择提示。\n\n"
+            "✅ 优势：\n"
+            "- 不修改全局人格配置\n"
+            "- 每次请求独立注入\n"
+            "- 插件卸载后自动失效\n\n"
+            "无需手动操作，插件已自动启用此功能。"
+        )
 
     @filter.permission_type(PermissionType.ADMIN)
     @filter.command("meme persona_status")
     async def persona_status(self, event: AstrMessageEvent):
-        """检查人格注入状态。用法: /meme persona_status"""
+        """检查情绪注入状态。用法: /meme persona_status"""
         try:
-            personas = self.context.provider_manager.personas
-
-            status_text = "人格注入状态:\n"
-
-            for i, persona in enumerate(personas):
-                current_prompt = persona.get("prompt", "")
-                persona_name = persona.get("name", f"人格{i+1}")
-
-                if self._persona_marker in current_prompt:
-                    status_text += f"✅ {persona_name}: 已注入\n"
-                else:
-                    status_text += f"❌ {persona_name}: 未注入\n"
-
-            status_text += f"\n备份状态: {'✅ 正常' if self.persona_backup else '❌ 无备份'}"
-            status_text += f"\n注入标记: `{self._persona_marker}`"
+            status_text = "📊 情绪注入状态\n\n"
+            status_text += f"✅ 注入方式: LLM 请求钩子 (推荐)\n"
+            status_text += f"✅ 自动注入: {'开启' if self.auto_send else '关闭'}\n"
+            status_text += f"✅ 分类数量: {len(self.categories)}\n"
+            status_text += f"✅ 分类列表: {', '.join(self.categories[:5])}"
+            
+            if len(self.categories) > 5:
+                status_text += f" 等 {len(self.categories)} 个"
+            
+            status_text += "\n\n💡 说明:\n"
+            status_text += "插件使用 LLM 钩子在每次请求时动态注入情绪指令，\n"
+            status_text += "不会修改人格配置，更安全、更灵活。"
 
             yield event.plain_result(status_text)
         except Exception as e:
             logger.error(f"检查人格状态失败: {e}")
-            yield event.plain_result(f"❌ 检查人格状态失败: {e}")
+            yield event.plain_result(f"❌ 检查状态失败: {e}")
 
     @filter.llm_tool(name="send_emoji")
     async def send_emoji(self, event: AstrMessageEvent, query: str):
