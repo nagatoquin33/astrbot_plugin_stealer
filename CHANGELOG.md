@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+2.1.4 优化了表情识别，删去了对图片的过滤，因为现在只会抓取表情包，同时优化vlm提示词
+
+
+2.1.3 修复bug
+
+
 2.1.2
 更新了表情包自定义导入和表情分类的自定义，优化了工具的调用逻辑
 

@@ -441,6 +441,9 @@ class Main(Star):
                                 combined_analysis_prompt=prompts.get(
                                     "COMBINED_ANALYSIS_PROMPT", None
                                 ),
+                                emoji_classification_with_filter_prompt=prompts.get(
+                                    "EMOJI_CLASSIFICATION_WITH_FILTER_PROMPT", None
+                                ),
                             )
                     except ImportError:
                         # 如果aiofiles不可用，回退到同步方式
@@ -458,6 +461,9 @@ class Main(Star):
                                 ),
                                 combined_analysis_prompt=prompts.get(
                                     "COMBINED_ANALYSIS_PROMPT", None
+                                ),
+                                emoji_classification_with_filter_prompt=prompts.get(
+                                    "EMOJI_CLASSIFICATION_WITH_FILTER_PROMPT", None
                                 ),
                             )
                 else:

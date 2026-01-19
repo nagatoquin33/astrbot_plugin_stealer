@@ -172,158 +172,106 @@ class ImageProcessorService:
         )
 
         # 尝试从插件实例获取提示词配置，如果不存在则使用默认值
-        # 表情包识别和分类的合并提示词（不包含内容过滤）
+        # 表情包含义与场景分析提示词（统一使用）
         # 注意：正常情况下会使用 prompts.json 中的优化版本，这里只是备用
         self.emoji_classification_prompt = getattr(
             plugin_instance,
             "EMOJI_CLASSIFICATION_PROMPT",
-            """# 角色定位
-你是专业的表情包识别与情绪分析专家，擅长分析中文互联网文化中的表情包特征和情绪表达。
+            """# 表情包含义与场景分析专家
 
-# 任务说明
-对输入图片进行两步分析：
-1. **表情包识别**：判断是否为聊天表情包
-2. **情绪分类**：如果是表情包，从指定情绪列表中选择最匹配的分类
+你是中文互联网文化专家，精通贴吧、微博、小红书等平台的梗文化和表情包使用习惯。
 
----
+## 任务目标
+分析表情包的情绪、语义标签和画面内容。
 
-## 第一步：表情包识别标准
+## 分析要求
 
-### ✅ 判定为表情包的特征：
-**视觉特征：**
-- 画风简洁（卡通、线稿、简笔画风格）
-- 有明显的白边或透明背景（贴纸效果）
-- 分辨率适中，通常为正方形或接近正方形
-- 主体突出，背景简单或纯色
+### 1. 情绪识别
+从以下情绪列表中选择最匹配的分类：`{emotion_list}`
 
-**内容特征：**
-- 夸张的面部表情或肢体动作
-- 包含中文文字（特别是网络用语、口语化表达）
-- 文字通常有描边、阴影等装饰效果
-- 表达特定情绪、态度或反应
+**分析重点：**
+- 面部表情和肢体语言（最重要）
+- 图片中的文字内容和网络梗
+- 整体传达的情绪氛围
+- 幽默和讽刺意味
 
-**功能特征：**
-- 明显用于聊天沟通的图片
-- 能够替代或增强文字表达
-- 具有网络文化属性（梗图、流行元素）
+### 2. 语义标签
+提取表情包的关键语义标签，体现网络文化特色：
+- 使用网络流行语和梗
+- 突出幽默、讽刺、调侃等元素
+- 每个标签简洁有力
+- 多个标签用逗号分隔
 
-**常见类型：**
-- 动漫角色截图配文字
-- 真人表情配网络用语
-- 动物表情包（如猫咪、狗狗等）
-- 卡通形象表情包
-
-### ❌ 排除的图片类型：
-- 普通生活照片、风景照
-- 纯文字截图、聊天记录截图
-- 商品图片、广告图片
-- 高清艺术作品、壁纸
-- 纯粹的信息展示图片
-
----
-
-## 第二步：情绪分类指南
-
-**分析要素：**
-1. **面部表情**：观察人物/角色的表情变化
-2. **肢体语言**：注意姿态、手势等身体语言
-3. **文字内容**：重点分析图片中的中文文字含义
-4. **整体氛围**：综合判断图片传达的情绪基调
-
-**分类原则：**
-- 当表情与文字冲突时，以**整体表达意图**为准
-- 必须从指定列表 `{emotion_list}` 中选择最匹配的分类
-- 优先考虑中文网络文化中的情绪表达习惯
-- 即使情绪复杂，也要选择最主要的情绪分类
-
----
+### 3. 画面描述
+用一句话描述画面内容：
+- 简洁明了，突出重点
+- 描述主要人物、动作、表情
+- 体现表情包的核心特征
 
 ## 输出格式
-严格按照以下格式返回，使用竖线 '|' 分隔五部分内容，不要添加任何解释：
-是否为表情包|情绪分类|语义标签(用逗号分隔)|画面描述(一句话)
+严格按照以下格式返回，使用竖线'|'分隔，不要添加任何其他内容：
+情绪分类|语义标签(用逗号分隔)|画面描述(一句话)
 
 **示例：**
-是|happy|大笑,熊猫人,指人|熊猫人指着屏幕大笑
-否|非表情包|无|一张风景照片""",
+happy|大笑,熊猫人,指人|熊猫人指着屏幕大笑
+troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
+
+## 重要提醒
+- 直接输出结果，不要解释过程
+- 必须体现网络文化和梗的特色
+- 语义标签要准确反映表情包含义
+- 画面描述要简洁生动""",
         )
 
-        # 内容过滤+表情包识别分类的三合一合并提示词
-        # 注意：正常情况下会使用 prompts.json 中的优化版本，这里只是备用
-        self.combined_analysis_prompt = getattr(
+        # 带审核的表情包分析提示词（合并版本）
+        self.emoji_classification_with_filter_prompt = getattr(
             plugin_instance,
-            "COMBINED_ANALYSIS_PROMPT",
-            """你是专业的图片内容审核与表情包分析专家，擅长分析中文互联网文化中的表情包特征和情绪表达。请按照以下要求进行四步分析：
+            "EMOJI_CLASSIFICATION_WITH_FILTER_PROMPT",
+            """# 表情包内容审核与分析专家
 
-## 第一步：内容过滤
-判断图片是否包含不当内容：
-- 如果包含裸露、暴力、血腥、政治敏感或违法内容，返回'过滤不通过'
-- 否则返回'通过'
+你是中文互联网文化专家，精通贴吧、微博、小红书等平台的梗文化和表情包使用习惯。
 
-## 第二步：表情包识别
-如果内容过滤通过，判断是否为聊天表情包：
+## 第一步：内容审核
+首先判断图片是否包含不当内容：
+- 如果包含裸露、暴力、血腥、政治敏感或违法内容，直接返回'过滤不通过'
+- 否则继续进行表情包分析
 
-### ✅ 判定为表情包的特征：
-**视觉特征：**
-- 画风简洁（卡通、线稿、简笔画风格）
-- 有明显的白边或透明背景（贴纸效果）
-- 分辨率适中，通常为正方形或接近正方形
-- 主体突出，背景简单或纯色
+## 第二步：表情包分析（仅在通过审核后）
 
-**内容特征：**
-- 夸张的面部表情或肢体动作
-- 包含中文文字（特别是网络用语、口语化表达）
-- 文字通常有描边、阴影等装饰效果
-- 表达特定情绪、态度或反应
+### 1. 情绪识别
+从以下情绪列表中选择最匹配的分类：`{emotion_list}`
 
-**功能特征：**
-- 明显用于聊天沟通的图片
-- 能够替代或增强文字表达
-- 具有网络文化属性（梗图、流行元素）
+### 2. 语义标签
+提取表情包的关键语义标签，体现网络文化特色：
+- 使用网络流行语和梗
+- 突出幽默、讽刺、调侃等元素
+- 每个标签简洁有力
+- 多个标签用逗号分隔
 
-**常见类型：**
-- 动漫角色截图配文字
-- 真人表情配网络用语
-- 动物表情包（如猫咪、狗狗等）
-- 卡通形象表情包
-
-### ❌ 排除的图片类型：
-- 普通生活照片、风景照
-- 纯文字截图、聊天记录截图
-- 商品图片、广告图片
-- 高清艺术作品、壁纸
-- 纯粹的信息展示图片
-
-## 第三步：情绪分类
-如果是表情包，进行情绪分析：
-
-**分析要素：**
-1. **面部表情**：观察人物/角色的表情变化
-2. **肢体语言**：注意姿态、手势等身体语言
-3. **文字内容**：重点分析图片中的中文文字含义
-4. **整体氛围**：综合判断图片传达的情绪基调
-
-**分类原则：**
-- 当表情与文字冲突时，以**整体表达意图**为准
-- 必须从指定列表 `{emotion_list}` 中选择最匹配的分类
-- 优先考虑中文网络文化中的情绪表达习惯
-- 即使情绪复杂，也要选择最主要的情绪分类
-
-## 第四步：内容描述
-如果是表情包，请提供：
-1. **语义标签**：提取图片中的关键元素、动作、文字梗，用逗号分隔（如：熊猫人, 挠头, 疑问）
-2. **画面描述**：用一句话详细描述表情包的内容和场景（如：一只卡通猫咪一脸疑惑地看着屏幕，配文"啊？"）
-
----
+### 3. 画面描述
+用一句话描述画面内容：
+- 简洁明了，突出重点
+- 描述主要人物、动作、表情
+- 体现表情包的核心特征
 
 ## 输出格式
-严格按照以下格式返回，使用竖线 '|' 分隔五部分内容，不要添加任何解释：
-过滤结果|是否为表情包|情绪分类|语义标签|画面描述
+- 如果内容审核不通过，只返回：过滤不通过
+- 如果审核通过，严格按照以下格式返回，使用竖线'|'分隔：
+情绪分类|语义标签(用逗号分隔)|画面描述(一句话)
 
 **示例：**
-通过|是|happy|大笑,熊猫人,指人|熊猫人指着屏幕大笑
-过滤不通过|否|none|无|无
-通过|否|非表情包|无|无""",
+happy|大笑,熊猫人,指人|熊猫人指着屏幕大笑
+troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
+
+## 重要提醒
+- 直接输出结果，不要解释过程
+- 必须体现网络文化和梗的特色
+- 语义标签要准确反映表情包含义
+- 画面描述要简洁生动""",
         )
+
+        # 保留combined_analysis_prompt作为备用（现在基本不使用）
+        self.combined_analysis_prompt = self.emoji_classification_prompt
 
         # 配置参数
         if hasattr(plugin_instance, "config_service") and plugin_instance.config_service:
@@ -436,6 +384,7 @@ class ImageProcessorService:
         vision_provider_id=None,
         emoji_classification_prompt=None,
         combined_analysis_prompt=None,
+        emoji_classification_with_filter_prompt=None,
     ):
         """更新图片处理器配置。
 
@@ -445,6 +394,7 @@ class ImageProcessorService:
             vision_provider_id: 视觉模型提供者ID
             emoji_classification_prompt: 表情包分类提示词
             combined_analysis_prompt: 综合分析提示词
+            emoji_classification_with_filter_prompt: 带审核的表情包分析提示词
         """
         if categories is not None:
             self.categories = categories
@@ -456,6 +406,8 @@ class ImageProcessorService:
             self.emoji_classification_prompt = emoji_classification_prompt
         if combined_analysis_prompt is not None:
             self.combined_analysis_prompt = combined_analysis_prompt
+        if emoji_classification_with_filter_prompt is not None:
+            self.emoji_classification_with_filter_prompt = emoji_classification_with_filter_prompt
 
     async def process_image(
         self,
@@ -636,25 +588,14 @@ class ImageProcessorService:
 
         # 过滤和分类图片（合并为一次VLM调用以提高效率）
         try:
-            # 如果是平台标记的表情包，跳过元数据过滤环节
-            if is_platform_emoji:
-                logger.info("平台已标记为表情包，跳过元数据预过滤，直接进行VLM分类")
-                # 直接调用VLM分类，跳过 _is_likely_emoji_by_metadata 检查
-                category, tags, desc, emotion, scenes = await self.classify_image(
-                    event=event,
-                    file_path=raw_path,
-                    categories=categories,
-                    content_filtration=content_filtration,
-                    skip_metadata_filter=True,  # 跳过元数据过滤
-                )
-            else:
-                # 正常流程：包含元数据过滤
-                category, tags, desc, emotion, scenes = await self.classify_image(
-                    event=event,
-                    file_path=raw_path,
-                    categories=categories,
-                    content_filtration=content_filtration,
-                )
+            # 统一调用VLM分类，不再区分平台标记
+            # 移除元数据预过滤后，所有图片都直接进入VLM分析
+            category, tags, desc, emotion, scenes = await self.classify_image(
+                event=event,
+                file_path=raw_path,
+                categories=categories,
+                content_filtration=content_filtration,
+            )
 
             logger.debug(f"图片分类结果: category={category}, emotion={emotion}")
 
@@ -754,7 +695,6 @@ class ImageProcessorService:
         categories=None,
         backend_tag=None,
         content_filtration=None,
-        skip_metadata_filter: bool = False,
     ) -> tuple[str, list[str], str, str, list[str]]:
         """使用视觉模型对图片进行分类并返回详细信息。
 
@@ -764,15 +704,14 @@ class ImageProcessorService:
             categories: 分类列表
             backend_tag: 后端标签
             content_filtration: 是否进行内容过滤（可选）
-            skip_metadata_filter: 是否跳过元数据过滤（平台已标记时使用）
 
         Returns:
             tuple: (category, tags, desc, emotion, scenes)，其中：
                   - category: 主要分类（emotion类别）
-                  - tags: 图片内容标签列表
-                  - desc: 图片内容描述
+                  - tags: 语义标签列表
+                  - desc: 画面描述（一句话）
                   - emotion: 情绪标签（与category相同）
-                  - scenes: 适用场景列表（新增）
+                  - scenes: 适用场景列表（新格式下为空列表）
         """
         try:
             # 确保file_path是绝对路径
@@ -784,14 +723,9 @@ class ImageProcessorService:
                 logger.error(error_msg)
                 raise FileNotFoundError(error_msg)
 
-            # 如果未跳过元数据过滤，先用元数据做一次快速过滤
-            if not skip_metadata_filter:
-                is_likely_emoji = self._is_likely_emoji_by_metadata(file_path)
-                logger.debug(f"元数据判断是否为表情包: {is_likely_emoji}")
-                if not is_likely_emoji:
-                    return "非表情包", [], "", "非表情包"
-            else:
-                logger.debug("跳过元数据过滤（平台已标记为表情包）")
+            # 移除元数据预过滤，直接使用VLM进行准确判断
+            # 原因：现在有了更准确的表情包识别方法，不需要基于图片尺寸的粗糙过滤
+            logger.debug("跳过元数据过滤，直接使用VLM进行表情包判断")
 
             # 确定是否进行内容过滤
             should_filter = (
@@ -803,73 +737,44 @@ class ImageProcessorService:
             # 构建情绪类别列表字符串
             emotion_list_str = ", ".join(self.categories)
 
-            # 如果不进行内容过滤，直接进行表情包识别和分类
-            if not should_filter:
-                # 使用表情包识别和分类的合并提示词
+            # 根据是否开启审核选择合适的提示词
+            if should_filter:
+                # 使用合并的审核+分析提示词，一次调用完成
+                prompt = self.emoji_classification_with_filter_prompt.format(
+                    emotion_list=emotion_list_str
+                )
+            else:
+                # 使用纯分析提示词
                 prompt = self.emoji_classification_prompt.format(
                     emotion_list=emotion_list_str
                 )
 
-                # 调用视觉模型进行分析
-                response = await self._call_vision_model(event, file_path, prompt)
-                logger.debug(f"表情包分析原始响应: {response}")
+            # 调用视觉模型进行分析
+            response = await self._call_vision_model(event, file_path, prompt)
+            logger.debug(f"VLM响应: {response}")
 
-                # 解析响应结果 - 升级为支持标签、描述和适用场景
-                # 格式: IsEmoji|Emotion|Tags|Description|Scenes
-                parts = [p.strip() for p in response.strip().split("|")]
-
-                filter_result = "通过"
-                is_emoji_result = parts[0] if len(parts) > 0 else "否"
-                emotion_result = parts[1] if len(parts) > 1 else "非表情包"
-
-                # 提取标签、描述和适用场景（如果有）
-                tags_str = parts[2] if len(parts) > 2 else ""
-                desc_result = parts[3] if len(parts) > 3 else "无描述"
-                scenes_str = parts[4] if len(parts) > 4 else ""
-
-                # 处理标签列表
-                tags_result = [t.strip() for t in tags_str.split(",") if t.strip() and t.strip() != "无"]
-
-                # 处理适用场景列表（新增）
-                scenes_result = [s.strip() for s in scenes_str.split(",") if s.strip() and s.strip() != "无"]
-            else:
-                # 使用内容过滤和表情包分析的合并提示词
-                prompt = self.combined_analysis_prompt.format(
-                    emotion_list=emotion_list_str
-                )
-
-                # 调用视觉模型进行一次性分析
-                response = await self._call_vision_model(event, file_path, prompt)
-                logger.debug(f"内容过滤和表情包分析原始响应: {response}")
-
-                # 解析响应结果 - 升级为支持标签、描述和适用场景
-                # 格式: Filter|IsEmoji|Emotion|Tags|Description|Scenes
-                parts = [p.strip() for p in response.strip().split("|")]
-
-                filter_result = parts[0] if len(parts) > 0 else "过滤不通过"
-                is_emoji_result = parts[1] if len(parts) > 1 else "否"
-                emotion_result = parts[2] if len(parts) > 2 else "非表情包"
-
-                # 提取标签、描述和适用场景（如果有）
-                tags_str = parts[3] if len(parts) > 3 else ""
-                desc_result = parts[4] if len(parts) > 4 else "无描述"
-                scenes_str = parts[5] if len(parts) > 5 else ""
-
-                # 处理标签列表
-                tags_result = [t.strip() for t in tags_str.split(",") if t.strip() and t.strip() != "无"]
-
-                # 处理适用场景列表（新增）
-                scenes_result = [s.strip() for s in scenes_str.split(",") if s.strip() and s.strip() != "无"]
-
-            # 处理过滤结果
-            if filter_result == "过滤不通过":
+            # 处理审核不通过的情况
+            if "过滤不通过" in response:
+                logger.warning(f"图片内容审核不通过: {file_path}")
                 return "过滤不通过", [], "", "过滤不通过", []
 
-            # 处理表情包判断结果
-            if is_emoji_result.lower() != "是" and emotion_result != "非表情包":
-                return "非表情包", [], "", "非表情包", []
+            # 统一的响应格式: 情绪分类|语义标签(用逗号分隔)|画面描述(一句话)
+            parts = [p.strip() for p in response.strip().split("|")]
 
-            # 处理情绪分类结果
+            emotion_result = parts[0] if len(parts) > 0 else (self.categories[0] if self.categories else "happy")
+            
+            # 语义标签作为tags
+            tags_str = parts[1] if len(parts) > 1 else ""
+            tags_result = [t.strip() for t in tags_str.split(",") if t.strip()]
+            
+            # 画面描述作为desc
+            desc_result = parts[2] if len(parts) > 2 else "表情包"
+            
+            # 适用场景设为空（新格式不再包含场景）
+            scenes_result = []
+
+            # 新逻辑：既然移除了元数据过滤，假设输入的都是表情包
+            # 只需要处理情绪分类结果
             if emotion_result in self.categories:
                 category = emotion_result
             else:
@@ -883,9 +788,9 @@ class ImageProcessorService:
                 if found_category:
                     category = found_category
                 else:
-                    # 如果无法提取有效分类，视为识别失败，直接标记为非表情包以便外部逻辑进行清理
-                    logger.warning(f"无法从响应中提取有效情绪分类: {emotion_result}，丢弃该图片")
-                    return "非表情包", [], "", "非表情包", []
+                    # 如果无法提取有效分类，使用默认分类
+                    logger.warning(f"无法从响应中提取有效情绪分类: {emotion_result}，使用默认分类")
+                    category = self.categories[0] if self.categories else "happy"
 
             return category, tags_result, desc_result, category, scenes_result
 
@@ -907,34 +812,6 @@ class ImageProcessorService:
             # 根据测试要求，无法分类时返回空字符串
             return "", [], "", "", []
 
-    def _is_likely_emoji_by_metadata(self, file_path: str) -> bool:
-        """根据图片元数据判断是否可能是表情包。
-
-        Args:
-            file_path: 图片文件路径
-
-        Returns:
-            是否可能是表情包
-        """
-        # 使用从插件实例获取的PILImage引用，避免重复导入
-        if self.PILImage is None:
-            return False  # 没有PIL时默认不通过，避免处理过多非表情包
-
-        try:
-            with self.PILImage.open(file_path) as img:
-                width, height = img.size
-                # 检查图片尺寸是否符合表情包特征
-                # 表情包通常是中等大小，太小或太大都不太可能
-                if max(width, height) > 1000 or min(width, height) < 50:
-                    return False
-                # 检查图片宽高比，表情包通常接近正方形
-                aspect_ratio = max(width, height) / min(width, height)
-                if aspect_ratio > 3:
-                    return False
-                return True
-        except Exception as e:
-            logger.debug(f"检查图片尺寸失败: {e}")
-            return False  # 异常时默认不通过，避免处理损坏的图片
     async def _call_vision_model(
         self, event: AstrMessageEvent | None, img_path: str, prompt: str
     ) -> str:
