@@ -36,6 +36,32 @@ except Exception:  # pragma: no cover - 仅作为兼容分支
     PILImage = None
 
 
+# ================= Monkey Patch Start =================
+# 修复 AstrBot Token 一次性销毁导致部分客户端无法预览/下载图片的问题
+from astrbot.core.file_token_service import FileTokenService
+import os
+
+# 定义一个新的 handle_file 方法，不删除 Token
+async def patched_handle_file(self, file_token: str) -> str:
+    async with self.lock:
+        await self._cleanup_expired_tokens()
+
+        if file_token not in self.staged_files:
+            raise KeyError(f"无效或过期的文件 token: {file_token}")
+
+        # 修改点：使用 [] 读取而不是 pop() 删除
+        # file_path, _ = self.staged_files.pop(file_token) 
+        file_path, _ = self.staged_files[file_token]
+        
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"文件不存在: {file_path}")
+        return file_path
+
+# 将核心类的方法替换为新方法
+FileTokenService.handle_file = patched_handle_file
+# ================= Monkey Patch End =================
+
+
 class Main(Star):
     """表情包偷取与发送插件。
 
