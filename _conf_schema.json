@@ -51,7 +51,7 @@
   "emotion_analysis_provider_id": {
     "description": "情绪分析专用模型（智能模式）",
     "type": "string",
-    "hint": "留空则使用当前会话模型，建议使用轻量模型如qwen-turbo",
+    "hint": "留空则使用当前会话模型，建议使用轻量模型如Qwen/Qwen3-8B这类的免费模型",
     "_special": "select_provider"
   },
   
@@ -154,4 +154,5 @@
     "default": 60
   }
 }
+
 
