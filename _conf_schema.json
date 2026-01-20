@@ -19,12 +19,6 @@
     "type": "float",
     "default": 0.4
   },
-  "smart_emoji_selection": {
-    "description": "智能表情包选择（根据上下文匹配）",
-    "type": "bool",
-    "default": true,
-    "hint": "启用后会根据回复内容智能匹配最相关的表情包，禁用则随机选择"
-  },
   
   "_model_section": {
     "description": "=== 模型配置 ===",
@@ -41,6 +35,36 @@
     "description": "开启内容审核（过滤不当图片）",
     "type": "bool",
     "default": false
+  },
+  
+  "_emotion_mode_section": {
+    "description": "=== 情绪识别模式 ===",
+    "type": "text",
+    "invisible": true
+  },
+  "enable_natural_emotion_analysis": {
+    "description": "情绪识别模式",
+    "type": "bool",
+    "default": true,
+    "hint": "✅ 开启=智能模式（轻量模型分析语义，不修改LLM回复）\n❌ 关闭=被动模式（LLM插入情绪标签，会修改回复内容）"
+  },
+  "emotion_analysis_provider_id": {
+    "description": "情绪分析专用模型（智能模式）",
+    "type": "string",
+    "hint": "留空则使用当前会话模型，建议使用轻量模型如qwen-turbo",
+    "_special": "select_provider"
+  },
+  
+  "_emoji_selection_section": {
+    "description": "=== 表情包选择策略 ===",
+    "type": "text",
+    "invisible": true
+  },
+  "smart_emoji_selection": {
+    "description": "智能表情包选择（两种模式通用）",
+    "type": "bool",
+    "default": true,
+    "hint": "✅ 开启=综合评分选择（多样性+匹配度+相似度）\n❌ 关闭=随机选择（仍会避免短期重复，保留最近5个历史）"
   },
   
   "_storage_section": {

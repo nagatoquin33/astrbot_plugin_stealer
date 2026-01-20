@@ -1,22 +1,27 @@
 import asyncio
 import copy
+import inspect
 import json
+import math
 import os
 import random
+import re
 import shutil
 import time
 from pathlib import Path
 from typing import Any
 
 from astrbot.api import AstrBotConfig, logger
-from astrbot.api.event import AstrMessageEvent, filter
+from astrbot.api.event import AstrMessageEvent, filter, MessageChain
 from astrbot.api.event.filter import (
     EventMessageType,
     PermissionType,
     PlatformAdapterType,
 )
-from astrbot.api.message_components import Plain
+from astrbot.api.message_components import Plain, Image as ImageComponent
 from astrbot.api.star import Context, Star, StarTools
+from astrbot.core.file_token_service import FileTokenService
+from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
 from .cache_service import CacheService
 from .command_handler import CommandHandler
@@ -26,15 +31,15 @@ from .config_service import ConfigService
 from .emotion_analyzer_service import EmotionAnalyzerService
 from .event_handler import EventHandler
 from .image_processor_service import ImageProcessorService
+from .natural_emotion_analyzer import SmartEmotionMatcher
 from .task_scheduler import TaskScheduler
+from .text_similarity import calculate_hybrid_similarity
 from .web_server import WebServer
 
 try:
-    # 可选依赖，用于通过图片尺寸/比例进行快速过滤，未安装时自动降级
-    from PIL import Image as PILImage  # type: ignore[import]
-except Exception:  # pragma: no cover - 仅作为兼容分支
-    PILImage = None
-
+    import aiofiles  # type: ignore
+except ImportError:
+    aiofiles = None
 
 # ================= Monkey Patch Start =================
 # 修复 AstrBot Token 一次性销毁导致部分客户端无法预览/下载图片的问题
@@ -47,9 +52,6 @@ except Exception:  # pragma: no cover - 仅作为兼容分支
 # 1. 使用访问计数而非全局禁用 pop()，减少对其他功能的影响
 # 2. Token 有效期缩短至 60 秒（表情包场景足够使用）
 # 3. 仅对插件注册的 Token 启用多次访问保护
-from astrbot.core.file_token_service import FileTokenService
-import os
-import time
 
 # 保存原始方法引用
 _original_handle_file = FileTokenService.handle_file
@@ -64,7 +66,6 @@ async def patched_register_file(self, file_path: str, timeout: float | None = No
     file_token = await _original_register_file(self, file_path, timeout)
     
     # 检查调用栈，判断是否来自本插件
-    import inspect
     frame = inspect.currentframe()
     try:
         # 向上查找调用栈
@@ -174,7 +175,6 @@ class Main(Star):
 
         # 初始化基础路径 - 遵循 AstrBot 插件存储大文件规范
         # 大文件应存储于 data/plugin_data/{plugin_name}/ 目录下
-        from astrbot.core.utils.astrbot_path import get_astrbot_data_path
         # self.name 在 v4.9.2 及以上版本可用
         plugin_name = getattr(self, "name", "astrbot_plugin_stealer")
         self.base_dir: Path = Path(get_astrbot_data_path()) / "plugin_data" / plugin_name
@@ -186,9 +186,6 @@ class Main(Star):
         self.raw_dir: Path = self.base_dir / "raw"
         self.categories_dir: Path = self.base_dir / "categories"
         self.cache_dir: Path = self.base_dir / "cache"
-
-        # 设置PILImage实例属性，供ImageProcessorService使用
-        self.PILImage = PILImage
 
         # 情绪选择标记（用于识别注入的内容）
         self._persona_marker = "<!-- STEALER_PLUGIN_EMOTION_MARKER_v3 -->"  # 更新版本号
@@ -227,6 +224,9 @@ class Main(Star):
         self.image_processor_service = ImageProcessorService(self)
         self.emotion_analyzer_service = EmotionAnalyzerService(self)
         self.task_scheduler = TaskScheduler()
+
+        # 初始化自然语言情绪分析器（新增）
+        self.smart_emotion_matcher = SmartEmotionMatcher(self)
 
         # 运行时属性
         self.backend_tag: str = self.BACKEND_TAG
@@ -281,6 +281,10 @@ class Main(Star):
 
         # 同步视觉模型配置
         self.vision_provider_id = self._load_vision_provider_id()
+        
+        # 同步自然语言情绪分析配置（新增）
+        self.enable_natural_emotion_analysis = self.config_service.enable_natural_emotion_analysis
+        self.emotion_analysis_provider_id = self.config_service.emotion_analysis_provider_id
 
     def _validate_config(self) -> bool:
         """验证配置参数的有效性。
@@ -424,10 +428,10 @@ class Main(Star):
                 prompts_path = plugin_dir / "prompts.json"
                 if prompts_path.exists():
                     # 使用异步文件读取
-                    import aiofiles # type: ignore
                     try:
-                        async with aiofiles.open(prompts_path, encoding="utf-8") as f:
-                            content = await f.read()
+                        if aiofiles:
+                            async with aiofiles.open(prompts_path, encoding="utf-8") as f:
+                                content = await f.read()
                             prompts = json.loads(content)
                             logger.info(f"已加载提示词文件: {prompts_path}")
                             # 将加载的提示词赋值给插件实例属性
@@ -586,33 +590,6 @@ class Main(Star):
             logger.error(f"终止插件失败: {e}")
 
         return
-
-    def _persist_config(self):
-        """持久化插件运行配置。"""
-        try:
-            # 使用配置服务更新并保存配置
-            config_updates = {
-                "auto_send": self.auto_send,
-                "categories": self.categories,
-                "backend_tag": self.backend_tag,
-                "emoji_chance": self.emoji_chance,
-                "max_reg_num": self.max_reg_num,
-                "do_replace": self.do_replace,
-                "raw_cleanup_interval": self.raw_cleanup_interval,
-                "capacity_control_interval": self.capacity_control_interval,
-                "enable_raw_cleanup": self.enable_raw_cleanup,
-                "enable_capacity_control": self.enable_capacity_control,
-                "steal_emoji": self.steal_emoji,
-                "content_filtration": self.content_filtration,
-                "vision_provider_id": self.vision_provider_id,
-                "raw_retention_minutes": self.raw_retention_minutes,
-            }
-
-            # 使用ConfigService的update_config方法确保配置同步
-            self.config_service.update_config(config_updates)
-
-        except Exception as e:
-            logger.error(f"保存配置失败: {e}")
 
     async def _load_index(self) -> dict[str, Any]:
         """加载分类索引文件。
@@ -994,124 +971,20 @@ class Main(Star):
             logger.error(f"获取视觉模型提供者失败: {e}")
             return None
 
-    def _is_safe_path(self, path: str) -> tuple[bool, str]:
-        """检查路径是否安全，防止路径遍历攻击。
-
-        Args:
-            path: 要检查的文件路径
-
-        Returns:
-            tuple[bool, str]: (是否安全, 规范化后的安全路径)
-        """
-        try:
-            # 定义允许的基准目录
-            # 优先使用公开 API，如果失败则使用内部 API 作为备选
-            try:
-                # 使用 StarTools.get_data_dir() 的父目录来获取 data 目录路径
-                astrbot_data_path = StarTools.get_data_dir("").parent.resolve()
-            except Exception:
-                # 备选方案：使用内部 API
-                logger.warning("使用内部API获取数据路径，建议检查StarTools.get_data_dir()的使用")
-                from astrbot.core.utils.astrbot_path import get_astrbot_data_path
-
-                astrbot_data_path = Path(get_astrbot_data_path()).resolve()
-
-            plugin_base_dir = Path(self.base_dir).resolve()
-
-            # 调试日志
-            logger.debug(f"路径安全检查 - 输入路径: {path}")
-            logger.debug(f"astrbot_data_path: {astrbot_data_path}")
-            logger.debug(f"plugin_base_dir: {plugin_base_dir}")
-
-            path_obj = Path(path)
-            normalized_path = None
-
-            if path_obj.is_absolute():
-                # 绝对路径：直接检查是否在允许的目录内
-                normalized_path = path_obj.resolve()
-            else:
-                # 相对路径：根据路径前缀解析到安全的基准目录
-                lower_path = path.lower()
-
-                # 检查是否包含路径遍历攻击
-                if ".." in str(path_obj):
-                    # 直接检查解析后的路径是否仍在预期的父目录内
-                    if lower_path.startswith(("data/", "data\\")):
-                        # 以 data/ 开头的相对路径解析到 astrbot_data_path
-                        relative_part = path[5:]  # 移除 "data/" 前缀
-                        normalized_path = (astrbot_data_path / relative_part).resolve()
-                        # 确保解析后的路径仍在 astrbot_data_path 内
-                        if not normalized_path.is_relative_to(astrbot_data_path):
-                            logger.error(
-                                f"路径遍历攻击检测: {path} -> {normalized_path}"
-                            )
-                            return False, path
-                    elif lower_path.startswith(("astrbot/", "astrbot\\")):
-                        # 以 AstrBot/ 开头的相对路径解析到 astrbot_data_path
-                        relative_part = path[8:]  # 移除 "AstrBot/" 前缀
-                        normalized_path = (astrbot_data_path / relative_part).resolve()
-                        # 确保解析后的路径仍在 astrbot_data_path 内
-                        if not normalized_path.is_relative_to(astrbot_data_path):
-                            logger.error(
-                                f"路径遍历攻击检测: {path} -> {normalized_path}"
-                            )
-                            return False, path
-                    else:
-                        # 其他相对路径解析到 plugin_base_dir
-                        normalized_path = (plugin_base_dir / path).resolve()
-                        # 确保解析后的路径仍在 plugin_base_dir 内
-                        if not normalized_path.is_relative_to(plugin_base_dir):
-                            logger.error(
-                                f"路径遍历攻击检测: {path} -> {normalized_path}"
-                            )
-                            return False, path
-                else:
-                    # 不包含路径遍历的相对路径，正常处理
-                    if lower_path.startswith(("data/", "data\\")):
-                        # 以 data/ 开头的相对路径解析到 astrbot_data_path
-                        relative_part = path[5:]  # 移除 "data/" 前缀
-                        normalized_path = (astrbot_data_path / relative_part).resolve()
-                    elif lower_path.startswith(("astrbot/", "astrbot\\")):
-                        # 以 AstrBot/ 开头的相对路径解析到 astrbot_data_path
-                        relative_part = path[8:]  # 移除 "AstrBot/" 前缀
-                        normalized_path = (astrbot_data_path / relative_part).resolve()
-                    else:
-                        # 其他相对路径解析到 plugin_base_dir
-                        normalized_path = (plugin_base_dir / path).resolve()
-
-            # 检查路径是否在允许的目录内
-            is_safe = False
-            # 添加临时目录到允许列表，因为 convert_to_file_path() 返回临时文件路径
-            temp_dir = astrbot_data_path / "temp"
-            allowed_parents = [astrbot_data_path, plugin_base_dir, temp_dir]
-
-            for parent in allowed_parents:
-                try:
-                    normalized_path.relative_to(parent)
-                    is_safe = True
-                    break
-                except ValueError:
-                    pass
-
-            if not is_safe:
-                logger.error(f"路径超出允许范围: {path} -> {normalized_path}")
-                logger.error(f"允许的父目录: {[str(p) for p in allowed_parents]}")
-                # 检查是否是临时文件目录的问题
-                if "temp" in str(normalized_path):
-                    logger.error("检测到临时文件路径，可能需要添加 temp 目录到允许列表")
-                return False, path
-
-            return True, str(normalized_path)
-        except Exception as e:
-            logger.error(f"路径安全检查失败: {e}")
-            return False, path
-
     @filter.event_message_type(EventMessageType.ALL)
     @filter.platform_adapter_type(PlatformAdapterType.ALL)
     async def on_message(self, event: AstrMessageEvent):
         """消息监听：偷取消息中的图片并分类存储。"""
-        # 委托给 EventHandler 类处理
-        await self.event_handler.on_message(event)
+        # 防护检查：确保 event_handler 已初始化且可用
+        if not hasattr(self, 'event_handler') or self.event_handler is None:
+            logger.debug("[Stealer] event_handler 未初始化，跳过消息处理")
+            return
+            
+        try:
+            # 委托给 EventHandler 类处理
+            await self.event_handler.on_message(event)
+        except Exception as e:
+            logger.error(f"[Stealer] 处理消息时发生错误: {e}", exc_info=True)
 
     async def _raw_cleanup_loop(self):
         """raw目录清理循环任务。"""
@@ -1119,8 +992,11 @@ class Main(Star):
         try:
             if self.steal_emoji and self.enable_raw_cleanup:
                 logger.info("启动时执行初始raw目录清理")
-                await self.event_handler._clean_raw_directory()
-                logger.info("初始raw目录清理完成")
+                if hasattr(self, 'event_handler') and self.event_handler:
+                    await self.event_handler._clean_raw_directory()
+                    logger.info("初始raw目录清理完成")
+                else:
+                    logger.warning("event_handler 未初始化，跳过初始清理")
         except Exception as e:
             logger.error(f"初始raw目录清理失败: {e}", exc_info=True)
 
@@ -1132,8 +1008,11 @@ class Main(Star):
                 # 只有当偷图功能开启且清理功能启用时才执行
                 if self.steal_emoji and self.enable_raw_cleanup:
                     logger.info("开始执行raw目录清理任务")
-                    await self.event_handler._clean_raw_directory()
-                    logger.info("raw目录清理任务完成")
+                    if hasattr(self, 'event_handler') and self.event_handler:
+                        await self.event_handler._clean_raw_directory()
+                        logger.info("raw目录清理任务完成")
+                    else:
+                        logger.warning("event_handler 未初始化，跳过清理任务")
 
             except asyncio.CancelledError:
                 logger.info("raw目录清理任务已取消")
@@ -1179,7 +1058,10 @@ class Main(Star):
                     
                     logger.info(f"清理后索引条目数: {len(image_index)}，有效文件: {len(valid_paths)}")
                     
-                    await self.event_handler._enforce_capacity(image_index)
+                    if hasattr(self, 'event_handler') and self.event_handler:
+                        await self.event_handler._enforce_capacity(image_index)
+                    else:
+                        logger.warning("event_handler 未初始化，跳过容量控制")
                     
                     if self.cache_service:
                         self.cache_service.set_cache("index_cache", image_index, persist=True)
@@ -1193,38 +1075,44 @@ class Main(Star):
                 logger.error(f"容量控制任务发生错误: {e}", exc_info=True)
                 continue
 
-    # 已移除_scan_register_emoji_folder方法（扫描系统表情包目录功能，无实际用途）
-    # 已移除_persona_maintenance_loop方法（不再需要定期维护，新注入逻辑只在首次加载时执行一次）
 
     async def _clean_raw_directory(self):
         """按时间定时清理raw目录中的原始图片"""
         # 委托给 EventHandler 类处理
-        await self.event_handler._clean_raw_directory()
+        if hasattr(self, 'event_handler') and self.event_handler:
+            await self.event_handler._clean_raw_directory()
+        else:
+            logger.warning("event_handler 未初始化，无法执行raw目录清理")
 
     async def _enforce_capacity(self, idx: dict):
         """执行容量控制，删除最旧的图片。"""
         # 委托给 EventHandler 类处理
-        await self.event_handler._enforce_capacity(idx)
+        if hasattr(self, 'event_handler') and self.event_handler:
+            await self.event_handler._enforce_capacity(idx)
+        else:
+            logger.warning("event_handler 未初始化，无法执行容量控制")
 
     @filter.on_llm_request()
     async def _inject_emotion_instruction(self, event: AstrMessageEvent, request):
         """在 LLM 请求时动态注入情绪选择指令。
         
-        优势：
-        - 不修改全局人格配置，更安全
-        - 每次请求独立注入，互不影响
-        - 可根据场景灵活控制是否注入
-        
-        注意：
-        - auto_send 控制是否被动发送表情包（也就是是否需要情绪注入）
-        - steal_emoji 控制是否偷取（保存）别人的表情包，与人格注入无关
+        模式切换逻辑：
+        - 智能模式（enable_natural_emotion_analysis=True）：不注入提示词，由轻量模型分析
+        - 被动模式（enable_natural_emotion_analysis=False）：注入提示词，LLM插入标签
         """
         try:
-            # 检查是否启用自动发送（被动发送）
-            # auto_send 控制人格注入，因为只有在需要自动发送时才需要情绪标签
+            # 检查是否启用自动发送
             if not self.auto_send:
                 logger.debug("[Stealer] 自动发送已禁用，跳过情绪注入")
                 return
+            
+            # 智能模式：启用自然语言分析时，不注入提示词
+            if getattr(self, 'enable_natural_emotion_analysis', True):
+                logger.debug("[Stealer] 智能模式已启用，跳过提示词注入，将使用轻量模型分析")
+                return
+            
+            # 被动模式：注入提示词让LLM插入标签
+            logger.debug("[Stealer] 被动模式：注入提示词让LLM插入情绪标签")
             
             # 检查分类列表是否为空
             if not self.categories:
@@ -1254,7 +1142,7 @@ class Main(Star):
             # 将指令添加到系统提示词
             if hasattr(request, 'system_prompt'):
                 request.system_prompt = (request.system_prompt or "") + emotion_instruction
-                logger.debug(f"[Stealer] 已注入情绪选择指令 (categories: {len(self.categories)})")
+                logger.info(f"[Stealer] 被动模式：已注入情绪选择指令 (categories: {len(self.categories)})")
             else:
                 logger.warning("[Stealer] LLM 请求对象没有 system_prompt 属性")
                 
@@ -1263,22 +1151,8 @@ class Main(Star):
 
     @filter.on_decorating_result(priority=100)
     async def _prepare_emoji_response(self, event: AstrMessageEvent):
-        """准备表情包响应的公共逻辑。
-
-        调整优先级为 100（数值越大越晚执行），让其他格式化插件先处理完毕，
-        避免破坏 <ref>、Markdown 等结构化内容。
-
-        处理流程：
-        1. 等待其他插件完成格式化（HTML、Markdown 等）
-        2. 从已格式化的 plain_text 中提取情绪
-        3. 仅清理情绪标签，保留其他格式
-        4. 发送表情包（如果需要）
-
-        支持的标签格式：
-        - &&happy&& 格式
-        - [emoji: happy] 格式
-        """
-        logger.debug("[Stealer] _prepare_emoji_response 被调用")
+        """清理情绪标签并异步发送表情包（不阻塞回复）"""
+        logger.info("[Stealer] _prepare_emoji_response 被调用")
 
         # 检查是否为主动发送（工具已发送表情包）
         if event.get_extra("stealer_active_sent"):
@@ -1300,63 +1174,103 @@ class Main(Star):
                 logger.debug("[Stealer] 结果对象无效，跳过处理")
                 return False
 
-            # 2. 提取纯文本（使用 get_plain_text 获取格式化后的文本）
-            # 此时其他插件已经处理完 <ref>、Markdown 等格式
+            # 2. 提取纯文本
             text = result.get_plain_text() or ""
             if not text.strip():
                 logger.debug("[Stealer] 没有可处理的文本内容，跳过")
                 return False
 
             # 3. 检查并处理显式的表情包标记 (来自 Tool 调用)
-            import re
             explicit_emojis = []
 
             def tag_replacer(match):
                 explicit_emojis.append(match.group(1))
-                return ""  # 从文本中移除标记
+                return ""
 
-            # 标记格式: [ast_emoji:path]
             text_without_explicit = re.sub(r"\[ast_emoji:(.*?)\]", tag_replacer, text)
             has_explicit = len(explicit_emojis) > 0
 
-            # 4. 统一使用 EmotionAnalyzerService 提取并清理情绪标签
-            # 这个方法会同时：
-            #   - 提取所有格式的情绪标签（标准、转义、残缺）
-            #   - 清理文本中的标签
-            #   - 返回 (提取到的情绪列表, 清理后的文本)
-            all_emotions, cleaned_text = await self._extract_emotions_from_text(
-                event, text_without_explicit
-            )
-
-            # 5. 判断是否需要更新文本
-            # 只有当清理了标签时才需要更新
-            need_update = (cleaned_text != text)
-
-            # 6. 处理显式表情包
+            # 6. 处理显式表情包（同步处理）
             if has_explicit:
-                await self._send_explicit_emojis(event, explicit_emojis, cleaned_text)
+                await self._send_explicit_emojis(event, explicit_emojis, text_without_explicit)
                 logger.info(f"[Stealer] 已发送 {len(explicit_emojis)} 张显式表情包")
                 return True
 
-            # 7. 仅在需要时更新结果对象
-            if need_update:
-                # 使用安全的更新方法，仅清理情绪标签，保留其他组件
-                self._update_result_with_cleaned_text_safe(event, result, cleaned_text)
-                logger.debug("[Stealer] 已清理情绪标签")
-
-            # 8. 检查是否需要发送表情包
-            if not all_emotions:
-                logger.debug("[Stealer] 未提取到情绪，跳过表情包发送")
-                return need_update
-
-            # 9. 尝试发送表情包
-            emoji_sent = await self._try_send_emoji(event, all_emotions, cleaned_text)
-
-            return need_update or emoji_sent
+            # 7. 模式判断：智能模式 vs 被动模式
+            is_intelligent_mode = getattr(self, 'enable_natural_emotion_analysis', True)
+            
+            if is_intelligent_mode:
+                # 智能模式：不修改消息链，直接异步分析
+                logger.debug("[Stealer] 智能模式：保持消息链不变，异步分析语义")
+                asyncio.create_task(
+                    self._async_analyze_and_send_emoji(event, text_without_explicit, [])
+                )
+                return False  # 不修改消息链
+            else:
+                # 被动模式：提取并清理标签，修改消息链
+                logger.debug("[Stealer] 被动模式：提取标签并清理消息链")
+                
+                # 提取情绪标签
+                all_emotions, cleaned_text = await self._extract_emotions_from_text(
+                    event, text_without_explicit
+                )
+                
+                # 判断是否需要更新文本
+                need_update = (cleaned_text != text_without_explicit)
+                
+                # 清理标签（修改消息链）
+                if need_update:
+                    self._update_result_with_cleaned_text_safe(event, result, cleaned_text)
+                    logger.debug("[Stealer] 被动模式：已清理情绪标签")
+                
+                # 异步发送表情包
+                asyncio.create_task(
+                    self._async_analyze_and_send_emoji(event, cleaned_text, all_emotions)
+                )
+                
+                return need_update  # 返回是否修改了消息链
 
         except Exception as e:
             logger.error(f"[Stealer] 处理表情包响应时发生错误: {e}", exc_info=True)
             return False
+
+    async def _async_analyze_and_send_emoji(
+        self, event: AstrMessageEvent, cleaned_text: str, extracted_emotions: list
+    ):
+        """后台异步分析情绪并发送表情包"""
+        try:
+            all_emotions = []
+            
+            # 模式切换：智能模式 vs 被动模式
+            if getattr(self, 'enable_natural_emotion_analysis', True):
+                # 智能模式：使用轻量模型分析，忽略标签
+                logger.debug("[Stealer] 智能模式：后台使用轻量模型分析LLM回复")
+                
+                # 使用智能情绪匹配器分析LLM回复的真实情绪
+                analyzed_emotion = await self.smart_emotion_matcher.analyze_and_match_emotion(
+                    event, cleaned_text, use_natural_analysis=True
+                )
+                
+                if analyzed_emotion:
+                    all_emotions = [analyzed_emotion]
+                    logger.debug(f"[Stealer] 智能模式：轻量模型识别情绪 {analyzed_emotion}")
+                else:
+                    logger.debug("[Stealer] 智能模式：轻量模型未识别到情绪，跳过表情包发送")
+                    return
+            else:
+                # 被动模式：依赖LLM插入的标签
+                if not extracted_emotions:
+                    logger.debug("[Stealer] 被动模式：未提取到LLM插入的情绪标签，跳过表情包发送")
+                    return
+                else:
+                    all_emotions = extracted_emotions
+                    logger.debug(f"[Stealer] 被动模式：检测到LLM插入的情绪标签 {all_emotions}")
+
+            # 尝试发送表情包
+            await self._try_send_emoji(event, all_emotions, cleaned_text)
+            
+        except Exception as e:
+            logger.error(f"[Stealer] 异步情绪分析和表情包发送失败: {e}", exc_info=True)
 
     def _validate_result(self, result) -> bool:
         """验证结果对象是否有效。"""
@@ -1369,16 +1283,7 @@ class Main(Star):
     def _update_result_with_cleaned_text_safe(
         self, event: AstrMessageEvent, result, cleaned_text: str
     ):
-        """安全地更新结果对象，仅修改纯文本组件，保留其他组件不变。
-        
-        这个方法会遍历消息链，只更新 Plain 文本组件的内容，
-        保留图片、引用等其他类型的组件，避免破坏消息结构。
-        
-        Args:
-            event: 消息事件
-            result: 当前结果对象
-            cleaned_text: 清理后的文本
-        """
+        """安全更新结果文本，保留其他组件"""
         # 查找并更新 Plain 组件
         text_updated = False
         for comp in result.chain:
@@ -1400,11 +1305,7 @@ class Main(Star):
     def _update_result_with_cleaned_text(
         self, event: AstrMessageEvent, result, cleaned_text: str
     ):
-        """更新结果对象，使用清理后的文本（完全重建消息链）。
-        
-        注意：这个方法会重建整个消息链，可能会丢失某些组件。
-        推荐使用 _update_result_with_cleaned_text_safe 代替。
-        """
+        """更新结果文本（重建消息链，不推荐使用）"""
         new_result = event.make_result().set_result_content_type(
             result.result_content_type
         )
@@ -1459,15 +1360,7 @@ class Main(Star):
             return False
 
     async def _select_emoji(self, category: str, context_text: str = "") -> str | None:
-        """智能选择表情包文件，根据上下文匹配最相关的表情包。
-
-        Args:
-            category: 情绪分类
-            context_text: 上下文文本（可选），用于智能匹配
-
-        Returns:
-            表情包文件路径，如果没有则返回None
-        """
+        """选择表情包（智能或随机）"""
         # 检查是否启用智能选择
         use_smart = getattr(self, "smart_emoji_selection", True)
 
@@ -1490,29 +1383,51 @@ class Main(Star):
                 return None
 
             logger.debug(f"从'{category}'目录中找到 {len(files)} 张图片（{'智能选择失败，' if use_smart else ''}随机选择）")
-            picked_image = random.choice(files)
-            return picked_image.as_posix()
+            
+            # 改进的随机选择：避免重复
+            recent_usage_key = f"recent_usage_{category}"
+            recent_usage = getattr(self, recent_usage_key, [])
+            
+            # 过滤最近使用的文件
+            available_files = [f for f in files if f.as_posix() not in recent_usage]
+            
+            # 如果过滤后没有可用文件，清空历史
+            if not available_files:
+                available_files = files
+                recent_usage.clear()
+            
+            # 随机选择
+            picked_image = random.choice(available_files)
+            
+            # 更新最近使用历史
+            picked_path = picked_image.as_posix()
+            if picked_path in recent_usage:
+                recent_usage.remove(picked_path)
+            recent_usage.append(picked_path)
+            
+            # 保持历史队列大小
+            max_recent = min(5, max(2, len(files) // 2))
+            if len(recent_usage) > max_recent:
+                recent_usage.pop(0)
+            
+            setattr(self, recent_usage_key, recent_usage)
+            
+            return picked_path
         except Exception as e:
             logger.error(f"选择表情包失败: {e}")
             return None
 
     async def _select_emoji_smart(self, category: str, context_text: str) -> str | None:
-        """智能选择表情包，根据上下文匹配描述和标签,并考虑使用频率避免重复。
-
-        Args:
-            category: 情绪分类
-            context_text: 上下文文本
-
-        Returns:
-            最匹配的表情包路径，如果没有则返回None
-        """
+        """智能选择表情包（多样性+匹配度+文本相似度）"""
         try:
             # 1. 加载索引，获取该分类下的所有表情包
             idx = await self._load_index()
             candidates = []
-
-            # 获取当前时间戳，用于计算使用频率衰减
             current_time = time.time()
+
+            # 获取最近使用历史（避免重复）
+            recent_usage_key = f"recent_usage_{category}"
+            recent_usage = getattr(self, recent_usage_key, [])
 
             for file_path, data in idx.items():
                 if not isinstance(data, dict):
@@ -1527,109 +1442,148 @@ class Main(Star):
                 if not os.path.exists(file_path):
                     continue
 
-                # 获取描述、标签和适用场景
-                desc = str(data.get("desc", "")).lower()
-                tags = [str(t).lower() for t in data.get("tags", [])]
-                scenes = [str(s).lower() for s in data.get("scenes", [])]
-
-                # 计算匹配分数
-                score = 0
-                context_lower = context_text.lower()
-
-                # 1. 适用场景匹配（新增，优先级最高）
-                for scene in scenes:
-                    if len(scene) > 2 and scene in context_lower:
-                        score += 25  # 场景匹配25分（最高）
-
-                # 2. 描述匹配
-                if desc:
-                    if desc in context_lower:
-                        # 描述完整包含在上下文中
-                        score += 20
-                    else:
-                        # 词汇匹配
-                        desc_words = [w for w in desc.split() if len(w) > 1]
-                        matched_words = 0
-                        for word in desc_words:
-                            if word in context_lower:
-                                matched_words += 1
-
-                        if matched_words > 0:
-                            score += matched_words * 5  # 每个匹配词5分
-
-                # 3. 标签匹配
-                for tag in tags:
-                    if len(tag) > 1 and tag in context_lower:
-                        score += 8  # 标签匹配8分
-
-                # 4. 计算使用频率惩罚（新增）
-                last_used = data.get("last_used", 0)
-                use_count = data.get("use_count", 0)
-
-                # 时间衰减：最近使用的减分更多
-                time_since_last_use = current_time - last_used
-                if time_since_last_use < 300:  # 5分钟内
-                    score -= 15
-                elif time_since_last_use < 1800:  # 30分钟内
-                    score -= 10
-                elif time_since_last_use < 3600:  # 1小时内
-                    score -= 5
-
-                # 使用频率惩罚：使用次数越多，减分越多
-                if use_count > 10:
-                    score -= min(use_count * 0.5, 10)  # 最多减10分
-
-                # 即使没有匹配也加入候选（score可能为负）
                 candidates.append({
                     "path": file_path,
-                    "score": score,
-                    "desc": desc,
-                    "last_used": last_used,
-                    "use_count": use_count
+                    "data": data,
+                    "last_used": data.get("last_used", 0),
+                    "use_count": data.get("use_count", 0),
+                    "desc": str(data.get("desc", "")).lower(),
+                    "tags": [str(t).lower() for t in data.get("tags", [])],
+                    "scenes": [str(s).lower() for s in data.get("scenes", [])],
                 })
 
             if not candidates:
                 logger.debug(f"分类 '{category}' 下没有可用的表情包")
                 return None
 
-            # 2. 根据分数选择
-            candidates.sort(key=lambda x: x["score"], reverse=True)
+            # 2. 强制避重：过滤最近使用的表情包
+            available_candidates = [c for c in candidates if c["path"] not in recent_usage]
+            
+            # 如果过滤后候选太少，只避免最近3个
+            if len(available_candidates) < max(2, len(candidates) * 0.3):
+                recent_3 = recent_usage[-3:] if len(recent_usage) >= 3 else recent_usage
+                available_candidates = [c for c in candidates if c["path"] not in recent_3]
+            
+            # 如果还是没有候选，清空历史重新开始
+            if not available_candidates:
+                available_candidates = candidates
+                recent_usage.clear()
 
-            if candidates[0]["score"] > 0:
-                # 有匹配：从高分候选中随机选择（增加多样性）
-                max_score = candidates[0]["score"]
-                top_candidates = [c for c in candidates if c["score"] >= max_score * 0.7]
+            # 3. 计算多样性分数（权重70%）
+            for candidate in available_candidates:
+                diversity_score = 100  # 基础分数
 
-                # 使用加权随机：分数越高，被选中概率越大
-                weights = [c["score"] for c in top_candidates]
-                selected = random.choices(top_candidates, weights=weights, k=1)[0]
+                # 时间多样性（使用时间越久分数越高）
+                time_since_last_use = current_time - candidate["last_used"]
+                if time_since_last_use < 300:  # 5分钟内大幅减分
+                    diversity_score -= 60
+                elif time_since_last_use < 1800:  # 30分钟内
+                    diversity_score -= 30
+                elif time_since_last_use < 3600:  # 1小时内
+                    diversity_score -= 10
+                else:
+                    # 超过1小时给予奖励
+                    hours_passed = time_since_last_use / 3600
+                    diversity_score += min(hours_passed * 5, 30)
 
-                logger.info(f"智能匹配表情包: 分数={selected['score']}, 描述={selected['desc'][:30]}")
-            else:
-                # 无匹配：使用反向加权随机（使用越少越容易选中）
-                # 为所有候选赋予基础分数，减去使用频率惩罚
-                for c in candidates:
-                    # 基础分10分，减去使用相关惩罚
-                    time_bonus = min((current_time - c["last_used"]) / 3600, 10)  # 时间越久加分越多，最多10分
-                    use_penalty = min(c["use_count"] * 0.3, 5)  # 使用次数惩罚，最多5分
-                    c["adjusted_score"] = 10 + time_bonus - use_penalty
+                # 频率多样性（使用次数越少分数越高）
+                use_count = candidate["use_count"]
+                if use_count == 0:
+                    diversity_score += 20  # 从未使用过的优先
+                elif use_count < 3:
+                    diversity_score += 10
+                elif use_count < 10:
+                    diversity_score += 0
+                else:
+                    diversity_score -= min(use_count * 2, 30)
 
-                # 确保所有分数为正
-                min_score = min(c["adjusted_score"] for c in candidates)
-                if min_score < 1:
-                    for c in candidates:
-                        c["adjusted_score"] += (1 - min_score)
+                candidate["diversity_score"] = max(diversity_score, 10)
 
-                weights = [c["adjusted_score"] for c in candidates]
-                selected = random.choices(candidates, weights=weights, k=1)[0]
+            # 4. 计算匹配分数（权重30%）
+            has_context = context_text and len(context_text.strip()) > 5
+            
+            for candidate in available_candidates:
+                match_score = 10  # 基础匹配分数
+                
+                if has_context:
+                    context_lower = context_text.lower()
+                    
+                    # 场景匹配
+                    for scene in candidate["scenes"]:
+                        if len(scene) > 2 and scene in context_lower:
+                            match_score += 25
+                    
+                    # 描述匹配
+                    desc = candidate["desc"]
+                    if desc and desc in context_lower:
+                        match_score += 20
+                    elif desc:
+                        desc_words = [w for w in desc.split() if len(w) > 1]
+                        matched_words = sum(1 for word in desc_words if word in context_lower)
+                        match_score += matched_words * 5
+                    
+                    # 标签匹配
+                    for tag in candidate["tags"]:
+                        if len(tag) > 1 and tag in context_lower:
+                            match_score += 8
+                    
+                    # 新增：文本相似度加成（类似MaiBot的编辑距离匹配）
+                    # 计算上下文与描述的整体相似度
+                    if desc and len(desc) > 3:
+                        similarity = calculate_hybrid_similarity(context_text, desc)
+                        # 相似度转换为分数加成（最多+15分）
+                        similarity_bonus = similarity * 15
+                        match_score += similarity_bonus
+                        
+                        if similarity > 0.3:  # 如果相似度较高，记录日志
+                            logger.debug(f"[相似度匹配] '{context_text[:20]}...' vs '{desc[:20]}...' = {similarity:.2f}")
 
-                logger.debug(f"未找到匹配，加权随机选择表情包（调整分数={selected['adjusted_score']:.1f}）")
+                candidate["match_score"] = match_score
 
-            # 3. 更新使用统计
+            # 5. 计算综合分数：多样性70% + 匹配度30%
+            max_diversity = max(c["diversity_score"] for c in available_candidates)
+            max_match = max(c["match_score"] for c in available_candidates)
+            
+            for candidate in available_candidates:
+                # 标准化到0-100
+                norm_diversity = (candidate["diversity_score"] / max_diversity) * 100
+                norm_match = (candidate["match_score"] / max_match) * 100
+                
+                # 多样性权重更高
+                candidate["final_score"] = norm_diversity * 0.7 + norm_match * 0.3
+
+            # 6. 选择策略：从前40%候选中加权随机选择
+            available_candidates.sort(key=lambda x: x["final_score"], reverse=True)
+            top_40_percent = max(1, int(len(available_candidates) * 0.4))
+            top_candidates = available_candidates[:top_40_percent]
+
+            # 使用指数衰减权重，保持随机性
+            weights = [math.exp(-i * 0.3) for i in range(len(top_candidates))]
+            selected = random.choices(top_candidates, weights=weights, k=1)[0]
+
+            # 7. 更新使用历史和统计
             selected_path = selected["path"]
+            
+            # 更新索引中的使用统计
             idx[selected_path]["last_used"] = int(current_time)
             idx[selected_path]["use_count"] = idx[selected_path].get("use_count", 0) + 1
             await self._save_index(idx)
+
+            # 更新最近使用历史
+            if selected_path in recent_usage:
+                recent_usage.remove(selected_path)
+            recent_usage.append(selected_path)
+            
+            # 保持历史队列大小（最多记录8个）
+            max_recent = min(8, max(3, len(candidates) // 2))
+            if len(recent_usage) > max_recent:
+                recent_usage.pop(0)
+            
+            setattr(self, recent_usage_key, recent_usage)
+
+            logger.info(f"选择表情包: 多样性={selected['diversity_score']:.1f}, "
+                       f"匹配度={selected['match_score']:.1f}, "
+                       f"综合={selected['final_score']:.1f}")
 
             return selected_path
 
@@ -1640,31 +1594,17 @@ class Main(Star):
     async def _send_emoji_with_text(
         self, event: AstrMessageEvent, emoji_path: str, cleaned_text: str
     ):
-        """发送表情包和文本。"""
+        """发送表情包（异步场景下直接发送新消息）"""
         try:
-            # 获取当前结果
-            result = event.get_result()
-
-            # 创建新的结果对象
-            new_result = event.make_result().set_result_content_type(
-                result.result_content_type
-            )
-
-            # 添加除了Plain文本外的其他组件
-            for comp in result.chain:
-                if not isinstance(comp, Plain):
-                    new_result.chain.append(comp)
-
-            # 添加清理后的文本
-            if cleaned_text.strip():
-                new_result.message(cleaned_text.strip())
-
-            # 添加图片
+            # 读取图片
             b64 = await self.image_processor_service._file_to_base64(emoji_path)
-            new_result.base64_image(b64)
-
-            # 设置新的结果对象
-            event.set_result(new_result)
+            
+            # 创建结果并发送
+            # 使用 event.send() 方法，传入 MessageChain 对象
+            await event.send(MessageChain([ImageComponent.fromBase64(b64)]))
+            
+            logger.debug(f"[Stealer] 已发送表情包: {emoji_path}")
+            
         except Exception as e:
             logger.error(f"发送表情包失败: {e}", exc_info=True)
 
@@ -1734,6 +1674,33 @@ class Main(Star):
     async def set_vision(self, event: AstrMessageEvent, provider_id: str = ""):
         """设置视觉模型。"""
         async for result in self.command_handler.set_vision(event, provider_id):
+            yield result
+
+    @filter.permission_type(PermissionType.ADMIN)
+    @filter.command("meme set_emotion_model")
+    async def set_emotion_provider(self, event: AstrMessageEvent, provider_id: str = ""):
+        """设置情绪分析模型。"""
+        async for result in self.command_handler.set_emotion_provider(event, provider_id):
+            yield result
+
+    @filter.permission_type(PermissionType.ADMIN)
+    @filter.command("meme natural_analysis")
+    async def toggle_natural_analysis(self, event: AstrMessageEvent, action: str = ""):
+        """启用/禁用自然语言情绪分析。用法: /meme natural_analysis <on|off>"""
+        async for result in self.command_handler.toggle_natural_analysis(event, action):
+            yield result
+
+    @filter.command("meme emotion_stats")
+    async def emotion_analysis_stats(self, event: AstrMessageEvent):
+        """显示情绪分析统计信息。"""
+        async for result in self.command_handler.emotion_analysis_stats(event):
+            yield result
+
+    @filter.permission_type(PermissionType.ADMIN)
+    @filter.command("meme clear_emotion_cache")
+    async def clear_emotion_cache(self, event: AstrMessageEvent):
+        """清空情绪分析缓存。"""
+        async for result in self.command_handler.clear_emotion_cache(event):
             yield result
 
     @filter.command("meme status")
@@ -1949,13 +1916,6 @@ class Main(Star):
         async for result in self.command_handler.push(event, category, alias):
             yield result
 
-    @filter.permission_type(PermissionType.ADMIN)
-    @filter.command("meme debug_image")
-    async def debug_image(self, event: AstrMessageEvent):
-        """调试命令：处理当前消息中的图片并显示详细信息"""
-        async for result in self.command_handler.debug_image(event):
-            yield result
-
     @filter.command("meme list")
     async def list_images(self, event: AstrMessageEvent, category: str = "", limit: str = "10"):
         """列出表情包。用法: /meme list [分类] [数量]"""
@@ -1977,48 +1937,6 @@ class Main(Star):
         """重建索引，用于迁移旧版本或修复索引。用法: /meme rebuild_index"""
         async for result in self.command_handler.rebuild_index(event):
             yield result
-
-    @filter.permission_type(PermissionType.ADMIN)
-    @filter.command("meme reload_persona")
-    async def reload_persona(self, event: AstrMessageEvent):
-        """[已废弃] 重新注入人格情绪选择提醒。
-        
-        注意：现在使用 LLM 钩子自动注入，无需手动操作。
-        用法: /meme reload_persona
-        """
-        yield event.plain_result(
-            "ℹ️ 此命令已废弃\n\n"
-            "插件现在使用 LLM 请求钩子自动注入情绪指令，\n"
-            "每次 LLM 请求时会自动添加情绪选择提示。\n\n"
-            "✅ 优势：\n"
-            "- 不修改全局人格配置\n"
-            "- 每次请求独立注入\n"
-            "- 插件卸载后自动失效\n\n"
-            "无需手动操作，插件已自动启用此功能。"
-        )
-
-    @filter.permission_type(PermissionType.ADMIN)
-    @filter.command("meme persona_status")
-    async def persona_status(self, event: AstrMessageEvent):
-        """检查情绪注入状态。用法: /meme persona_status"""
-        try:
-            status_text = "📊 情绪注入状态\n\n"
-            status_text += f"✅ 注入方式: LLM 请求钩子 (推荐)\n"
-            status_text += f"✅ 自动注入: {'开启' if self.auto_send else '关闭'}\n"
-            status_text += f"✅ 分类数量: {len(self.categories)}\n"
-            status_text += f"✅ 分类列表: {', '.join(self.categories[:5])}"
-            
-            if len(self.categories) > 5:
-                status_text += f" 等 {len(self.categories)} 个"
-            
-            status_text += "\n\n💡 说明:\n"
-            status_text += "插件使用 LLM 钩子在每次请求时动态注入情绪指令，\n"
-            status_text += "不会修改人格配置，更安全、更灵活。"
-
-            yield event.plain_result(status_text)
-        except Exception as e:
-            logger.error(f"检查人格状态失败: {e}")
-            yield event.plain_result(f"❌ 检查状态失败: {e}")
 
     @filter.llm_tool(name="send_emoji")
     async def send_emoji(self, event: AstrMessageEvent, query: str):

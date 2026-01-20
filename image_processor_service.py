@@ -148,8 +148,6 @@ class ImageProcessorService:
             plugin_instance: StealerPlugin 实例，用于访问插件的配置和服务
         """
         self.plugin = plugin_instance
-        # 从插件实例获取PILImage引用，避免重复导入逻辑
-        self.PILImage = getattr(plugin_instance, "PILImage", None)
         # 确保base_dir始终是字符串
         if (
             hasattr(plugin_instance, "base_dir")

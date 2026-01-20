@@ -20,37 +20,96 @@ class CommandHandler:
     async def meme_on(self, event: AstrMessageEvent):
         """开启偷表情包功能。"""
         self.plugin.steal_emoji = True
-        self.plugin._persist_config()
         yield event.plain_result("已开启偷表情包")
 
     async def meme_off(self, event: AstrMessageEvent):
         """关闭偷表情包功能。"""
         self.plugin.steal_emoji = False
-        self.plugin._persist_config()
         yield event.plain_result("已关闭偷表情包")
 
     async def auto_on(self, event: AstrMessageEvent):
         """开启自动发送功能。"""
         self.plugin.auto_send = True
-        self.plugin._persist_config()
         yield event.plain_result("已开启自动发送")
 
     async def auto_off(self, event: AstrMessageEvent):
         """关闭自动发送功能。"""
         self.plugin.auto_send = False
-        self.plugin._persist_config()
         yield event.plain_result("已关闭自动发送")
 
-    async def set_vision(self, event: AstrMessageEvent, provider_id: str = ""):
-        """设置视觉模型。"""
+    async def set_emotion_provider(self, event: AstrMessageEvent, provider_id: str = ""):
+        """设置情绪分析模型。"""
         if not provider_id:
-            yield event.plain_result("请提供视觉模型的 provider_id")
+            yield event.plain_result("请提供情绪分析模型的 provider_id")
             return
         # 同时更新实例属性和配置服务中的值，确保同步
-        self.plugin.vision_provider_id = provider_id
-        self.plugin.config_service.vision_provider_id = provider_id
-        self.plugin._persist_config()
-        yield event.plain_result(f"已设置视觉模型: {provider_id}")
+        self.plugin.emotion_analysis_provider_id = provider_id
+        self.plugin.config_service.emotion_analysis_provider_id = provider_id
+        yield event.plain_result(f"已设置情绪分析模型: {provider_id}")
+
+    async def toggle_natural_analysis(self, event: AstrMessageEvent, action: str = ""):
+        """启用/禁用自然语言情绪分析。"""
+        if action not in ["on", "off"]:
+            current_status = "启用" if self.plugin.enable_natural_emotion_analysis else "禁用"
+            yield event.plain_result(f"当前自然语言分析状态: {current_status}\n用法: /meme natural_analysis <on|off>")
+            return
+
+        if action == "on":
+            self.plugin.enable_natural_emotion_analysis = True
+            yield event.plain_result("已启用自然语言情绪分析")
+        else:
+            self.plugin.enable_natural_emotion_analysis = False
+            yield event.plain_result("已禁用自然语言情绪分析")
+
+    async def emotion_analysis_stats(self, event: AstrMessageEvent):
+        """显示情绪分析统计信息。"""
+        try:
+            # 显示当前模式
+            mode = "智能模式" if self.plugin.enable_natural_emotion_analysis else "被动模式"
+            
+            status_text = f"🧠 情绪分析模式: {mode}\n\n"
+            
+            if self.plugin.enable_natural_emotion_analysis:
+                # 智能模式：显示轻量模型分析统计
+                stats = self.plugin.smart_emotion_matcher.get_analyzer_stats()
+                
+                if "message" in stats:
+                    status_text += f"轻量模型分析: {stats['message']}\n"
+                else:
+                    status_text += "📊 轻量模型分析统计:\n"
+                    status_text += f"总分析次数: {stats['total_analyses']}\n"
+                    status_text += f"缓存命中率: {stats['cache_hit_rate']}\n"
+                    status_text += f"成功率: {stats['success_rate']}\n"
+                    status_text += f"平均响应时间: {stats['avg_response_time']}\n"
+                    status_text += f"缓存大小: {stats['cache_size']}\n"
+                
+                status_text += "\n💡 智能模式说明:\n"
+                status_text += "- 不向LLM注入提示词\n"
+                status_text += "- 使用轻量模型分析回复语义\n"
+                status_text += "- 自动识别情绪并发送表情包\n"
+            else:
+                # 被动模式：显示标签识别说明
+                status_text += "📋 被动模式说明:\n"
+                status_text += "- 向LLM注入情绪选择提示词\n"
+                status_text += "- LLM在回复中插入 &&情绪&& 标签\n"
+                status_text += "- 插件识别标签并发送表情包\n"
+                status_text += "- 依赖LLM遵循格式要求\n"
+            
+            status_text += "\n⚙️ 配置状态:\n"
+            status_text += f"自动发送: {'启用' if self.plugin.auto_send else '禁用'}\n"
+            status_text += f"分析模型: {self.plugin.emotion_analysis_provider_id or '使用当前会话模型'}\n"
+            
+            yield event.plain_result(status_text)
+        except Exception as e:
+            yield event.plain_result(f"获取统计信息失败: {e}")
+
+    async def clear_emotion_cache(self, event: AstrMessageEvent):
+        """清空情绪分析缓存。"""
+        try:
+            self.plugin.smart_emotion_matcher.clear_cache()
+            yield event.plain_result("✅ 情绪分析缓存已清空")
+        except Exception as e:
+            yield event.plain_result(f"❌ 清空缓存失败: {e}")
 
     async def status(self, event: AstrMessageEvent):
         """显示插件状态和详细的表情包统计信息。"""
@@ -156,80 +215,6 @@ class CommandHandler:
         result = event.make_result().base64_image(b64)
         yield result
 
-    async def debug_image(self, event: AstrMessageEvent):
-        """调试命令：处理当前消息中的图片并显示详细信息。"""
-        # 收集所有图片组件
-        image_components = [
-            comp for comp in event.get_messages() if isinstance(comp, Image)
-        ]
-
-        if not image_components:
-            yield event.plain_result("当前消息中没有图片")
-            return
-
-        # 处理第一张图片
-        first_image = image_components[0]
-        try:
-            # 转换图片到临时文件路径
-            temp_file_path = await first_image.convert_to_file_path()
-
-            # 临时文件由框架创建，无需安全检查
-            # 安全检查会在 process_image 中处理最终存储路径时进行
-
-            # 确保临时文件存在且可访问
-            if not Path(temp_file_path).exists():
-                yield event.plain_result("临时文件不存在")
-                return
-
-            # 开始调试处理
-            result_message = "=== 图片调试信息 ===\n"
-
-            # 1. 基本信息
-            image_path = Path(temp_file_path)
-            file_size = image_path.stat().st_size
-            result_message += f"文件大小: {file_size / 1024:.2f} KB\n"
-
-            # 2. 元数据过滤结果
-            # 直接使用plugin中的PILImage引用
-            if self.plugin.PILImage is not None:
-                try:
-                    with self.plugin.PILImage.open(temp_file_path) as image:
-                        width, height = image.size
-                    result_message += f"分辨率: {width}x{height}\n"
-                    aspect_ratio = (
-                        max(width, height) / min(width, height)
-                        if min(width, height) > 0
-                        else 0
-                    )
-                    result_message += f"宽高比: {aspect_ratio:.2f}\n"
-                except Exception as e:
-                    result_message += f"获取图片信息失败: {e}\n"
-
-            # 3. 多模态分析结果
-            result_message += "\n=== 多模态分析结果 ===\n"
-
-            # 处理图片
-            success, image_index = await self.plugin._process_image(
-                event, temp_file_path, is_temp=True, idx=None
-            )
-            if success and image_index:
-                for processed_file_path, image_info in image_index.items():
-                    if isinstance(image_info, dict):
-                        result_message += (
-                            f"分类: {image_info.get('category', '未知')}\n"
-                        )
-                        result_message += f"情绪: {image_info.get('emotion', '未知')}\n"
-                        result_message += f"标签: {image_info.get('tags', [])}\n"
-                        result_message += f"描述: {image_info.get('desc', '无')}\n"
-            else:
-                result_message += "图片处理失败\n"
-
-            yield event.plain_result(result_message)
-
-        except Exception as e:
-            logger.error(f"调试图片失败: {e}")
-            yield event.plain_result(f"调试失败: {str(e)}")
-
     async def clean(self, event: AstrMessageEvent, mode: str = ""):
         """手动触发清理操作，清理raw目录中的原始图片文件，不影响已分类的表情包。
 
@@ -333,8 +318,6 @@ class CommandHandler:
             await self.plugin.task_scheduler.cancel_task("raw_cleanup_loop")
             yield event.plain_result("已禁用raw目录清理任务")
 
-        self.plugin._persist_config()
-
     async def toggle_capacity_control(self, event: AstrMessageEvent, action: str = ""):
         """启用/禁用容量控制任务。"""
         if action not in ["on", "off"]:
@@ -355,8 +338,6 @@ class CommandHandler:
             await self.plugin.task_scheduler.cancel_task("capacity_control_loop")
             yield event.plain_result("已禁用容量控制任务")
 
-        self.plugin._persist_config()
-
     async def set_raw_cleanup_interval(
         self, event: AstrMessageEvent, interval: str = ""
     ):
@@ -374,7 +355,6 @@ class CommandHandler:
                 return
 
             self.plugin.raw_cleanup_interval = minutes
-            self.plugin._persist_config()
             yield event.plain_result(f"已设置raw清理周期为: {minutes}分钟")
         except ValueError:
             yield event.plain_result("无效的周期值，请输入正整数")
@@ -396,7 +376,6 @@ class CommandHandler:
                 return
 
             self.plugin.capacity_control_interval = minutes
-            self.plugin._persist_config()
             yield event.plain_result(f"已设置容量控制周期为: {minutes}分钟")
         except ValueError:
             yield event.plain_result("无效的周期值，请输入正整数")
@@ -447,7 +426,6 @@ class CommandHandler:
             return
 
         self.plugin.image_processing_mode = mode
-        self.plugin._persist_config()
 
         mode_names = {
             "always": "总是处理",
@@ -475,7 +453,6 @@ class CommandHandler:
                 return
 
             self.plugin.image_processing_probability = prob
-            self.plugin._persist_config()
             yield event.plain_result(f"已设置处理概率为: {prob * 100:.0f}%")
         except ValueError:
             yield event.plain_result("无效的概率值，请输入 0.0-1.0 之间的数字")
@@ -495,7 +472,6 @@ class CommandHandler:
                 return
 
             self.plugin.image_processing_interval = seconds
-            self.plugin._persist_config()
             yield event.plain_result(f"已设置处理间隔为: {seconds}秒")
         except ValueError:
             yield event.plain_result("无效的间隔值，请输入正整数")
@@ -515,7 +491,6 @@ class CommandHandler:
                 return
 
             self.plugin.image_processing_cooldown = seconds
-            self.plugin._persist_config()
             yield event.plain_result(f"已设置冷却时间为: {seconds}秒")
         except ValueError:
             yield event.plain_result("无效的冷却时间，请输入正整数")

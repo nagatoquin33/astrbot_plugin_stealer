@@ -252,5 +252,5 @@ class CacheService:
             self.persist_all()
 
     def cleanup(self):
-        """清理资源。"""
-        pass
+        """清理资源（持久化所有缓存）。"""
+        self.persist_all()

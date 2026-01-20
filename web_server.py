@@ -410,8 +410,6 @@ class WebServer:
             # 更新 category_info
             if hasattr(self.plugin.config_service, "category_info"):
                 self.plugin.config_service.category_info.update(category_info)
-            
-            self.plugin.config_service.config_manager.save_config()
 
             if hasattr(self.plugin, "image_processor_service"):
                 self.plugin.image_processor_service.categories = category_keys
