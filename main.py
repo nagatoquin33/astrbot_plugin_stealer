@@ -182,7 +182,6 @@ class Main(Star):
         # 确保基础目录存在
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
-        self.config_path: Path = self.base_dir / "config.json"
         self.raw_dir: Path = self.base_dir / "raw"
         self.categories_dir: Path = self.base_dir / "categories"
         self.cache_dir: Path = self.base_dir / "cache"
@@ -1097,8 +1096,8 @@ class Main(Star):
         """在 LLM 请求时动态注入情绪选择指令。
         
         模式切换逻辑：
-        - 智能模式（enable_natural_emotion_analysis=True）：不注入提示词，由轻量模型分析
-        - 被动模式（enable_natural_emotion_analysis=False）：注入提示词，LLM插入标签
+    - LLM模式（enable_natural_emotion_analysis=True）：不注入提示词，由轻量模型分析
+    - 被动标签模式（enable_natural_emotion_analysis=False）：注入提示词，LLM插入标签
         """
         try:
             # 检查是否启用自动发送
@@ -1106,13 +1105,13 @@ class Main(Star):
                 logger.debug("[Stealer] 自动发送已禁用，跳过情绪注入")
                 return
             
-            # 智能模式：启用自然语言分析时，不注入提示词
+            # LLM模式：启用自然语言分析时，不注入提示词
             if getattr(self, 'enable_natural_emotion_analysis', True):
-                logger.debug("[Stealer] 智能模式已启用，跳过提示词注入，将使用轻量模型分析")
+                logger.debug("[Stealer] LLM模式已启用，跳过提示词注入，将使用轻量模型分析")
                 return
             
-            # 被动模式：注入提示词让LLM插入标签
-            logger.debug("[Stealer] 被动模式：注入提示词让LLM插入情绪标签")
+            # 被动标签模式：注入提示词让LLM插入标签
+            logger.debug("[Stealer] 被动标签模式：注入提示词让LLM插入情绪标签")
             
             # 检查分类列表是否为空
             if not self.categories:
@@ -1142,7 +1141,7 @@ class Main(Star):
             # 将指令添加到系统提示词
             if hasattr(request, 'system_prompt'):
                 request.system_prompt = (request.system_prompt or "") + emotion_instruction
-                logger.info(f"[Stealer] 被动模式：已注入情绪选择指令 (categories: {len(self.categories)})")
+                logger.info(f"[Stealer] 被动标签模式：已注入情绪选择指令 (categories: {len(self.categories)})")
             else:
                 logger.warning("[Stealer] LLM 请求对象没有 system_prompt 属性")
                 
@@ -1152,6 +1151,17 @@ class Main(Star):
     @filter.on_decorating_result(priority=100)
     async def _prepare_emoji_response(self, event: AstrMessageEvent):
         """清理情绪标签并异步发送表情包（不阻塞回复）"""
+        
+        # 首先检查是否为 LLM 回复（过滤命令输出、系统消息等）
+        result = event.get_result()
+        if result is None:
+            return False
+        
+        # 只处理 LLM 生成的回复，跳过命令/插件输出
+        if not result.is_llm_result():
+            logger.debug("[Stealer] 非 LLM 回复，跳过表情包处理")
+            return False
+        
         logger.info("[Stealer] _prepare_emoji_response 被调用")
 
         # 检查是否为主动发送（工具已发送表情包）
@@ -1161,7 +1171,8 @@ class Main(Star):
             if result:
                 text = result.get_plain_text() or ""
                 if text.strip():
-                    cleaned_text = self._clean_emotion_tags(text)
+                    # 复用 _extract_emotions_from_text 的清理逻辑
+                    _, cleaned_text = await self._extract_emotions_from_text(event, text)
                     if cleaned_text != text:
                         self._update_result_with_cleaned_text_safe(event, result, cleaned_text)
                         logger.debug("[Stealer] 已清理主动发送后的情绪标签")
@@ -1196,19 +1207,19 @@ class Main(Star):
                 logger.info(f"[Stealer] 已发送 {len(explicit_emojis)} 张显式表情包")
                 return True
 
-            # 7. 模式判断：智能模式 vs 被动模式
+            # 7. 模式判断：LLM模式 vs 被动标签模式
             is_intelligent_mode = getattr(self, 'enable_natural_emotion_analysis', True)
             
             if is_intelligent_mode:
-                # 智能模式：不修改消息链，直接异步分析
-                logger.debug("[Stealer] 智能模式：保持消息链不变，异步分析语义")
+                # LLM模式：不修改消息链，直接异步分析
+                logger.debug("[Stealer] LLM模式：保持消息链不变，异步分析语义")
                 asyncio.create_task(
                     self._async_analyze_and_send_emoji(event, text_without_explicit, [])
                 )
                 return False  # 不修改消息链
             else:
-                # 被动模式：提取并清理标签，修改消息链
-                logger.debug("[Stealer] 被动模式：提取标签并清理消息链")
+                # 被动标签模式：提取并清理标签，修改消息链
+                logger.debug("[Stealer] 被动标签模式：提取标签并清理消息链")
                 
                 # 提取情绪标签
                 all_emotions, cleaned_text = await self._extract_emotions_from_text(
@@ -1221,7 +1232,7 @@ class Main(Star):
                 # 清理标签（修改消息链）
                 if need_update:
                     self._update_result_with_cleaned_text_safe(event, result, cleaned_text)
-                    logger.debug("[Stealer] 被动模式：已清理情绪标签")
+                    logger.debug("[Stealer] 被动标签模式：已清理情绪标签")
                 
                 # 异步发送表情包
                 asyncio.create_task(
@@ -1241,10 +1252,10 @@ class Main(Star):
         try:
             all_emotions = []
             
-            # 模式切换：智能模式 vs 被动模式
+            # 模式切换：LLM模式 vs 被动标签模式
             if getattr(self, 'enable_natural_emotion_analysis', True):
-                # 智能模式：使用轻量模型分析，忽略标签
-                logger.debug("[Stealer] 智能模式：后台使用轻量模型分析LLM回复")
+                # LLM模式：使用轻量模型分析，忽略标签
+                logger.debug("[Stealer] LLM模式：后台使用轻量模型分析LLM回复")
                 
                 # 使用智能情绪匹配器分析LLM回复的真实情绪
                 analyzed_emotion = await self.smart_emotion_matcher.analyze_and_match_emotion(
@@ -1253,20 +1264,29 @@ class Main(Star):
                 
                 if analyzed_emotion:
                     all_emotions = [analyzed_emotion]
-                    logger.debug(f"[Stealer] 智能模式：轻量模型识别情绪 {analyzed_emotion}")
+                    logger.debug(f"[Stealer] LLM模式：轻量模型识别情绪 {analyzed_emotion}")
                 else:
-                    logger.debug("[Stealer] 智能模式：轻量模型未识别到情绪，跳过表情包发送")
+                    logger.debug("[Stealer] LLM模式：轻量模型未识别到情绪，跳过表情包发送")
                     return
             else:
-                # 被动模式：依赖LLM插入的标签
+                # 被动标签模式：依赖LLM插入的标签
                 if not extracted_emotions:
-                    logger.debug("[Stealer] 被动模式：未提取到LLM插入的情绪标签，跳过表情包发送")
+                    logger.debug("[Stealer] 被动标签模式：未提取到LLM插入的情绪标签，跳过表情包发送")
                     return
                 else:
                     all_emotions = extracted_emotions
-                    logger.debug(f"[Stealer] 被动模式：检测到LLM插入的情绪标签 {all_emotions}")
+                    logger.debug(f"[Stealer] 被动标签模式：检测到LLM插入的情绪标签 {all_emotions}")
 
             # 尝试发送表情包
+            # 注意：在发送前短暂等待，给 tool loop 留出设置 stealer_active_sent 标记的时间
+            # 这是因为 LLM 可能在第一轮回复后决定调用 tool，而我们的异步任务可能在 tool 执行前就完成了分析
+            await asyncio.sleep(0.5)
+            
+            # 再次检查标记（tool 可能在等待期间被调用）
+            if event.get_extra("stealer_active_sent"):
+                logger.debug("[Stealer] 检测到 tool 已主动发送表情包，跳过自动发送")
+                return
+            
             await self._try_send_emoji(event, all_emotions, cleaned_text)
             
         except Exception as e:
@@ -1325,6 +1345,12 @@ class Main(Star):
         self, event: AstrMessageEvent, emotions: list[str], cleaned_text: str
     ) -> bool:
         """尝试发送表情包。"""
+        # 如果本轮已经通过 LLM 工具主动发送过表情包，则跳过自动发送（避免重复）
+    # 典型场景：LLM模式下 LLM 先调用 send_emoji_by_id 发送了一张，但后台自然语言分析仍可能触发概率发送。
+        if event.get_extra("stealer_active_sent"):
+            logger.debug("[Stealer] 检测到 stealer_active_sent=True，跳过自动表情发送")
+            return False
+
         # 1. 检查发送概率
         if not self._check_send_probability():
             return False
@@ -1341,7 +1367,14 @@ class Main(Star):
         return True
 
     def _check_send_probability(self) -> bool:
-        """检查表情包发送概率。"""
+        """检查表情包发送概率。
+
+        说明：
+        - 被动标签模式（LLM 插入 &&emotion&&）
+    - LLM模式（自然语言分析 / 智能 LLM 模式）
+
+        以上两种模式共享同一个概率配置：self.emoji_chance。
+        """
         try:
             chance = float(self.emoji_chance)
             if chance <= 0:
@@ -1938,44 +1971,57 @@ class Main(Star):
         async for result in self.command_handler.rebuild_index(event):
             yield result
 
-    @filter.llm_tool(name="send_emoji")
-    async def send_emoji(self, event: AstrMessageEvent, query: str):
-        """发送表情包。
+    async def _search_emoji_candidates(
+        self,
+        query: str,
+        *,
+        limit: int = 5,
+        idx: dict | None = None,
+    ):
+        """统一的表情包搜索逻辑（给 LLM 工具复用）。
+
+        委托给 ImageProcessorService.smart_search 实现。
+
+        Returns:
+            list[tuple[path, desc, emotion]]
+        """
+        if idx is None:
+            idx = self.cache_service.get_cache("index_cache") or {}
+
+        return await self.image_processor_service.smart_search(query, limit=limit, idx=idx)
+
+    @filter.llm_tool(name="search_emoji")
+    async def search_emoji(self, event: AstrMessageEvent, query: str):
+        """搜索表情包，返回候选列表供你选择。
 
         Args:
             query(string): 搜索关键词
 
         推荐分类词汇：
-        - confused: 困惑, 疑问, 不懂, 啥情况, 疑惑, 迷茫
-        - dumb: 无语, 尴尬, 呆住, 汗, 无语
-        - happy: 开心, 高兴, 快乐, 大笑, 兴奋, 嗨
-        - sad: 难过, 伤心, 哭了, 悲伤
-        - angry: 生气, 愤怒, 恼火, 滚
-        - surprised: 惊讶, 震惊, 卧槽, 吓死
-        - troll: 嘲讽, 搞怪, 呵呵, 发癫, 也是醉了
-        - tired: 累, 瘫倒, 累了, 躺平
-        - disgust: 嫌弃, 鄙视, 嫌弃, 恶心
-        - thank: 赞同, 感谢, 谢谢, 牛逼, 赞
-        - cry: 大哭, 泪崩, 哭唧唧
-        - shy: 害羞, 羞涩, 脸红
+        - confused: 困惑, 疑问, 不懂, 啥情况
+        - dumb: 无语, 尴尬, 呆住
+        - happy: 开心, 高兴, 大笑, 兴奋
+        - sad: 难过, 伤心, 哭了
+        - angry: 生气, 愤怒, 恼火
+        - surprised: 惊讶, 震惊, 卧槽
+        - troll: 嘲讽, 搞怪, 呵呵, 发癫
+        - tired: 累, 瘫倒, 躺平
+        - disgust: 嫌弃, 鄙视, 恶心
+        - thank: 感谢, 谢谢, 牛逼, 赞
+        - cry: 大哭, 泪崩
+        - shy: 害羞, 脸红
         - love: 喜欢, 爱了, 么么哒
-        - fear: 害怕, 恐怖, 瑟瑟发抖
-        - excitement: 兴奋, 激动
-        - embarrassed: 尴尬, 社死, 脚趾抠地
-        - sigh: 叹气, 无奈, 唉
-
-        使用规则：
-        - 优先使用上述分类词汇作为搜索关键词
-        - 如无匹配，可使用具体表达（如：开心死了、气死了）
-        - 尽量使用简短词汇，避免长句
+        - fear: 害怕, 瑟瑟发抖
+        - embarrassed: 尴尬, 社死
 
         返回值：
-        - 成功：返回成功发送的表情包描述
-        - 失败：返回错误提示字符串（如"发送失败：未找到..."）
+        - 成功：返回候选表情包列表（包含编号、描述、分类），请选择一个编号调用 send_emoji_by_id 发送
+        - 失败：返回错误提示
         """
-        logger.info(f"[Tool] LLM 请求发送表情包: {query}")
+        logger.info(f"[Tool] LLM 搜索表情包: {query}")
 
-        # 标记为主动发送，避免被动模式重复触发
+        # 标记为主动发送流程开始，避免自动发送重复触发
+        # 注意：必须在 tool 执行最开始就设置，因为 on_decorating_result 可能在 tool loop 中途触发
         event.set_extra("stealer_active_sent", True)
 
         try:
@@ -1984,38 +2030,175 @@ class Main(Star):
                 await self._load_index()
 
             idx = self.cache_service.get_cache("index_cache") or {}
-            results = await self.image_processor_service.search_images(query, limit=5, idx=idx)
 
+            results = await self._search_emoji_candidates(query, limit=5, idx=idx)
+
+            # 4. 如果仍然没结果
             if not results:
                 logger.warning(f"未找到匹配的表情包: {query}")
-                yield event.plain_result(f"💡 图库中暂无关于'{query}'的表情包")
-                yield f"发送失败：未找到与'{query}'匹配的表情包。请尝试使用更通用的关键词（如：不懂、开心、生气）。"
+                yield f"搜索失败：未找到与'{query}'匹配的表情包。建议尝试：happy, sad, angry, confused, troll 等分类词"
                 return
 
-            # 发送最佳匹配（第一个）
-            best_path, best_desc, best_emotion = results[0]
-            if not os.path.exists(best_path):
-                logger.warning(f"最佳匹配表情包文件不存在: {best_path}")
-                yield event.plain_result(f"💡 表情包文件丢失，请检查图库")
-                yield "发送失败：文件丢失。"
-                return
-
-            logger.info(f"[Tool] 直接发送表情包: {best_path} (emotion={best_emotion})")
-
-            # 发送表情包（不带文本，LLM 的回复单独发送）
-            b64 = await self.image_processor_service._file_to_base64(best_path)
-            yield event.make_result().message("").base64_image(b64)
-
-            # 打印候选列表供调试/LLM 参考
-            for i, (path, desc, emotion) in enumerate(results[:5]):
-                if os.path.exists(path):
-                    logger.debug(f"[Tool] 候选{i+1}: [{emotion}] {desc[:20]}")
+            # 5. 构建候选列表，存入缓存供后续发送
+            candidates = []
+            result_lines = [f"找到 {len(results)} 个匹配的表情包：\n"]
             
-            yield f"成功发送表情包：{best_desc} (分类：{best_emotion})"
+            for i, (path, desc, emotion) in enumerate(results):
+                if os.path.exists(path):
+                    candidate_id = f"emoji_{i+1}"
+                    candidates.append({
+                        "id": candidate_id,
+                        "path": path,
+                        "desc": desc,
+                        "emotion": emotion
+                    })
+                    # 截断描述，避免太长
+                    short_desc = desc[:50] + "..." if len(desc) > 50 else desc
+                    result_lines.append(f"  [{i+1}] [{emotion}] {short_desc}")
+            
+            if not candidates:
+                yield "搜索失败：找到的表情包文件均已丢失"
+                return
+            
+            # 存入实例属性，供 send_emoji_by_id 使用（临时存储，不持久化）
+            self._emoji_candidates = candidates
+            
+            result_lines.append(f"\n请调用 send_emoji_by_id 并传入编号(1-{len(candidates)})来发送你选择的表情包。")
+            
+            result_text = "\n".join(result_lines)
+            logger.info(f"[Tool] 搜索完成，返回 {len(candidates)} 个候选")
+            yield result_text
+
+        except Exception as e:
+            logger.error(f"[Tool] 搜索表情包失败: {e}", exc_info=True)
+            yield f"搜索出错：{e}"
+
+    @filter.llm_tool(name="send_emoji_by_id")
+    async def send_emoji_by_id(self, event: AstrMessageEvent, emoji_id: int):
+        """发送指定编号的表情包。必须先调用 search_emoji 获取候选列表。
+
+        Args:
+            emoji_id(number): 表情包编号（1-5），从 search_emoji 返回的列表中选择
+
+        返回值：
+        - 成功：返回已发送的表情包描述
+        - 失败：返回错误提示
+        """
+        logger.info(f"[Tool] LLM 选择发送表情包编号: {emoji_id}")
+
+        # 标记为主动发送，避免被动标签模式重复触发
+        event.set_extra("stealer_active_sent", True)
+
+        try:
+            tool_text: str | None = None
+            # LLM 可能会传入 2.0 / "2" 等，统一转为 int 处理
+            try:
+                emoji_id = int(emoji_id)
+            except Exception:
+                tool_text = f"发送失败：编号 {emoji_id} 无法解析为整数，请选择 1-5 之间的编号"
+                yield tool_text
+                return
+
+            # 从实例属性获取候选列表
+            candidates = getattr(self, "_emoji_candidates", None)
+            
+            if not candidates:
+                tool_text = "发送失败：没有可用的候选列表，请先调用 search_emoji 搜索表情包"
+                yield tool_text
+                return
+            
+            # 验证编号范围
+            if emoji_id < 1 or emoji_id > len(candidates):
+                tool_text = f"发送失败：编号 {emoji_id} 无效，请选择 1-{len(candidates)} 之间的编号"
+                yield tool_text
+                return
+            
+            # 获取选中的表情包
+            selected = candidates[emoji_id - 1]
+            path = selected["path"]
+            desc = selected["desc"]
+            emotion = selected["emotion"]
+            
+            if not os.path.exists(path):
+                tool_text = "发送失败：表情包文件已丢失"
+                yield tool_text
+                return
+            
+            # 发送表情包
+            logger.info(f"[Tool] 发送选中的表情包: {path} (emotion={emotion})")
+            b64 = await self.image_processor_service._file_to_base64(path)
+            
+            # 使用 event.send() 直接发送图片，而不是 yield
+            # 这样可以确保后续的 yield tool_text 能正常返回给 LLM
+            from astrbot.api.message_components import Image as ImageComponent
+            from astrbot.api.event import MessageChain
+            await event.send(MessageChain([ImageComponent.fromBase64(b64)]))
+            
+            # 返回成功信息给 LLM
+            tool_text = f"已发送表情包：{desc} (分类：{emotion})"
+            logger.info(f"[Tool] {tool_text}")
+            yield tool_text
             return
 
         except Exception as e:
             logger.error(f"[Tool] 发送表情包失败: {e}", exc_info=True)
-            yield event.plain_result("⚠️ 发送表情包时出错")
-            yield f"发送出错：{e}"
+            tool_text = f"发送出错：{e}"
+            yield tool_text
+            return
+
+    @filter.llm_tool(name="send_emoji")
+    async def send_emoji(self, event: AstrMessageEvent, query: str):
+        """快速发送表情包（自动选择最佳匹配）。如果你想自己选择，请改用 search_emoji + send_emoji_by_id。
+
+        Args:
+            query(string): 搜索关键词（如：开心、难过、无语、生气）
+
+        返回值：
+        - 成功：返回已发送的表情包描述
+        - 失败：返回错误提示
+        """
+        logger.info(f"[Tool] LLM 快速发送表情包: {query}")
+
+        # 标记为主动发送，避免被动标签模式重复触发
+        event.set_extra("stealer_active_sent", True)
+
+        try:
+            tool_text: str | None = None
+            if not self.cache_service.get_cache("index_cache"):
+                await self._load_index()
+
+            idx = self.cache_service.get_cache("index_cache") or {}
+
+            results = await self._search_emoji_candidates(query, limit=5, idx=idx)
+
+            if not results:
+                tool_text = f"发送失败：未找到与'{query}'匹配的表情包"
+                yield tool_text
+                return
+
+            # 发送最佳匹配
+            best_path, best_desc, best_emotion = results[0]
+            if not os.path.exists(best_path):
+                tool_text = "发送失败：文件丢失"
+                yield tool_text
+                return
+
+            logger.info(f"[Tool] 快速发送表情包: {best_path} (emotion={best_emotion})")
+            b64 = await self.image_processor_service._file_to_base64(best_path)
+            
+            # 使用 event.send() 直接发送图片，而不是 yield
+            # 这样可以确保后续的 yield tool_text 能正常返回给 LLM
+            from astrbot.api.message_components import Image as ImageComponent
+            from astrbot.api.event import MessageChain
+            await event.send(MessageChain([ImageComponent.fromBase64(b64)]))
+
+            tool_text = f"已发送表情包：{best_desc} (分类：{best_emotion})"
+            logger.info(f"[Tool] {tool_text}")
+            yield tool_text
+            return
+
+        except Exception as e:
+            logger.error(f"[Tool] 发送表情包失败: {e}", exc_info=True)
+            tool_text = f"发送出错：{e}"
+            yield tool_text
             return

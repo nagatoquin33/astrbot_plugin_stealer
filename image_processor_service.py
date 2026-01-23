@@ -1221,3 +1221,63 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
         except Exception as e:
             logger.error(f"搜索图片失败: {e}")
             return []
+
+    async def smart_search(
+        self,
+        query: str,
+        limit: int = 5,
+        idx: dict | None = None,
+    ) -> list[tuple[str, str, str]]:
+        """智能搜索表情包（带多级 fallback）。
+
+        搜索顺序：
+        1) 直接用 query 调用 search_images
+        2) 关键词映射（如"无语" -> dumb）
+        3) 模糊匹配到分类（相似度阈值 0.4）
+
+        Args:
+            query: 搜索关键词
+            limit: 返回结果数量
+            idx: 索引缓存，为 None 时自动加载
+
+        Returns:
+            list[tuple[path, desc, emotion]]
+        """
+        from .text_similarity import calculate_hybrid_similarity
+
+        # 确保索引可用
+        if idx is None:
+            if hasattr(self.plugin, "cache_service"):
+                idx = self.plugin.cache_service.get_cache("index_cache") or {}
+            else:
+                idx = {}
+
+        # 1) 直接搜索
+        results = await self.search_images(query, limit=limit, idx=idx)
+        if results:
+            return results
+
+        # 2) 关键词映射
+        keyword_map = self._get_keyword_map()
+        if query in keyword_map:
+            mapped_category = keyword_map[query]
+            logger.info(f"[smart_search] 关键词映射: '{query}' -> '{mapped_category}'")
+            results = await self.search_images(mapped_category, limit=limit, idx=idx)
+            if results:
+                return results
+
+        # 3) 模糊匹配到分类
+        best_match = None
+        best_score = 0.0
+        for category in self.VALID_CATEGORIES:
+            score = calculate_hybrid_similarity(query, category)
+            if score > best_score and score > 0.4:
+                best_score = score
+                best_match = category
+
+        if best_match:
+            logger.info(f"[smart_search] 模糊匹配: '{query}' -> '{best_match}' (相似度: {best_score:.2f})")
+            results = await self.search_images(best_match, limit=limit, idx=idx)
+
+        return results
+
