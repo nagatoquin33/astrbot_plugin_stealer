@@ -1943,21 +1943,35 @@ class Main(Star):
         """发送表情包。
 
         Args:
-            query (str): 搜索关键词。请优先从以下推荐词中选择最接近的含义：
-            - 困惑/疑问: 不懂, 啥情况, 疑惑, 迷茫
-            - 无语/尴尬: 无语, 呆住, 汗, 尴尬
-            - 开心/激动: 开心, 大笑, 兴奋, 嗨
-            - 难过/大哭: 难过, 哭了, 悲伤
-            - 生气/愤怒: 生气, 恼火, 滚
-            - 惊讶/震惊: 震惊, 卧槽, 吓死
-            - 嘲讽/搞怪: 呵呵, 发癫, 也是醉了
-            - 累/瘫倒: 累了, 躺平
-            - 嫌弃/鄙视: 嫌弃, 恶心
-            - 赞同/感谢: 谢谢, 牛逼, 赞
+            query(string): 搜索关键词
+
+        推荐分类词汇：
+        - confused: 困惑, 疑问, 不懂, 啥情况, 疑惑, 迷茫
+        - dumb: 无语, 尴尬, 呆住, 汗, 无语
+        - happy: 开心, 高兴, 快乐, 大笑, 兴奋, 嗨
+        - sad: 难过, 伤心, 哭了, 悲伤
+        - angry: 生气, 愤怒, 恼火, 滚
+        - surprised: 惊讶, 震惊, 卧槽, 吓死
+        - troll: 嘲讽, 搞怪, 呵呵, 发癫, 也是醉了
+        - tired: 累, 瘫倒, 累了, 躺平
+        - disgust: 嫌弃, 鄙视, 嫌弃, 恶心
+        - thank: 赞同, 感谢, 谢谢, 牛逼, 赞
+        - cry: 大哭, 泪崩, 哭唧唧
+        - shy: 害羞, 羞涩, 脸红
+        - love: 喜欢, 爱了, 么么哒
+        - fear: 害怕, 恐怖, 瑟瑟发抖
+        - excitement: 兴奋, 激动
+        - embarrassed: 尴尬, 社死, 脚趾抠地
+        - sigh: 叹气, 无奈, 唉
 
         使用规则：
-        - 优先使用上述推荐词，如果无法匹配再使用具体描述。
-        - 尽量使用简短的情绪词（如"不懂"）而非长句（如"我看不太懂"）。
+        - 优先使用上述分类词汇作为搜索关键词
+        - 如无匹配，可使用具体表达（如：开心死了、气死了）
+        - 尽量使用简短词汇，避免长句
+
+        返回值：
+        - 成功：返回成功发送的表情包描述
+        - 失败：返回错误提示字符串（如"发送失败：未找到..."）
         """
         logger.info(f"[Tool] LLM 请求发送表情包: {query}")
 
@@ -1975,14 +1989,16 @@ class Main(Star):
             if not results:
                 logger.warning(f"未找到匹配的表情包: {query}")
                 yield event.plain_result(f"💡 图库中暂无关于'{query}'的表情包")
-                return f"发送失败：未找到与'{query}'匹配的表情包。请尝试使用更通用的关键词（如：不懂、开心、生气）。"
+                yield f"发送失败：未找到与'{query}'匹配的表情包。请尝试使用更通用的关键词（如：不懂、开心、生气）。"
+                return
 
             # 发送最佳匹配（第一个）
             best_path, best_desc, best_emotion = results[0]
             if not os.path.exists(best_path):
                 logger.warning(f"最佳匹配表情包文件不存在: {best_path}")
                 yield event.plain_result(f"💡 表情包文件丢失，请检查图库")
-                return "发送失败：文件丢失。"
+                yield "发送失败：文件丢失。"
+                return
 
             logger.info(f"[Tool] 直接发送表情包: {best_path} (emotion={best_emotion})")
 
@@ -1995,13 +2011,11 @@ class Main(Star):
                 if os.path.exists(path):
                     logger.debug(f"[Tool] 候选{i+1}: [{emotion}] {desc[:20]}")
             
-            return f"成功发送表情包：{best_desc} (分类：{best_emotion})"
+            yield f"成功发送表情包：{best_desc} (分类：{best_emotion})"
+            return
 
         except Exception as e:
             logger.error(f"[Tool] 发送表情包失败: {e}", exc_info=True)
             yield event.plain_result("⚠️ 发送表情包时出错")
-            return f"发送出错：{e}"
-
-        except Exception as e:
-            logger.error(f"[Tool] 发送表情包失败: {e}", exc_info=True)
-            yield event.plain_result("⚠️ 发送表情包时出错")
+            yield f"发送出错：{e}"
+            return
