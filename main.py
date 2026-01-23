@@ -1199,36 +1199,32 @@ class Main(Star):
             # 7. 模式判断：智能模式 vs 被动模式
             is_intelligent_mode = getattr(self, 'enable_natural_emotion_analysis', True)
             
+            # 统一提取并清理情绪标签（防止历史残留导致的标签泄漏）
+            all_emotions, cleaned_text = await self._extract_emotions_from_text(
+                event, text_without_explicit
+            )
+            
+            # 判断是否需要更新文本
+            need_update = (cleaned_text != text_without_explicit)
+            
+            if need_update:
+                self._update_result_with_cleaned_text_safe(event, result, cleaned_text)
+                logger.debug(f"[Stealer] 已清理情绪标签 (模式={'智能' if is_intelligent_mode else '被动'})")
+
             if is_intelligent_mode:
-                # 智能模式：不修改消息链，直接异步分析
-                logger.debug("[Stealer] 智能模式：保持消息链不变，异步分析语义")
+                # 智能模式：不使用提取到的标签，而是重新分析语义
+                logger.debug("[Stealer] 智能模式：异步分析语义")
                 asyncio.create_task(
-                    self._async_analyze_and_send_emoji(event, text_without_explicit, [])
+                    self._async_analyze_and_send_emoji(event, cleaned_text, [])
                 )
-                return False  # 不修改消息链
             else:
-                # 被动模式：提取并清理标签，修改消息链
-                logger.debug("[Stealer] 被动模式：提取标签并清理消息链")
-                
-                # 提取情绪标签
-                all_emotions, cleaned_text = await self._extract_emotions_from_text(
-                    event, text_without_explicit
-                )
-                
-                # 判断是否需要更新文本
-                need_update = (cleaned_text != text_without_explicit)
-                
-                # 清理标签（修改消息链）
-                if need_update:
-                    self._update_result_with_cleaned_text_safe(event, result, cleaned_text)
-                    logger.debug("[Stealer] 被动模式：已清理情绪标签")
-                
-                # 异步发送表情包
+                # 被动模式：使用提取到的标签
+                logger.debug("[Stealer] 被动模式：使用提取的标签")
                 asyncio.create_task(
                     self._async_analyze_and_send_emoji(event, cleaned_text, all_emotions)
                 )
                 
-                return need_update  # 返回是否修改了消息链
+            return need_update  # 返回是否修改了消息链
 
         except Exception as e:
             logger.error(f"[Stealer] 处理表情包响应时发生错误: {e}", exc_info=True)
