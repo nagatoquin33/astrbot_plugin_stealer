@@ -3,302 +3,466 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>亨利的战利品</title>
-    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <title>亨利的战利品 - 天国拯救</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=EB+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap');
+        
+        :root {
+            /* Kingdom Come: Deliverance - Royal Blue Codex Theme */
+            --bg-main: #060a12;
+            --bg-panel: #0d141f;
+            --bg-card: #141c29;
+            --bg-modal: #0f1623;
+            
+            --gold-primary: #d4b46e;
+            --gold-bright: #f9e3a2;
+            --gold-dim: #8c7335;
+            
+            --text-main: #e6e6e6;
+            --text-muted: #94a3b8;
+            --text-gold: #d4b46e;
+            
+            --border-style: 1px solid var(--gold-dim);
+            --border-double: 3px double var(--gold-dim);
+            
+            --overlay-color: rgba(3, 7, 16, 0.9);
+        }
+        
+        * { box-sizing: border-box; }
         
         body {
-            font-family: 'Noto Sans SC', sans-serif;
+            background-color: var(--bg-main);
+            color: var(--text-main);
+            font-family: 'EB Garamond', serif;
+            font-size: 18px;
+            line-height: 1.6;
+            background-image: url("data:image/svg+xml,%3Csvg width='100' height='100' viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+        }
+
+        /* Typography */
+        h1, h2, h3, .font-cinzel {
+            font-family: 'Cinzel', serif;
+            font-weight: 700;
+            color: var(--gold-primary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            text-shadow: 2px 2px 0px rgba(0,0,0,0.8);
         }
         
-        .emoji-card:hover .overlay {
-            opacity: 1;
+        h1 { font-size: 2.2rem; border-bottom: var(--border-double); padding-bottom: 12px; margin-bottom: 24px; }
+        h2 { font-size: 1.5rem; border-bottom: 1px solid var(--gold-dim); padding-bottom: 8px; margin-bottom: 16px; }
+
+        /* Panels */
+        .codex-panel {
+            background: var(--bg-panel);
+            border: 2px solid var(--gold-dim);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+            position: relative;
+            /* Corner decorations via CSS gradient */
+            background-image: 
+                linear-gradient(135deg, var(--gold-dim) 5px, transparent 5px),
+                linear-gradient(225deg, var(--gold-dim) 5px, transparent 5px),
+                linear-gradient(315deg, var(--gold-dim) 5px, transparent 5px),
+                linear-gradient(45deg, var(--gold-dim) 5px, transparent 5px);
+            background-position: top left, top right, bottom right, bottom left;
+            background-size: 10px 10px;
+            background-repeat: no-repeat;
         }
         
-        .line-clamp-2 {
-            display: -webkit-box;
-            line-clamp: 2;
-            -webkit-line-clamp: 2;
-            -webkit-box-orient: vertical;
+        /* Inner border for panels */
+        .codex-panel::after {
+            content: '';
+            position: absolute;
+            top: 4px; left: 4px; right: 4px; bottom: 4px;
+            border: 1px solid rgba(212, 180, 110, 0.1);
+            pointer-events: none;
+        }
+
+        /* Buttons */
+        .codex-btn {
+            background: linear-gradient(to bottom, #1f2835, #0f1520);
+            border: 1px solid var(--gold-dim);
+            color: var(--gold-primary);
+            padding: 8px 24px;
+            font-family: 'Cinzel', serif;
+            font-size: 0.95rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            position: relative;
             overflow: hidden;
         }
+
+        .codex-btn:hover {
+            border-color: var(--gold-bright);
+            color: var(--gold-bright);
+            box-shadow: 0 0 15px rgba(212, 180, 110, 0.2);
+            transform: translateY(-1px);
+            background: linear-gradient(to bottom, #2a3544, #151e2b);
+            text-shadow: 0 0 5px rgba(212, 180, 110, 0.5);
+        }
         
-        .line-clamp-3 {
-            display: -webkit-box;
-            line-clamp: 3;
-            -webkit-line-clamp: 3;
-            -webkit-box-orient: vertical;
+        .codex-btn:active { transform: translateY(1px); }
+
+        .codex-btn.primary {
+            background: linear-gradient(to bottom, #8a703f, #4a3b20);
+            color: #fff;
+            border-color: #e6c680;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+        }
+        
+        .codex-btn.primary:hover {
+            background: linear-gradient(to bottom, #a3854d, #5e4b2a);
+            color: #fff;
+            box-shadow: 0 0 20px rgba(212, 180, 110, 0.4);
+        }
+
+        .nav-btn {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            background: rgba(13, 20, 31, 0.8);
+            border: 1px solid var(--gold-dim);
+            color: var(--gold-primary);
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            z-index: 100;
+        }
+
+        .nav-btn:hover {
+            background: var(--gold-primary);
+            color: #000;
+            box-shadow: 0 0 15px rgba(212, 180, 110, 0.4);
+        }
+        
+        /* Inputs */
+        .codex-input {
+            background: #0d1219;
+            border: 1px solid #2d3748;
+            color: #eee;
+            padding: 10px 15px;
+            font-family: 'EB Garamond', serif;
+            font-size: 1.1rem;
+            width: 100%;
+            outline: none;
+            transition: all 0.3s;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.5);
+        }
+
+        .codex-input:focus {
+            border-color: var(--gold-primary);
+            background: #0e1014;
+            box-shadow: 0 0 8px rgba(197, 160, 89, 0.2);
+        }
+
+        .codex-input::placeholder { color: #666; font-style: italic; }
+        
+        select.codex-input {
+            appearance: none;
+            background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23C5A059%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E");
+            background-repeat: no-repeat;
+            background-position: right 12px top 50%;
+            background-size: 10px auto;
+            padding-right: 30px;
+        }
+
+        /* Cards */
+        .item-card {
+            background: var(--bg-card);
+            border: 1px solid #333;
+            transition: all 0.3s ease;
+            position: relative;
             overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
         }
-        
-        /* 渐变背景 */
-        .gradient-bg {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+
+        .item-card::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border: 1px solid transparent;
+            transition: border-color 0.3s;
+            pointer-events: none;
+            z-index: 10;
         }
-        
-        /* 卡片悬浮效果 */
-        .hover-lift {
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-        
-        .hover-lift:hover {
+
+        .item-card:hover {
             transform: translateY(-4px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.5);
         }
         
-        /* 玻璃态效果 */
-        .glass {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
+        .item-card:hover::before { border-color: var(--gold-primary); }
+
+        /* Modals */
+        .modal-overlay {
+            background: rgba(0, 0, 0, 0.9);
+            backdrop-filter: blur(4px);
         }
         
-        /* 自定义滚动条 */
-        ::-webkit-scrollbar {
-            width: 8px;
-            height: 8px;
+        .modal-content {
+            background: #111316;
+            border: 2px solid var(--gold-dim);
+            box-shadow: 0 0 60px rgba(0,0,0,1);
+            position: relative;
+            /* Ornate borders */
+            outline: 2px solid #000;
+            outline-offset: -6px;
         }
         
-        ::-webkit-scrollbar-track {
-            background: #f1f1f1;
-            border-radius: 4px;
+        .modal-header {
+            background: #0a0b0d;
+            border-bottom: 1px solid var(--gold-dim);
+            padding: 16px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #050505; }
+        ::-webkit-scrollbar-thumb { background: #333; border: 1px solid #000; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--gold-dim); }
+
+        /* Utilities */
+        .text-gold { color: var(--gold-primary) !important; }
+        .text-bright { color: var(--gold-bright) !important; }
+        .border-gold { border-color: var(--gold-primary) !important; }
+        .font-serif { font-family: 'EB Garamond', serif; }
         
-        ::-webkit-scrollbar-thumb {
-            background: #888;
-            border-radius: 4px;
+        /* Spinner */
+        .spinner {
+            border: 3px solid rgba(197, 160, 89, 0.2);
+            border-top: 3px solid var(--gold-primary);
+            border-radius: 50%;
+            width: 50px; height: 50px;
+            animation: spin 1s linear infinite;
         }
-        
-        ::-webkit-scrollbar-thumb:hover {
-            background: #555;
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        @keyframes slideUp {
+            from { transform: translate(-50%, 100%); opacity: 0; }
+            to { transform: translate(-50%, 0); opacity: 1; }
         }
-        
-        /* 动画 */
-        @keyframes fadeInUp {
-            from {
-                opacity: 0;
-                transform: translateY(20px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-        
-        .animate-fade-in-up {
-            animation: fadeInUp 0.5s ease-out;
+        .animate-slide-up {
+            animation: slideUp 0.3s ease-out;
         }
     </style>
 </head>
-<body class="bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50 min-h-screen">
-    <div id="app" class="container mx-auto px-4 py-8 max-w-7xl">
+<body>
+    <div id="app" class="min-h-screen flex flex-col p-4 md:p-8 max-w-[1600px] mx-auto">
+        
         <!-- Header -->
-        <header class="mb-6 animate-fade-in-up">
-            <div class="glass rounded-2xl shadow-2xl p-4 md:p-6 border border-white/20">
-                <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-3">
-                    <div class="flex items-center gap-3">
-                        <span class="text-3xl md:text-4xl">🏆</span>
-                        <div>
-                            <h1 class="text-xl md:text-3xl font-black bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
-                                亨利的战利品
-                            </h1>
-                            <p class="text-gray-500 text-xs md:text-sm">精心收藏的表情包宝库</p>
-                        </div>
-                    </div>
-                    <div class="flex items-center gap-2 bg-purple-50 px-3 py-2 rounded-xl">
-                        <span class="text-2xl md:text-3xl font-bold text-purple-600">{{ stats.total_images }}</span>
-                        <span class="text-xs text-gray-500 uppercase tracking-wide">总收藏</span>
-                    </div>
+        <header class="codex-panel p-6 mb-8 flex flex-col md:flex-row justify-between items-center gap-6">
+            <div class="flex items-center gap-5">
+                <div class="w-20 h-20 bg-black border-2 border-amber-900/60 flex items-center justify-center shadow-inner relative group overflow-hidden">
+                    <div class="absolute inset-0 bg-gradient-to-br from-amber-900/20 to-transparent"></div>
+                    <svg class="w-12 h-12 text-amber-600 drop-shadow-lg" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
+                    </svg>
                 </div>
-                
-                <!-- Categories Stats -->
-                <div class="flex flex-wrap gap-1.5">
-                    <div v-for="(count, cat) in stats.categories" :key="cat" 
-                         class="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-gradient-to-r from-purple-100 to-pink-100 border border-purple-200 hover:shadow-md transition">
-                        <span class="text-xs font-medium text-purple-700">{{ cat }}</span>
-                        <span class="text-xs font-bold text-purple-900 bg-white/60 px-1.5 py-0.5 rounded-full">{{ count }}</span>
-                    </div>
+                <div>
+                    <h1 class="text-4xl m-0 border-none p-0 text-gold shadow-black drop-shadow-md">亨利的战利品</h1>
+                    <p class="text-amber-700/80 uppercase tracking-[0.2em] text-sm font-bold mt-1">Henry's Loot - Codex</p>
                 </div>
+            </div>
+
+            <div class="flex gap-4">
+                <button @click="openUploadModal" class="codex-btn primary">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                    添加藏品
+                </button>
+                <button @click="openEmotionsModal" class="codex-btn">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+                    管理分类
+                </button>
             </div>
         </header>
 
-        <!-- Controls -->
-        <div class="glass p-4 md:p-5 rounded-2xl shadow-xl mb-6 sticky top-4 z-20 border border-white/20 animate-fade-in-up">
-            <div class="flex flex-col sm:flex-row gap-3">
-                <!-- Search -->
-                <div class="flex-1 relative">
-                    <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                        <svg class="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
-                        </svg>
-                    </div>
-                    <input type="text" v-model="searchQuery" @input="debouncedSearch"
-                           placeholder="搜索表情包..." 
-                           class="w-full pl-10 pr-3 py-2.5 md:py-3 border-2 border-purple-100 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition bg-white/80 text-sm">
-                </div>
-                <!-- Category Filter -->
-                <select v-model="selectedCategory" @change="fetchImages(1)"
-                        class="px-3 py-2.5 md:py-3 border-2 border-purple-100 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent appearance-none bg-white/80 cursor-pointer transition text-sm">
-                    <option value="">📂 全部分类</option>
-                    <option v-for="(count, cat) in stats.categories" :key="cat" :value="cat">
-                        {{ cat }} ({{ count }})
-                    </option>
-                </select>
+        <!-- Stats -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+            <div class="codex-panel p-4 text-center group hover:border-amber-700/50 transition-colors">
+                <div class="text-4xl font-cinzel text-gold group-hover:text-bright transition-colors">{{ stats.total || 0 }}</div>
+                <div class="text-xs text-muted uppercase tracking-widest mt-2 border-t border-white/10 pt-2 inline-block px-4">总藏品</div>
+            </div>
+            <div class="codex-panel p-4 text-center group hover:border-amber-700/50 transition-colors">
+                <div class="text-4xl font-cinzel text-gold group-hover:text-bright transition-colors">{{ stats.categories || 0 }}</div>
+                <div class="text-xs text-muted uppercase tracking-widest mt-2 border-t border-white/10 pt-2 inline-block px-4">分类数</div>
+            </div>
+            <div class="codex-panel p-4 text-center group hover:border-amber-700/50 transition-colors">
+                <div class="text-4xl font-cinzel text-gold group-hover:text-bright transition-colors">{{ stats.today || 0 }}</div>
+                <div class="text-xs text-muted uppercase tracking-widest mt-2 border-t border-white/10 pt-2 inline-block px-4">今日新增</div>
+            </div>
+            <div class="codex-panel p-4 text-center group hover:border-amber-700/50 transition-colors">
+                <div class="text-4xl font-cinzel text-gold group-hover:text-bright transition-colors">{{ Math.round((stats.total || 0) / (stats.categories || 1)) }}</div>
+                <div class="text-xs text-muted uppercase tracking-widest mt-2 border-t border-white/10 pt-2 inline-block px-4">平均每类</div>
+            </div>
+        </div>
+
+        <!-- Search Toolbar -->
+        <div class="codex-panel p-5 mb-8 flex flex-col md:flex-row gap-4 items-center justify-between">
+            <div class="relative w-full md:w-96">
+                <input v-model="searchQuery" @input="debouncedSearch" placeholder="搜索战利品 (标签/描述)..." class="codex-input pl-10 text-sm">
+                <svg class="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
             </div>
             
-            <!-- Action Buttons - stacked on mobile -->
-            <div class="flex flex-wrap gap-2 mt-3">
-                <button @click="openUploadModal" 
-                        class="flex-1 sm:flex-none px-4 py-2.5 md:py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-xl hover:from-green-600 hover:to-emerald-700 transition shadow-lg hover:shadow-xl font-medium text-sm md:text-base flex items-center justify-center gap-1.5">
-                    <span>➕</span>
-                    <span class="hidden xs:inline">添加表情包</span>
-                    <span class="xs:hidden">添加</span>
-                </button>
-                <button @click="openEmotionsModal" 
-                        class="flex-1 sm:flex-none px-4 py-2.5 md:py-3 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-xl hover:from-blue-600 hover:to-indigo-700 transition shadow-lg hover:shadow-xl font-medium text-sm md:text-base flex items-center justify-center gap-1.5">
-                    <span>😊</span>
-                    <span class="hidden xs:inline">情绪分类</span>
-                    <span class="xs:hidden">分类</span>
-                </button>
-                <button @click="fetchImages(1)" 
-                        class="flex-1 sm:flex-none px-4 py-2.5 md:py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-xl hover:from-purple-700 hover:to-pink-700 transition shadow-lg hover:shadow-xl font-medium text-sm md:text-base flex items-center justify-center gap-1.5">
-                    <span>🔄</span>
-                    <span class="hidden xs:inline">刷新</span>
+            <div class="flex items-center gap-3 w-full md:w-auto">
+                <select v-model="selectedCategory" @change="fetchImages(1)" class="codex-input w-full md:w-40 text-sm h-[42px]">
+                    <option value="">所有分类</option>
+                    <option v-for="cat in categories" :key="cat.key" :value="cat.key">{{ cat.name }} ({{ cat.count }})</option>
+                </select>
+
+                <select v-model="sortBy" @change="fetchImages(1)" class="codex-input w-full md:w-40 text-sm h-[42px]">
+                    <option value="newest">最新获取</option>
+                    <option value="oldest">最早获取</option>
+                </select>
+                
+                <button @click="toggleBatchMode" class="codex-btn text-sm h-[42px] whitespace-nowrap" :class="{'border-gold-bright text-gold-bright': isBatchMode}">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg>
+                    <span>{{ isBatchMode ? '退出批量' : '批量' }}</span>
                 </button>
             </div>
         </div>
 
         <!-- Gallery -->
-        <div v-if="loading" class="text-center py-16">
-            <div class="inline-block">
-                <div class="animate-spin rounded-full h-12 w-12 border-4 border-purple-200 border-t-purple-600 mx-auto"></div>
-                <p class="mt-4 text-gray-600 font-medium text-sm">加载中...</p>
+        <div v-if="loading" class="flex flex-col justify-center items-center py-20">
+            <div class="spinner mb-4"></div>
+            <p class="text-gold font-cinzel tracking-widest animate-pulse">Loading Artifacts...</p>
+        </div>
+
+        <div v-else-if="images.length > 0" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 gap-5 mb-8">
+            <div v-for="img in images" :key="img.hash" 
+                 @click="isBatchMode ? toggleSelection(img) : openPreview(img)" 
+                 class="item-card cursor-pointer group flex flex-col h-full relative"
+                 :class="{'ring-2 ring-gold-bright shadow-[0_0_15px_rgba(212,180,110,0.5)]': selectedImages.has(img.hash)}">
+                
+                <!-- Batch Selection Indicator -->
+                <div v-if="isBatchMode" class="absolute top-2 right-2 z-10 w-6 h-6 rounded border border-gold bg-black/80 flex items-center justify-center transition-colors shadow-md"
+                     :class="{'bg-gold text-black': selectedImages.has(img.hash), 'opacity-50 hover:opacity-100': !selectedImages.has(img.hash)}">
+                    <svg v-if="selectedImages.has(img.hash)" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                </div>
+
+                <div class="aspect-square relative overflow-hidden" style="background: var(--bg-main)">
+                    <img :src="img.url" class="w-full h-full object-cover opacity-80 group-hover:opacity-100 group-hover:scale-105 transition-all duration-500" loading="lazy">
+                    <div class="absolute top-0 left-0 right-0 p-2 bg-gradient-to-b from-black/80 to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
+                        <span class="text-[10px] text-gold uppercase tracking-wider border border-gold/30 px-2 py-0.5 bg-black/50">{{ img.category }}</span>
+                    </div>
+                </div>
+                <div class="p-3 border-t border-[#222] flex-grow" style="background: var(--bg-panel)">
+                    <p class="text-sm text-gray-400 truncate group-hover:text-gold transition-colors">{{ img.desc || '未命名藏品' }}</p>
+                </div>
             </div>
         </div>
 
-        <div v-else-if="images.length === 0" class="text-center py-16">
-            <div class="glass rounded-xl p-8 inline-block">
-                <div class="text-5xl mb-3">🔍</div>
-                <p class="text-gray-500">没有找到表情包</p>
-            </div>
-        </div>
-
-        <div v-else class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 md:gap-4">
-            <div v-for="(img, idx) in images" :key="img.hash"
-                 class="emoji-card group glass rounded-xl md:rounded-2xl shadow-lg overflow-hidden border border-white/40 hover-lift hover:shadow-xl transition-all flex flex-col">
-                <!-- 图片区域 -->
-                <div class="w-full aspect-square relative cursor-zoom-in overflow-hidden bg-gradient-to-br from-gray-50 to-gray-100"
-                     @click="openPreview(img, idx)" title="点击放大">
-                    <img :src="img.url" :alt="img.desc"
-                         class="w-full h-full object-contain p-2 md:p-3 transition-all duration-300 group-hover:scale-110"
-                         loading="lazy">
-                    
-                    <!-- 左上角分类标签 -->
-                    <div class="absolute top-2 left-2 pointer-events-none">
-                        <span class="inline-flex items-center px-1.5 py-0.5 md:px-3 md:py-1 rounded-full text-[10px] md:text-xs font-semibold bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg backdrop-blur-sm">
-                            {{ img.category }}
-                        </span>
-                    </div>
-
-                    <!-- 右上角删除按钮 -->
-                    <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-all duration-200">
-                        <button @click.stop="deleteImage(img)" 
-                                class="bg-white/95 hover:bg-red-50 text-red-500 rounded-full p-1.5 md:p-2 shadow-lg border border-red-100 hover:border-red-300 transition backdrop-blur-sm hover:scale-110" 
-                                title="删除">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-1 1-1h6c1 0 1 1 1 1v2"/>
-                            </svg>
-                        </button>
-                    </div>
-                </div>
-
-                <!-- 底部信息条 -->
-                <div class="p-2 md:p-3 flex-1 flex flex-col justify-between bg-white/80">
-                    <p class="text-[10px] md:text-xs text-gray-700 line-clamp-2 mb-1.5 md:mb-2" :title="img.desc || '无描述'">
-                        {{ img.desc || '（无描述）' }}
-                    </p>
-                    <div class="flex flex-wrap gap-0.5 md:gap-1.5 content-end">
-                        <span v-for="tag in (img.tags || []).slice(0, 2)" :key="tag"
-                              class="text-[9px] md:text-[10px] bg-gradient-to-r from-purple-50 to-pink-50 text-purple-700 border border-purple-200 px-1.5 py-0.5 rounded-full font-medium">
-                            #{{ tag }}
-                        </span>
-                        <span v-if="(img.tags || []).length > 2" class="text-[9px] md:text-[10px] text-gray-400 px-0.5">+{{ (img.tags || []).length - 2 }}</span>
-                    </div>
-                </div>
-            </div>
+        <div v-else class="text-center py-24 text-gray-500 border-2 border-dashed border-[#222] rounded-lg" style="background: var(--bg-main)">
+            <svg class="w-16 h-16 mx-auto mb-4 opacity-30 text-amber-800" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+            <p class="text-xl font-cinzel text-amber-900/50">暂无相关藏品</p>
         </div>
 
         <!-- Pagination -->
-        <div class="mt-8 flex flex-col sm:flex-row justify-center items-center gap-2 md:gap-3 animate-fade-in-up">
-            <button @click="prevPage" :disabled="currentPage === 1" 
-                    class="w-full sm:w-auto px-4 py-2.5 md:px-6 md:py-3 glass border border-white/40 rounded-xl hover:bg-white/60 disabled:opacity-40 disabled:cursor-not-allowed transition shadow-md font-medium text-sm">
-                ← 上一页
+        <div v-if="total > pageSize" class="flex justify-center items-center gap-8 mt-auto py-8 border-t border-white/5">
+            <button @click="prevPage" :disabled="currentPage === 1" class="codex-btn disabled:opacity-30 disabled:cursor-not-allowed">
+                <span class="text-lg mr-1">«</span> 上一页
             </button>
-            <div class="glass px-4 py-2 md:px-6 md:py-3 rounded-xl text-gray-700 font-medium border border-white/40 shadow-md text-sm">
-                <span class="text-purple-600 font-bold">{{ currentPage }}</span> / <span class="text-purple-600 font-bold">{{ Math.ceil(total / pageSize) }}</span>
-            </div>
-            <button @click="nextPage" :disabled="currentPage * pageSize >= total"
-                    class="w-full sm:w-auto px-4 py-2.5 md:px-6 md:py-3 glass border border-white/40 rounded-xl hover:bg-white/60 disabled:opacity-40 disabled:cursor-not-allowed transition shadow-md font-medium text-sm">
-                下一页 →
+            <span class="font-cinzel text-gold text-lg tracking-widest">Page {{ currentPage }} / {{ Math.ceil(total / pageSize) }}</span>
+            <button @click="nextPage" :disabled="currentPage * pageSize >= total" class="codex-btn disabled:opacity-30 disabled:cursor-not-allowed">
+                下一页 <span class="text-lg ml-1">»</span>
             </button>
         </div>
 
         <!-- Preview Modal -->
-        <div v-if="previewOpen" class="fixed inset-0 z-50 animate-fade-in-up" role="dialog" aria-modal="true" aria-labelledby="preview-title">
-            <div class="absolute inset-0 bg-black/90 backdrop-blur-sm" @click="closePreview"></div>
-            <div class="relative z-10 h-full w-full flex items-center justify-center p-2 md:p-4">
-                <div class="bg-white w-full max-w-5xl rounded-2xl md:rounded-3xl shadow-2xl overflow-hidden border-4 border-white/20 max-h-[95vh] flex flex-col md:flex-row">
-                    <!-- Image Section -->
-                    <div class="w-full md:w-auto md:flex-1 bg-gradient-to-br from-gray-50 to-gray-100 relative flex items-center justify-center p-4 md:p-6 min-h-[40vh] md:min-h-auto">
-                        <img v-if="previewItem" :src="previewItem.url" :alt="previewItem.desc"
-                             class="max-w-full max-h-[35vh] md:max-h-[60vh] object-contain rounded-lg shadow-lg" />
-                        <button @click="prevPreview" :disabled="previewIndex <= 0"
-                                class="absolute left-2 top-1/2 -translate-y-1/2 glass hover:bg-white text-gray-800 rounded-full w-10 h-10 md:w-12 md:h-12 flex items-center justify-center shadow-xl disabled:opacity-30 disabled:cursor-not-allowed border-2 border-white/40 hover:scale-110 transition">
-                            <svg class="w-5 h-5 md:w-6 md:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M15 19l-7-7 7-7"/></svg>
-                        </button>
-                        <button @click="nextPreview" :disabled="previewIndex >= images.length - 1"
-                                class="absolute right-2 top-1/2 -translate-y-1/2 glass hover:bg-white text-gray-800 rounded-full w-10 h-10 md:w-12 md:h-12 flex items-center justify-center shadow-xl disabled:opacity-30 disabled:cursor-not-allowed border-2 border-white/40 hover:scale-110 transition">
-                            <svg class="w-5 h-5 md:w-6 md:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M9 5l7 7-7 7"/></svg>
+        <div v-if="previewOpen" class="fixed inset-0 z-50 modal-overlay flex items-center justify-center p-4" @click.self="closePreview">
+            <div class="modal-content w-full max-w-6xl flex flex-col lg:flex-row max-h-[90vh] overflow-hidden">
+                <div class="lg:w-2/3 bg-black/80 flex items-center justify-center relative p-8 border-r border-amber-900/30 group">
+                    <button @click.stop="prevImage" class="nav-btn left-4 opacity-0 group-hover:opacity-100 transition-opacity" v-if="images.length > 1">
+                        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                    </button>
+                    
+                    <img :src="previewItem?.url" class="max-w-full max-h-[80vh] shadow-[0_0_30px_rgba(0,0,0,0.8)] border border-[#333]">
+                    
+                    <button @click.stop="nextImage" class="nav-btn right-4 opacity-0 group-hover:opacity-100 transition-opacity" v-if="images.length > 1">
+                        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                    </button>
+                    
+                    <button @click="closePreview" class="absolute top-6 right-6 text-gray-400 hover:text-gold hover:rotate-90 transition-all duration-300 bg-black/50 p-2 rounded-full border border-transparent hover:border-gold z-10">
+                        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                </div>
+                <div class="lg:w-1/3 flex flex-col" style="background: var(--bg-modal)">
+                    <div class="modal-header flex justify-between items-center">
+                        <h3 class="text-2xl m-0">{{ isEditing ? '编辑藏品' : '藏品详情' }}</h3>
+                        <button v-if="!isEditing" @click="startEdit" class="text-gold hover:text-white transition-colors">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
                         </button>
                     </div>
-
-                    <!-- Meta Section -->
-                    <div class="w-full md:w-96 flex-1 p-4 md:p-5 flex flex-col gap-4 bg-gradient-to-br from-purple-50 to-pink-50 overflow-y-auto">
-                        <div class="flex items-center justify-between gap-2">
-                            <div class="flex items-center gap-2">
-                                <span class="inline-flex px-3 py-1.5 rounded-full bg-gradient-to-r from-purple-600 to-pink-600 text-white text-xs md:text-sm font-bold shadow-lg">
-                                    {{ previewItem?.category || 'unknown' }}
-                                </span>
-                                <span class="text-xs md:text-sm text-gray-500">{{ previewIndex + 1 }} / {{ images.length }}</span>
-                            </div>
-                            <button @click="closePreview" class="glass hover:bg-red-50 text-gray-600 hover:text-red-600 rounded-full w-8 h-8 md:w-10 md:h-10 flex items-center justify-center transition border border-white/40 hover:border-red-200">
-                                <svg class="w-5 h-5 md:w-6 md:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-                            </button>
+                    
+                    <div v-if="!isEditing" class="p-8 space-y-8 flex-grow overflow-y-auto custom-scrollbar">
+                        <div>
+                            <label class="text-xs uppercase text-amber-700 font-bold tracking-[0.2em] block mb-2">分类</label>
+                            <span class="text-2xl text-gold font-serif border-b border-amber-900/30 pb-1 inline-block pr-8">{{ previewItem?.category }}</span>
                         </div>
-
-                        <div class="bg-white/60 backdrop-blur-sm rounded-xl p-3 md:p-4 border border-white/60 flex-1">
-                            <p class="text-xs text-gray-500 uppercase tracking-wide font-medium mb-1.5">描述</p>
-                            <p class="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap break-words">
-                                {{ previewItem?.desc || '（无描述）' }}
+                        <div>
+                            <label class="text-xs uppercase text-amber-700 font-bold tracking-[0.2em] block mb-2">描述</label>
+                            <p class="text-gray-300 leading-relaxed font-serif text-lg italic pl-4 border-l-2 border-amber-900/50">
+                                "{{ previewItem?.desc || '暂无描述' }}"
                             </p>
                         </div>
-
-                        <div class="flex flex-wrap gap-1.5">
-                            <span v-for="tag in (previewItem?.tags || [])" :key="tag"
-                                  class="text-xs bg-gradient-to-r from-purple-100 to-pink-100 text-purple-700 px-2.5 py-1 rounded-full font-medium border border-purple-200">#{{ tag }}</span>
-                            <span v-if="(previewItem?.tags || []).length === 0" class="text-sm text-gray-400">（无标签）</span>
+                        <div>
+                            <label class="text-xs uppercase text-amber-700 font-bold tracking-[0.2em] block mb-2">标签</label>
+                            <div class="flex flex-wrap gap-2">
+                                <span v-for="tag in (previewItem?.tags || [])" :key="tag" class="px-3 py-1 bg-amber-900/20 border border-amber-900/40 text-amber-500 text-sm font-serif">#{{ tag }}</span>
+                            </div>
                         </div>
+                        <div class="text-xs text-gray-600 font-mono mt-4 pt-4 border-t border-white/5">
+                            HASH: <span class="text-gray-500">{{ previewItem?.hash }}</span>
+                        </div>
+                    </div>
 
-                        <div class="flex flex-col gap-2 mt-auto">
-                            <a v-if="previewItem" :href="previewItem.url" target="_blank" rel="noreferrer"
-                               class="w-full text-center px-4 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white rounded-xl font-medium shadow-lg hover:shadow-xl transition text-sm">
-                                📥 下载图片
+                    <div v-else class="p-8 space-y-6 flex-grow overflow-y-auto custom-scrollbar">
+                        <div>
+                            <label class="text-xs uppercase text-amber-700 font-bold tracking-[0.2em] block mb-2">分类</label>
+                            <select v-model="editForm.category" class="codex-input w-full">
+                                <option v-for="cat in categories" :key="cat.key" :value="cat.key">{{ cat.name }}</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-xs uppercase text-amber-700 font-bold tracking-[0.2em] block mb-2">描述</label>
+                            <textarea v-model="editForm.desc" rows="4" class="codex-input w-full resize-none"></textarea>
+                        </div>
+                        <div>
+                            <label class="text-xs uppercase text-amber-700 font-bold tracking-[0.2em] block mb-2">标签 (逗号分隔)</label>
+                            <input v-model="editForm.tags" type="text" class="codex-input w-full" placeholder="e.g. rare, weapon, gold">
+                        </div>
+                    </div>
+
+                    <div class="p-6 border-t border-amber-900/30 flex flex-col gap-3" style="background: var(--bg-main)">
+                        <div v-if="!isEditing" class="flex flex-col gap-3">
+                            <a :href="previewItem?.url" target="_blank" class="codex-btn text-center justify-center w-full">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                                下载原图
                             </a>
-                            <button @click="deleteImage(previewItem)" 
-                                    class="w-full px-4 py-3 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white rounded-xl font-medium shadow-lg hover:shadow-xl transition text-sm">
-                                🗑️ 删除
+                            <button @click="deleteImage(previewItem)" class="codex-btn text-center justify-center w-full text-red-500 border-red-900/30 hover:border-red-500 hover:bg-red-900/10">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                                销毁此物
                             </button>
+                        </div>
+                        <div v-else class="flex gap-3">
+                            <button @click="saveEdit" class="codex-btn primary flex-1 py-2 text-sm justify-center">保存</button>
+                            <button @click="cancelEdit" class="codex-btn flex-1 py-2 text-sm justify-center">取消</button>
                         </div>
                     </div>
                 </div>
@@ -306,500 +470,503 @@
         </div>
 
         <!-- Upload Modal -->
-        <div v-if="uploadOpen" class="fixed inset-0 z-50 animate-fade-in-up" role="dialog" aria-modal="true" aria-labelledby="upload-title">
-            <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" @click="closeUploadModal"></div>
-            <div class="relative z-10 h-full w-full flex items-center justify-center p-3 md:p-4">
-                <div class="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden border-4 border-white/20 max-h-[95vh] overflow-y-auto">
-                    <div class="p-4 md:p-6 bg-gradient-to-r from-green-500 to-emerald-600">
-                        <div class="flex items-center justify-between">
-                            <h2 id="upload-title" class="text-xl md:text-2xl font-bold text-white">添加表情包</h2>
-                            <button @click="closeUploadModal" class="glass hover:bg-white/30 text-white rounded-full w-8 h-8 md:w-10 md:h-10 flex items-center justify-center transition border border-white/40">
-                                <svg class="w-5 h-5 md:w-6 md:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        <div v-if="uploadOpen" class="fixed inset-0 z-50 modal-overlay flex items-center justify-center p-4" @click.self="closeUploadModal">
+            <div class="modal-content w-full max-w-2xl max-h-[90vh] flex flex-col">
+                <div class="modal-header">
+                    <h2 class="text-2xl m-0">添加新藏品</h2>
+                    <button @click="closeUploadModal" class="text-gray-500 hover:text-gold transition-colors"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+                </div>
+                
+                <form @submit.prevent="submitUpload" class="p-8 space-y-6 overflow-y-auto">
+                    <div>
+                        <label class="block text-gold mb-2 font-bold uppercase text-xs tracking-widest">选择图片</label>
+                        <div class="border-2 border-dashed border-amber-900/40 rounded p-8 text-center hover:border-gold transition-all cursor-pointer relative group min-h-[160px] flex items-center justify-center" style="background: var(--bg-main)">
+                            <input type="file" accept="image/*" @change="handleFileSelect" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10">
+                            
+                            <div v-if="uploadPreviewUrl" class="flex items-center gap-6">
+                                <img :src="uploadPreviewUrl" class="h-24 w-24 object-cover border border-gold shadow-lg">
+                                <div class="text-left">
+                                    <p class="text-white font-serif text-lg">{{ uploadFile?.name }}</p>
+                                    <p class="text-sm text-gray-500 font-mono mt-1">{{ (uploadFile?.size / 1024).toFixed(1) }} KB</p>
+                                    <p class="text-xs text-green-500 mt-2 flex items-center gap-1"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> 已就绪</p>
+                                </div>
+                            </div>
+                            <div v-else class="group-hover:text-gold transition-colors text-gray-500 flex flex-col items-center gap-3">
+                                <svg class="w-10 h-10 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                                <p class="text-lg font-serif">点击或拖拽以上传图像</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-6">
+                        <div>
+                            <label class="block text-gold mb-2 font-bold uppercase text-xs tracking-widest">情绪分类 <span class="text-red-500">*</span></label>
+                            <select v-model="uploadForm.emotion" class="codex-input" required>
+                                <option value="" class="text-gray-500">请选择...</option>
+                                <option v-for="emo in availableEmotions" :key="emo.key" :value="emo.key">{{ emo.name || emo.key }}</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-gold mb-2 font-bold uppercase text-xs tracking-widest">标签</label>
+                            <input type="text" v-model="uploadForm.tags" placeholder="例如: 可爱, 搞怪 (逗号分隔)" class="codex-input">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-gold mb-2 font-bold uppercase text-xs tracking-widest">描述</label>
+                        <textarea v-model="uploadForm.desc" rows="3" placeholder="关于此藏品的详细描述..." class="codex-input resize-none"></textarea>
+                    </div>
+
+                    <div v-if="uploadError" class="text-red-400 text-sm bg-red-900/10 p-3 border border-red-900/30 flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                        {{ uploadError }}
+                    </div>
+
+                    <div class="flex gap-4 pt-4 border-t border-white/5">
+                        <button type="button" @click="closeUploadModal" class="codex-btn flex-1 opacity-80 hover:opacity-100">取消</button>
+                        <button type="submit" :disabled="uploading" class="codex-btn primary flex-1">
+                            <span v-if="uploading" class="flex items-center gap-2">
+                                <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                                处理中...
+                            </span>
+                            <span v-else>确认入库</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Category Management Modal -->
+        <div v-if="emotionsOpen" class="fixed inset-0 z-50 modal-overlay flex items-center justify-center p-4" @click.self="closeEmotionsModal">
+            <div class="modal-content w-full max-w-2xl max-h-[85vh] flex flex-col">
+                <div class="modal-header">
+                    <h2 class="text-2xl m-0">分类管理</h2>
+                    <button @click="closeEmotionsModal" class="text-gray-500 hover:text-gold transition-colors"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+                </div>
+                
+                <!-- Add New Category Form -->
+                <div class="p-6 border-b border-amber-900/30" style="background: var(--bg-panel)">
+                    <h3 class="text-gold text-sm font-bold uppercase tracking-widest mb-4">新增分类</h3>
+                    <div class="grid grid-cols-12 gap-4">
+                        <div class="col-span-3">
+                            <input v-model="newEmotion.key" placeholder="Key (e.g. happy)" class="codex-input w-full text-sm font-mono">
+                        </div>
+                        <div class="col-span-3">
+                            <input v-model="newEmotion.name" placeholder="名称 (如: 开心)" class="codex-input w-full text-sm">
+                        </div>
+                        <div class="col-span-4">
+                            <input v-model="newEmotion.desc" placeholder="描述 (可选)" class="codex-input w-full text-sm">
+                        </div>
+                        <div class="col-span-2">
+                            <button @click="addEmotion" :disabled="!newEmotion.key || addingEmotion" class="codex-btn primary w-full justify-center h-full text-sm">
+                                <span v-if="addingEmotion">...</span>
+                                <span v-else>添加</span>
                             </button>
                         </div>
                     </div>
-                    
-                    <form @submit.prevent="submitUpload" class="p-4 md:p-6 space-y-4">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">选择图片</label>
-                            <div class="relative border-2 border-dashed border-purple-200 rounded-xl p-4 md:p-6 text-center hover:border-purple-400 transition bg-purple-50/50" 
-                                 @dragover.prevent @drop.prevent="handleDrop">
-                                <input type="file" accept="image/*" @change="handleFileSelect" required
-                                       class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">
-                                <div v-if="uploadFile" class="flex items-center justify-center gap-3 md:gap-4">
-                                    <img :src="uploadPreviewUrl" class="w-16 h-16 md:w-20 md:h-20 object-contain rounded-lg shadow">
-                                    <div class="text-left">
-                                        <p class="font-medium text-gray-800 text-sm md:text-base">{{ uploadFile.name }}</p>
-                                        <p class="text-xs md:text-sm text-gray-500">{{ (uploadFile.size / 1024).toFixed(1) }} KB</p>
-                                    </div>
-                                </div>
-                                <div v-else class="text-purple-500">
-                                    <svg class="w-10 h-10 md:w-12 md:h-12 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-                                    <p class="font-medium text-sm md:text-base">点击或拖拽上传</p>
-                                    <p class="text-xs text-gray-400 mt-1">支持 PNG、JPG、GIF、WebP</p>
+                </div>
+
+                <div class="p-6 overflow-y-auto flex-grow" style="background: var(--bg-panel)">
+                    <div class="grid gap-3">
+                        <div v-for="cat in availableEmotions" :key="cat.key" class="p-4 border border-[#333] flex flex-col gap-2 hover:border-gold transition-all group relative" style="background: var(--bg-card)">
+                            <div class="flex justify-between items-start">
+                                <div class="flex items-center gap-3">
+                                    <span class="text-xl font-serif text-gray-200 group-hover:text-gold transition-colors">{{ cat.name || cat.key }}</span>
+                                    <span class="text-xs text-muted font-mono uppercase tracking-wider bg-black/40 px-2 py-1 border border-white/5 rounded-sm">{{ cat.key }}</span>
                                 </div>
                             </div>
-                        </div>
-
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">
-                                表情分类
-                                <span class="text-gray-400 font-normal text-xs">(情绪大类)</span>
-                            </label>
-                            <select v-model="uploadForm.emotion"
-                                    class="w-full px-3 py-2.5 md:px-4 md:py-3 border-2 border-purple-100 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent appearance-none bg-white/80 cursor-pointer transition text-sm">
-                                <option value="">选择情绪...</option>
-                                <option v-for="emo in availableEmotions" :key="emo.key" :value="emo.key" :title="emo.desc">
-                                    {{ emo.name }} ({{ emo.key }})
-                                </option>
-                            </select>
-                            <p v-if="uploadForm.emotion" class="text-xs text-gray-500 mt-1">
-                                {{ getEmotionDesc(uploadForm.emotion) }}
+                            <p class="text-sm text-gray-500 italic font-serif border-l-2 border-amber-900/30 pl-3">
+                                {{ cat.desc || '暂无描述' }}
                             </p>
                         </div>
-
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">
-                                语义标签
-                                <span class="text-gray-400 font-normal text-xs">(逗号分隔)</span>
-                            </label>
-                            <input type="text" v-model="uploadForm.tags"
-                                   placeholder="如: 大笑, 熊猫人"
-                                   class="w-full px-3 py-2.5 md:px-4 md:py-3 border-2 border-purple-100 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition text-sm">
+                        <div v-if="availableEmotions.length === 0" class="text-center text-gray-500 py-12 border border-dashed border-white/10">
+                            暂无分类数据
                         </div>
-
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">简单描述</label>
-                            <textarea v-model="uploadForm.desc" rows="2"
-                                      placeholder="描述图片内容"
-                                      class="w-full px-3 py-2.5 md:px-4 md:py-3 border-2 border-purple-100 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition resize-none text-sm"></textarea>
-                        </div>
-
-                        <div v-if="uploadError" class="p-3 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm">
-                            {{ uploadError }}
-                        </div>
-
-                        <div class="flex gap-2 md:gap-3 pt-2">
-                            <button type="button" @click="closeUploadModal"
-                                    class="flex-1 px-4 py-2.5 md:px-5 md:py-3 glass border border-gray-200 rounded-xl text-gray-600 hover:bg-gray-50 transition font-medium text-sm">
-                                取消
-                            </button>
-                            <button type="submit" :disabled="uploading || !uploadFile"
-                                    class="flex-1 px-4 py-2.5 md:px-5 md:py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-xl hover:from-green-600 hover:to-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition shadow-lg font-medium text-sm">
-                                <span v-if="uploading">上传中...</span>
-                                <span v-else>✅ 确认添加</span>
-                            </button>
-                        </div>
-                    </form>
+                    </div>
                 </div>
             </div>
         </div>
 
-        <!-- Emotions Modal -->
-        <div v-if="emotionsOpen" class="fixed inset-0 z-50 animate-fade-in-up" role="dialog" aria-modal="true" aria-labelledby="emotions-title">
-            <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" @click="closeEmotionsModal"></div>
-            <div class="relative z-10 h-full w-full flex items-center justify-center p-3 md:p-4">
-                <div class="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden border-4 border-white/20 max-h-[95vh] overflow-y-auto">
-                    <div class="p-4 md:p-6 bg-gradient-to-r from-blue-500 to-indigo-600">
-                        <div class="flex items-center justify-between">
-                            <h2 id="emotions-title" class="text-xl md:text-2xl font-bold text-white">管理情绪分类</h2>
-                            <button @click="closeEmotionsModal" class="glass hover:bg-white/30 text-white rounded-full w-8 h-8 md:w-10 md:h-10 flex items-center justify-center transition border border-white/40">
-                                <svg class="w-5 h-5 md:w-6 md:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-                            </button>
-                        </div>
-                    </div>
+        <!-- Batch Action Bar -->
+        <div v-if="isBatchMode" class="fixed bottom-8 left-1/2 transform -translate-x-1/2 z-40 bg-black/90 border border-gold px-8 py-4 rounded shadow-[0_0_30px_rgba(0,0,0,0.8)] flex items-center gap-6 animate-slide-up">
+            <span class="text-gold font-cinzel">已选中 {{ selectedImages.size }} 项</span>
+            <div class="h-6 w-px bg-white/20"></div>
+            <button @click="selectAll" class="codex-btn text-sm">全选 / 反选</button>
+            <button @click="openBatchMoveModal" :disabled="selectedImages.size === 0" class="codex-btn text-sm disabled:opacity-50">批量移动</button>
+            <button @click="handleBatchDelete" :disabled="selectedImages.size === 0" class="codex-btn danger text-sm disabled:opacity-50">批量删除</button>
+            <div class="h-6 w-px bg-white/20"></div>
+            <button @click="toggleBatchMode" class="text-gray-400 hover:text-white">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+        </div>
+
+        <!-- Batch Move Modal -->
+        <div v-if="batchMoveOpen" class="fixed inset-0 z-50 modal-overlay flex items-center justify-center p-4" @click.self="closeBatchMoveModal">
+            <div class="modal-content w-full max-w-md">
+                <div class="modal-header">
+                    <h3 class="text-xl m-0">批量移动到...</h3>
+                </div>
+                <div class="p-6">
+                    <label class="text-xs uppercase text-amber-700 font-bold tracking-[0.2em] block mb-2">选择目标分类</label>
+                    <select v-model="batchTargetCategory" class="codex-input w-full mb-6">
+                        <option value="" disabled>请选择...</option>
+                        <option v-for="cat in categories" :key="cat.key" :value="cat.key">{{ cat.name }}</option>
+                    </select>
                     
-                    <div class="p-4 md:p-6">
-                        <p class="text-gray-600 mb-3 text-sm">编辑可用的情绪分类。</p>
-                        
-                        <div class="space-y-2 max-h-60 md:max-h-80 overflow-y-auto mb-4">
-                            <div v-for="(emotion, index) in emotions" :key="emotion.key" 
-                                 class="flex flex-wrap md:flex-nowrap items-center gap-2 p-2 md:p-3 bg-gray-50 rounded-xl border border-gray-200">
-                                <span class="w-6 h-6 md:w-8 md:h-8 bg-gradient-to-br from-purple-400 to-pink-500 rounded-lg flex items-center justify-center text-white text-xs md:text-sm order-1">
-                                    {{ index + 1 }}
-                                </span>
-                                <input type="text" v-model="emotion.key" 
-                                       class="flex-1 px-2 py-1.5 md:px-3 md:py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-xs md:text-sm order-2"
-                                       title="唯一标识符">
-                                <input type="text" v-model="emotion.name" 
-                                       class="flex-1 px-2 py-1.5 md:px-3 md:py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs md:text-sm order-3"
-                                       placeholder="名称">
-                                <input type="text" v-model="emotion.desc" 
-                                       class="w-full md:flex-[2] px-2 py-1.5 md:px-3 md:py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs md:text-sm order-4"
-                                       placeholder="描述">
-                                <button @click="removeEmotion(index)" 
-                                        class="p-1.5 md:p-2 text-red-500 hover:bg-red-50 rounded-lg transition order-5 ml-auto md:ml-0">
-                                    <svg class="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-                                </button>
-                            </div>
-                        </div>
-
-                        <div class="p-3 md:p-4 bg-blue-50 rounded-xl border border-blue-200 mb-4">
-                            <p class="text-xs md:text-sm text-blue-700 mb-2">添加新的情绪分类：</p>
-                            <div class="flex flex-wrap gap-2">
-                                <input type="text" v-model="newEmotionKey" placeholder="key" 
-                                       class="flex-1 min-w-[80px] px-2 py-1.5 md:px-3 md:py-2 border border-blue-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-xs md:text-sm">
-                                <input type="text" v-model="newEmotionName" placeholder="名称" 
-                                       class="flex-1 min-w-[60px] px-2 py-1.5 md:px-3 md:py-2 border border-blue-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs md:text-sm">
-                                <input type="text" v-model="newEmotionDesc" placeholder="描述" 
-                                       class="flex-[2] min-w-[100px] px-2 py-1.5 md:px-3 md:py-2 border border-blue-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs md:text-sm">
-                                <button @click="addEmotion" 
-                                        class="px-3 py-1.5 md:px-4 md:py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition text-xs md:text-sm whitespace-nowrap">
-                                    ➕ 添加
-                                </button>
-                            </div>
-                        </div>
-
-                        <div v-if="emotionsError" class="p-3 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm mb-4">
-                            {{ emotionsError }}
-                        </div>
-
-                        <div class="flex gap-2 md:gap-3 pt-2">
-                            <button type="button" @click="closeEmotionsModal"
-                                    class="flex-1 px-4 py-2.5 md:px-5 md:py-3 glass border border-gray-200 rounded-xl text-gray-600 hover:bg-gray-50 transition font-medium text-sm">
-                                取消
-                            </button>
-                            <button @click="saveEmotions" :disabled="savingEmotions"
-                                    class="flex-1 px-4 py-2.5 md:px-5 md:py-3 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-xl hover:from-blue-600 hover:to-indigo-700 disabled:opacity-50 transition shadow-lg font-medium text-sm">
-                                <span v-if="savingEmotions">保存中...</span>
-                                <span v-else>💾 保存设置</span>
-                            </button>
-                        </div>
+                    <div class="flex gap-3 justify-end">
+                        <button @click="closeBatchMoveModal" class="codex-btn">取消</button>
+                        <button @click="confirmBatchMove" class="codex-btn primary">确认移动</button>
                     </div>
                 </div>
             </div>
         </div>
+
     </div>
 
     <script>
-        const { createApp } = Vue
+        const { createApp, ref, reactive, onMounted } = Vue;
 
         createApp({
-            data() {
-                return {
-                    images: [],
-                    stats: { total_images: 0, categories: {} },
-                    loading: false,
-                    searchQuery: '',
-                    selectedCategory: '',
-                    currentPage: 1,
-                    pageSize: 24,
-                    total: 0,
-                    searchTimeout: null,
+            setup() {
+                const images = ref([]);
+                const categories = ref([]);
+                const stats = reactive({ total: 0, categories: 0, today: 0 });
+                const loading = ref(true);
+                const searchQuery = ref('');
+                const selectedCategory = ref('');
+                const sortBy = ref('newest');
+                const currentPage = ref(1);
+                const pageSize = ref(24);
+                const total = ref(0);
+                
+                const previewOpen = ref(false);
+                const previewItem = ref(null);
+                const isEditing = ref(false);
+                const editForm = reactive({ category: '', tags: '', desc: '' });
+                
+                const isBatchMode = ref(false);
+                const selectedImages = ref(new Set());
+                const batchMoveOpen = ref(false);
+                const batchTargetCategory = ref('');
+                
+                const uploadOpen = ref(false);
+                const uploading = ref(false);
+                const uploadFile = ref(null);
+                const uploadPreviewUrl = ref(null);
+                const uploadError = ref(null);
+                const uploadForm = reactive({ emotion: '', tags: '', desc: '' });
+                const availableEmotions = ref([]);
 
-                    previewOpen: false,
-                    previewItem: null,
-                    previewIndex: -1,
+                const newEmotion = reactive({ key: '', name: '', desc: '' });
+                const addingEmotion = ref(false);
 
-                    uploadOpen: false,
-                    uploading: false,
-                    uploadFile: null,
-                    uploadPreviewUrl: null,
-                    uploadError: null,
-                    uploadForm: {
-                        emotion: '',
-                        tags: '',
-                        desc: ''
-                    },
+                const emotionsOpen = ref(false);
+                
+                const searchTimeout = ref(null);
 
-                    emotionsOpen: false,
-                    emotions: [],
-                    savingEmotions: false,
-                    emotionsError: null,
-                    newEmotionKey: '',
-                    newEmotionName: '',
-                    newEmotionDesc: '',
-                    availableEmotions: []
-                }
-            },
-            mounted() {
-                this.fetchStats();
-                this.fetchImages();
-                this.fetchEmotions();
-
-                // 键盘快捷键（预览更顺手）
-                window.addEventListener('keydown', this.onKeydown);
-            },
-            unmounted() {
-                window.removeEventListener('keydown', this.onKeydown);
-            },
-            methods: {
-                openPreview(img, idx) {
-                    this.previewItem = img;
-                    this.previewIndex = idx;
-                    this.previewOpen = true;
-                },
-                closePreview() {
-                    this.previewOpen = false;
-                    this.previewItem = null;
-                    this.previewIndex = -1;
-                },
-                prevPreview() {
-                    if (this.previewIndex > 0) {
-                        const idx = this.previewIndex - 1;
-                        this.openPreview(this.images[idx], idx);
-                    }
-                },
-                nextPreview() {
-                    if (this.previewIndex < this.images.length - 1) {
-                        const idx = this.previewIndex + 1;
-                        this.openPreview(this.images[idx], idx);
-                    }
-                },
-                onKeydown(e) {
-                    if (!this.previewOpen) return;
-                    if (e.key === 'Escape') {
-                        this.closePreview();
-                    } else if (e.key === 'ArrowLeft') {
-                        this.prevPreview();
-                    } else if (e.key === 'ArrowRight') {
-                        this.nextPreview();
-                    }
-                },
-                async fetchStats() {
+                // Fetch Methods
+                const fetchStats = async () => {
                     try {
                         const res = await fetch('/api/stats');
-                        this.stats = await res.json();
-                    } catch (e) {
-                        console.error(e);
-                    }
-                },
-                async fetchImages(page = this.currentPage) {
-                    this.loading = true;
-                    this.currentPage = page;
+                        const data = await res.json();
+                        Object.assign(stats, data.stats || {});
+                    } catch (e) { console.error(e); }
+                };
+
+                const fetchImages = async (page = 1) => {
+                    loading.value = true;
+                    currentPage.value = page;
                     try {
                         const params = new URLSearchParams({
-                            page: page,
-                            size: this.pageSize,
-                            q: this.searchQuery,
+                            page, size: pageSize.value,
+                            q: searchQuery.value,
+                            category: selectedCategory.value,
+                            sort: sortBy.value
                         });
-                        if (this.selectedCategory) {
-                            params.append('category', this.selectedCategory);
-                        }
-                        
                         const res = await fetch(`/api/images?${params}`);
                         const data = await res.json();
-                        this.images = data.images;
-                        this.total = data.total;
+                        images.value = data.images || [];
+                        total.value = data.total || 0;
+                        categories.value = data.categories || [];
+                    } catch (e) { console.error(e); } 
+                    finally { loading.value = false; }
+                };
 
-                        // 若预览打开，刷新后尽量保持当前预览项
-                        if (this.previewOpen && this.previewItem) {
-                            const idx = this.images.findIndex(x => x.hash === this.previewItem.hash);
-                            if (idx >= 0) {
-                                this.openPreview(this.images[idx], idx);
-                            } else {
-                                this.closePreview();
-                            }
-                        }
-                    } catch (e) {
-                        console.error(e);
-                        alert('加载失败');
-                    } finally {
-                        this.loading = false;
-                    }
-                },
-                debouncedSearch() {
-                    clearTimeout(this.searchTimeout);
-                    this.searchTimeout = setTimeout(() => {
-                        this.fetchImages(1);
-                    }, 500);
-                },
-                async deleteImage(img) {
-                    if (!confirm('确定要删除这张表情包吗？')) return;
-                    
+                const fetchEmotions = async () => {
                     try {
-                        const res = await fetch(`/api/images/${img.hash}`, {
-                            method: 'DELETE'
-                        });
+                        const res = await fetch('/api/emotions');
+                        const data = await res.json();
+                        availableEmotions.value = data.emotions || [];
+                    } catch (e) { console.error(e); }
+                };
+
+                const debouncedSearch = () => {
+                    clearTimeout(searchTimeout.value);
+                    searchTimeout.value = setTimeout(() => fetchImages(1), 400);
+                };
+
+                const deleteImage = async (img) => {
+                    if (!confirm('确定要丢弃这份战利品吗？此操作无法撤销。')) return;
+                    try {
+                        const res = await fetch(`/api/images/${img.hash}`, { method: 'DELETE' });
                         if (res.ok) {
-                            if (this.previewOpen && this.previewItem && this.previewItem.hash === img.hash) {
-                                this.closePreview();
-                            }
-                            this.fetchImages(this.currentPage);
-                            this.fetchStats();
-                        } else {
-                            alert('删除失败');
-                        }
-                    } catch (e) {
-                        console.error(e);
-                        alert('删除出错');
+                            if (previewOpen.value) closePreview();
+                            fetchImages(currentPage.value);
+                            fetchStats();
+                        } else alert('删除失败');
+                    } catch (e) { alert('出错'); }
+                };
+
+                // Pagination
+                const prevPage = () => currentPage.value > 1 && fetchImages(currentPage.value - 1);
+                const nextPage = () => currentPage.value * pageSize.value < total.value && fetchImages(currentPage.value + 1);
+
+                // Modal Control
+                const openPreview = (img) => { previewItem.value = img; previewOpen.value = true; };
+                const closePreview = () => { previewOpen.value = false; previewItem.value = null; };
+
+                // Quick Switch Logic
+                const getCurrentIndex = () => images.value.findIndex(i => i.hash === previewItem.value?.hash);
+                
+                const prevImage = () => {
+                    if (!previewItem.value) return;
+                    const idx = getCurrentIndex();
+                    if (idx > 0) previewItem.value = images.value[idx - 1];
+                };
+                
+                const nextImage = () => {
+                    if (!previewItem.value) return;
+                    const idx = getCurrentIndex();
+                    if (idx < images.value.length - 1) previewItem.value = images.value[idx + 1];
+                };
+
+                const handleKeydown = (e) => {
+                    if (!previewOpen.value) return;
+                    if (e.key === 'ArrowLeft') prevImage();
+                    if (e.key === 'ArrowRight') nextImage();
+                    if (e.key === 'Escape') closePreview();
+                };
+
+                const openUploadModal = () => {
+                    uploadOpen.value = true;
+                    uploadFile.value = null;
+                    uploadPreviewUrl.value = null;
+                    uploadError.value = null;
+                    Object.assign(uploadForm, { emotion: '', tags: '', desc: '' });
+                    fetchEmotions();
+                };
+                const closeUploadModal = () => uploadOpen.value = false;
+
+                const openEmotionsModal = () => {
+                    emotionsOpen.value = true;
+                    fetchEmotions();
+                };
+                const closeEmotionsModal = () => emotionsOpen.value = false;
+
+                // Batch Logic
+                const toggleBatchMode = () => {
+                    isBatchMode.value = !isBatchMode.value;
+                    selectedImages.value.clear();
+                };
+
+                const toggleSelection = (img) => {
+                    if (selectedImages.value.has(img.hash)) {
+                        selectedImages.value.delete(img.hash);
+                    } else {
+                        selectedImages.value.add(img.hash);
                     }
-                },
-                prevPage() {
-                    if (this.currentPage > 1) {
-                        this.fetchImages(this.currentPage - 1);
+                };
+                
+                const selectAll = () => {
+                    if (selectedImages.value.size === images.value.length) {
+                        selectedImages.value.clear();
+                    } else {
+                        images.value.forEach(img => selectedImages.value.add(img.hash));
                     }
-                },
-                nextPage() {
-                    if (this.currentPage * this.pageSize < this.total) {
-                        this.fetchImages(this.currentPage + 1);
-                    }
-                },
-                openUploadModal() {
-                    this.uploadOpen = true;
-                    this.uploadError = null;
-                    this.uploadFile = null;
-                    this.uploadPreviewUrl = null;
-                    this.uploadForm = { emotion: '', tags: '', desc: '' };
-                },
-                closeUploadModal() {
-                    this.uploadOpen = false;
-                    this.uploadFile = null;
-                    this.uploadPreviewUrl = null;
-                    this.uploadError = null;
-                },
-                handleFileSelect(e) {
-                    const file = e.target.files[0];
-                    this.setUploadFile(file);
-                },
-                handleDrop(e) {
-                    const file = e.dataTransfer.files[0];
-                    this.setUploadFile(file);
-                },
-                setUploadFile(file) {
-                    if (!file || !file.type.startsWith('image/')) {
-                        this.uploadError = '请选择图片文件';
-                        return;
-                    }
-                    this.uploadFile = file;
-                    this.uploadError = null;
-                    this.uploadPreviewUrl = URL.createObjectURL(file);
-                },
-                async submitUpload() {
-                    if (!this.uploadFile) return;
-                    
-                    this.uploading = true;
-                    this.uploadError = null;
+                };
+
+                const handleBatchDelete = async () => {
+                    if (selectedImages.value.size === 0) return;
+                    if (!confirm(`确定要删除选中的 ${selectedImages.value.size} 张图片吗？`)) return;
                     
                     try {
-                        const formData = new FormData();
-                        formData.append('file', this.uploadFile);
-                        formData.append('emotion', this.uploadForm.emotion);
-                        formData.append('tags', this.uploadForm.tags);
-                        formData.append('desc', this.uploadForm.desc);
-                        
-                        const res = await fetch('/api/images/upload', {
+                        const res = await fetch('/api/images/batch/delete', {
                             method: 'POST',
-                            body: formData
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ hashes: Array.from(selectedImages.value) })
                         });
-                        
                         const data = await res.json();
-                        
                         if (data.success) {
-                            this.closeUploadModal();
-                            this.fetchImages(1);
-                            this.fetchStats();
-                            this.$nextTick(() => {
-                                this.openPreview({ hash: data.image.hash, url: data.image.url }, 0);
-                            });
+                            selectedImages.value.clear();
+                            fetchImages(currentPage.value);
+                            fetchStats();
+                        } else alert(data.error || '删除失败');
+                    } catch (e) { alert('操作出错: ' + e.message); }
+                };
+
+                const openBatchMoveModal = () => {
+                    if (selectedImages.value.size === 0) return;
+                    batchTargetCategory.value = '';
+                    batchMoveOpen.value = true;
+                    fetchEmotions();
+                };
+                const closeBatchMoveModal = () => batchMoveOpen.value = false;
+
+                const confirmBatchMove = async () => {
+                    if (!batchTargetCategory.value) return;
+                    try {
+                        const res = await fetch('/api/images/batch/move', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ 
+                                hashes: Array.from(selectedImages.value),
+                                category: batchTargetCategory.value
+                            })
+                        });
+                        const data = await res.json();
+                        if (data.success) {
+                            batchMoveOpen.value = false;
+                            selectedImages.value.clear();
+                            isBatchMode.value = false;
+                            fetchImages(currentPage.value);
+                            fetchStats();
+                        } else alert(data.error || '移动失败');
+                    } catch (e) { alert('操作出错: ' + e.message); }
+                };
+
+                // Edit Logic
+                const startEdit = () => {
+                    if (!previewItem.value) return;
+                    Object.assign(editForm, {
+                        category: previewItem.value.category,
+                        tags: previewItem.value.tags.join(', '),
+                        desc: previewItem.value.desc
+                    });
+                    isEditing.value = true;
+                    fetchEmotions(); // ensure categories are loaded
+                };
+
+                const cancelEdit = () => {
+                    isEditing.value = false;
+                };
+
+                const saveEdit = async () => {
+                    if (!previewItem.value) return;
+                    try {
+                        const res = await fetch(`/api/images/${previewItem.value.hash}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(editForm)
+                        });
+                        const data = await res.json();
+                        if (data.success) {
+                            isEditing.value = false;
+                            // Manually update local state to avoid flicker, though list refresh will happen
+                            previewItem.value.category = editForm.category;
+                            previewItem.value.tags = editForm.tags.split(',').map(t => t.trim()).filter(t => t);
+                            previewItem.value.desc = editForm.desc;
+                            
+                            fetchImages(currentPage.value);
+                        } else alert(data.error || '保存失败');
+                    } catch (e) { alert('保存出错: ' + e.message); }
+                };
+
+                const addEmotion = async () => {
+                    if (!newEmotion.key) return;
+                    addingEmotion.value = true;
+                    try {
+                        const newCat = { ...newEmotion };
+                        // Add to current list to send full list
+                        const currentList = [...availableEmotions.value];
+                        // Check if exists
+                        const existingIdx = currentList.findIndex(c => c.key === newCat.key);
+                        if (existingIdx >= 0) {
+                            if (!confirm(`分类 ${newCat.key} 已存在，确定要更新吗？`)) {
+                                addingEmotion.value = false;
+                                return;
+                            }
+                            currentList[existingIdx] = newCat;
                         } else {
-                            this.uploadError = data.error || '上传失败';
+                            currentList.push(newCat);
                         }
-                    } catch (e) {
-                        console.error(e);
-                        this.uploadError = '上传出错，请重试';
-                    } finally {
-                        this.uploading = false;
-                    }
-                },
-                async fetchEmotions() {
-                    try {
-                        const res = await fetch('/api/emotions');
-                        const data = await res.json();
-                        this.availableEmotions = data.emotions || [];
-                    } catch (e) {
-                        console.error(e);
-                    }
-                },
-                getEmotionDesc(key) {
-                    const emotion = this.availableEmotions.find(e => e.key === key);
-                    return emotion ? emotion.desc || '暂无描述' : '';
-                },
-                async openEmotionsModal() {
-                    this.emotionsOpen = true;
-                    this.emotionsError = null;
-                    this.newEmotionKey = '';
-                    this.newEmotionName = '';
-                    try {
-                        const res = await fetch('/api/emotions');
-                        const data = await res.json();
-                        this.emotions = data.emotions || [];
-                    } catch (e) {
-                        console.error(e);
-                        this.emotionsError = '加载失败';
-                    }
-                },
-                closeEmotionsModal() {
-                    this.emotionsOpen = false;
-                    this.emotions = [];
-                    this.emotionsError = null;
-                    this.newEmotionKey = '';
-                    this.newEmotionName = '';
-                    this.newEmotionDesc = '';
-                },
-                addEmotion() {
-                    const key = this.newEmotionKey.trim();
-                    const name = this.newEmotionName.trim();
-                    const desc = this.newEmotionDesc.trim();
-                    
-                    if (!key || !name) {
-                        this.emotionsError = '请填写 key 和名称';
-                        return;
-                    }
-                    
-                    if (this.emotions.some(e => e.key === key)) {
-                        this.emotionsError = 'key 已存在';
-                        return;
-                    }
-                    
-                    this.emotions.push({ key, name, desc });
-                    this.newEmotionKey = '';
-                    this.newEmotionName = '';
-                    this.newEmotionDesc = '';
-                    this.emotionsError = null;
-                },
-                removeEmotion(index) {
-                    this.emotions.splice(index, 1);
-                },
-                async saveEmotions() {
-                    if (this.emotions.length === 0) {
-                        this.emotionsError = '至少保留一个分类';
-                        return;
-                    }
-                    
-                    this.savingEmotions = true;
-                    this.emotionsError = null;
-                    
-                    try {
-                        // 发送完整对象数组，包含 key、name、desc
-                        const categories = this.emotions.map(e => ({
-                            key: e.key,
-                            name: e.name,
-                            desc: e.desc
-                        }));
+
                         const res = await fetch('/api/categories', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ categories })
+                            body: JSON.stringify({ categories: currentList })
                         });
-                        
                         const data = await res.json();
+                        
                         if (data.success) {
-                            this.closeEmotionsModal();
-                            this.fetchImages(1);
-                            this.fetchStats();
+                            fetchEmotions();
+                            // Reset form
+                            newEmotion.key = '';
+                            newEmotion.name = '';
+                            newEmotion.desc = '';
                         } else {
-                            this.emotionsError = data.error || '保存失败';
+                            alert(data.error || '添加失败');
                         }
                     } catch (e) {
-                        console.error(e);
-                        this.emotionsError = '保存出错，请重试';
+                        alert('操作出错: ' + e.message);
                     } finally {
-                        this.savingEmotions = false;
+                        addingEmotion.value = false;
                     }
-                }
+                };
+
+                // Upload Logic
+                const handleFileSelect = (e) => {
+                    const file = e.target.files[0];
+                    if (file && file.type.startsWith('image/')) {
+                        uploadFile.value = file;
+                        uploadPreviewUrl.value = URL.createObjectURL(file);
+                        uploadError.value = null;
+                    }
+                };
+
+                const submitUpload = async () => {
+                    if (!uploadFile.value) return;
+                    uploading.value = true;
+                    try {
+                        const formData = new FormData();
+                        formData.append('file', uploadFile.value);
+                        formData.append('emotion', uploadForm.emotion);
+                        formData.append('tags', uploadForm.tags);
+                        formData.append('desc', uploadForm.desc);
+                        
+                        const res = await fetch('/api/images/upload', { method: 'POST', body: formData });
+                        const data = await res.json();
+                        if (data.success) {
+                            closeUploadModal();
+                            fetchImages(1);
+                            fetchStats();
+                        } else {
+                            uploadError.value = data.error || '上传失败';
+                        }
+                    } catch (e) { uploadError.value = '上传出错'; } 
+                    finally { uploading.value = false; }
+                };
+
+                onMounted(() => {
+                    fetchStats();
+                    fetchImages(1);
+                    fetchEmotions();
+                    window.addEventListener('keydown', handleKeydown);
+                });
+
+                return {
+                    images, categories, stats, loading, searchQuery, selectedCategory, sortBy, currentPage, pageSize, total,
+                    previewOpen, previewItem, openPreview, closePreview, prevImage, nextImage,
+                    uploadOpen, uploading, uploadFile, uploadPreviewUrl, uploadError, uploadForm, availableEmotions,
+                    openUploadModal, closeUploadModal, handleFileSelect, submitUpload, debouncedSearch, deleteImage, prevPage, nextPage,
+                    emotionsOpen, openEmotionsModal, closeEmotionsModal, fetchImages,
+                    newEmotion, addingEmotion, addEmotion,
+                    isEditing, editForm, startEdit, cancelEdit, saveEdit,
+                    isBatchMode, selectedImages, batchMoveOpen, batchTargetCategory,
+                    toggleBatchMode, toggleSelection, selectAll, handleBatchDelete, 
+                    openBatchMoveModal, closeBatchMoveModal, confirmBatchMove
+                };
             }
-        }).mount('#app')
+        }).mount('#app');
     </script>
 </body>
 </html>
