@@ -15,9 +15,15 @@
     "default": true
   },
   "emoji_chance": {
-    "description": "表情包发送概率（0.0-1.0）",
+    "description": "表情包发送概率",
     "type": "float",
-    "default": 0.4
+    "default": 0.4,
+    "slider": {
+      "min": 0.0,
+      "max": 1.0,
+      "step": 0.1
+    },
+    "hint": "调节自动发送表情包的概率，0.0=从不发送，1.0=每次都发送，建议设置在0.2-0.6之间"
   },
   
   "_model_section": {
@@ -46,7 +52,7 @@
     "description": "情绪识别模式",
     "type": "bool",
     "default": true,
-    "hint": "✅ 开启=LLM模式（轻量模型分析语义，不修改LLM回复）\n❌ 关闭=被动标签模式（LLM插入情绪标签，会修改回复内容）"
+    "hint": "✅ 开启=LLM模式（轻量模型分析语义，不修改LLM回复）\n❌ 关闭=被动标签模式（LLM插入情绪标签，会修改回复内容）\n\n⚠️ 重要：切换模式后建议使用 /reset 命令清除AI的对话上下文，避免bot继续输出 &&emotion&& 标签"
   },
   "emotion_analysis_provider_id": {
     "description": "情绪分析专用模型（LLM模式）",
@@ -75,7 +81,13 @@
   "max_reg_num": {
     "description": "最大表情包数量",
     "type": "int",
-    "default": 100
+    "default": 100,
+    "slider": {
+      "min": 10,
+      "max": 2000,
+      "step": 10
+    },
+    "hint": "表情包存储上限，超过后将自动清理旧的表情包"
   },
   "do_replace": {
     "description": "达到上限时替换旧表情包",
@@ -96,9 +108,15 @@
     "labels": ["总是处理", "概率处理（推荐）", "间隔处理"]
   },
   "image_processing_probability": {
-    "description": "概率模式：处理概率（推荐0.3）",
+    "description": "概率模式：处理概率",
     "type": "float",
-    "default": 0.3
+    "default": 0.3,
+    "slider": {
+      "min": 0.0,
+      "max": 1.0,
+      "step": 0.05
+    },
+    "hint": "图片处理概率，推荐设置0.3（30%），用于减少API消耗"
   },
   "image_processing_interval": {
     "description": "间隔模式：处理间隔（秒）",
@@ -141,7 +159,13 @@
   "raw_cleanup_interval": {
     "description": "清理检查周期（分钟）",
     "type": "int",
-    "default": 30
+    "default": 30,
+    "slider": {
+      "min": 5,
+      "max": 1440,
+      "step": 5
+    },
+    "hint": "自动清理原始图片的间隔时间，5-1440分钟"
   },
   "enable_capacity_control": {
     "description": "自动容量控制",
@@ -151,7 +175,13 @@
   "capacity_control_interval": {
     "description": "容量检查周期（分钟）",
     "type": "int",
-    "default": 60
+    "default": 60,
+    "slider": {
+      "min": 10,
+      "max": 1440,
+      "step": 10
+    },
+    "hint": "容量控制检查间隔，10-1440分钟"
   }
 }
 

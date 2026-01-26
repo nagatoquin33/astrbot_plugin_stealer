@@ -36,7 +36,8 @@ class ConfigService:
         self.alias_path = self.base_dir / "aliases.json"
         self._aliases = {}
         
-        # 分类名称配置（key -> {name, description}）
+        # 分类详细信息配置
+        self.category_info_path = self.base_dir / "category_info.json"
         self.category_info = {
             "happy": {"name": "开心", "desc": "快乐、高兴、愉悦的情绪"},
             "sad": {"name": "难过", "desc": "悲伤、沮丧、失落的情绪"},
@@ -96,6 +97,29 @@ class ConfigService:
         
         # 4. 加载别名
         self._load_aliases()
+
+        # 5. 加载分类详细信息
+        self._load_category_info()
+
+    def _load_category_info(self):
+        """加载分类详细信息。"""
+        if not self.category_info_path.exists():
+            return
+        
+        try:
+            with open(self.category_info_path, encoding="utf-8") as f:
+                saved_info = json.load(f)
+                self.category_info.update(saved_info)
+        except Exception as e:
+            logger.error(f"加载分类详细信息失败: {e}")
+
+    def save_category_info(self):
+        """保存分类详细信息。"""
+        try:
+            with open(self.category_info_path, "w", encoding="utf-8") as f:
+                json.dump(self.category_info, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"保存分类详细信息失败: {e}")
 
     def _apply_config(self):
         """将配置字典应用到实例属性。"""

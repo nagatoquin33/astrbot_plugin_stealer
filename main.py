@@ -610,6 +610,8 @@ class Main(Star):
                 index_data = await self._migrate_legacy_data()
                 self._migration_done = True
                 logger.debug(f"[_load_index] migration returned {len(index_data)} items")
+                if index_data:
+                    self.cache_service.set_cache("index_cache", index_data, persist=True)
 
             return index_data
         except OSError as e:

@@ -5,11 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+2.1.7 优化了webui界面，增加了对已收集表情包描述分类的更改功能，调整了界面布局和视觉效果
+
 2.1.6  针对函数工具做了优化和调整，现在可以正常使用发送表情包工具，且llm能知道发了什么
 
 2.1.5 添加了一个后置轻量llm进行语义分析发送表情包的方法，可以有效避免因对消息链的修改造成未知的错误（标签泄露或者影响其他插件），可以使用几b的小模型，一般平台上这种模型是免费开放使用的。这种模式下的缺点是小模型对部分回复的理解会有偏差，以及受网络影响会造成延迟波动。两种模式按需选择使用。
-
-
 
 2.1.4 优化了表情识别，删去了对图片的过滤，因为现在只会抓取表情包，同时优化vlm提示词
 

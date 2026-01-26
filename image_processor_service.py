@@ -1035,6 +1035,12 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
             logger.error(f"计算哈希值失败: {e}")
             return ""
 
+    def invalidate_cache(self, image_hash: str):
+        """失效指定图片的缓存。"""
+        if hasattr(self, "_image_cache") and image_hash in self._image_cache:
+            del self._image_cache[image_hash]
+            logger.debug(f"已失效缓存: {image_hash}")
+
     def cleanup(self):
         """清理资源。"""
         # 清理图片缓存

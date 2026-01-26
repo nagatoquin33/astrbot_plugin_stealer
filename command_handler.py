@@ -56,10 +56,10 @@ class CommandHandler:
 
         if action == "on":
             self.plugin.enable_natural_emotion_analysis = True
-            yield event.plain_result("已启用自然语言情绪分析")
+            yield event.plain_result("✅ 已启用自然语言情绪分析（LLM模式）\n\n💡 提示：如果之前使用被动标签模式，建议使用 /reset 清除AI对话上下文，避免继续输出 &&emotion&& 标签")
         else:
             self.plugin.enable_natural_emotion_analysis = False
-            yield event.plain_result("已禁用自然语言情绪分析")
+            yield event.plain_result("❌ 已禁用自然语言情绪分析（被动标签模式）\n\n💡 提示：LLM现在会在回复开头插入 &&emotion&& 标签，插件会自动清理这些标签")
 
     async def emotion_analysis_stats(self, event: AstrMessageEvent):
         """显示情绪分析统计信息。"""
