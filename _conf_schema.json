@@ -168,9 +168,10 @@
     "hint": "自动清理原始图片的间隔时间，5-1440分钟"
   },
   "enable_capacity_control": {
-    "description": "自动容量控制",
+    "description": "启用后台容量控制任务",
     "type": "bool",
-    "default": true
+    "default": true,
+    "hint": "开启后，后台会定期检查并执行容量控制（删除旧图）和无效索引清理。关闭则不会自动清理。"
   },
   "capacity_control_interval": {
     "description": "容量检查周期（分钟）",

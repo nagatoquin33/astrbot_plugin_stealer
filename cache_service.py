@@ -38,6 +38,7 @@ class CacheService:
             "text_cache": {},  # 文本情绪分类缓存
             "index_cache": {},  # 索引缓存
             "desc_cache": {},  # 描述缓存
+            "blacklist_cache": {}, # 黑名单缓存
         }
 
         # 加载持久化的缓存

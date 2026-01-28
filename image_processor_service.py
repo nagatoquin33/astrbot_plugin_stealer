@@ -484,6 +484,14 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                         await self.plugin._safe_remove_file(file_path)
                     return False, None
 
+            # 检查图片是否在黑名单中
+            blacklist = self.plugin.cache_service.get_cache("blacklist_cache")
+            if blacklist and hash_val in blacklist:
+                logger.debug(f"图片在黑名单中，跳过存储: {hash_val}")
+                if is_temp and os.path.exists(file_path):
+                    await self.plugin._safe_remove_file(file_path)
+                return False, None
+
         # 检查图片是否已存在于缓存中
         if hash_val in self._image_cache:
             cached_result = self._image_cache[hash_val]

@@ -281,6 +281,7 @@ class WebServer:
     async def handle_delete_image(self, request):
         """删除图片"""
         image_hash = request.match_info["hash"]
+        add_to_blacklist = request.query.get("blacklist", "false").lower() == "true"
         
         # 获取缓存的可变副本
         index = self.plugin.cache_service.get_cache("index_cache")
@@ -308,6 +309,13 @@ class WebServer:
                     # 保存更新后的索引
                     self.plugin.cache_service.set_cache("index_cache", index_copy, persist=True)
                 
+                # 3. 添加到黑名单（如果请求）
+                if add_to_blacklist:
+                    # 使用当前时间戳作为值
+                    import time
+                    self.plugin.cache_service.set("blacklist_cache", image_hash, int(time.time()), persist=True)
+                    logger.info(f"Added image {image_hash} to blacklist")
+
                 # 失效缓存
                 if hasattr(self.plugin, "image_processor_service"):
                     self.plugin.image_processor_service.invalidate_cache(image_hash)
