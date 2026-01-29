@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+2.1.9 新增 `/meme 偷` 主动收录窗口（默认30秒，管理员可用），并在WebUI分类管理中加入“删除分类”（删除分类将连同该分类下所有图片一起删除，已加入二次确认提醒）
+
 2.1.8 新增表情包黑名单功能，在WebUI中删除图片时可选择“永不再偷”，永久拉黑该表情包，防止重复收集
 
 2.1.7 优化了webui界面，增加了对已收集表情包描述分类的更改功能，调整了界面布局和视觉效果

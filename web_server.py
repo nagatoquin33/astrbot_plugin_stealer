@@ -1,4 +1,3 @@
-import asyncio
 import hashlib
 import logging
 import os
@@ -41,6 +40,9 @@ class WebServer:
         self.app.router.add_get("/api/config", self.handle_get_config)
         self.app.router.add_get("/api/categories", self.handle_get_categories)
         self.app.router.add_post("/api/categories", self.handle_update_categories)
+        self.app.router.add_delete(
+            "/api/categories/{key}", self.handle_delete_category
+        )
         self.app.router.add_get("/api/emotions", self.handle_get_emotions)
         self.app.router.add_get("/api/health", self.handle_health_check)
 
@@ -214,7 +216,7 @@ class WebServer:
                         in_desc = search_query in item["desc"].lower()
                         if not (in_tags or in_desc):
                             continue
-                    
+
                     # 统计符合搜索条件的分类数量（不受当前选中的分类影响）
                     cat = item["category"]
                     category_counts[cat] = category_counts.get(cat, 0) + 1
@@ -253,7 +255,7 @@ class WebServer:
                         "name": cat_info["name"],
                         "count": count
                     })
-                
+
                 # 处理未在配置中但存在的分类（如 unknown 或旧数据）
                 known_keys = {c["key"] for c in categories_list}
                 for cat_key, count in category_counts.items():
@@ -263,7 +265,7 @@ class WebServer:
                             "name": cat_key, # Fallback name
                             "count": count
                         })
-            
+
             # 按数量倒序排序分类列表
             categories_list.sort(key=lambda x: x["count"], reverse=True)
 
@@ -282,12 +284,12 @@ class WebServer:
         """删除图片"""
         image_hash = request.match_info["hash"]
         add_to_blacklist = request.query.get("blacklist", "false").lower() == "true"
-        
+
         # 获取缓存的可变副本
         index = self.plugin.cache_service.get_cache("index_cache")
         if not index:
             return web.json_response({"error": "Image index not found"}, status=404)
-        
+
         # 创建可变副本用于修改
         index_copy = dict(index)
         target_path = None
@@ -308,7 +310,7 @@ class WebServer:
                     del index_copy[target_path]
                     # 保存更新后的索引
                     self.plugin.cache_service.set_cache("index_cache", index_copy, persist=True)
-                
+
                 # 3. 添加到黑名单（如果请求）
                 if add_to_blacklist:
                     # 使用当前时间戳作为值
@@ -332,7 +334,7 @@ class WebServer:
         try:
             image_hash = request.match_info["hash"]
             data = await request.json()
-            
+
             new_category = data.get("category")
             new_tags = data.get("tags") # list or comma separated string
             new_desc = data.get("desc")
@@ -340,7 +342,7 @@ class WebServer:
             index = self.plugin.cache_service.get_cache("index_cache")
             if not index:
                 return web.json_response({"error": "Index not found"}, status=404)
-            
+
             index_copy = dict(index)
             target_path = None
             meta = None
@@ -350,16 +352,16 @@ class WebServer:
                     target_path = path_str
                     meta = m
                     break
-            
+
             if not target_path or not meta:
                 return web.json_response({"error": "Image not found"}, status=404)
 
             # 更新 Tags 和 Desc
             if new_tags is not None:
                 if isinstance(new_tags, str):
-                    new_tags = [t.strip() for t in new_tags.split(',') if t.strip()]
+                    new_tags = [t.strip() for t in new_tags.split(",") if t.strip()]
                 meta["tags"] = new_tags
-            
+
             if new_desc is not None:
                 meta["desc"] = new_desc
 
@@ -370,12 +372,12 @@ class WebServer:
                     # 创建新目录
                     new_cat_dir = self.data_dir / "categories" / new_category
                     new_cat_dir.mkdir(parents=True, exist_ok=True)
-                    
+
                     new_path = new_cat_dir / old_path.name
-                    
+
                     # 移动文件
                     shutil.move(str(old_path), str(new_path))
-                    
+
                     # 更新索引 Key 和 Path
                     del index_copy[target_path]
                     meta["path"] = str(new_path)
@@ -405,17 +407,17 @@ class WebServer:
             index = self.plugin.cache_service.get_cache("index_cache")
             if not index:
                 return web.json_response({"success": True})
-            
+
             index_copy = dict(index)
             deleted_count = 0
-            
+
             paths_to_delete = []
             hash_set = set(hashes)
-            
+
             for path_str, meta in index_copy.items():
                 if meta.get("hash") in hash_set:
                     paths_to_delete.append(path_str)
-            
+
             for path_str in paths_to_delete:
                 try:
                     if os.path.exists(path_str):
@@ -428,7 +430,7 @@ class WebServer:
 
             if deleted_count > 0:
                 self.plugin.cache_service.set_cache("index_cache", index_copy, persist=True)
-            
+
             return web.json_response({"success": True, "count": deleted_count})
         except Exception as e:
             logger.error(f"Batch delete failed: {e}")
@@ -440,7 +442,7 @@ class WebServer:
             data = await request.json()
             hashes = data.get("hashes", [])
             target_category = data.get("category")
-            
+
             if not hashes or not target_category:
                 return web.json_response({"error": "Missing hashes or category"}, status=400)
 
@@ -450,33 +452,33 @@ class WebServer:
 
             index_copy = dict(index)
             moved_count = 0
-            
+
             target_dir = self.data_dir / "categories" / target_category
             target_dir.mkdir(parents=True, exist_ok=True)
-            
-            items_to_move = [] 
+
+            items_to_move = []
             hash_set = set(hashes)
-            
+
             for path_str, meta in index_copy.items():
                 if meta.get("hash") in hash_set:
                     if meta.get("category") != target_category:
                         items_to_move.append((path_str, meta))
-            
+
             for old_path_str, meta in items_to_move:
                 try:
                     old_path = Path(old_path_str)
                     if not old_path.exists():
                         continue
-                        
+
                     new_path = target_dir / old_path.name
-                    
+
                     shutil.move(str(old_path), str(new_path))
-                    
+
                     del index_copy[old_path_str]
                     meta["path"] = str(new_path)
                     meta["category"] = target_category
                     index_copy[str(new_path)] = meta
-                    
+
                     moved_count += 1
                 except Exception as e:
                     logger.warning(f"Failed to move {old_path_str}: {e}")
@@ -497,19 +499,19 @@ class WebServer:
     async def handle_get_stats(self, request):
         try:
             index = self.plugin.cache_service.get_cache("index_cache") or {}
-            
+
             # 计算今日新增
             today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
             today_count = 0
             for meta in index.values():
                 if meta.get("created_at", 0) >= today_start:
                     today_count += 1
-            
+
             # 获取分类数量（配置的分类总数）
             categories_count = 0
             if hasattr(self.plugin, "config_service"):
                 categories_count = len(self.plugin.config_service.categories)
-            
+
             # 前端期望的数据结构是 { stats: { total, categories, today } }
             return web.json_response({
                 "stats": {
@@ -537,42 +539,42 @@ class WebServer:
     async def handle_upload_image(self, request):
         try:
             data = await request.post()
-            
-            if 'file' not in data:
+
+            if "file" not in data:
                 return web.json_response({"error": "没有上传文件"}, status=400)
-            
-            uploaded_file = data['file']
+
+            uploaded_file = data["file"]
             if not uploaded_file.filename:
                 return web.json_response({"error": "文件名无效"}, status=400)
-            
-            category = data.get('emotion', '').strip()
+
+            category = data.get("emotion", "").strip()
             if not category:
                 return web.json_response({"error": "请选择情绪分类"}, status=400)
-            tags_raw = data.get('tags', '').strip()
-            tags = [t.strip() for t in tags_raw.split(',') if t.strip()] if tags_raw else []
-            desc = data.get('desc', '').strip()
-            
+            tags_raw = data.get("tags", "").strip()
+            tags = [t.strip() for t in tags_raw.split(",") if t.strip()] if tags_raw else []
+            desc = data.get("desc", "").strip()
+
             file_ext = Path(uploaded_file.filename).suffix.lower()
-            allowed_exts = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'}
+            allowed_exts = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
             if file_ext not in allowed_exts:
                 return web.json_response({"error": f"不支持的文件类型，允许: {', '.join(allowed_exts)}"}, status=400)
-            
+
             file_content = uploaded_file.file.read()
             file_hash = hashlib.md5(file_content).hexdigest()
-            
+
             timestamp = int(datetime.now().timestamp())
             unique_filename = f"{timestamp}_{uuid.uuid4().hex[:8]}{file_ext}"
-            
+
             category_dir = Path(self.data_dir) / "categories" / category
             category_dir.mkdir(parents=True, exist_ok=True)
-            
+
             file_path = category_dir / unique_filename
-            
-            with open(file_path, 'wb') as f:
+
+            with open(file_path, "wb") as f:
                 f.write(file_content)
-            
+
             index = dict(self.plugin.cache_service.get_cache("index_cache") or {})
-            
+
             index[str(file_path)] = {
                 "hash": file_hash,
                 "path": str(file_path),
@@ -581,12 +583,12 @@ class WebServer:
                 "desc": desc,
                 "created_at": timestamp
             }
-            
+
             self.plugin.cache_service.set_cache("index_cache", index, persist=True)
-            
+
             rel_path = file_path.relative_to(self.data_dir)
             url = f"/images/{rel_path.as_posix()}"
-            
+
             return web.json_response({
                 "success": True,
                 "image": {
@@ -598,7 +600,7 @@ class WebServer:
                     "created_at": timestamp
                 }
             })
-            
+
         except Exception as e:
             logger.error(f"上传图片失败: {e}", exc_info=True)
             return web.json_response({"error": str(e)}, status=500)
@@ -627,7 +629,7 @@ class WebServer:
             # 拆分数据：提取 key 列表和 category_info
             category_keys = []
             category_info = {}
-            
+
             for item in new_categories_data:
                 if isinstance(item, dict) and item.get("key"):
                     key = item["key"]
@@ -642,30 +644,113 @@ class WebServer:
                     # 兼容旧格式（直接发送字符串）
                     category_keys.append(item)
 
-            # 保存到 config_service
-            self.plugin.config_service.categories = category_keys
-            
-            # 更新 category_info
-            if hasattr(self.plugin.config_service, "category_info"):
-                self.plugin.config_service.category_info.update(category_info)
-                # 保存到文件
-                if hasattr(self.plugin.config_service, "save_category_info"):
-                    self.plugin.config_service.save_category_info()
+            if hasattr(self.plugin, "_update_config_from_dict"):
+                self.plugin._update_config_from_dict({"categories": category_keys})
+            else:
+                self.plugin.config_service.update_config_from_dict({"categories": category_keys})
+                if hasattr(self.plugin, "categories"):
+                    self.plugin.categories = category_keys
 
-            if hasattr(self.plugin, "image_processor_service"):
-                self.plugin.image_processor_service.categories = category_keys
-
-            if hasattr(self.plugin, "categories"):
-                self.plugin.categories = category_keys
-
-            if hasattr(self.plugin, "emotion_analyzer_service"):
-                self.plugin.emotion_analyzer_service.update_config(categories=category_keys)
-
-            asyncio.create_task(self.plugin._reload_personas(force=True))
+            self.plugin.config_service.category_info.update(category_info)
+            self.plugin.config_service.save_category_info()
 
             return web.json_response({"success": True, "categories": category_keys})
         except Exception as e:
             logger.error(f"更新分类列表失败: {e}", exc_info=True)
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def handle_delete_category(self, request):
+        try:
+            category_key = (request.match_info.get("key") or "").strip()
+            if not category_key:
+                return web.json_response({"error": "分类Key无效"}, status=400)
+
+            if not hasattr(self.plugin, "config_service") or not self.plugin.config_service:
+                return web.json_response({"error": "配置服务不可用"}, status=500)
+
+            current_categories = list(self.plugin.config_service.categories or [])
+            if category_key not in current_categories:
+                return web.json_response({"error": "分类不存在"}, status=404)
+
+            if len(current_categories) <= 1:
+                return web.json_response({"error": "至少需要保留1个分类"}, status=400)
+
+            updated_categories = [c for c in current_categories if c != category_key]
+
+            index = self.plugin.cache_service.get_cache("index_cache") or {}
+            index_copy = dict(index)
+
+            deleted_missing_count = 0
+            deleted_file_count = 0
+
+            for path_str, meta in list(index_copy.items()):
+                if not isinstance(meta, dict):
+                    continue
+                if meta.get("category") != category_key:
+                    continue
+
+                old_path = Path(path_str)
+                if not old_path.exists():
+                    del index_copy[path_str]
+                    deleted_missing_count += 1
+                    continue
+
+                try:
+                    old_path.unlink()
+                    deleted_file_count += 1
+
+                    if "hash" in meta and hasattr(self.plugin, "image_processor_service"):
+                        try:
+                            self.plugin.image_processor_service.invalidate_cache(meta["hash"])
+                        except Exception:
+                            pass
+
+                    del index_copy[path_str]
+                except Exception as e:
+                    logger.warning(f"删除分类文件失败: {old_path}, 错误: {e}")
+
+            if index_copy != index:
+                self.plugin.cache_service.set_cache("index_cache", index_copy, persist=True)
+
+            if self.data_dir:
+                category_dir = Path(self.data_dir) / "categories" / category_key
+                try:
+                    base_categories_dir = (Path(self.data_dir) / "categories").resolve()
+                    category_dir = (base_categories_dir / category_key).resolve()
+
+                    if category_dir.parent == base_categories_dir and category_dir.exists() and category_dir.is_dir():
+                        try:
+                            orphan_files = [p for p in category_dir.rglob("*") if p.is_file()]
+                            deleted_file_count += len(orphan_files)
+                        except Exception:
+                            pass
+
+                        shutil.rmtree(category_dir, ignore_errors=True)
+                except Exception as e:
+                    logger.warning(f"删除空分类目录失败: {category_dir}, 错误: {e}")
+
+            if category_key in getattr(self.plugin.config_service, "category_info", {}):
+                del self.plugin.config_service.category_info[category_key]
+                self.plugin.config_service.save_category_info()
+
+            if hasattr(self.plugin, "_update_config_from_dict"):
+                self.plugin._update_config_from_dict({"categories": updated_categories})
+            else:
+                self.plugin.config_service.update_config_from_dict({"categories": updated_categories})
+                if hasattr(self.plugin, "categories"):
+                    self.plugin.categories = updated_categories
+
+            return web.json_response(
+                {
+                    "success": True,
+                    "deleted": category_key,
+                    "categories": updated_categories,
+                    "deleted_files": deleted_file_count,
+                    "pruned_missing": deleted_missing_count,
+                }
+            )
+        except Exception as e:
+            logger.error(f"删除分类失败: {e}", exc_info=True)
             return web.json_response({"error": str(e)}, status=500)
 
     async def handle_get_emotions(self, request):

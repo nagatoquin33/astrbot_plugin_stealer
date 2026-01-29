@@ -578,6 +578,14 @@
                                     <span class="text-xl font-serif text-gray-200 group-hover:text-gold transition-colors">{{ cat.name || cat.key }}</span>
                                     <span class="text-xs text-muted font-mono uppercase tracking-wider bg-black/40 px-2 py-1 border border-white/5 rounded-sm">{{ cat.key }}</span>
                                 </div>
+                                <button
+                                    @click="deleteEmotion(cat)"
+                                    :disabled="deletingEmotionKey === cat.key"
+                                    class="codex-btn danger text-xs px-3 py-1 disabled:opacity-60"
+                                >
+                                    <span v-if="deletingEmotionKey === cat.key">...</span>
+                                    <span v-else>删除</span>
+                                </button>
                             </div>
                             <p class="text-sm text-gray-500 italic font-serif border-l-2 border-amber-900/30 pl-3">
                                 {{ cat.desc || '暂无描述' }}
@@ -663,6 +671,7 @@
 
                 const newEmotion = reactive({ key: '', name: '', desc: '' });
                 const addingEmotion = ref(false);
+                const deletingEmotionKey = ref('');
 
                 const emotionsOpen = ref(false);
                 
@@ -921,6 +930,30 @@
                     }
                 };
 
+                const deleteEmotion = async (cat) => {
+                    if (!cat?.key) return;
+                    if (!confirm(`确定要删除分类 ${cat.key} 吗？该分类下的图片会被直接删除且无法恢复。`)) return;
+                    deletingEmotionKey.value = cat.key;
+                    try {
+                        const res = await fetch(`/api/categories/${encodeURIComponent(cat.key)}`, { method: 'DELETE' });
+                        const data = await res.json().catch(() => ({}));
+                        if (res.ok && data.success) {
+                            if (selectedCategory.value === cat.key) selectedCategory.value = '';
+                            if (editForm.category === cat.key) editForm.category = '';
+                            if (previewItem.value && previewItem.value.category === cat.key) previewItem.value.category = 'unknown';
+                            fetchEmotions();
+                            fetchImages(currentPage.value);
+                            fetchStats();
+                        } else {
+                            alert(data.error || '删除失败');
+                        }
+                    } catch (e) {
+                        alert('操作出错: ' + e.message);
+                    } finally {
+                        deletingEmotionKey.value = '';
+                    }
+                };
+
                 // Upload Logic
                 const handleFileSelect = (e) => {
                     const file = e.target.files[0];
@@ -967,7 +1000,7 @@
                     uploadOpen, uploading, uploadFile, uploadPreviewUrl, uploadError, uploadForm, availableEmotions,
                     openUploadModal, closeUploadModal, handleFileSelect, submitUpload, debouncedSearch, deleteImage, prevPage, nextPage,
                     emotionsOpen, openEmotionsModal, closeEmotionsModal, fetchImages,
-                    newEmotion, addingEmotion, addEmotion,
+                    newEmotion, addingEmotion, addEmotion, deletingEmotionKey, deleteEmotion,
                     isEditing, editForm, startEdit, cancelEdit, saveEdit,
                     isBatchMode, selectedImages, batchMoveOpen, batchTargetCategory,
                     toggleBatchMode, toggleSelection, selectAll, handleBatchDelete, 

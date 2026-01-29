@@ -1,5 +1,4 @@
 import asyncio
-import copy
 import inspect
 import json
 import math
@@ -12,14 +11,15 @@ from pathlib import Path
 from typing import Any
 
 from astrbot.api import AstrBotConfig, logger
-from astrbot.api.event import AstrMessageEvent, filter, MessageChain
+from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.event.filter import (
     EventMessageType,
     PermissionType,
     PlatformAdapterType,
 )
-from astrbot.api.message_components import Plain, Image as ImageComponent
-from astrbot.api.star import Context, Star, StarTools
+from astrbot.api.message_components import Image as ImageComponent
+from astrbot.api.message_components import Plain
+from astrbot.api.star import Context, Star
 from astrbot.core.file_token_service import FileTokenService
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
@@ -43,7 +43,7 @@ except ImportError:
 
 # ================= Monkey Patch Start =================
 # 修复 AstrBot Token 一次性销毁导致部分客户端无法预览/下载图片的问题
-# 
+#
 # 问题背景：
 # 部分客户端（QQ/NapCat、Lagrange）在下载图片前会先发送 HEAD 请求探测文件，
 # 导致 Token 被提前消费，后续 GET 请求失败返回 404。
@@ -64,7 +64,7 @@ async def patched_register_file(self, file_path: str, timeout: float | None = No
     """重写注册方法，为插件的 Token 添加标记"""
     # 调用原始注册方法
     file_token = await _original_register_file(self, file_path, timeout)
-    
+
     # 检查调用栈，判断是否来自本插件
     frame = inspect.currentframe()
     try:
@@ -87,7 +87,7 @@ async def patched_register_file(self, file_path: str, timeout: float | None = No
             caller_frame = caller_frame.f_back
     finally:
         del frame
-    
+
     return file_token
 
 async def patched_handle_file(self, file_token: str) -> str:
@@ -105,7 +105,7 @@ async def patched_handle_file(self, file_token: str) -> str:
         else:
             # 其他 Token：保持原有的一次性行为
             file_path, _ = self.staged_files.pop(file_token)
-        
+
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"文件不存在: {file_path}")
         return file_path
@@ -147,28 +147,6 @@ class Main(Star):
     # 从外部文件加载的提示词（已迁移到ImageProcessorService）
 
     # 缓存相关常量和方法已迁移到CacheService类
-
-    # 情绪分类列表（英文标签）
-    # 注意: 实际使用的分类列表由 ImageProcessorService.VALID_CATEGORIES 定义
-    CATEGORIES = [
-        "happy",       # 开心
-        "sad",         # 难过
-        "angry",       # 生气
-        "cry",         # 大哭
-        "shy",         # 害羞
-        "surprised",   # 惊讶
-        "love",        # 喜爱
-        "fear",        # 害怕
-        "tired",       # 疲惫
-        "disgust",     # 厌恶
-        "excitement",  # 兴奋
-        "embarrassed", # 尴尬
-        "sigh",        # 叹气
-        "thank",       # 感谢
-        "confused",    # 困惑
-        "dumb",        # 无语/呆
-        "troll",       # 发癫/搞怪
-    ]
 
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
         super().__init__(context)
@@ -231,6 +209,7 @@ class Main(Star):
         self.backend_tag: str = self.BACKEND_TAG
         self._scanner_task: asyncio.Task | None = None
         self._migration_done: bool = False  # 迁移只执行一次
+        self._force_capture_windows: dict[str, dict[str, object]] = {}
 
         # 验证配置
         self._validate_config()
@@ -265,6 +244,15 @@ class Main(Star):
         self.raw_retention_minutes = self.config_service.raw_retention_minutes
         self.categories = self.config_service.categories
 
+        # 同步模型相关配置
+        self.vision_provider_id = self._load_vision_provider_id()
+        self.enable_natural_emotion_analysis = (
+            self.config_service.enable_natural_emotion_analysis
+        )
+        self.emotion_analysis_provider_id = (
+            self.config_service.emotion_analysis_provider_id
+        )
+
         # 同步图片处理节流配置
         self.image_processing_mode = self.config_service.image_processing_mode
         self.image_processing_probability = (
@@ -278,9 +266,56 @@ class Main(Star):
         self.webui_host = self.config_service.webui_host
         self.webui_port = self.config_service.webui_port
 
+    def _auto_merge_existing_categories(self) -> None:
+        current = list(getattr(self.config_service, "categories", []) or [])
+        current_set = set(current)
+
+        discovered: set[str] = set()
+
+        try:
+            if self.categories_dir.exists():
+                for child in self.categories_dir.iterdir():
+                    if not child.is_dir():
+                        continue
+                    key = child.name.strip()
+                    if not key or key == "unknown":
+                        continue
+                    try:
+                        if any(p.is_file() for p in child.iterdir()):
+                            discovered.add(key)
+                    except OSError:
+                        discovered.add(key)
+        except Exception:
+            pass
+
+        try:
+            index = self.cache_service.get_cache("index_cache") or {}
+            for meta in index.values():
+                if not isinstance(meta, dict):
+                    continue
+                cat = str(meta.get("category", "")).strip()
+                if not cat or cat == "unknown":
+                    continue
+                discovered.add(cat)
+        except Exception:
+            pass
+
+        to_add = sorted(discovered - current_set)
+        if not to_add:
+            return
+
+        merged_categories = current + to_add
+        self._update_config_from_dict({"categories": merged_categories})
+
+        for category in to_add:
+            try:
+                (self.categories_dir / category).mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
+
         # 同步视觉模型配置
         self.vision_provider_id = self._load_vision_provider_id()
-        
+
         # 同步自然语言情绪分析配置（新增）
         self.enable_natural_emotion_analysis = self.config_service.enable_natural_emotion_analysis
         self.emotion_analysis_provider_id = self.config_service.emotion_analysis_provider_id
@@ -334,6 +369,72 @@ class Main(Star):
 
         return True  # 即使有问题也返回True，因为已经修复
 
+    def _get_force_capture_key(self, event: AstrMessageEvent) -> str:
+        if hasattr(event, "get_session_id"):
+            try:
+                session_id = event.get_session_id()
+                if session_id:
+                    return str(session_id)
+            except Exception:
+                pass
+
+        if hasattr(event, "unified_msg_origin"):
+            try:
+                return str(event.unified_msg_origin)
+            except Exception:
+                pass
+
+        return "global"
+
+    def _get_force_capture_sender_id(self, event: AstrMessageEvent) -> str | None:
+        for attr in ("sender_id", "user_id"):
+            value = getattr(event, attr, None)
+            if value:
+                return str(value)
+
+        message_obj = getattr(event, "message_obj", None)
+        if message_obj is not None:
+            for attr in ("sender_id", "user_id"):
+                value = getattr(message_obj, attr, None)
+                if value:
+                    return str(value)
+
+        return None
+
+    def begin_force_capture(self, event: AstrMessageEvent, seconds: int) -> None:
+        key = self._get_force_capture_key(event)
+        sender_id = self._get_force_capture_sender_id(event)
+        until = time.time() + max(1, int(seconds))
+        self._force_capture_windows[key] = {"until": until, "sender_id": sender_id}
+
+    def get_force_capture_entry(self, event: AstrMessageEvent) -> dict[str, object] | None:
+        key = self._get_force_capture_key(event)
+        entry = self._force_capture_windows.get(key)
+        if not entry:
+            return None
+
+        try:
+            until = float(entry.get("until", 0))
+        except Exception:
+            self._force_capture_windows.pop(key, None)
+            return None
+
+        if time.time() > until:
+            self._force_capture_windows.pop(key, None)
+            return None
+
+        expected_sender_id = entry.get("sender_id")
+        if expected_sender_id:
+            current_sender_id = self._get_force_capture_sender_id(event)
+            if current_sender_id and str(current_sender_id) != str(expected_sender_id):
+                return None
+
+        return entry
+
+    def consume_force_capture(self, event: AstrMessageEvent) -> None:
+        key = self._get_force_capture_key(event)
+        self._force_capture_windows.pop(key, None)
+
     def _update_config_from_dict(self, config_dict: dict):
         """从配置字典更新插件配置。"""
         if not config_dict:
@@ -347,10 +448,85 @@ class Main(Star):
                 old_webui_host = getattr(self, "webui_host", "0.0.0.0")
                 old_webui_port = getattr(self, "webui_port", 8899)
 
+                old_enable_raw_cleanup = getattr(self, "enable_raw_cleanup", True)
+                old_raw_cleanup_interval = getattr(self, "raw_cleanup_interval", 30)
+                old_enable_capacity_control = getattr(
+                    self, "enable_capacity_control", True
+                )
+                old_capacity_control_interval = getattr(
+                    self, "capacity_control_interval", 60
+                )
+
                 self.config_service.update_config_from_dict(config_dict)
 
                 # 统一同步所有配置
                 self._sync_all_config()
+
+                try:
+                    old_raw_cleanup_interval_i = int(old_raw_cleanup_interval)
+                except Exception:
+                    old_raw_cleanup_interval_i = int(getattr(self, "raw_cleanup_interval", 30))
+
+                try:
+                    old_capacity_control_interval_i = int(old_capacity_control_interval)
+                except Exception:
+                    old_capacity_control_interval_i = int(getattr(self, "capacity_control_interval", 60))
+
+                background_task_toggle_changed = (
+                    old_enable_raw_cleanup != self.enable_raw_cleanup
+                    or old_enable_capacity_control != self.enable_capacity_control
+                )
+                background_task_interval_changed = (
+                    old_raw_cleanup_interval_i != int(self.raw_cleanup_interval)
+                    or old_capacity_control_interval_i != int(self.capacity_control_interval)
+                )
+                if background_task_toggle_changed or background_task_interval_changed:
+                    async def reconcile_background_tasks():
+                        if not getattr(self, "task_scheduler", None):
+                            return
+
+                        raw_running = self.task_scheduler.is_task_running(
+                            "raw_cleanup_loop"
+                        )
+                        if not self.enable_raw_cleanup:
+                            if raw_running:
+                                await self.task_scheduler.cancel_task("raw_cleanup_loop")
+                        else:
+                            if (
+                                raw_running
+                                and old_raw_cleanup_interval_i != int(self.raw_cleanup_interval)
+                            ):
+                                await self.task_scheduler.cancel_task("raw_cleanup_loop")
+                                raw_running = False
+                            if not raw_running:
+                                self.task_scheduler.create_task(
+                                    "raw_cleanup_loop", self._raw_cleanup_loop()
+                                )
+
+                        capacity_running = self.task_scheduler.is_task_running(
+                            "capacity_control_loop"
+                        )
+                        if not self.enable_capacity_control:
+                            if capacity_running:
+                                await self.task_scheduler.cancel_task(
+                                    "capacity_control_loop"
+                                )
+                        else:
+                            if (
+                                capacity_running
+                                and old_capacity_control_interval_i
+                                != int(self.capacity_control_interval)
+                            ):
+                                await self.task_scheduler.cancel_task(
+                                    "capacity_control_loop"
+                                )
+                                capacity_running = False
+                            if not capacity_running:
+                                self.task_scheduler.create_task(
+                                    "capacity_control_loop", self._capacity_control_loop()
+                                )
+
+                    asyncio.create_task(reconcile_background_tasks())
 
                 # 检查 WebUI 配置是否变化并重启
                 # 注意：on_config_update 可能是同步调用，重启操作涉及IO，使用 create_task 异步执行
@@ -419,6 +595,11 @@ class Main(Star):
             self.raw_dir.mkdir(parents=True, exist_ok=True)
             self.categories_dir.mkdir(parents=True, exist_ok=True)
             self.cache_dir.mkdir(parents=True, exist_ok=True)
+
+            try:
+                self._auto_merge_existing_categories()
+            except Exception:
+                pass
 
             # 加载提示词文件
             try:
@@ -598,15 +779,15 @@ class Main(Star):
         """
         try:
             cache_data = self.cache_service.get_cache("index_cache")
-            
+
             logger.debug(f"[_load_index] raw cache type: {type(cache_data)}, keys: {list(cache_data.keys())[:5] if cache_data else 'empty'}")
-            
+
             index_data = dict(cache_data) if cache_data else {}
 
             logger.debug(f"[_load_index] converted to dict, {len(index_data)} items")
 
             if not index_data and not self._migration_done:
-                logger.debug(f"[_load_index] cache empty, attempting migration...")
+                logger.debug("[_load_index] cache empty, attempting migration...")
                 index_data = await self._migrate_legacy_data()
                 self._migration_done = True
                 logger.debug(f"[_load_index] migration returned {len(index_data)} items")
@@ -673,7 +854,10 @@ class Main(Star):
 
             # --- 智能合并逻辑 ---
             # 加载当前索引
-            current_index = await self._load_index()
+            try:
+                current_index = dict(self.cache_service.get_cache("index_cache") or {})
+            except Exception:
+                current_index = {}
 
             # 建立当前索引的哈希映射
             current_hash_map = {}
@@ -977,10 +1161,10 @@ class Main(Star):
     async def on_message(self, event: AstrMessageEvent):
         """消息监听：偷取消息中的图片并分类存储。"""
         # 防护检查：确保 event_handler 已初始化且可用
-        if not hasattr(self, 'event_handler') or self.event_handler is None:
+        if not hasattr(self, "event_handler") or self.event_handler is None:
             logger.debug("[Stealer] event_handler 未初始化，跳过消息处理")
             return
-            
+
         try:
             # 委托给 EventHandler 类处理
             await self.event_handler.on_message(event)
@@ -993,7 +1177,7 @@ class Main(Star):
         try:
             if self.steal_emoji and self.enable_raw_cleanup:
                 logger.info("启动时执行初始raw目录清理")
-                if hasattr(self, 'event_handler') and self.event_handler:
+                if hasattr(self, "event_handler") and self.event_handler:
                     await self.event_handler._clean_raw_directory()
                     logger.info("初始raw目录清理完成")
                 else:
@@ -1009,7 +1193,7 @@ class Main(Star):
                 # 只有当偷图功能开启且清理功能启用时才执行
                 if self.steal_emoji and self.enable_raw_cleanup:
                     logger.info("开始执行raw目录清理任务")
-                    if hasattr(self, 'event_handler') and self.event_handler:
+                    if hasattr(self, "event_handler") and self.event_handler:
                         await self.event_handler._clean_raw_directory()
                         logger.info("raw目录清理任务完成")
                     else:
@@ -1032,41 +1216,41 @@ class Main(Star):
                 if self.steal_emoji and self.enable_capacity_control:
                     logger.info("开始执行容量控制任务")
                     image_index = await self._load_index()
-                    
+
                     logger.info(f"当前索引条目数: {len(image_index)}")
-                    
+
                     removed_invalid = 0
                     valid_paths = []
-                    
+
                     for path, info in list(image_index.items()):
                         if not isinstance(info, dict):
                             logger.debug(f"跳过无效索引条目（非字典）: {path}")
                             del image_index[path]
                             continue
-                            
+
                         actual_path = info.get("path", path)
                         path_exists = os.path.exists(actual_path)
-                        
+
                         if not path_exists:
                             logger.debug(f"文件不存在，将删除索引: {actual_path}")
                             del image_index[path]
                             removed_invalid += 1
                         else:
                             valid_paths.append(path)
-                    
+
                     if removed_invalid > 0:
                         logger.info(f"已清理 {removed_invalid} 个无效索引条目")
-                    
+
                     logger.info(f"清理后索引条目数: {len(image_index)}，有效文件: {len(valid_paths)}")
-                    
-                    if hasattr(self, 'event_handler') and self.event_handler:
+
+                    if hasattr(self, "event_handler") and self.event_handler:
                         await self.event_handler._enforce_capacity(image_index)
                     else:
                         logger.warning("event_handler 未初始化，跳过容量控制")
-                    
+
                     if self.cache_service:
                         self.cache_service.set_cache("index_cache", image_index, persist=True)
-                    
+
                     logger.info("容量控制任务完成")
 
             except asyncio.CancelledError:
@@ -1080,7 +1264,7 @@ class Main(Star):
     async def _clean_raw_directory(self):
         """按时间定时清理raw目录中的原始图片"""
         # 委托给 EventHandler 类处理
-        if hasattr(self, 'event_handler') and self.event_handler:
+        if hasattr(self, "event_handler") and self.event_handler:
             await self.event_handler._clean_raw_directory()
         else:
             logger.warning("event_handler 未初始化，无法执行raw目录清理")
@@ -1088,7 +1272,7 @@ class Main(Star):
     async def _enforce_capacity(self, idx: dict):
         """执行容量控制，删除最旧的图片。"""
         # 委托给 EventHandler 类处理
-        if hasattr(self, 'event_handler') and self.event_handler:
+        if hasattr(self, "event_handler") and self.event_handler:
             await self.event_handler._enforce_capacity(idx)
         else:
             logger.warning("event_handler 未初始化，无法执行容量控制")
@@ -1096,7 +1280,7 @@ class Main(Star):
     @filter.on_llm_request()
     async def _inject_emotion_instruction(self, event: AstrMessageEvent, request):
         """在 LLM 请求时动态注入情绪选择指令。
-        
+
         模式切换逻辑：
     - LLM模式（enable_natural_emotion_analysis=True）：不注入提示词，由轻量模型分析
     - 被动标签模式（enable_natural_emotion_analysis=False）：注入提示词，LLM插入标签
@@ -1106,23 +1290,23 @@ class Main(Star):
             if not self.auto_send:
                 logger.debug("[Stealer] 自动发送已禁用，跳过情绪注入")
                 return
-            
+
             # LLM模式：启用自然语言分析时，不注入提示词
-            if getattr(self, 'enable_natural_emotion_analysis', True):
+            if getattr(self, "enable_natural_emotion_analysis", True):
                 logger.debug("[Stealer] LLM模式已启用，跳过提示词注入，将使用轻量模型分析")
                 return
-            
+
             # 被动标签模式：注入提示词让LLM插入标签
             logger.debug("[Stealer] 被动标签模式：注入提示词让LLM插入情绪标签")
-            
+
             # 检查分类列表是否为空
             if not self.categories:
                 logger.debug("[Stealer] 分类列表为空，跳过情绪注入")
                 return
-            
+
             # 构建情绪分类字符串
             categories_str = ", ".join(self.categories)
-            
+
             # 生成情绪选择指令
             emotion_instruction = f"""
 {self._persona_marker}
@@ -1139,31 +1323,31 @@ class Main(Star):
 4. 不要使用 Markdown 代码块或括号，**仅使用 && 符号**。
 {self._persona_marker}
 """
-            
+
             # 将指令添加到系统提示词
-            if hasattr(request, 'system_prompt'):
+            if hasattr(request, "system_prompt"):
                 request.system_prompt = (request.system_prompt or "") + emotion_instruction
                 logger.info(f"[Stealer] 被动标签模式：已注入情绪选择指令 (categories: {len(self.categories)})")
             else:
                 logger.warning("[Stealer] LLM 请求对象没有 system_prompt 属性")
-                
+
         except Exception as e:
             logger.error(f"[Stealer] 注入情绪选择指令失败: {e}", exc_info=True)
 
     @filter.on_decorating_result(priority=100)
     async def _prepare_emoji_response(self, event: AstrMessageEvent):
         """清理情绪标签并异步发送表情包（不阻塞回复）"""
-        
+
         # 首先检查是否为 LLM 回复（过滤命令输出、系统消息等）
         result = event.get_result()
         if result is None:
             return False
-        
+
         # 只处理 LLM 生成的回复，跳过命令/插件输出
         if not result.is_llm_result():
             logger.debug("[Stealer] 非 LLM 回复，跳过表情包处理")
             return False
-        
+
         logger.info("[Stealer] _prepare_emoji_response 被调用")
 
         # 检查是否为主动发送（工具已发送表情包）
@@ -1210,8 +1394,8 @@ class Main(Star):
                 return True
 
             # 7. 模式判断：LLM模式 vs 被动标签模式
-            is_intelligent_mode = getattr(self, 'enable_natural_emotion_analysis', True)
-            
+            is_intelligent_mode = getattr(self, "enable_natural_emotion_analysis", True)
+
             if is_intelligent_mode:
                 # LLM模式：不修改消息链，直接异步分析
                 logger.debug("[Stealer] LLM模式：保持消息链不变，异步分析语义")
@@ -1222,25 +1406,25 @@ class Main(Star):
             else:
                 # 被动标签模式：提取并清理标签，修改消息链
                 logger.debug("[Stealer] 被动标签模式：提取标签并清理消息链")
-                
+
                 # 提取情绪标签
                 all_emotions, cleaned_text = await self._extract_emotions_from_text(
                     event, text_without_explicit
                 )
-                
+
                 # 判断是否需要更新文本
                 need_update = (cleaned_text != text_without_explicit)
-                
+
                 # 清理标签（修改消息链）
                 if need_update:
                     self._update_result_with_cleaned_text_safe(event, result, cleaned_text)
                     logger.debug("[Stealer] 被动标签模式：已清理情绪标签")
-                
+
                 # 异步发送表情包
                 asyncio.create_task(
                     self._async_analyze_and_send_emoji(event, cleaned_text, all_emotions)
                 )
-                
+
                 return need_update  # 返回是否修改了消息链
 
         except Exception as e:
@@ -1253,17 +1437,17 @@ class Main(Star):
         """后台异步分析情绪并发送表情包"""
         try:
             all_emotions = []
-            
+
             # 模式切换：LLM模式 vs 被动标签模式
-            if getattr(self, 'enable_natural_emotion_analysis', True):
+            if getattr(self, "enable_natural_emotion_analysis", True):
                 # LLM模式：使用轻量模型分析，忽略标签
                 logger.debug("[Stealer] LLM模式：后台使用轻量模型分析LLM回复")
-                
+
                 # 使用智能情绪匹配器分析LLM回复的真实情绪
                 analyzed_emotion = await self.smart_emotion_matcher.analyze_and_match_emotion(
                     event, cleaned_text, use_natural_analysis=True
                 )
-                
+
                 if analyzed_emotion:
                     all_emotions = [analyzed_emotion]
                     logger.debug(f"[Stealer] LLM模式：轻量模型识别情绪 {analyzed_emotion}")
@@ -1283,14 +1467,14 @@ class Main(Star):
             # 注意：在发送前短暂等待，给 tool loop 留出设置 stealer_active_sent 标记的时间
             # 这是因为 LLM 可能在第一轮回复后决定调用 tool，而我们的异步任务可能在 tool 执行前就完成了分析
             await asyncio.sleep(0.5)
-            
+
             # 再次检查标记（tool 可能在等待期间被调用）
             if event.get_extra("stealer_active_sent"):
                 logger.debug("[Stealer] 检测到 tool 已主动发送表情包，跳过自动发送")
                 return
-            
+
             await self._try_send_emoji(event, all_emotions, cleaned_text)
-            
+
         except Exception as e:
             logger.error(f"[Stealer] 异步情绪分析和表情包发送失败: {e}", exc_info=True)
 
@@ -1309,7 +1493,7 @@ class Main(Star):
         # 查找并更新 Plain 组件
         text_updated = False
         for comp in result.chain:
-            if isinstance(comp, Plain) and hasattr(comp, 'text'):
+            if isinstance(comp, Plain) and hasattr(comp, "text"):
                 # 只更新包含情绪标签的 Plain 组件
                 if comp.text and comp.text.strip():
                     # 简单替换：将组件文本设置为清理后的文本
@@ -1318,7 +1502,7 @@ class Main(Star):
                     text_updated = True
                     logger.debug(f"[Stealer] 已更新 Plain 组件: {cleaned_text[:50]}...")
                     break  # 通常只有一个主文本组件，找到后跳出
-        
+
         if not text_updated:
             # 如果没有找到 Plain 组件，添加一个新的
             logger.debug("[Stealer] 未找到 Plain 组件，添加新的文本组件")
@@ -1418,35 +1602,35 @@ class Main(Star):
                 return None
 
             logger.debug(f"从'{category}'目录中找到 {len(files)} 张图片（{'智能选择失败，' if use_smart else ''}随机选择）")
-            
+
             # 改进的随机选择：避免重复
             recent_usage_key = f"recent_usage_{category}"
             recent_usage = getattr(self, recent_usage_key, [])
-            
+
             # 过滤最近使用的文件
             available_files = [f for f in files if f.as_posix() not in recent_usage]
-            
+
             # 如果过滤后没有可用文件，清空历史
             if not available_files:
                 available_files = files
                 recent_usage.clear()
-            
+
             # 随机选择
             picked_image = random.choice(available_files)
-            
+
             # 更新最近使用历史
             picked_path = picked_image.as_posix()
             if picked_path in recent_usage:
                 recent_usage.remove(picked_path)
             recent_usage.append(picked_path)
-            
+
             # 保持历史队列大小
             max_recent = min(5, max(2, len(files) // 2))
             if len(recent_usage) > max_recent:
                 recent_usage.pop(0)
-            
+
             setattr(self, recent_usage_key, recent_usage)
-            
+
             return picked_path
         except Exception as e:
             logger.error(f"选择表情包失败: {e}")
@@ -1493,12 +1677,12 @@ class Main(Star):
 
             # 2. 强制避重：过滤最近使用的表情包
             available_candidates = [c for c in candidates if c["path"] not in recent_usage]
-            
+
             # 如果过滤后候选太少，只避免最近3个
             if len(available_candidates) < max(2, len(candidates) * 0.3):
                 recent_3 = recent_usage[-3:] if len(recent_usage) >= 3 else recent_usage
                 available_candidates = [c for c in candidates if c["path"] not in recent_3]
-            
+
             # 如果还是没有候选，清空历史重新开始
             if not available_candidates:
                 available_candidates = candidates
@@ -1536,18 +1720,18 @@ class Main(Star):
 
             # 4. 计算匹配分数（权重30%）
             has_context = context_text and len(context_text.strip()) > 5
-            
+
             for candidate in available_candidates:
                 match_score = 10  # 基础匹配分数
-                
+
                 if has_context:
                     context_lower = context_text.lower()
-                    
+
                     # 场景匹配
                     for scene in candidate["scenes"]:
                         if len(scene) > 2 and scene in context_lower:
                             match_score += 25
-                    
+
                     # 描述匹配
                     desc = candidate["desc"]
                     if desc and desc in context_lower:
@@ -1556,12 +1740,12 @@ class Main(Star):
                         desc_words = [w for w in desc.split() if len(w) > 1]
                         matched_words = sum(1 for word in desc_words if word in context_lower)
                         match_score += matched_words * 5
-                    
+
                     # 标签匹配
                     for tag in candidate["tags"]:
                         if len(tag) > 1 and tag in context_lower:
                             match_score += 8
-                    
+
                     # 新增：文本相似度加成（类似MaiBot的编辑距离匹配）
                     # 计算上下文与描述的整体相似度
                     if desc and len(desc) > 3:
@@ -1569,7 +1753,7 @@ class Main(Star):
                         # 相似度转换为分数加成（最多+15分）
                         similarity_bonus = similarity * 15
                         match_score += similarity_bonus
-                        
+
                         if similarity > 0.3:  # 如果相似度较高，记录日志
                             logger.debug(f"[相似度匹配] '{context_text[:20]}...' vs '{desc[:20]}...' = {similarity:.2f}")
 
@@ -1578,12 +1762,12 @@ class Main(Star):
             # 5. 计算综合分数：多样性70% + 匹配度30%
             max_diversity = max(c["diversity_score"] for c in available_candidates)
             max_match = max(c["match_score"] for c in available_candidates)
-            
+
             for candidate in available_candidates:
                 # 标准化到0-100
                 norm_diversity = (candidate["diversity_score"] / max_diversity) * 100
                 norm_match = (candidate["match_score"] / max_match) * 100
-                
+
                 # 多样性权重更高
                 candidate["final_score"] = norm_diversity * 0.7 + norm_match * 0.3
 
@@ -1598,7 +1782,7 @@ class Main(Star):
 
             # 7. 更新使用历史和统计
             selected_path = selected["path"]
-            
+
             # 更新索引中的使用统计
             idx[selected_path]["last_used"] = int(current_time)
             idx[selected_path]["use_count"] = idx[selected_path].get("use_count", 0) + 1
@@ -1608,12 +1792,12 @@ class Main(Star):
             if selected_path in recent_usage:
                 recent_usage.remove(selected_path)
             recent_usage.append(selected_path)
-            
+
             # 保持历史队列大小（最多记录8个）
             max_recent = min(8, max(3, len(candidates) // 2))
             if len(recent_usage) > max_recent:
                 recent_usage.pop(0)
-            
+
             setattr(self, recent_usage_key, recent_usage)
 
             logger.info(f"选择表情包: 多样性={selected['diversity_score']:.1f}, "
@@ -1633,13 +1817,13 @@ class Main(Star):
         try:
             # 读取图片
             b64 = await self.image_processor_service._file_to_base64(emoji_path)
-            
+
             # 创建结果并发送
             # 使用 event.send() 方法，传入 MessageChain 对象
             await event.send(MessageChain([ImageComponent.fromBase64(b64)]))
-            
+
             logger.debug(f"[Stealer] 已发送表情包: {emoji_path}")
-            
+
         except Exception as e:
             logger.error(f"发送表情包失败: {e}", exc_info=True)
 
@@ -1705,23 +1889,17 @@ class Main(Star):
         async for result in self.command_handler.auto_off(event):
             yield result
 
-    @filter.command("meme set_vision")
-    async def set_vision(self, event: AstrMessageEvent, provider_id: str = ""):
-        """设置视觉模型。"""
-        async for result in self.command_handler.set_vision(event, provider_id):
+    @filter.permission_type(PermissionType.ADMIN)
+    @filter.command("meme 偷")
+    async def capture(self, event: AstrMessageEvent):
+        async for result in self.command_handler.capture(event):
             yield result
 
-    @filter.permission_type(PermissionType.ADMIN)
-    @filter.command("meme set_emotion_model")
-    async def set_emotion_provider(self, event: AstrMessageEvent, provider_id: str = ""):
-        """设置情绪分析模型。"""
-        async for result in self.command_handler.set_emotion_provider(event, provider_id):
-            yield result
+
 
     @filter.permission_type(PermissionType.ADMIN)
     @filter.command("meme natural_analysis")
     async def toggle_natural_analysis(self, event: AstrMessageEvent, action: str = ""):
-        """启用/禁用自然语言情绪分析。用法: /meme natural_analysis <on|off>"""
         async for result in self.command_handler.toggle_natural_analysis(event, action):
             yield result
 
@@ -1765,61 +1943,7 @@ class Main(Star):
 
 
 
-    @filter.command("meme throttle")
-    async def throttle_config(self, event: AstrMessageEvent, action: str = "", value: str = ""):
-        """配置图片处理节流。用法: /meme throttle <mode|probability|interval|cooldown> <值>"""
-        if not action:
-            # 显示当前节流状态
-            async for result in self.command_handler.throttle_status(event):
-                yield result
-        elif action == "mode":
-            async for result in self.command_handler.set_throttle_mode(event, value):
-                yield result
-        elif action == "probability":
-            async for result in self.command_handler.set_throttle_probability(event, value):
-                yield result
-        elif action == "interval":
-            async for result in self.command_handler.set_throttle_interval(event, value):
-                yield result
-        elif action == "cooldown":
-            async for result in self.command_handler.set_throttle_cooldown(event, value):
-                yield result
-        else:
-            yield event.plain_result("用法: /meme throttle <mode|probability|interval|cooldown> <值>\n或 /meme throttle 查看状态")
 
-
-
-    @filter.command("meme task")
-    async def task_config(self, event: AstrMessageEvent, task_type: str = "", action: str = "", value: str = ""):
-        """配置后台任务。用法: /meme task <cleanup|capacity> <on|off|interval> [值]"""
-        if not task_type:
-            # 显示任务状态（已合并到 status 中）
-            yield event.plain_result("使用 /meme status 查看任务状态")
-            return
-
-        if task_type == "cleanup":
-            if action == "on" or action == "off":
-                async for result in self.command_handler.toggle_raw_cleanup(event, action):
-                    yield result
-            elif action == "interval":
-                async for result in self.command_handler.set_raw_cleanup_interval(event, value):
-                    yield result
-            else:
-                yield event.plain_result("用法: /meme task cleanup <on|off|interval> [分钟数]")
-        elif task_type == "capacity":
-            if action == "on" or action == "off":
-                async for result in self.command_handler.toggle_capacity_control(event, action):
-                    yield result
-            elif action == "interval":
-                async for result in self.command_handler.set_capacity_control_interval(event, value):
-                    yield result
-            else:
-                yield event.plain_result("用法: /meme task capacity <on|off|interval> [分钟数]")
-        elif task_type == "status":
-            # 显示任务状态 - 重定向到主状态命令
-            yield event.plain_result("请使用 /meme status 查看完整状态信息")
-        else:
-            yield event.plain_result("用法: /meme task <cleanup|capacity> <on|off|interval> [值]")
 
     async def get_count(self) -> int:
         idx = await self._load_index()
@@ -2044,7 +2168,7 @@ class Main(Star):
             # 5. 构建候选列表，存入缓存供后续发送
             candidates = []
             result_lines = [f"找到 {len(results)} 个匹配的表情包：\n"]
-            
+
             for i, (path, desc, emotion) in enumerate(results):
                 if os.path.exists(path):
                     candidate_id = f"emoji_{i+1}"
@@ -2057,16 +2181,16 @@ class Main(Star):
                     # 截断描述，避免太长
                     short_desc = desc[:50] + "..." if len(desc) > 50 else desc
                     result_lines.append(f"  [{i+1}] [{emotion}] {short_desc}")
-            
+
             if not candidates:
                 yield "搜索失败：找到的表情包文件均已丢失"
                 return
-            
+
             # 存入实例属性，供 send_emoji_by_id 使用（临时存储，不持久化）
             self._emoji_candidates = candidates
-            
+
             result_lines.append(f"\n请调用 send_emoji_by_id 并传入编号(1-{len(candidates)})来发送你选择的表情包。")
-            
+
             result_text = "\n".join(result_lines)
             logger.info(f"[Tool] 搜索完成，返回 {len(candidates)} 个候选")
             yield result_text
@@ -2103,39 +2227,39 @@ class Main(Star):
 
             # 从实例属性获取候选列表
             candidates = getattr(self, "_emoji_candidates", None)
-            
+
             if not candidates:
                 tool_text = "发送失败：没有可用的候选列表，请先调用 search_emoji 搜索表情包"
                 yield tool_text
                 return
-            
+
             # 验证编号范围
             if emoji_id < 1 or emoji_id > len(candidates):
                 tool_text = f"发送失败：编号 {emoji_id} 无效，请选择 1-{len(candidates)} 之间的编号"
                 yield tool_text
                 return
-            
+
             # 获取选中的表情包
             selected = candidates[emoji_id - 1]
             path = selected["path"]
             desc = selected["desc"]
             emotion = selected["emotion"]
-            
+
             if not os.path.exists(path):
                 tool_text = "发送失败：表情包文件已丢失"
                 yield tool_text
                 return
-            
+
             # 发送表情包
             logger.info(f"[Tool] 发送选中的表情包: {path} (emotion={emotion})")
             b64 = await self.image_processor_service._file_to_base64(path)
-            
+
             # 使用 event.send() 直接发送图片，而不是 yield
             # 这样可以确保后续的 yield tool_text 能正常返回给 LLM
-            from astrbot.api.message_components import Image as ImageComponent
             from astrbot.api.event import MessageChain
+            from astrbot.api.message_components import Image as ImageComponent
             await event.send(MessageChain([ImageComponent.fromBase64(b64)]))
-            
+
             # 返回成功信息给 LLM
             tool_text = f"已发送表情包：{desc} (分类：{emotion})"
             logger.info(f"[Tool] {tool_text}")
@@ -2187,11 +2311,11 @@ class Main(Star):
 
             logger.info(f"[Tool] 快速发送表情包: {best_path} (emotion={best_emotion})")
             b64 = await self.image_processor_service._file_to_base64(best_path)
-            
+
             # 使用 event.send() 直接发送图片，而不是 yield
             # 这样可以确保后续的 yield tool_text 能正常返回给 LLM
-            from astrbot.api.message_components import Image as ImageComponent
             from astrbot.api.event import MessageChain
+            from astrbot.api.message_components import Image as ImageComponent
             await event.send(MessageChain([ImageComponent.fromBase64(b64)]))
 
             tool_text = f"已发送表情包：{best_desc} (分类：{best_emotion})"

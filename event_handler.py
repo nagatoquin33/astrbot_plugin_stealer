@@ -4,8 +4,8 @@ import random
 import time
 
 from astrbot.api import logger
-from astrbot.api.event import AstrMessageEvent
-from astrbot.api.message_components import Image
+from astrbot.api.event import AstrMessageEvent, MessageChain
+from astrbot.api.message_components import Image, Plain
 
 
 class EventHandler:
@@ -179,7 +179,16 @@ class EventHandler:
 
         plugin_instance = self.plugin
 
-        if not plugin_instance.steal_emoji:
+        force_entry = None
+        if hasattr(plugin_instance, "get_force_capture_entry"):
+            try:
+                force_entry = plugin_instance.get_force_capture_entry(event)
+            except Exception:
+                force_entry = None
+
+        force_active = force_entry is not None
+
+        if not plugin_instance.steal_emoji and not force_active:
             return
 
         # 收集所有图片组件
@@ -191,6 +200,39 @@ class EventHandler:
 
         # 如果没有图片，直接返回
         if not imgs:
+            return
+
+        if force_active:
+            img = imgs[0]
+            try:
+                temp_path: str = await img.convert_to_file_path()
+                if not os.path.exists(temp_path):
+                    await event.send(MessageChain([Plain(text="❌ 收录失败：图片临时文件不存在")]))
+                else:
+                    success, idx = await plugin_instance._process_image(
+                        event, temp_path, is_temp=True, is_platform_emoji=True
+                    )
+                    if success and idx:
+                        await plugin_instance._save_index(idx)
+                        await event.send(MessageChain([Plain(text="✅ 已收录并自动分类入库")]))
+                    else:
+                        await event.send(
+                            MessageChain(
+                                [
+                                    Plain(
+                                        text="❌ 未收录（可能被判定为非表情包/审核不通过/重复或处理失败）"
+                                    )
+                                ]
+                            )
+                        )
+            except Exception as e:
+                await event.send(MessageChain([Plain(text=f"❌ 收录失败：{e}")]))
+            finally:
+                if hasattr(plugin_instance, "consume_force_capture"):
+                    try:
+                        plugin_instance.consume_force_capture(event)
+                    except Exception:
+                        pass
             return
 
         # 检查是否应该处理图片（节流控制）
@@ -307,12 +349,12 @@ class EventHandler:
             if max_reg <= 0:
                 logger.warning(f"容量控制上限无效: max_reg_num={max_reg}，跳过容量控制")
                 return
-            
+
             if len(image_index) <= max_reg:
                 return
             if not self.plugin.do_replace:
                 return
-                
+
             image_items = []
             for file_path, image_info in image_index.items():
                 created_at = (
@@ -324,13 +366,13 @@ class EventHandler:
 
             if not image_items:
                 return
-                
+
             image_items.sort(key=lambda x: x[1])
 
             remove_count = len(image_items) - max_reg
             remove_count = max(0, remove_count)  # 确保不为负数
             safe_remove_count = min(remove_count, len(image_items))  # 确保不超出范围
-            
+
             logger.info(f"容量控制: 当前 {len(image_items)} 个，上限 {max_reg}，将删除 {safe_remove_count} 个最旧的")
 
             for i in range(safe_remove_count):
@@ -362,7 +404,7 @@ class EventHandler:
 
                 if remove_path in image_index:
                     del image_index[remove_path]
-                    
+
             logger.info(f"容量控制完成，删除了 {remove_count} 个表情包，当前数量: {len(image_index)}")
         except ValueError as e:
             logger.error(f"执行容量控制时配置值错误: {e}")

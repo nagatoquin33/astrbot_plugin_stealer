@@ -3,7 +3,6 @@ from pathlib import Path
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
-from astrbot.api.message_components import Image
 
 
 class CommandHandler:
@@ -37,15 +36,17 @@ class CommandHandler:
         self.plugin.auto_send = False
         yield event.plain_result("已关闭自动发送")
 
-    async def set_emotion_provider(self, event: AstrMessageEvent, provider_id: str = ""):
-        """设置情绪分析模型。"""
-        if not provider_id:
-            yield event.plain_result("请提供情绪分析模型的 provider_id")
+    async def capture(self, event: AstrMessageEvent):
+        window_seconds = 30
+
+        if hasattr(self.plugin, "begin_force_capture"):
+            self.plugin.begin_force_capture(event, window_seconds)
+            yield event.plain_result(
+                f"✅ 已进入强制接收窗口：{window_seconds} 秒内发送 1 张图片将自动分类并入库"
+            )
             return
-        # 同时更新实例属性和配置服务中的值，确保同步
-        self.plugin.emotion_analysis_provider_id = provider_id
-        self.plugin.config_service.emotion_analysis_provider_id = provider_id
-        yield event.plain_result(f"已设置情绪分析模型: {provider_id}")
+
+        yield event.plain_result("❌ 插件未初始化强制接收能力")
 
     async def toggle_natural_analysis(self, event: AstrMessageEvent, action: str = ""):
         """启用/禁用自然语言情绪分析。"""
@@ -66,13 +67,13 @@ class CommandHandler:
         try:
             # 显示当前模式
             mode = "智能模式" if self.plugin.enable_natural_emotion_analysis else "被动模式"
-            
+
             status_text = f"🧠 情绪分析模式: {mode}\n\n"
-            
+
             if self.plugin.enable_natural_emotion_analysis:
                 # 智能模式：显示轻量模型分析统计
                 stats = self.plugin.smart_emotion_matcher.get_analyzer_stats()
-                
+
                 if "message" in stats:
                     status_text += f"轻量模型分析: {stats['message']}\n"
                 else:
@@ -82,7 +83,7 @@ class CommandHandler:
                     status_text += f"成功率: {stats['success_rate']}\n"
                     status_text += f"平均响应时间: {stats['avg_response_time']}\n"
                     status_text += f"缓存大小: {stats['cache_size']}\n"
-                
+
                 status_text += "\n💡 智能模式说明:\n"
                 status_text += "- 不向LLM注入提示词\n"
                 status_text += "- 使用轻量模型分析回复语义\n"
@@ -94,11 +95,11 @@ class CommandHandler:
                 status_text += "- LLM在回复中插入 &&情绪&& 标签\n"
                 status_text += "- 插件识别标签并发送表情包\n"
                 status_text += "- 依赖LLM遵循格式要求\n"
-            
+
             status_text += "\n⚙️ 配置状态:\n"
             status_text += f"自动发送: {'启用' if self.plugin.auto_send else '禁用'}\n"
             status_text += f"分析模型: {self.plugin.emotion_analysis_provider_id or '使用当前会话模型'}\n"
-            
+
             yield event.plain_result(status_text)
         except Exception as e:
             yield event.plain_result(f"获取统计信息失败: {e}")
@@ -298,202 +299,8 @@ class CommandHandler:
             logger.error(f"容量控制失败: {e}")
             yield event.plain_result(f"容量控制失败: {str(e)}")
 
-    async def toggle_raw_cleanup(self, event: AstrMessageEvent, action: str = ""):
-        """启用/禁用raw目录清理任务。"""
-        if action not in ["on", "off"]:
-            yield event.plain_result("用法: /meme raw_cleanup <on|off>")
-            return
 
-        if action == "on":
-            self.plugin.enable_raw_cleanup = True
-            # 如果任务未运行，启动它
-            if not self.plugin.task_scheduler.is_task_running("raw_cleanup_loop"):
-                self.plugin.task_scheduler.create_task(
-                    "raw_cleanup_loop", self.plugin._raw_cleanup_loop()
-                )
-            yield event.plain_result("已启用raw目录清理任务")
-        else:
-            self.plugin.enable_raw_cleanup = False
-            # 停止任务
-            await self.plugin.task_scheduler.cancel_task("raw_cleanup_loop")
-            yield event.plain_result("已禁用raw目录清理任务")
 
-    async def toggle_capacity_control(self, event: AstrMessageEvent, action: str = ""):
-        """启用/禁用容量控制任务。"""
-        if action not in ["on", "off"]:
-            yield event.plain_result("用法: /meme capacity_control <on|off>")
-            return
-
-        if action == "on":
-            self.plugin.enable_capacity_control = True
-            # 如果任务未运行，启动它
-            if not self.plugin.task_scheduler.is_task_running("capacity_control_loop"):
-                self.plugin.task_scheduler.create_task(
-                    "capacity_control_loop", self.plugin._capacity_control_loop()
-                )
-            yield event.plain_result("已启用容量控制任务")
-        else:
-            self.plugin.enable_capacity_control = False
-            # 停止任务
-            await self.plugin.task_scheduler.cancel_task("capacity_control_loop")
-            yield event.plain_result("已禁用容量控制任务")
-
-    async def set_raw_cleanup_interval(
-        self, event: AstrMessageEvent, interval: str = ""
-    ):
-        """设置raw清理周期。"""
-        if not interval:
-            yield event.plain_result(
-                "用法: /meme raw_cleanup_interval <分钟>\n例如: /meme raw_cleanup_interval 30"
-            )
-            return
-
-        try:
-            minutes = int(interval)
-            if minutes < 1:
-                yield event.plain_result("清理周期必须至少为1分钟")
-                return
-
-            self.plugin.raw_cleanup_interval = minutes
-            yield event.plain_result(f"已设置raw清理周期为: {minutes}分钟")
-        except ValueError:
-            yield event.plain_result("无效的周期值，请输入正整数")
-
-    async def set_capacity_control_interval(
-        self, event: AstrMessageEvent, interval: str = ""
-    ):
-        """设置容量控制周期。"""
-        if not interval:
-            yield event.plain_result(
-                "用法: /meme capacity_interval <分钟>\n例如: /meme capacity_interval 60"
-            )
-            return
-
-        try:
-            minutes = int(interval)
-            if minutes < 1:
-                yield event.plain_result("控制周期必须至少为1分钟")
-                return
-
-            self.plugin.capacity_control_interval = minutes
-            yield event.plain_result(f"已设置容量控制周期为: {minutes}分钟")
-        except ValueError:
-            yield event.plain_result("无效的周期值，请输入正整数")
-
-    async def throttle_status(self, event: AstrMessageEvent):
-        """显示图片处理节流状态。"""
-        mode = self.plugin.image_processing_mode
-        mode_names = {
-            "always": "总是处理",
-            "probability": "概率处理",
-            "interval": "间隔处理",
-            "cooldown": "冷却处理",
-        }
-
-        status_text = "图片处理节流状态:\n"
-        status_text += f"当前模式: {mode_names.get(mode, mode)}\n"
-
-        if mode == "probability":
-            status_text += (
-                f"处理概率: {self.plugin.image_processing_probability * 100:.0f}%\n"
-            )
-        elif mode == "interval":
-            status_text += f"处理间隔: {self.plugin.image_processing_interval}秒\n"
-        elif mode == "cooldown":
-            status_text += f"冷却时间: {self.plugin.image_processing_cooldown}秒\n"
-
-        status_text += "\n说明:\n"
-        status_text += "- always: 每张图片都处理（消耗API最多）\n"
-        status_text += "- probability: 按概率随机处理\n"
-        status_text += "- interval: 每N秒只处理一次\n"
-        status_text += "- cooldown: 两次处理间隔至少N秒"
-
-        yield event.plain_result(status_text)
-
-    async def set_throttle_mode(self, event: AstrMessageEvent, mode: str = ""):
-        """设置图片处理节流模式。"""
-        valid_modes = ["always", "probability", "interval", "cooldown"]
-
-        if not mode or mode not in valid_modes:
-            yield event.plain_result(
-                f"用法: /meme throttle_mode <模式>\n"
-                f"可用模式: {', '.join(valid_modes)}\n"
-                f"- always: 总是处理\n"
-                f"- probability: 概率处理\n"
-                f"- interval: 间隔处理\n"
-                f"- cooldown: 冷却处理"
-            )
-            return
-
-        self.plugin.image_processing_mode = mode
-
-        mode_names = {
-            "always": "总是处理",
-            "probability": "概率处理",
-            "interval": "间隔处理",
-            "cooldown": "冷却处理",
-        }
-
-        yield event.plain_result(f"已设置图片处理模式为: {mode_names[mode]}")
-
-    async def set_throttle_probability(
-        self, event: AstrMessageEvent, probability: str = ""
-    ):
-        """设置概率模式的处理概率。"""
-        if not probability:
-            yield event.plain_result(
-                "用法: /meme throttle_probability <概率>\n概率范围: 0.0-1.0（例如 0.3 表示30%）"
-            )
-            return
-
-        try:
-            prob = float(probability)
-            if not (0.0 <= prob <= 1.0):
-                yield event.plain_result("概率必须在 0.0-1.0 之间")
-                return
-
-            self.plugin.image_processing_probability = prob
-            yield event.plain_result(f"已设置处理概率为: {prob * 100:.0f}%")
-        except ValueError:
-            yield event.plain_result("无效的概率值，请输入 0.0-1.0 之间的数字")
-
-    async def set_throttle_interval(self, event: AstrMessageEvent, interval: str = ""):
-        """设置间隔模式的处理间隔。"""
-        if not interval:
-            yield event.plain_result(
-                "用法: /meme throttle_interval <秒数>\n例如: /meme throttle_interval 60"
-            )
-            return
-
-        try:
-            seconds = int(interval)
-            if seconds < 1:
-                yield event.plain_result("间隔必须至少为1秒")
-                return
-
-            self.plugin.image_processing_interval = seconds
-            yield event.plain_result(f"已设置处理间隔为: {seconds}秒")
-        except ValueError:
-            yield event.plain_result("无效的间隔值，请输入正整数")
-
-    async def set_throttle_cooldown(self, event: AstrMessageEvent, cooldown: str = ""):
-        """设置冷却模式的冷却时间。"""
-        if not cooldown:
-            yield event.plain_result(
-                "用法: /meme throttle_cooldown <秒数>\n例如: /meme throttle_cooldown 30"
-            )
-            return
-
-        try:
-            seconds = int(cooldown)
-            if seconds < 1:
-                yield event.plain_result("冷却时间必须至少为1秒")
-                return
-
-            self.plugin.image_processing_cooldown = seconds
-            yield event.plain_result(f"已设置冷却时间为: {seconds}秒")
-        except ValueError:
-            yield event.plain_result("无效的冷却时间，请输入正整数")
 
     async def migrate_legacy_data(self, event: AstrMessageEvent):
         """手动迁移旧版本数据。"""
@@ -806,7 +613,7 @@ class CommandHandler:
             # 1. 建立哈希查找表，用于处理文件路径变更的情况
             # 合并 old_index 和 legacy_data_map 用于查找
             combined_index = {**old_index, **legacy_data_map}
-            
+
             old_hash_map = {}
             for k, v in combined_index.items():
                 if isinstance(v, dict) and v.get("hash"):

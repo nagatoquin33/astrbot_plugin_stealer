@@ -13,13 +13,13 @@ from astrbot.api.event import AstrMessageEvent
 
 def levenshtein_distance(s1: str, s2: str) -> int:
     """计算两个字符串之间的编辑距离（Levenshtein距离）。
-    
+
     编辑距离是将一个字符串转换为另一个字符串所需的最少编辑操作次数（插入、删除、替换）。
-    
+
     Args:
         s1: 第一个字符串
         s2: 第二个字符串
-        
+
     Returns:
         int: 编辑距离，值越小表示两个字符串越相似
     """
@@ -28,17 +28,17 @@ def levenshtein_distance(s1: str, s2: str) -> int:
         return len(s2)
     if not s2:
         return len(s1)
-    
+
     # 创建距离矩阵
     # dp[i][j] 表示 s1[0..i-1] 到 s2[0..j-1] 的编辑距离
     dp = [[0] * (len(s2) + 1) for _ in range(len(s1) + 1)]
-    
+
     # 初始化第一行和第一列
     for i in range(len(s1) + 1):
         dp[i][0] = i
     for j in range(len(s2) + 1):
         dp[0][j] = j
-    
+
     # 填充距离矩阵
     for i in range(1, len(s1) + 1):
         for j in range(1, len(s2) + 1):
@@ -47,24 +47,24 @@ def levenshtein_distance(s1: str, s2: str) -> int:
                 cost = 0
             else:
                 cost = 1
-            
+
             # 取三种操作（删除、插入、替换）中的最小值
             dp[i][j] = min(
                 dp[i-1][j] + 1,      # 删除操作
                 dp[i][j-1] + 1,      # 插入操作
                 dp[i-1][j-1] + cost  # 替换操作
             )
-    
+
     return dp[len(s1)][len(s2)]
 
 
 def calculate_similarity(s1: str, s2: str) -> float:
     """计算两个字符串的相似度（0-1之间）。
-    
+
     Args:
         s1: 第一个字符串
         s2: 第二个字符串
-        
+
     Returns:
         float: 相似度，1表示完全相同，0表示完全不同
     """
@@ -72,7 +72,7 @@ def calculate_similarity(s1: str, s2: str) -> float:
         return 1.0
     if not s1 or not s2:
         return 0.0
-    
+
     distance = levenshtein_distance(s1, s2)
     max_len = max(len(s1), len(s2))
     return 1.0 - (distance / max_len)
@@ -694,6 +694,43 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                 await self.plugin._safe_remove_file(raw_path)
             # 重新抛出异常，添加更多上下文信息
             raise Exception(error_msg) from e
+
+    def _build_emotion_list_str(self, categories: list[str] | None = None) -> str:
+        categories = categories if categories is not None else (self.categories or [])
+        categories = [c for c in categories if isinstance(c, str) and c.strip()]
+        info_map = {}
+        try:
+            if hasattr(self.plugin, "config_service") and self.plugin.config_service:
+                info_map = getattr(self.plugin.config_service, "category_info", {}) or {}
+        except Exception:
+            info_map = {}
+
+        lines = []
+        for raw_key in categories:
+            key = raw_key.strip()
+            info = info_map.get(key)
+            if isinstance(info, dict):
+                name = str(info.get("name", "")).strip()
+                desc = str(info.get("desc", "")).strip()
+            else:
+                name = ""
+                desc = ""
+
+            if name and name != key:
+                if desc:
+                    lines.append(f"{key} - {name}：{desc}")
+                else:
+                    lines.append(f"{key} - {name}")
+            else:
+                if desc:
+                    lines.append(f"{key}：{desc}")
+                else:
+                    lines.append(key)
+
+        if lines:
+            return "\n".join(lines)
+        return ", ".join(categories)
+
     async def classify_image(
         self,
         event: AstrMessageEvent | None,
@@ -740,8 +777,8 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                 else getattr(self.plugin, "content_filtration", True)
             )
 
-            # 构建情绪类别列表字符串
-            emotion_list_str = ", ".join(self.categories)
+            prompt_categories = categories if isinstance(categories, list) else None
+            emotion_list_str = self._build_emotion_list_str(prompt_categories)
 
             # 根据是否开启审核选择合适的提示词
             if should_filter:
@@ -768,14 +805,14 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
             parts = [p.strip() for p in response.strip().split("|")]
 
             emotion_result = parts[0] if len(parts) > 0 else (self.categories[0] if self.categories else "happy")
-            
+
             # 语义标签作为tags
             tags_str = parts[1] if len(parts) > 1 else ""
             tags_result = [t.strip() for t in tags_str.split(",") if t.strip()]
-            
+
             # 画面描述作为desc
             desc_result = parts[2] if len(parts) > 2 else "表情包"
-            
+
             # 适用场景设为空（新格式不再包含场景）
             scenes_result = []
 
@@ -1131,7 +1168,7 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
             query_lower = query.lower()
             query_tokens = [t for t in query_lower.split() if len(t) > 1]
             query_chars = set(query_lower) if len(query_lower) > 1 else set()
-            
+
             MAX_STR_LENGTH = 20
             top_k = limit * 3
             top_candidates = []
@@ -1154,10 +1191,10 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                     score = 20
                     top_candidates.append((file_path, desc, category, score))
                     continue
-                
+
                 if query_lower in category or category in query_lower:
                     score = 10
-                
+
                 if query_lower == desc:
                     score = max(score, 15)
                 elif query_lower in desc:
@@ -1215,7 +1252,7 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
 
             top_candidates.sort(key=lambda x: x[3], reverse=True)
             results = [(item[0], item[1], item[2]) for item in top_candidates[:limit]]
-            
+
             if not results:
                 keyword_map = self._get_keyword_map()
                 if query in keyword_map:
@@ -1229,7 +1266,7 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                             results.append((file_path, str(data.get("desc", "")), cat))
                             if len(results) >= limit:
                                 break
-            
+
             return results
 
         except Exception as e:
