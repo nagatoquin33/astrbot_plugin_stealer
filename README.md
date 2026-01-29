@@ -101,7 +101,7 @@
 
 这样能确保模式切换立即生效，避免新旧模式混淆。
 
-## 🎮 指令列表 (前缀: `/plugin meme`)
+## 🎮 指令列表 (前缀: `/meme`)
 
 | 指令 | 说明 |
 | :--- | :--- |
@@ -124,6 +124,7 @@
 本项目基于 MIT 许可证开源。
 
 [![GitHub license](https://img.shields.io/github/license/nagatoquin33/astrbot_plugin_stealer)](https://github.com/nagatoquin33/astrbot_plugin_stealer/blob/main/LICENSE)
+
 
 
 
