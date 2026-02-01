@@ -60,7 +60,10 @@ _original_register_file = FileTokenService.register_file
 # 插件专用的 Token 标记集合（使用 set 提高查询效率）
 _plugin_reusable_tokens = set()
 
-async def patched_register_file(self, file_path: str, timeout: float | None = None) -> str:
+
+async def patched_register_file(
+    self, file_path: str, timeout: float | None = None
+) -> str:
     """重写注册方法，为插件的 Token 添加标记"""
     # 调用原始注册方法
     file_token = await _original_register_file(self, file_path, timeout)
@@ -82,13 +85,17 @@ async def patched_register_file(self, file_path: str, timeout: float | None = No
                         if file_token in self.staged_files:
                             file_path_stored, _ = self.staged_files[file_token]
                             expire_time = time.time() + 60  # 60秒超时
-                            self.staged_files[file_token] = (file_path_stored, expire_time)
+                            self.staged_files[file_token] = (
+                                file_path_stored,
+                                expire_time,
+                            )
                 break
             caller_frame = caller_frame.f_back
     finally:
         del frame
 
     return file_token
+
 
 async def patched_handle_file(self, file_token: str) -> str:
     """优化的 handle_file，仅对插件 Token 启用多次访问"""
@@ -110,9 +117,11 @@ async def patched_handle_file(self, file_token: str) -> str:
             raise FileNotFoundError(f"文件不存在: {file_path}")
         return file_path
 
+
 # 应用补丁
 FileTokenService.register_file = patched_register_file
 FileTokenService.handle_file = patched_handle_file
+
 
 # 清理函数（在插件卸载时调用）
 def _cleanup_monkey_patch():
@@ -120,6 +129,7 @@ def _cleanup_monkey_patch():
     FileTokenService.handle_file = _original_handle_file
     FileTokenService.register_file = _original_register_file
     _plugin_reusable_tokens.clear()
+
 
 # ================= Monkey Patch End =================
 
@@ -155,7 +165,9 @@ class Main(Star):
         # 大文件应存储于 data/plugin_data/{plugin_name}/ 目录下
         # self.name 在 v4.9.2 及以上版本可用
         plugin_name = getattr(self, "name", "astrbot_plugin_stealer")
-        self.base_dir: Path = Path(get_astrbot_data_path()) / "plugin_data" / plugin_name
+        self.base_dir: Path = (
+            Path(get_astrbot_data_path()) / "plugin_data" / plugin_name
+        )
 
         # 确保基础目录存在
         self.base_dir.mkdir(parents=True, exist_ok=True)
@@ -214,7 +226,6 @@ class Main(Star):
         # 验证配置
         self._validate_config()
 
-
     def _load_vision_provider_id(self) -> str | None:
         """加载视觉模型提供商ID。
 
@@ -233,6 +244,7 @@ class Main(Star):
         self.auto_send = self.config_service.auto_send
         self.emoji_chance = self.config_service.emoji_chance
         self.smart_emoji_selection = self.config_service.smart_emoji_selection
+        self.send_emoji_as_gif = self.config_service.send_emoji_as_gif
         self.max_reg_num = self.config_service.max_reg_num
         self.do_replace = self.config_service.do_replace
         self.raw_cleanup_interval = self.config_service.raw_cleanup_interval
@@ -317,8 +329,12 @@ class Main(Star):
         self.vision_provider_id = self._load_vision_provider_id()
 
         # 同步自然语言情绪分析配置（新增）
-        self.enable_natural_emotion_analysis = self.config_service.enable_natural_emotion_analysis
-        self.emotion_analysis_provider_id = self.config_service.emotion_analysis_provider_id
+        self.enable_natural_emotion_analysis = (
+            self.config_service.enable_natural_emotion_analysis
+        )
+        self.emotion_analysis_provider_id = (
+            self.config_service.emotion_analysis_provider_id
+        )
 
     def _validate_config(self) -> bool:
         """验证配置参数的有效性。
@@ -336,26 +352,35 @@ class Main(Star):
             fixed.append("最大表情数量已重置为100")
 
         # 验证表情发送概率
-        if not isinstance(self.emoji_chance, (int, float)) or not (0 <= self.emoji_chance <= 1):
+        if not isinstance(self.emoji_chance, (int, float)) or not (
+            0 <= self.emoji_chance <= 1
+        ):
             errors.append("表情发送概率必须在0-1之间")
             self.emoji_chance = 0.4
             fixed.append("表情发送概率已重置为0.4")
 
         # 验证清理周期
-        if not isinstance(self.raw_cleanup_interval, int) or self.raw_cleanup_interval < 1:
+        if (
+            not isinstance(self.raw_cleanup_interval, int)
+            or self.raw_cleanup_interval < 1
+        ):
             errors.append("raw清理周期必须至少为1分钟")
             self.raw_cleanup_interval = 30
             fixed.append("raw清理周期已重置为30分钟")
 
         # 验证容量控制周期
-        if not isinstance(self.capacity_control_interval, int) or self.capacity_control_interval < 1:
+        if (
+            not isinstance(self.capacity_control_interval, int)
+            or self.capacity_control_interval < 1
+        ):
             errors.append("容量控制周期必须至少为1分钟")
             self.capacity_control_interval = 60
             fixed.append("容量控制周期已重置为60分钟")
 
         # 验证保留期限（如果存在）
         if hasattr(self, "raw_retention_minutes") and (
-            not isinstance(self.raw_retention_minutes, int) or self.raw_retention_minutes < 1
+            not isinstance(self.raw_retention_minutes, int)
+            or self.raw_retention_minutes < 1
         ):
             errors.append("raw目录保留期限必须至少为1分钟")
             self.raw_retention_minutes = 60
@@ -401,13 +426,44 @@ class Main(Star):
 
         return None
 
+    def _get_group_id(self, event: AstrMessageEvent) -> str | None:
+        try:
+            if hasattr(event, "get_group_id"):
+                gid = event.get_group_id()
+                if gid:
+                    return str(gid)
+        except Exception:
+            pass
+
+        message_obj = getattr(event, "message_obj", None)
+        if message_obj is not None:
+            try:
+                gid = getattr(message_obj, "group_id", "") or ""
+                gid = str(gid).strip()
+                return gid or None
+            except Exception:
+                return None
+        return None
+
+    def is_meme_enabled_for_event(self, event: AstrMessageEvent) -> bool:
+        group_id = self._get_group_id(event)
+        config_service = getattr(self, "config_service", None)
+        if config_service is None:
+            return True
+        try:
+            return bool(config_service.is_group_allowed(group_id))
+        except Exception:
+            return True
+
     def begin_force_capture(self, event: AstrMessageEvent, seconds: int) -> None:
         key = self._get_force_capture_key(event)
         sender_id = self._get_force_capture_sender_id(event)
         until = time.time() + max(1, int(seconds))
         self._force_capture_windows[key] = {"until": until, "sender_id": sender_id}
 
-    def get_force_capture_entry(self, event: AstrMessageEvent) -> dict[str, object] | None:
+    def get_force_capture_entry(
+        self, event: AstrMessageEvent
+    ) -> dict[str, object] | None:
         key = self._get_force_capture_key(event)
         entry = self._force_capture_windows.get(key)
         if not entry:
@@ -465,22 +521,28 @@ class Main(Star):
                 try:
                     old_raw_cleanup_interval_i = int(old_raw_cleanup_interval)
                 except Exception:
-                    old_raw_cleanup_interval_i = int(getattr(self, "raw_cleanup_interval", 30))
+                    old_raw_cleanup_interval_i = int(
+                        getattr(self, "raw_cleanup_interval", 30)
+                    )
 
                 try:
                     old_capacity_control_interval_i = int(old_capacity_control_interval)
                 except Exception:
-                    old_capacity_control_interval_i = int(getattr(self, "capacity_control_interval", 60))
+                    old_capacity_control_interval_i = int(
+                        getattr(self, "capacity_control_interval", 60)
+                    )
 
                 background_task_toggle_changed = (
                     old_enable_raw_cleanup != self.enable_raw_cleanup
                     or old_enable_capacity_control != self.enable_capacity_control
                 )
-                background_task_interval_changed = (
-                    old_raw_cleanup_interval_i != int(self.raw_cleanup_interval)
-                    or old_capacity_control_interval_i != int(self.capacity_control_interval)
+                background_task_interval_changed = old_raw_cleanup_interval_i != int(
+                    self.raw_cleanup_interval
+                ) or old_capacity_control_interval_i != int(
+                    self.capacity_control_interval
                 )
                 if background_task_toggle_changed or background_task_interval_changed:
+
                     async def reconcile_background_tasks():
                         if not getattr(self, "task_scheduler", None):
                             return
@@ -490,13 +552,16 @@ class Main(Star):
                         )
                         if not self.enable_raw_cleanup:
                             if raw_running:
-                                await self.task_scheduler.cancel_task("raw_cleanup_loop")
+                                await self.task_scheduler.cancel_task(
+                                    "raw_cleanup_loop"
+                                )
                         else:
-                            if (
-                                raw_running
-                                and old_raw_cleanup_interval_i != int(self.raw_cleanup_interval)
+                            if raw_running and old_raw_cleanup_interval_i != int(
+                                self.raw_cleanup_interval
                             ):
-                                await self.task_scheduler.cancel_task("raw_cleanup_loop")
+                                await self.task_scheduler.cancel_task(
+                                    "raw_cleanup_loop"
+                                )
                                 raw_running = False
                             if not raw_running:
                                 self.task_scheduler.create_task(
@@ -523,7 +588,8 @@ class Main(Star):
                                 capacity_running = False
                             if not capacity_running:
                                 self.task_scheduler.create_task(
-                                    "capacity_control_loop", self._capacity_control_loop()
+                                    "capacity_control_loop",
+                                    self._capacity_control_loop(),
                                 )
 
                     asyncio.create_task(reconcile_background_tasks())
@@ -531,10 +597,11 @@ class Main(Star):
                 # 检查 WebUI 配置是否变化并重启
                 # 注意：on_config_update 可能是同步调用，重启操作涉及IO，使用 create_task 异步执行
                 if (
-                    old_webui_enabled != self.webui_enabled or
-                    old_webui_host != self.webui_host or
-                    old_webui_port != self.webui_port
+                    old_webui_enabled != self.webui_enabled
+                    or old_webui_host != self.webui_host
+                    or old_webui_port != self.webui_port
                 ):
+
                     async def restart_webui():
                         logger.info("检测到 WebUI 配置变更，正在重启 WebUI...")
                         if self.web_server:
@@ -544,9 +611,7 @@ class Main(Star):
                         if self.webui_enabled:
                             try:
                                 self.web_server = WebServer(
-                                    self,
-                                    host=self.webui_host,
-                                    port=self.webui_port
+                                    self, host=self.webui_host, port=self.webui_port
                                 )
                                 await self.web_server.start()
                             except Exception as e:
@@ -610,7 +675,9 @@ class Main(Star):
                     # 使用异步文件读取
                     try:
                         if aiofiles:
-                            async with aiofiles.open(prompts_path, encoding="utf-8") as f:
+                            async with aiofiles.open(
+                                prompts_path, encoding="utf-8"
+                            ) as f:
                                 content = await f.read()
                             prompts = json.loads(content)
                             logger.info(f"已加载提示词文件: {prompts_path}")
@@ -659,9 +726,7 @@ class Main(Star):
             if self.webui_enabled:
                 try:
                     self.web_server = WebServer(
-                        self,
-                        host=self.webui_host,
-                        port=self.webui_port
+                        self, host=self.webui_host, port=self.webui_port
                     )
                     await self.web_server.start()
                 except Exception as e:
@@ -705,8 +770,6 @@ class Main(Star):
         except Exception as e:
             logger.error(f"初始化插件失败: {e}")
             raise
-
-
 
     async def terminate(self):
         """插件销毁生命周期钩子。清理任务。"""
@@ -780,7 +843,9 @@ class Main(Star):
         try:
             cache_data = self.cache_service.get_cache("index_cache")
 
-            logger.debug(f"[_load_index] raw cache type: {type(cache_data)}, keys: {list(cache_data.keys())[:5] if cache_data else 'empty'}")
+            logger.debug(
+                f"[_load_index] raw cache type: {type(cache_data)}, keys: {list(cache_data.keys())[:5] if cache_data else 'empty'}"
+            )
 
             index_data = dict(cache_data) if cache_data else {}
 
@@ -790,9 +855,13 @@ class Main(Star):
                 logger.debug("[_load_index] cache empty, attempting migration...")
                 index_data = await self._migrate_legacy_data()
                 self._migration_done = True
-                logger.debug(f"[_load_index] migration returned {len(index_data)} items")
+                logger.debug(
+                    f"[_load_index] migration returned {len(index_data)} items"
+                )
                 if index_data:
-                    self.cache_service.set_cache("index_cache", index_data, persist=True)
+                    self.cache_service.set_cache(
+                        "index_cache", index_data, persist=True
+                    )
 
             return index_data
         except OSError as e:
@@ -835,7 +904,9 @@ class Main(Star):
                             old_data = json.load(f)
 
                         if isinstance(old_data, dict) and old_data:
-                            logger.info(f"从 {old_path} 加载了 {len(old_data)} 条旧记录")
+                            logger.info(
+                                f"从 {old_path} 加载了 {len(old_data)} 条旧记录"
+                            )
                             migrated_data.update(old_data)
 
                             # 备份旧文件
@@ -936,7 +1007,13 @@ class Main(Star):
                         continue
 
                     # 检查是否是图片文件
-                    if img_file.suffix.lower() not in [".jpg", ".jpeg", ".png", ".gif", ".webp"]:
+                    if img_file.suffix.lower() not in [
+                        ".jpg",
+                        ".jpeg",
+                        ".png",
+                        ".gif",
+                        ".webp",
+                    ]:
                         continue
 
                     # 尝试找到对应的raw文件
@@ -949,7 +1026,10 @@ class Main(Star):
                         else:
                             # 查找相似名称的文件
                             for raw_file in self.raw_dir.iterdir():
-                                if raw_file.is_file() and raw_file.stem == img_file.stem:
+                                if (
+                                    raw_file.is_file()
+                                    and raw_file.stem == img_file.stem
+                                ):
                                     raw_path = str(raw_file)
                                     break
 
@@ -959,7 +1039,9 @@ class Main(Star):
 
                     # 计算文件哈希
                     try:
-                        file_hash = await self.image_processor_service._compute_hash(str(img_file))
+                        file_hash = await self.image_processor_service._compute_hash(
+                            str(img_file)
+                        )
                     except Exception as e:
                         logger.debug(f"计算文件哈希失败: {e}")
                         file_hash = ""
@@ -969,7 +1051,7 @@ class Main(Star):
                         "hash": file_hash,
                         "category": category_name,
                         "created_at": int(img_file.stat().st_mtime),
-                        "migrated": True  # 标记为迁移数据
+                        "migrated": True,  # 标记为迁移数据
                     }
 
             logger.info(f"从文件重建了 {len(rebuilt_index)} 条索引记录")
@@ -1241,7 +1323,9 @@ class Main(Star):
                     if removed_invalid > 0:
                         logger.info(f"已清理 {removed_invalid} 个无效索引条目")
 
-                    logger.info(f"清理后索引条目数: {len(image_index)}，有效文件: {len(valid_paths)}")
+                    logger.info(
+                        f"清理后索引条目数: {len(image_index)}，有效文件: {len(valid_paths)}"
+                    )
 
                     if hasattr(self, "event_handler") and self.event_handler:
                         await self.event_handler._enforce_capacity(image_index)
@@ -1249,7 +1333,9 @@ class Main(Star):
                         logger.warning("event_handler 未初始化，跳过容量控制")
 
                     if self.cache_service:
-                        self.cache_service.set_cache("index_cache", image_index, persist=True)
+                        self.cache_service.set_cache(
+                            "index_cache", image_index, persist=True
+                        )
 
                     logger.info("容量控制任务完成")
 
@@ -1259,7 +1345,6 @@ class Main(Star):
             except Exception as e:
                 logger.error(f"容量控制任务发生错误: {e}", exc_info=True)
                 continue
-
 
     async def _clean_raw_directory(self):
         """按时间定时清理raw目录中的原始图片"""
@@ -1281,9 +1366,9 @@ class Main(Star):
     async def _inject_emotion_instruction(self, event: AstrMessageEvent, request):
         """在 LLM 请求时动态注入情绪选择指令。
 
-        模式切换逻辑：
-    - LLM模式（enable_natural_emotion_analysis=True）：不注入提示词，由轻量模型分析
-    - 被动标签模式（enable_natural_emotion_analysis=False）：注入提示词，LLM插入标签
+            模式切换逻辑：
+        - LLM模式（enable_natural_emotion_analysis=True）：不注入提示词，由轻量模型分析
+        - 被动标签模式（enable_natural_emotion_analysis=False）：注入提示词，LLM插入标签
         """
         try:
             # 检查是否启用自动发送
@@ -1293,7 +1378,9 @@ class Main(Star):
 
             # LLM模式：启用自然语言分析时，不注入提示词
             if getattr(self, "enable_natural_emotion_analysis", True):
-                logger.debug("[Stealer] LLM模式已启用，跳过提示词注入，将使用轻量模型分析")
+                logger.debug(
+                    "[Stealer] LLM模式已启用，跳过提示词注入，将使用轻量模型分析"
+                )
                 return
 
             # 被动标签模式：注入提示词让LLM插入标签
@@ -1326,8 +1413,12 @@ class Main(Star):
 
             # 将指令添加到系统提示词
             if hasattr(request, "system_prompt"):
-                request.system_prompt = (request.system_prompt or "") + emotion_instruction
-                logger.info(f"[Stealer] 被动标签模式：已注入情绪选择指令 (categories: {len(self.categories)})")
+                request.system_prompt = (
+                    request.system_prompt or ""
+                ) + emotion_instruction
+                logger.info(
+                    f"[Stealer] 被动标签模式：已注入情绪选择指令 (categories: {len(self.categories)})"
+                )
             else:
                 logger.warning("[Stealer] LLM 请求对象没有 system_prompt 属性")
 
@@ -1358,9 +1449,13 @@ class Main(Star):
                 text = result.get_plain_text() or ""
                 if text.strip():
                     # 复用 _extract_emotions_from_text 的清理逻辑
-                    _, cleaned_text = await self._extract_emotions_from_text(event, text)
+                    _, cleaned_text = await self._extract_emotions_from_text(
+                        event, text
+                    )
                     if cleaned_text != text:
-                        self._update_result_with_cleaned_text_safe(event, result, cleaned_text)
+                        self._update_result_with_cleaned_text_safe(
+                            event, result, cleaned_text
+                        )
                         logger.debug("[Stealer] 已清理主动发送后的情绪标签")
             return False
 
@@ -1389,7 +1484,19 @@ class Main(Star):
 
             # 6. 处理显式表情包（同步处理）
             if has_explicit:
-                await self._send_explicit_emojis(event, explicit_emojis, text_without_explicit)
+                if not self.is_meme_enabled_for_event(event):
+                    _, cleaned_text = await self._extract_emotions_from_text(
+                        event, text_without_explicit
+                    )
+                    if cleaned_text != text_without_explicit:
+                        self._update_result_with_cleaned_text_safe(
+                            event, result, cleaned_text
+                        )
+                    logger.debug("[Stealer] 群聊已禁用表情包发送，跳过显式表情包发送")
+                    return cleaned_text != text_without_explicit
+                await self._send_explicit_emojis(
+                    event, explicit_emojis, text_without_explicit
+                )
                 logger.info(f"[Stealer] 已发送 {len(explicit_emojis)} 张显式表情包")
                 return True
 
@@ -1413,16 +1520,20 @@ class Main(Star):
                 )
 
                 # 判断是否需要更新文本
-                need_update = (cleaned_text != text_without_explicit)
+                need_update = cleaned_text != text_without_explicit
 
                 # 清理标签（修改消息链）
                 if need_update:
-                    self._update_result_with_cleaned_text_safe(event, result, cleaned_text)
+                    self._update_result_with_cleaned_text_safe(
+                        event, result, cleaned_text
+                    )
                     logger.debug("[Stealer] 被动标签模式：已清理情绪标签")
 
                 # 异步发送表情包
                 asyncio.create_task(
-                    self._async_analyze_and_send_emoji(event, cleaned_text, all_emotions)
+                    self._async_analyze_and_send_emoji(
+                        event, cleaned_text, all_emotions
+                    )
                 )
 
                 return need_update  # 返回是否修改了消息链
@@ -1436,6 +1547,9 @@ class Main(Star):
     ):
         """后台异步分析情绪并发送表情包"""
         try:
+            if not self.is_meme_enabled_for_event(event):
+                return
+
             all_emotions = []
 
             # 模式切换：LLM模式 vs 被动标签模式
@@ -1444,24 +1558,34 @@ class Main(Star):
                 logger.debug("[Stealer] LLM模式：后台使用轻量模型分析LLM回复")
 
                 # 使用智能情绪匹配器分析LLM回复的真实情绪
-                analyzed_emotion = await self.smart_emotion_matcher.analyze_and_match_emotion(
-                    event, cleaned_text, use_natural_analysis=True
+                analyzed_emotion = (
+                    await self.smart_emotion_matcher.analyze_and_match_emotion(
+                        event, cleaned_text, use_natural_analysis=True
+                    )
                 )
 
                 if analyzed_emotion:
                     all_emotions = [analyzed_emotion]
-                    logger.debug(f"[Stealer] LLM模式：轻量模型识别情绪 {analyzed_emotion}")
+                    logger.debug(
+                        f"[Stealer] LLM模式：轻量模型识别情绪 {analyzed_emotion}"
+                    )
                 else:
-                    logger.debug("[Stealer] LLM模式：轻量模型未识别到情绪，跳过表情包发送")
+                    logger.debug(
+                        "[Stealer] LLM模式：轻量模型未识别到情绪，跳过表情包发送"
+                    )
                     return
             else:
                 # 被动标签模式：依赖LLM插入的标签
                 if not extracted_emotions:
-                    logger.debug("[Stealer] 被动标签模式：未提取到LLM插入的情绪标签，跳过表情包发送")
+                    logger.debug(
+                        "[Stealer] 被动标签模式：未提取到LLM插入的情绪标签，跳过表情包发送"
+                    )
                     return
                 else:
                     all_emotions = extracted_emotions
-                    logger.debug(f"[Stealer] 被动标签模式：检测到LLM插入的情绪标签 {all_emotions}")
+                    logger.debug(
+                        f"[Stealer] 被动标签模式：检测到LLM插入的情绪标签 {all_emotions}"
+                    )
 
             # 尝试发送表情包
             # 注意：在发送前短暂等待，给 tool loop 留出设置 stealer_active_sent 标记的时间
@@ -1531,8 +1655,11 @@ class Main(Star):
         self, event: AstrMessageEvent, emotions: list[str], cleaned_text: str
     ) -> bool:
         """尝试发送表情包。"""
+        if not self.is_meme_enabled_for_event(event):
+            return False
+
         # 如果本轮已经通过 LLM 工具主动发送过表情包，则跳过自动发送（避免重复）
-    # 典型场景：LLM模式下 LLM 先调用 send_emoji_by_id 发送了一张，但后台自然语言分析仍可能触发概率发送。
+        # 典型场景：LLM模式下 LLM 先调用 send_emoji_by_id 发送了一张，但后台自然语言分析仍可能触发概率发送。
         if event.get_extra("stealer_active_sent"):
             logger.debug("[Stealer] 检测到 stealer_active_sent=True，跳过自动表情发送")
             return False
@@ -1555,11 +1682,11 @@ class Main(Star):
     def _check_send_probability(self) -> bool:
         """检查表情包发送概率。
 
-        说明：
-        - 被动标签模式（LLM 插入 &&emotion&&）
-    - LLM模式（自然语言分析 / 智能 LLM 模式）
+            说明：
+            - 被动标签模式（LLM 插入 &&emotion&&）
+        - LLM模式（自然语言分析 / 智能 LLM 模式）
 
-        以上两种模式共享同一个概率配置：self.emoji_chance。
+            以上两种模式共享同一个概率配置：self.emoji_chance。
         """
         try:
             chance = float(self.emoji_chance)
@@ -1601,7 +1728,9 @@ class Main(Star):
                 logger.debug(f"情绪'{category}'对应的图片目录为空")
                 return None
 
-            logger.debug(f"从'{category}'目录中找到 {len(files)} 张图片（{'智能选择失败，' if use_smart else ''}随机选择）")
+            logger.debug(
+                f"从'{category}'目录中找到 {len(files)} 张图片（{'智能选择失败，' if use_smart else ''}随机选择）"
+            )
 
             # 改进的随机选择：避免重复
             recent_usage_key = f"recent_usage_{category}"
@@ -1661,27 +1790,33 @@ class Main(Star):
                 if not os.path.exists(file_path):
                     continue
 
-                candidates.append({
-                    "path": file_path,
-                    "data": data,
-                    "last_used": data.get("last_used", 0),
-                    "use_count": data.get("use_count", 0),
-                    "desc": str(data.get("desc", "")).lower(),
-                    "tags": [str(t).lower() for t in data.get("tags", [])],
-                    "scenes": [str(s).lower() for s in data.get("scenes", [])],
-                })
+                candidates.append(
+                    {
+                        "path": file_path,
+                        "data": data,
+                        "last_used": data.get("last_used", 0),
+                        "use_count": data.get("use_count", 0),
+                        "desc": str(data.get("desc", "")).lower(),
+                        "tags": [str(t).lower() for t in data.get("tags", [])],
+                        "scenes": [str(s).lower() for s in data.get("scenes", [])],
+                    }
+                )
 
             if not candidates:
                 logger.debug(f"分类 '{category}' 下没有可用的表情包")
                 return None
 
             # 2. 强制避重：过滤最近使用的表情包
-            available_candidates = [c for c in candidates if c["path"] not in recent_usage]
+            available_candidates = [
+                c for c in candidates if c["path"] not in recent_usage
+            ]
 
             # 如果过滤后候选太少，只避免最近3个
             if len(available_candidates) < max(2, len(candidates) * 0.3):
                 recent_3 = recent_usage[-3:] if len(recent_usage) >= 3 else recent_usage
-                available_candidates = [c for c in candidates if c["path"] not in recent_3]
+                available_candidates = [
+                    c for c in candidates if c["path"] not in recent_3
+                ]
 
             # 如果还是没有候选，清空历史重新开始
             if not available_candidates:
@@ -1738,7 +1873,9 @@ class Main(Star):
                         match_score += 20
                     elif desc:
                         desc_words = [w for w in desc.split() if len(w) > 1]
-                        matched_words = sum(1 for word in desc_words if word in context_lower)
+                        matched_words = sum(
+                            1 for word in desc_words if word in context_lower
+                        )
                         match_score += matched_words * 5
 
                     # 标签匹配
@@ -1755,7 +1892,9 @@ class Main(Star):
                         match_score += similarity_bonus
 
                         if similarity > 0.3:  # 如果相似度较高，记录日志
-                            logger.debug(f"[相似度匹配] '{context_text[:20]}...' vs '{desc[:20]}...' = {similarity:.2f}")
+                            logger.debug(
+                                f"[相似度匹配] '{context_text[:20]}...' vs '{desc[:20]}...' = {similarity:.2f}"
+                            )
 
                 candidate["match_score"] = match_score
 
@@ -1800,9 +1939,11 @@ class Main(Star):
 
             setattr(self, recent_usage_key, recent_usage)
 
-            logger.info(f"选择表情包: 多样性={selected['diversity_score']:.1f}, "
-                       f"匹配度={selected['match_score']:.1f}, "
-                       f"综合={selected['final_score']:.1f}")
+            logger.info(
+                f"选择表情包: 多样性={selected['diversity_score']:.1f}, "
+                f"匹配度={selected['match_score']:.1f}, "
+                f"综合={selected['final_score']:.1f}"
+            )
 
             return selected_path
 
@@ -1815,8 +1956,9 @@ class Main(Star):
     ):
         """发送表情包（异步场景下直接发送新消息）"""
         try:
-            # 读取图片
-            b64 = await self.image_processor_service._file_to_base64(emoji_path)
+            if not self.is_meme_enabled_for_event(event):
+                return
+            b64 = await self.image_processor_service._file_to_gif_base64(emoji_path)
 
             # 创建结果并发送
             # 使用 event.send() 方法，传入 MessageChain 对象
@@ -1853,7 +1995,9 @@ class Main(Star):
             for path in emoji_paths:
                 try:
                     if os.path.exists(path):
-                        b64 = await self.image_processor_service._file_to_base64(path)
+                        b64 = await self.image_processor_service._file_to_gif_base64(
+                            path
+                        )
                         new_result.base64_image(b64)
                     else:
                         logger.warning(f"显式表情包文件不存在: {path}")
@@ -1890,12 +2034,24 @@ class Main(Star):
             yield result
 
     @filter.permission_type(PermissionType.ADMIN)
+    @filter.command("meme group")
+    async def group_filter(
+        self,
+        event: AstrMessageEvent,
+        list_name: str = "",
+        action: str = "",
+        group_id: str = "",
+    ):
+        async for result in self.command_handler.group_filter(
+            event, list_name, action, group_id
+        ):
+            yield result
+
+    @filter.permission_type(PermissionType.ADMIN)
     @filter.command("meme 偷")
     async def capture(self, event: AstrMessageEvent):
         async for result in self.command_handler.capture(event):
             yield result
-
-
 
     @filter.permission_type(PermissionType.ADMIN)
     @filter.command("meme natural_analysis")
@@ -1922,7 +2078,6 @@ class Main(Star):
         async for result in self.command_handler.status(event):
             yield result
 
-
     @filter.command("meme clean", priority=-100)
     async def clean(self, event: AstrMessageEvent, mode: str = ""):
         """手动清理raw目录中的原始图片文件（不影响已分类的表情包）。
@@ -1940,10 +2095,6 @@ class Main(Star):
         """手动执行容量控制，删除最旧的表情包以控制总数量。"""
         async for result in self.command_handler.enforce_capacity(event):
             yield result
-
-
-
-
 
     async def get_count(self) -> int:
         idx = await self._load_index()
@@ -2076,7 +2227,9 @@ class Main(Star):
             yield result
 
     @filter.command("meme list")
-    async def list_images(self, event: AstrMessageEvent, category: str = "", limit: str = "10"):
+    async def list_images(
+        self, event: AstrMessageEvent, category: str = "", limit: str = "10"
+    ):
         """列出表情包。用法: /meme list [分类] [数量]"""
         async for result in self.command_handler.list_images(event, category, limit):
             yield result
@@ -2087,8 +2240,6 @@ class Main(Star):
         """删除指定表情包。用法: /meme delete <序号|文件名>"""
         async for result in self.command_handler.delete_image(event, identifier):
             yield result
-
-
 
     @filter.permission_type(PermissionType.ADMIN)
     @filter.command("meme rebuild_index")
@@ -2114,7 +2265,9 @@ class Main(Star):
         if idx is None:
             idx = self.cache_service.get_cache("index_cache") or {}
 
-        return await self.image_processor_service.smart_search(query, limit=limit, idx=idx)
+        return await self.image_processor_service.smart_search(
+            query, limit=limit, idx=idx
+        )
 
     @filter.llm_tool(name="search_emoji")
     async def search_emoji(self, event: AstrMessageEvent, query: str):
@@ -2151,6 +2304,10 @@ class Main(Star):
         event.set_extra("stealer_active_sent", True)
 
         try:
+            if not self.is_meme_enabled_for_event(event):
+                yield "搜索失败：当前群聊已禁用表情包功能"
+                return
+
             if not self.cache_service.get_cache("index_cache"):
                 logger.debug("索引未加载，正在加载...")
                 await self._load_index()
@@ -2171,16 +2328,18 @@ class Main(Star):
 
             for i, (path, desc, emotion) in enumerate(results):
                 if os.path.exists(path):
-                    candidate_id = f"emoji_{i+1}"
-                    candidates.append({
-                        "id": candidate_id,
-                        "path": path,
-                        "desc": desc,
-                        "emotion": emotion
-                    })
+                    candidate_id = f"emoji_{i + 1}"
+                    candidates.append(
+                        {
+                            "id": candidate_id,
+                            "path": path,
+                            "desc": desc,
+                            "emotion": emotion,
+                        }
+                    )
                     # 截断描述，避免太长
                     short_desc = desc[:50] + "..." if len(desc) > 50 else desc
-                    result_lines.append(f"  [{i+1}] [{emotion}] {short_desc}")
+                    result_lines.append(f"  [{i + 1}] [{emotion}] {short_desc}")
 
             if not candidates:
                 yield "搜索失败：找到的表情包文件均已丢失"
@@ -2189,7 +2348,9 @@ class Main(Star):
             # 存入实例属性，供 send_emoji_by_id 使用（临时存储，不持久化）
             self._emoji_candidates = candidates
 
-            result_lines.append(f"\n请调用 send_emoji_by_id 并传入编号(1-{len(candidates)})来发送你选择的表情包。")
+            result_lines.append(
+                f"\n请调用 send_emoji_by_id 并传入编号(1-{len(candidates)})来发送你选择的表情包。"
+            )
 
             result_text = "\n".join(result_lines)
             logger.info(f"[Tool] 搜索完成，返回 {len(candidates)} 个候选")
@@ -2216,12 +2377,18 @@ class Main(Star):
         event.set_extra("stealer_active_sent", True)
 
         try:
+            if not self.is_meme_enabled_for_event(event):
+                yield "发送失败：当前群聊已禁用表情包功能"
+                return
+
             tool_text: str | None = None
             # LLM 可能会传入 2.0 / "2" 等，统一转为 int 处理
             try:
                 emoji_id = int(emoji_id)
             except Exception:
-                tool_text = f"发送失败：编号 {emoji_id} 无法解析为整数，请选择 1-5 之间的编号"
+                tool_text = (
+                    f"发送失败：编号 {emoji_id} 无法解析为整数，请选择 1-5 之间的编号"
+                )
                 yield tool_text
                 return
 
@@ -2229,7 +2396,9 @@ class Main(Star):
             candidates = getattr(self, "_emoji_candidates", None)
 
             if not candidates:
-                tool_text = "发送失败：没有可用的候选列表，请先调用 search_emoji 搜索表情包"
+                tool_text = (
+                    "发送失败：没有可用的候选列表，请先调用 search_emoji 搜索表情包"
+                )
                 yield tool_text
                 return
 
@@ -2252,12 +2421,13 @@ class Main(Star):
 
             # 发送表情包
             logger.info(f"[Tool] 发送选中的表情包: {path} (emotion={emotion})")
-            b64 = await self.image_processor_service._file_to_base64(path)
+            b64 = await self.image_processor_service._file_to_gif_base64(path)
 
             # 使用 event.send() 直接发送图片，而不是 yield
             # 这样可以确保后续的 yield tool_text 能正常返回给 LLM
             from astrbot.api.event import MessageChain
             from astrbot.api.message_components import Image as ImageComponent
+
             await event.send(MessageChain([ImageComponent.fromBase64(b64)]))
 
             # 返回成功信息给 LLM
@@ -2289,6 +2459,10 @@ class Main(Star):
         event.set_extra("stealer_active_sent", True)
 
         try:
+            if not self.is_meme_enabled_for_event(event):
+                yield "发送失败：当前群聊已禁用表情包功能"
+                return
+
             tool_text: str | None = None
             if not self.cache_service.get_cache("index_cache"):
                 await self._load_index()
@@ -2310,12 +2484,13 @@ class Main(Star):
                 return
 
             logger.info(f"[Tool] 快速发送表情包: {best_path} (emotion={best_emotion})")
-            b64 = await self.image_processor_service._file_to_base64(best_path)
+            b64 = await self.image_processor_service._file_to_gif_base64(best_path)
 
             # 使用 event.send() 直接发送图片，而不是 yield
             # 这样可以确保后续的 yield tool_text 能正常返回给 LLM
             from astrbot.api.event import MessageChain
             from astrbot.api.message_components import Image as ImageComponent
+
             await event.send(MessageChain([ImageComponent.fromBase64(b64)]))
 
             tool_text = f"已发送表情包：{best_desc} (分类：{best_emotion})"

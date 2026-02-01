@@ -38,7 +38,7 @@ class CacheService:
             "text_cache": {},  # 文本情绪分类缓存
             "index_cache": {},  # 索引缓存
             "desc_cache": {},  # 描述缓存
-            "blacklist_cache": {}, # 黑名单缓存
+            "blacklist_cache": {},  # 黑名单缓存
         }
 
         # 加载持久化的缓存
@@ -54,7 +54,9 @@ class CacheService:
                         cached_data = json.load(f)
                         if isinstance(cached_data, dict):
                             self._caches[cache_name] = cached_data
-                            logger.info(f"[load_caches] loaded {len(cached_data)} items for {cache_name} from {cache_file}")
+                            logger.info(
+                                f"[load_caches] loaded {len(cached_data)} items for {cache_name} from {cache_file}"
+                            )
                 except Exception as e:
                     logger.error(f"加载缓存文件 {cache_file} 失败: {e}")
             else:

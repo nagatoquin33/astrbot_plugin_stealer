@@ -36,6 +36,147 @@ class CommandHandler:
         self.plugin.auto_send = False
         yield event.plain_result("已关闭自动发送")
 
+    async def group_filter(
+        self,
+        event: AstrMessageEvent,
+        list_name: str = "",
+        action: str = "",
+        group_id: str = "",
+    ):
+        """管理群聊黑白名单。
+
+        用法:
+        - /meme group show
+        - /meme group wl add [群号]
+        - /meme group wl del [群号]
+        - /meme group wl clear
+        - /meme group bl add [群号]
+        - /meme group bl del [群号]
+        - /meme group bl clear
+        """
+
+        def normalize_gid(value: object) -> str:
+            s = str(value).strip()
+            return s
+
+        def get_event_group_id() -> str:
+            try:
+                gid = event.get_group_id()
+            except Exception:
+                gid = ""
+            return normalize_gid(gid)
+
+        def format_id_list(ids: list[str], *, max_items: int = 30) -> str:
+            if not ids:
+                return "（空）"
+            shown = ids[:max_items]
+            suffix = (
+                f" … 还有 {len(ids) - max_items} 个" if len(ids) > max_items else ""
+            )
+            return ", ".join(shown) + suffix
+
+        raw_list_name = (list_name or "").strip().lower()
+        raw_action = (action or "").strip().lower()
+
+        if raw_list_name in {"show", "list", "ls", "status"} and not raw_action:
+            raw_action = raw_list_name
+            raw_list_name = ""
+
+        if raw_action in {"", "help", "h"}:
+            yield event.plain_result(
+                "用法:\n"
+                "/meme group show\n"
+                "/meme group wl add [群号]\n"
+                "/meme group wl del [群号]\n"
+                "/meme group wl clear\n"
+                "/meme group bl add [群号]\n"
+                "/meme group bl del [群号]\n"
+                "/meme group bl clear\n\n"
+                "说明:\n"
+                "- whitelist( wl ) 非空时优先生效：只有在白名单内的群才会偷/发\n"
+                "- whitelist 为空时使用 blacklist( bl )：黑名单内的群不会偷/发\n"
+                "- 未提供群号时默认使用当前群号"
+            )
+            return
+
+        if raw_action in {"show", "list", "ls", "status"}:
+            cfg = getattr(self.plugin, "config_service", None)
+            if cfg is None:
+                yield event.plain_result("❌ 配置服务不可用")
+                return
+            whitelist = list(getattr(cfg, "group_whitelist", []) or [])
+            blacklist = list(getattr(cfg, "group_blacklist", []) or [])
+            mode = "白名单优先" if whitelist else ("黑名单" if blacklist else "未启用")
+            yield event.plain_result(
+                "群聊过滤状态:\n"
+                f"- 模式: {mode}\n"
+                f"- 白名单({len(whitelist)}): {format_id_list(whitelist)}\n"
+                f"- 黑名单({len(blacklist)}): {format_id_list(blacklist)}"
+            )
+            return
+
+        if raw_list_name in {"wl", "white", "whitelist", "白", "白名单"}:
+            list_key = "group_whitelist"
+            list_title = "白名单"
+        elif raw_list_name in {"bl", "black", "blacklist", "黑", "黑名单"}:
+            list_key = "group_blacklist"
+            list_title = "黑名单"
+        else:
+            yield event.plain_result(
+                "❌ 参数错误：请使用 wl 或 bl，或使用 /meme group help"
+            )
+            return
+
+        cfg = getattr(self.plugin, "config_service", None)
+        if cfg is None:
+            yield event.plain_result("❌ 配置服务不可用")
+            return
+
+        current: list[str] = list(getattr(cfg, list_key, []) or [])
+        current_set = set(current)
+
+        if raw_action in {"clear", "reset"}:
+            updated = []
+            ok = bool(cfg.update_config({list_key: updated}))
+            if ok:
+                yield event.plain_result(f"✅ 已清空群聊{list_title}")
+            else:
+                yield event.plain_result(f"❌ 清空群聊{list_title}失败")
+            return
+
+        gid = normalize_gid(group_id) if group_id else get_event_group_id()
+        if not gid:
+            yield event.plain_result("❌ 未获取到群号，请在群聊中执行或手动提供群号")
+            return
+
+        if raw_action in {"add", "a", "append", "+"}:
+            if gid in current_set:
+                yield event.plain_result(f"ℹ️ 群 {gid} 已在{list_title}中")
+                return
+            updated = current + [gid]
+            ok = bool(cfg.update_config({list_key: updated}))
+            if ok:
+                yield event.plain_result(f"✅ 已添加群 {gid} 到{list_title}")
+            else:
+                yield event.plain_result(f"❌ 添加群 {gid} 到{list_title}失败")
+            return
+
+        if raw_action in {"del", "delete", "rm", "remove", "-"}:
+            if gid not in current_set:
+                yield event.plain_result(f"ℹ️ 群 {gid} 不在{list_title}中")
+                return
+            updated = [x for x in current if x != gid]
+            ok = bool(cfg.update_config({list_key: updated}))
+            if ok:
+                yield event.plain_result(f"✅ 已从{list_title}移除群 {gid}")
+            else:
+                yield event.plain_result(f"❌ 从{list_title}移除群 {gid}失败")
+            return
+
+        yield event.plain_result(
+            "❌ 参数错误：请使用 add/del/clear/show，或 /meme group help"
+        )
+
     async def capture(self, event: AstrMessageEvent):
         window_seconds = 30
 
@@ -51,22 +192,34 @@ class CommandHandler:
     async def toggle_natural_analysis(self, event: AstrMessageEvent, action: str = ""):
         """启用/禁用自然语言情绪分析。"""
         if action not in ["on", "off"]:
-            current_status = "启用" if self.plugin.enable_natural_emotion_analysis else "禁用"
-            yield event.plain_result(f"当前自然语言分析状态: {current_status}\n用法: /meme natural_analysis <on|off>")
+            current_status = (
+                "启用" if self.plugin.enable_natural_emotion_analysis else "禁用"
+            )
+            yield event.plain_result(
+                f"当前自然语言分析状态: {current_status}\n用法: /meme natural_analysis <on|off>"
+            )
             return
 
         if action == "on":
             self.plugin.enable_natural_emotion_analysis = True
-            yield event.plain_result("✅ 已启用自然语言情绪分析（LLM模式）\n\n💡 提示：如果之前使用被动标签模式，建议使用 /reset 清除AI对话上下文，避免继续输出 &&emotion&& 标签")
+            yield event.plain_result(
+                "✅ 已启用自然语言情绪分析（LLM模式）\n\n💡 提示：如果之前使用被动标签模式，建议使用 /reset 清除AI对话上下文，避免继续输出 &&emotion&& 标签"
+            )
         else:
             self.plugin.enable_natural_emotion_analysis = False
-            yield event.plain_result("❌ 已禁用自然语言情绪分析（被动标签模式）\n\n💡 提示：LLM现在会在回复开头插入 &&emotion&& 标签，插件会自动清理这些标签")
+            yield event.plain_result(
+                "❌ 已禁用自然语言情绪分析（被动标签模式）\n\n💡 提示：LLM现在会在回复开头插入 &&emotion&& 标签，插件会自动清理这些标签"
+            )
 
     async def emotion_analysis_stats(self, event: AstrMessageEvent):
         """显示情绪分析统计信息。"""
         try:
             # 显示当前模式
-            mode = "智能模式" if self.plugin.enable_natural_emotion_analysis else "被动模式"
+            mode = (
+                "智能模式"
+                if self.plugin.enable_natural_emotion_analysis
+                else "被动模式"
+            )
 
             status_text = f"🧠 情绪分析模式: {mode}\n\n"
 
@@ -154,25 +307,30 @@ class CommandHandler:
 
             # 构建统计信息
             status_text += "📊 表情包统计:\n"
-            status_text += f"总数量: {total_count}/{self.plugin.max_reg_num} ({total_count/self.plugin.max_reg_num*100:.1f}%)\n\n"
+            status_text += f"总数量: {total_count}/{self.plugin.max_reg_num} ({total_count / self.plugin.max_reg_num * 100:.1f}%)\n\n"
 
             # 分类统计 - 只显示前5个最多的分类
             status_text += "📂 分类统计 (前5):\n"
-            sorted_categories = sorted(category_stats.items(), key=lambda x: x[1], reverse=True)
+            sorted_categories = sorted(
+                category_stats.items(), key=lambda x: x[1], reverse=True
+            )
             for category, count in sorted_categories[:5]:
                 percentage = count / total_count * 100
                 status_text += f"  {category}: {count}张 ({percentage:.1f}%)\n"
 
             if len(sorted_categories) > 5:
-                status_text += f"  ...还有{len(sorted_categories)-5}个分类\n"
+                status_text += f"  ...还有{len(sorted_categories) - 5}个分类\n"
 
             # 存储统计
-            raw_count = len(list(self.plugin.raw_dir.glob("*"))) if self.plugin.raw_dir.exists() else 0
+            raw_count = (
+                len(list(self.plugin.raw_dir.glob("*")))
+                if self.plugin.raw_dir.exists()
+                else 0
+            )
             status_text += "\n💾 存储信息:\n"
             status_text += f"  原始图片: {raw_count}张 | 分类图片: {total_count}张"
 
         yield event.plain_result(status_text)
-
 
     async def push(self, event: AstrMessageEvent, category: str = "", alias: str = ""):
         """手动推送指定分类的表情包。支持使用分类名称或别名。"""
@@ -212,7 +370,9 @@ class CommandHandler:
             yield event.plain_result("该分类暂无表情包")
             return
         pick = random.choice(files)
-        b64 = await self.plugin.image_processor_service._file_to_base64(pick.as_posix())
+        b64 = await self.plugin.image_processor_service._file_to_gif_base64(
+            pick.as_posix()
+        )
         result = event.make_result().base64_image(b64)
         yield result
 
@@ -226,7 +386,9 @@ class CommandHandler:
         try:
             # 清理所有raw文件（因为成功分类的文件已经被立即删除了）
             deleted_count = await self._force_clean_raw_directory()
-            yield event.plain_result(f"✅ raw目录清理完成，共删除 {deleted_count} 张原始图片")
+            yield event.plain_result(
+                f"✅ raw目录清理完成，共删除 {deleted_count} 张原始图片"
+            )
         except Exception as e:
             logger.error(f"手动清理失败: {e}")
             yield event.plain_result(f"❌ 清理失败: {str(e)}")
@@ -279,7 +441,9 @@ class CommandHandler:
             max_count = self.plugin.max_reg_num
 
             if current_count <= max_count:
-                yield event.plain_result(f"当前表情包数量 {current_count} 未超过限制 {max_count}，无需清理")
+                yield event.plain_result(
+                    f"当前表情包数量 {current_count} 未超过限制 {max_count}，无需清理"
+                )
                 return
 
             # 执行容量控制
@@ -298,9 +462,6 @@ class CommandHandler:
         except Exception as e:
             logger.error(f"容量控制失败: {e}")
             yield event.plain_result(f"容量控制失败: {str(e)}")
-
-
-
 
     async def migrate_legacy_data(self, event: AstrMessageEvent):
         """手动迁移旧版本数据。"""
@@ -338,7 +499,13 @@ class CommandHandler:
         self.plugin = None
         logger.debug("CommandHandler 资源已清理")
 
-    async def list_images(self, event: AstrMessageEvent, category: str = "", limit: str = "10", show_images: bool = True):
+    async def list_images(
+        self,
+        event: AstrMessageEvent,
+        category: str = "",
+        limit: str = "10",
+        show_images: bool = True,
+    ):
         """列出表情包，支持按分类筛选。
 
         Args:
@@ -374,12 +541,14 @@ class CommandHandler:
                 if not Path(img_path).exists():
                     continue
 
-                filtered_images.append({
-                    "path": img_path,
-                    "name": Path(img_path).name,
-                    "category": img_category,
-                    "created_at": img_info.get("created_at", 0)
-                })
+                filtered_images.append(
+                    {
+                        "path": img_path,
+                        "name": Path(img_path).name,
+                        "category": img_category,
+                        "created_at": img_info.get("created_at", 0),
+                    }
+                )
 
         if not filtered_images:
             if category:
@@ -402,13 +571,17 @@ class CommandHandler:
                 title += f" - 分类: {category}"
 
             # 先发送标题
-            yield event.plain_result(title + "\n💡 使用 /meme delete <序号> 删除指定图片")
+            yield event.plain_result(
+                title + "\n💡 使用 /meme delete <序号> 删除指定图片"
+            )
 
             # 逐个发送图片和信息
             for i, img in enumerate(display_images, 1):
                 try:
                     # 读取图片并转换为base64
-                    b64 = await self.plugin.image_processor_service._file_to_base64(img["path"])
+                    b64 = await self.plugin.image_processor_service._file_to_gif_base64(
+                        img["path"]
+                    )
 
                     # 构建图片信息
                     info_text = f"{i:2d}. {img['name'][:20]}{'...' if len(img['name']) > 20 else ''}\n"
@@ -426,7 +599,9 @@ class CommandHandler:
                     yield event.plain_result(info_text)
 
             if len(filtered_images) > max_limit:
-                yield event.plain_result(f"...还有 {len(filtered_images) - max_limit} 张图片")
+                yield event.plain_result(
+                    f"...还有 {len(filtered_images) - max_limit} 张图片"
+                )
         else:
             # 纯文本模式
             # 构建标题信息
@@ -476,12 +651,14 @@ class CommandHandler:
         valid_images = []
         for img_path, img_info in image_index.items():
             if isinstance(img_info, dict) and Path(img_path).exists():
-                valid_images.append({
-                    "path": img_path,
-                    "name": Path(img_path).name,
-                    "category": img_info.get("category", "未分类"),
-                    "created_at": img_info.get("created_at", 0)
-                })
+                valid_images.append(
+                    {
+                        "path": img_path,
+                        "name": Path(img_path).name,
+                        "category": img_info.get("category", "未分类"),
+                        "created_at": img_info.get("created_at", 0),
+                    }
+                )
 
         # 按创建时间排序（与list命令保持一致，最新的在前）
         valid_images.sort(key=lambda x: x["created_at"], reverse=True)
@@ -502,8 +679,7 @@ class CommandHandler:
 
         if not target_image:
             yield event.plain_result(
-                f"未找到图片: {identifier}\n"
-                "请使用 /meme list 查看可用的图片列表"
+                f"未找到图片: {identifier}\n请使用 /meme list 查看可用的图片列表"
             )
             return
 
@@ -587,6 +763,7 @@ class CommandHandler:
 
             # 尝试加载旧版本遗留文件（Legacy Data）- 独立存储，不修改 old_index
             import json
+
             legacy_metadata_count = 0
             legacy_data_map = {}  # 独立存储 legacy 数据
             possible_legacy_paths = [
@@ -622,10 +799,10 @@ class CommandHandler:
             old_name_map = {}
             for k, v in combined_index.items():
                 if isinstance(v, dict):
-                     path_obj = Path(k)
-                     old_name_map[path_obj.name] = v
-                     # 同时也用纯文件名（不带扩展名）建立映射
-                     old_name_map[path_obj.stem] = v
+                    path_obj = Path(k)
+                    old_name_map[path_obj.name] = v
+                    # 同时也用纯文件名（不带扩展名）建立映射
+                    old_name_map[path_obj.stem] = v
 
             recovered_count = 0
 
@@ -696,7 +873,9 @@ class CommandHandler:
 
             if category_stats:
                 result_msg += "\n📂 分类统计:\n"
-                for cat, count in sorted(category_stats.items(), key=lambda x: x[1], reverse=True):
+                for cat, count in sorted(
+                    category_stats.items(), key=lambda x: x[1], reverse=True
+                ):
                     result_msg += f"  {cat}: {count}张\n"
 
             yield event.plain_result(result_msg)
@@ -704,6 +883,3 @@ class CommandHandler:
         except Exception as e:
             logger.error(f"重建索引失败: {e}", exc_info=True)
             yield event.plain_result(f"❌ 重建索引失败: {str(e)}")
-
-
-

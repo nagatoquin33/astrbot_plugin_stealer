@@ -14,7 +14,9 @@ class EmotionAnalyzerService:
 
     # 3. 残缺模式：处理模型输出 &&happy| 或 &&happy\n 这种忘记闭合的情况
     # 仅匹配后跟 |、换行符或字符串结束的情况，避免误伤正常文本
-    INCOMPLETE_HEX_PATTERN = re.compile(r"(?:&&|\\&\\&)\s*([a-zA-Z0-9_]+)\s*(?:[|]|\n|$)")
+    INCOMPLETE_HEX_PATTERN = re.compile(
+        r"(?:&&|\\&\\&)\s*([a-zA-Z0-9_]+)\s*(?:[|]|\n|$)"
+    )
 
     # 单个&的匹配太容易误伤（如 URL 参数），仅作为最后的兜底，且要求情绪词必须在列表内
     SINGLE_HEX_PATTERN = re.compile(r"&([^&\s]+?)&")
@@ -96,8 +98,6 @@ class EmotionAnalyzerService:
         except Exception as e:
             logger.error(f"提取文本情绪失败: {e}")
             return [], text
-
-
 
     def update_config(self, categories=None):
         """更新配置参数"""

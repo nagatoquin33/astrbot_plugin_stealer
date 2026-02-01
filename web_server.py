@@ -40,9 +40,7 @@ class WebServer:
         self.app.router.add_get("/api/config", self.handle_get_config)
         self.app.router.add_get("/api/categories", self.handle_get_categories)
         self.app.router.add_post("/api/categories", self.handle_update_categories)
-        self.app.router.add_delete(
-            "/api/categories/{key}", self.handle_delete_category
-        )
+        self.app.router.add_delete("/api/categories/{key}", self.handle_delete_category)
         self.app.router.add_get("/api/emotions", self.handle_get_emotions)
         self.app.router.add_get("/api/health", self.handle_health_check)
 
@@ -92,16 +90,22 @@ class WebServer:
             # 显示实际监听地址
             protocol = "http"
             if self.host == "0.0.0.0":
-                logger.info(f"Emoji Manager WebUI started - listening on all interfaces (0.0.0.0:{self.port})")
+                logger.info(
+                    f"Emoji Manager WebUI started - listening on all interfaces (0.0.0.0:{self.port})"
+                )
                 logger.info(f"  → Local access: {protocol}://127.0.0.1:{self.port}")
             else:
-                logger.info(f"Emoji Manager WebUI started at {protocol}://{self.host}:{self.port}")
+                logger.info(
+                    f"Emoji Manager WebUI started at {protocol}://{self.host}:{self.port}"
+                )
 
             return True
 
         except OSError as e:
             if "Address already in use" in str(e) or e.errno == 98 or e.errno == 10048:
-                logger.error(f"WebUI 端口 {self.port} 已被占用，请更换端口或关闭占用该端口的程序")
+                logger.error(
+                    f"WebUI 端口 {self.port} 已被占用，请更换端口或关闭占用该端口的程序"
+                )
             else:
                 logger.error(f"Failed to start WebUI (OS error): {e}")
             return False
@@ -128,7 +132,7 @@ class WebServer:
                 return web.Response(
                     text="<h1>Emoji Manager WebUI</h1><p>index.html not found</p>",
                     content_type="text/html",
-                    status=404
+                    status=404,
                 )
             # 这里不直接使用 FileResponse：
             # - 在部分环境/代理下，如果传输过程中异常中断，curl 可能会报 Received HTTP/0.9
@@ -187,7 +191,7 @@ class WebServer:
                         "category": meta.get("category", "unknown"),
                         "tags": meta.get("tags", []),
                         "desc": meta.get("desc", ""),
-                        "created_at": meta.get("created_at", 0)
+                        "created_at": meta.get("created_at", 0),
                     }
 
                     # 预览增强：按需返回一些元信息（默认关闭，避免无谓 I/O）
@@ -233,7 +237,7 @@ class WebServer:
             # 排序
             if sort_order == "oldest":
                 images.sort(key=lambda x: x["created_at"], reverse=False)
-            else: # newest (default)
+            else:  # newest (default)
                 images.sort(key=lambda x: x["created_at"], reverse=True)
 
             # 分页
@@ -250,32 +254,34 @@ class WebServer:
                 for cat_info in base_categories:
                     key = cat_info["key"]
                     count = category_counts.get(key, 0)
-                    categories_list.append({
-                        "key": key,
-                        "name": cat_info["name"],
-                        "count": count
-                    })
+                    categories_list.append(
+                        {"key": key, "name": cat_info["name"], "count": count}
+                    )
 
                 # 处理未在配置中但存在的分类（如 unknown 或旧数据）
                 known_keys = {c["key"] for c in categories_list}
                 for cat_key, count in category_counts.items():
                     if cat_key not in known_keys:
-                        categories_list.append({
-                            "key": cat_key,
-                            "name": cat_key, # Fallback name
-                            "count": count
-                        })
+                        categories_list.append(
+                            {
+                                "key": cat_key,
+                                "name": cat_key,  # Fallback name
+                                "count": count,
+                            }
+                        )
 
             # 按数量倒序排序分类列表
             categories_list.sort(key=lambda x: x["count"], reverse=True)
 
-            return web.json_response({
-                "total": total,
-                "page": page,
-                "size": page_size,
-                "images": paged_images,
-                "categories": categories_list
-            })
+            return web.json_response(
+                {
+                    "total": total,
+                    "page": page,
+                    "size": page_size,
+                    "images": paged_images,
+                    "categories": categories_list,
+                }
+            )
         except Exception as e:
             logger.error(f"Error listing images: {e}")
             return web.json_response({"error": str(e)}, status=500)
@@ -309,13 +315,18 @@ class WebServer:
                 if target_path in index_copy:
                     del index_copy[target_path]
                     # 保存更新后的索引
-                    self.plugin.cache_service.set_cache("index_cache", index_copy, persist=True)
+                    self.plugin.cache_service.set_cache(
+                        "index_cache", index_copy, persist=True
+                    )
 
                 # 3. 添加到黑名单（如果请求）
                 if add_to_blacklist:
                     # 使用当前时间戳作为值
                     import time
-                    self.plugin.cache_service.set("blacklist_cache", image_hash, int(time.time()), persist=True)
+
+                    self.plugin.cache_service.set(
+                        "blacklist_cache", image_hash, int(time.time()), persist=True
+                    )
                     logger.info(f"Added image {image_hash} to blacklist")
 
                 # 失效缓存
@@ -336,7 +347,7 @@ class WebServer:
             data = await request.json()
 
             new_category = data.get("category")
-            new_tags = data.get("tags") # list or comma separated string
+            new_tags = data.get("tags")  # list or comma separated string
             new_desc = data.get("desc")
 
             index = self.plugin.cache_service.get_cache("index_cache")
@@ -384,7 +395,9 @@ class WebServer:
                     meta["category"] = new_category
                     index_copy[str(new_path)] = meta
                 else:
-                    return web.json_response({"error": "Source file not found"}, status=404)
+                    return web.json_response(
+                        {"error": "Source file not found"}, status=404
+                    )
             else:
                 # 只是更新元数据
                 index_copy[target_path] = meta
@@ -429,7 +442,9 @@ class WebServer:
                     logger.warning(f"Failed to delete {path_str}: {e}")
 
             if deleted_count > 0:
-                self.plugin.cache_service.set_cache("index_cache", index_copy, persist=True)
+                self.plugin.cache_service.set_cache(
+                    "index_cache", index_copy, persist=True
+                )
 
             return web.json_response({"success": True, "count": deleted_count})
         except Exception as e:
@@ -444,7 +459,9 @@ class WebServer:
             target_category = data.get("category")
 
             if not hashes or not target_category:
-                return web.json_response({"error": "Missing hashes or category"}, status=400)
+                return web.json_response(
+                    {"error": "Missing hashes or category"}, status=400
+                )
 
             index = self.plugin.cache_service.get_cache("index_cache")
             if not index:
@@ -484,7 +501,9 @@ class WebServer:
                     logger.warning(f"Failed to move {old_path_str}: {e}")
 
             if moved_count > 0:
-                self.plugin.cache_service.set_cache("index_cache", index_copy, persist=True)
+                self.plugin.cache_service.set_cache(
+                    "index_cache", index_copy, persist=True
+                )
 
                 # 失效缓存
                 if hasattr(self.plugin, "image_processor_service"):
@@ -501,7 +520,11 @@ class WebServer:
             index = self.plugin.cache_service.get_cache("index_cache") or {}
 
             # 计算今日新增
-            today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+            today_start = (
+                datetime.now()
+                .replace(hour=0, minute=0, second=0, microsecond=0)
+                .timestamp()
+            )
             today_count = 0
             for meta in index.values():
                 if meta.get("created_at", 0) >= today_start:
@@ -513,28 +536,24 @@ class WebServer:
                 categories_count = len(self.plugin.config_service.categories)
 
             # 前端期望的数据结构是 { stats: { total, categories, today } }
-            return web.json_response({
-                "stats": {
-                    "total": len(index),
-                    "categories": categories_count,
-                    "today": today_count
+            return web.json_response(
+                {
+                    "stats": {
+                        "total": len(index),
+                        "categories": categories_count,
+                        "today": today_count,
+                    }
                 }
-            })
+            )
         except Exception as e:
             logger.error(f"Error getting stats: {e}")
             return web.json_response({"error": str(e)}, status=500)
 
     async def handle_get_config(self, request):
-        return web.json_response({
-            "version": "1.0.0",
-            "plugin_version": "0.1.0"
-        })
+        return web.json_response({"version": "1.0.0", "plugin_version": "0.1.0"})
 
     async def handle_health_check(self, request):
-        return web.json_response({
-            "status": "ok",
-            "service": "emoji-manager-webui"
-        })
+        return web.json_response({"status": "ok", "service": "emoji-manager-webui"})
 
     async def handle_upload_image(self, request):
         try:
@@ -551,13 +570,20 @@ class WebServer:
             if not category:
                 return web.json_response({"error": "请选择情绪分类"}, status=400)
             tags_raw = data.get("tags", "").strip()
-            tags = [t.strip() for t in tags_raw.split(",") if t.strip()] if tags_raw else []
+            tags = (
+                [t.strip() for t in tags_raw.split(",") if t.strip()]
+                if tags_raw
+                else []
+            )
             desc = data.get("desc", "").strip()
 
             file_ext = Path(uploaded_file.filename).suffix.lower()
             allowed_exts = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
             if file_ext not in allowed_exts:
-                return web.json_response({"error": f"不支持的文件类型，允许: {', '.join(allowed_exts)}"}, status=400)
+                return web.json_response(
+                    {"error": f"不支持的文件类型，允许: {', '.join(allowed_exts)}"},
+                    status=400,
+                )
 
             file_content = uploaded_file.file.read()
             file_hash = hashlib.md5(file_content).hexdigest()
@@ -581,7 +607,7 @@ class WebServer:
                 "category": category,
                 "tags": tags,
                 "desc": desc,
-                "created_at": timestamp
+                "created_at": timestamp,
             }
 
             self.plugin.cache_service.set_cache("index_cache", index, persist=True)
@@ -589,17 +615,19 @@ class WebServer:
             rel_path = file_path.relative_to(self.data_dir)
             url = f"/images/{rel_path.as_posix()}"
 
-            return web.json_response({
-                "success": True,
-                "image": {
-                    "hash": file_hash,
-                    "url": url,
-                    "category": category,
-                    "tags": tags,
-                    "desc": desc,
-                    "created_at": timestamp
+            return web.json_response(
+                {
+                    "success": True,
+                    "image": {
+                        "hash": file_hash,
+                        "url": url,
+                        "category": category,
+                        "tags": tags,
+                        "desc": desc,
+                        "created_at": timestamp,
+                    },
                 }
-            })
+            )
 
         except Exception as e:
             logger.error(f"上传图片失败: {e}", exc_info=True)
@@ -638,7 +666,7 @@ class WebServer:
                     if item.get("name") or item.get("desc"):
                         category_info[key] = {
                             "name": item.get("name", ""),
-                            "desc": item.get("desc", "")
+                            "desc": item.get("desc", ""),
                         }
                 elif isinstance(item, str):
                     # 兼容旧格式（直接发送字符串）
@@ -647,7 +675,9 @@ class WebServer:
             if hasattr(self.plugin, "_update_config_from_dict"):
                 self.plugin._update_config_from_dict({"categories": category_keys})
             else:
-                self.plugin.config_service.update_config_from_dict({"categories": category_keys})
+                self.plugin.config_service.update_config_from_dict(
+                    {"categories": category_keys}
+                )
                 if hasattr(self.plugin, "categories"):
                     self.plugin.categories = category_keys
 
@@ -665,7 +695,10 @@ class WebServer:
             if not category_key:
                 return web.json_response({"error": "分类Key无效"}, status=400)
 
-            if not hasattr(self.plugin, "config_service") or not self.plugin.config_service:
+            if (
+                not hasattr(self.plugin, "config_service")
+                or not self.plugin.config_service
+            ):
                 return web.json_response({"error": "配置服务不可用"}, status=500)
 
             current_categories = list(self.plugin.config_service.categories or [])
@@ -699,9 +732,13 @@ class WebServer:
                     old_path.unlink()
                     deleted_file_count += 1
 
-                    if "hash" in meta and hasattr(self.plugin, "image_processor_service"):
+                    if "hash" in meta and hasattr(
+                        self.plugin, "image_processor_service"
+                    ):
                         try:
-                            self.plugin.image_processor_service.invalidate_cache(meta["hash"])
+                            self.plugin.image_processor_service.invalidate_cache(
+                                meta["hash"]
+                            )
                         except Exception:
                             pass
 
@@ -710,7 +747,9 @@ class WebServer:
                     logger.warning(f"删除分类文件失败: {old_path}, 错误: {e}")
 
             if index_copy != index:
-                self.plugin.cache_service.set_cache("index_cache", index_copy, persist=True)
+                self.plugin.cache_service.set_cache(
+                    "index_cache", index_copy, persist=True
+                )
 
             if self.data_dir:
                 category_dir = Path(self.data_dir) / "categories" / category_key
@@ -718,9 +757,15 @@ class WebServer:
                     base_categories_dir = (Path(self.data_dir) / "categories").resolve()
                     category_dir = (base_categories_dir / category_key).resolve()
 
-                    if category_dir.parent == base_categories_dir and category_dir.exists() and category_dir.is_dir():
+                    if (
+                        category_dir.parent == base_categories_dir
+                        and category_dir.exists()
+                        and category_dir.is_dir()
+                    ):
                         try:
-                            orphan_files = [p for p in category_dir.rglob("*") if p.is_file()]
+                            orphan_files = [
+                                p for p in category_dir.rglob("*") if p.is_file()
+                            ]
                             deleted_file_count += len(orphan_files)
                         except Exception:
                             pass
@@ -736,7 +781,9 @@ class WebServer:
             if hasattr(self.plugin, "_update_config_from_dict"):
                 self.plugin._update_config_from_dict({"categories": updated_categories})
             else:
-                self.plugin.config_service.update_config_from_dict({"categories": updated_categories})
+                self.plugin.config_service.update_config_from_dict(
+                    {"categories": updated_categories}
+                )
                 if hasattr(self.plugin, "categories"):
                     self.plugin.categories = updated_categories
 

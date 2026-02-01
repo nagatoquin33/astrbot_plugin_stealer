@@ -25,6 +25,30 @@
     },
     "hint": "调节自动发送表情包的概率，0.0=从不发送，1.0=每次都发送，建议设置在0.2-0.6之间"
   },
+  "send_emoji_as_gif": {
+    "description": "真表情包样式（GIF发送）",
+    "type": "bool",
+    "default": true,
+    "hint": "✅ 开启：发送时尽量以 GIF 输出（更接近“真表情包”样式；非 GIF 会在发送侧转换）\n❌ 关闭：按原文件格式发送（png/jpg/gif 等）\n\n内存提示：开启后在“超大图/动图/高频发送大量不同表情包”场景下，会出现较高瞬时内存占用"
+  },
+
+  "_group_filter_section": {
+    "description": "=== 群聊过滤 ===",
+    "type": "text",
+    "invisible": true
+  },
+  "group_whitelist": {
+    "description": "群聊白名单（优先生效）",
+    "type": "list",
+    "default": [],
+    "hint": "填写群号列表。白名单非空时：只有白名单内的群会偷/发。"
+  },
+  "group_blacklist": {
+    "description": "群聊黑名单",
+    "type": "list",
+    "default": [],
+    "hint": "填写群号列表。白名单为空时：黑名单内的群不会偷/发。"
+  },
   
   "_model_section": {
     "description": "=== 模型配置 ===",

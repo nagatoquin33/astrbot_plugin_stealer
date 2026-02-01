@@ -4,11 +4,17 @@ import hashlib
 import os
 import shutil
 import time
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
+
+try:
+    from PIL import Image as PILImage
+except Exception:
+    PILImage = None
 
 
 def levenshtein_distance(s1: str, s2: str) -> int:
@@ -43,16 +49,16 @@ def levenshtein_distance(s1: str, s2: str) -> int:
     for i in range(1, len(s1) + 1):
         for j in range(1, len(s2) + 1):
             # 如果当前字符相同，不需要编辑操作
-            if s1[i-1] == s2[j-1]:
+            if s1[i - 1] == s2[j - 1]:
                 cost = 0
             else:
                 cost = 1
 
             # 取三种操作（删除、插入、替换）中的最小值
             dp[i][j] = min(
-                dp[i-1][j] + 1,      # 删除操作
-                dp[i][j-1] + 1,      # 插入操作
-                dp[i-1][j-1] + cost  # 替换操作
+                dp[i - 1][j] + 1,  # 删除操作
+                dp[i][j - 1] + 1,  # 插入操作
+                dp[i - 1][j - 1] + cost,  # 替换操作
             )
 
     return dp[len(s1)][len(s2)]
@@ -83,44 +89,119 @@ class ImageProcessorService:
 
     # 有效分类集合作为类常量
     VALID_CATEGORIES = {
-        "happy",       # 开心
-        "sad",         # 难过
-        "angry",       # 生气
-        "cry",         # 大哭
-        "shy",         # 害羞
-        "surprised",   # 惊讶
-        "love",        # 喜爱
-        "fear",        # 害怕
-        "tired",       # 疲惫
-        "disgust",     # 厌恶
+        "happy",  # 开心
+        "sad",  # 难过
+        "angry",  # 生气
+        "cry",  # 大哭
+        "shy",  # 害羞
+        "surprised",  # 惊讶
+        "love",  # 喜爱
+        "fear",  # 害怕
+        "tired",  # 疲惫
+        "disgust",  # 厌恶
         "excitement",  # 兴奋
-        "embarrassed", # 尴尬
-        "sigh",        # 叹气
-        "thank",       # 感谢 (新增)
-        "confused",    # 困惑 (新增)
-        "dumb",        # 无语/呆 (新增)
-        "troll",       # 发癫/搞怪 (新增)
+        "embarrassed",  # 尴尬
+        "sigh",  # 叹气
+        "thank",  # 感谢 (新增)
+        "confused",  # 困惑 (新增)
+        "dumb",  # 无语/呆 (新增)
+        "troll",  # 发癫/搞怪 (新增)
     }
 
     # 分类迁移映射表（用于自动迁移旧版本数据）
     # 从前前版本迁移到新版本(17分类)
     CATEGORY_MIGRATION_MAP = {
-        "smirk": "troll",        # 坏笑 -> 发癫
+        "smirk": "troll",  # 坏笑 -> 发癫
     }
 
     # 常见表达 → 分类映射（帮助LLM理解如何搜索）
     EXPRESSION_TO_CATEGORY = {
-        "tired": ["困了", "累了", "好累", "疲惫", "疲倦", "想睡", "想睡觉", "困死了", "累死了", "精疲力尽", "疲惫不堪", "无精打采"],
-        "happy": ["开心", "高兴", "快乐", "愉快", "爽", "开心死了", "笑死", "乐呵呵", "美滋滋", "爽翻了"],
-        "sad": ["难过", "伤心", "悲伤", "心碎", "哭了", "泪目", "悲痛", "失落", "沮丧", "郁闷"],
-        "angry": ["生气", "愤怒", "恼火", "发火", "怒了", "气死", "气死了", "可恶", "讨厌", "抓狂"],
+        "tired": [
+            "困了",
+            "累了",
+            "好累",
+            "疲惫",
+            "疲倦",
+            "想睡",
+            "想睡觉",
+            "困死了",
+            "累死了",
+            "精疲力尽",
+            "疲惫不堪",
+            "无精打采",
+        ],
+        "happy": [
+            "开心",
+            "高兴",
+            "快乐",
+            "愉快",
+            "爽",
+            "开心死了",
+            "笑死",
+            "乐呵呵",
+            "美滋滋",
+            "爽翻了",
+        ],
+        "sad": [
+            "难过",
+            "伤心",
+            "悲伤",
+            "心碎",
+            "哭了",
+            "泪目",
+            "悲痛",
+            "失落",
+            "沮丧",
+            "郁闷",
+        ],
+        "angry": [
+            "生气",
+            "愤怒",
+            "恼火",
+            "发火",
+            "怒了",
+            "气死",
+            "气死了",
+            "可恶",
+            "讨厌",
+            "抓狂",
+        ],
         "cry": ["大哭", "哭了", "泪崩", "哭唧唧", "哭晕", "泪流满面", "哭辽"],
         "shy": ["害羞", "不好意思", "羞涩", "脸红", "羞羞", "腼腆", "娇羞"],
-        "surprised": ["惊讶", "震惊", "惊了", "啥", "卧槽", "我草", "居然", "竟然", "不可思议", "卧了个槽"],
-        "love": ["喜欢", "爱了", "爱你", "么么哒", "亲亲", "心动了", "喜欢死了", "爱死"],
+        "surprised": [
+            "惊讶",
+            "震惊",
+            "惊了",
+            "啥",
+            "卧槽",
+            "我草",
+            "居然",
+            "竟然",
+            "不可思议",
+            "卧了个槽",
+        ],
+        "love": [
+            "喜欢",
+            "爱了",
+            "爱你",
+            "么么哒",
+            "亲亲",
+            "心动了",
+            "喜欢死了",
+            "爱死",
+        ],
         "fear": ["害怕", "吓人", "恐怖", "惊悚", "瑟瑟发抖", "怕怕", "恐惧"],
         "disgust": ["恶心", "嫌弃", "厌恶", "鄙视", "呕吐", "嫌弃", "受不了", "无语"],
-        "excitement": ["兴奋", "激动", "嗨", "太棒了", "给力", "冲冲冲", "冲鸭", "激情"],
+        "excitement": [
+            "兴奋",
+            "激动",
+            "嗨",
+            "太棒了",
+            "给力",
+            "冲冲冲",
+            "冲鸭",
+            "激情",
+        ],
         "embarrassed": ["尴尬", "脚趾抠地", "社死", "丢人", "不好意思", "窘迫"],
         "sigh": ["叹气", "唉", "无奈", "叹息", "惆怅", "忧伤"],
         "thank": ["谢谢", "感谢", "感恩", "多谢", "感激", "爱你", "笔芯"],
@@ -167,6 +248,10 @@ class ImageProcessorService:
         # 缓存过期时间（秒），默认1小时
         self._cache_expire_time = getattr(
             plugin_instance, "image_cache_expire_time", 3600
+        )
+        self._gif_base64_cache: dict[str, tuple[float, str]] = {}
+        self._gif_base64_cache_expire_time = getattr(
+            plugin_instance, "gif_base64_cache_expire_time", 3600
         )
 
         # 尝试从插件实例获取提示词配置，如果不存在则使用默认值
@@ -272,7 +357,10 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
         self.combined_analysis_prompt = self.emoji_classification_prompt
 
         # 配置参数
-        if hasattr(plugin_instance, "config_service") and plugin_instance.config_service:
+        if (
+            hasattr(plugin_instance, "config_service")
+            and plugin_instance.config_service
+        ):
             self.categories = list(plugin_instance.config_service.categories or [])
         else:
             self.categories = []
@@ -312,7 +400,13 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
 
             # 迁移图片文件
             for img_file in old_dir.glob("*"):
-                if img_file.is_file() and img_file.suffix.lower() in [".jpg", ".jpeg", ".png", ".gif", ".webp"]:
+                if img_file.is_file() and img_file.suffix.lower() in [
+                    ".jpg",
+                    ".jpeg",
+                    ".png",
+                    ".gif",
+                    ".webp",
+                ]:
                     target_path = new_dir / img_file.name
                     # 避免文件名冲突
                     if target_path.exists():
@@ -334,12 +428,16 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
             if old_index.exists():
                 try:
                     import json
+
                     with open(old_index, encoding="utf-8") as f:
                         old_data = json.load(f)
 
                     # 更新分类字段
                     for item in old_data:
-                        if isinstance(item, dict) and item.get("category") == old_category:
+                        if (
+                            isinstance(item, dict)
+                            and item.get("category") == old_category
+                        ):
                             item["category"] = new_category
 
                     # 合并到新索引
@@ -373,7 +471,9 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
             category_dir.mkdir(parents=True, exist_ok=True)
 
         if migrated_files > 0 or migrated_indices > 0:
-            logger.info(f"分类迁移完成: 迁移 {migrated_files} 个文件, {migrated_indices} 条索引记录")
+            logger.info(
+                f"分类迁移完成: 迁移 {migrated_files} 个文件, {migrated_indices} 条索引记录"
+            )
 
     def update_config(
         self,
@@ -405,7 +505,9 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
         if combined_analysis_prompt is not None:
             self.combined_analysis_prompt = combined_analysis_prompt
         if emoji_classification_with_filter_prompt is not None:
-            self.emoji_classification_with_filter_prompt = emoji_classification_with_filter_prompt
+            self.emoji_classification_with_filter_prompt = (
+                emoji_classification_with_filter_prompt
+            )
 
     async def process_image(
         self,
@@ -447,8 +549,17 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
 
         # 使用简化的处理流程
         return await self._process_image_legacy(
-            event, file_path, is_temp, idx, categories, content_filtration, backend_tag, hash_val, is_platform_emoji
+            event,
+            file_path,
+            is_temp,
+            idx,
+            categories,
+            content_filtration,
+            backend_tag,
+            hash_val,
+            is_platform_emoji,
         )
+
     async def _process_image_legacy(
         self,
         event: AstrMessageEvent | None,
@@ -497,7 +608,9 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
             cached_result = self._image_cache[hash_val]
             # 检查缓存是否过期
             if time.time() - cached_result["timestamp"] < self._cache_expire_time:
-                logger.debug(f"图片分类结果已缓存: {hash_val} -> {cached_result['category']}")
+                logger.debug(
+                    f"图片分类结果已缓存: {hash_val} -> {cached_result['category']}"
+                )
 
                 category = cached_result["category"]
                 tags = cached_result["tags"]
@@ -545,13 +658,17 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
 
                         # 检查文件是否仍然存在
                         if not os.path.exists(raw_path):
-                            logger.warning(f"原始文件已不存在（缓存分支），可能被清理: {raw_path}")
+                            logger.warning(
+                                f"原始文件已不存在（缓存分支），可能被清理: {raw_path}"
+                            )
                             return False, None
 
                         try:
                             shutil.copy2(raw_path, cat_path)
                         except FileNotFoundError:
-                            logger.warning(f"复制文件时发现文件已被删除（缓存分支）: {raw_path}")
+                            logger.warning(
+                                f"复制文件时发现文件已被删除（缓存分支）: {raw_path}"
+                            )
                             return False, None
 
                     # 图片已成功分类，立即删除raw目录中的原始文件
@@ -560,7 +677,9 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                             await self.plugin._safe_remove_file(raw_path)
                             logger.debug(f"已删除已分类的原始文件（缓存）: {raw_path}")
                     except Exception as e:
-                        logger.warning(f"删除已分类的原始文件失败（缓存）: {raw_path}, 错误: {e}")
+                        logger.warning(
+                            f"删除已分类的原始文件失败（缓存）: {raw_path}, 错误: {e}"
+                        )
 
                     # 更新图片索引（使用分类文件路径）
                     idx[cat_path] = {
@@ -671,7 +790,9 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
 
                 return True, idx
             else:
-                logger.warning(f"图片分类结果无效: {category}，图片将留在raw目录等待清理")
+                logger.warning(
+                    f"图片分类结果无效: {category}，图片将留在raw目录等待清理"
+                )
 
                 # 将无法分类的结果也存入缓存，避免重复处理
                 self._image_cache[hash_val] = {
@@ -701,7 +822,9 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
         info_map = {}
         try:
             if hasattr(self.plugin, "config_service") and self.plugin.config_service:
-                info_map = getattr(self.plugin.config_service, "category_info", {}) or {}
+                info_map = (
+                    getattr(self.plugin.config_service, "category_info", {}) or {}
+                )
         except Exception:
             info_map = {}
 
@@ -804,7 +927,11 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
             # 统一的响应格式: 情绪分类|语义标签(用逗号分隔)|画面描述(一句话)
             parts = [p.strip() for p in response.strip().split("|")]
 
-            emotion_result = parts[0] if len(parts) > 0 else (self.categories[0] if self.categories else "happy")
+            emotion_result = (
+                parts[0]
+                if len(parts) > 0
+                else (self.categories[0] if self.categories else "happy")
+            )
 
             # 语义标签作为tags
             tags_str = parts[1] if len(parts) > 1 else ""
@@ -832,7 +959,9 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                     category = found_category
                 else:
                     # 如果无法提取有效分类，使用默认分类
-                    logger.warning(f"无法从响应中提取有效情绪分类: {emotion_result}，使用默认分类")
+                    logger.warning(
+                        f"无法从响应中提取有效情绪分类: {emotion_result}，使用默认分类"
+                    )
                     category = self.categories[0] if self.categories else "happy"
 
             return category, tags_result, desc_result, category, scenes_result
@@ -846,7 +975,9 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
             if "未配置视觉模型" in str(e) or "vision_model" in str(e).lower():
                 logger.error("请检查插件配置，确保已正确设置视觉模型(vision_model)参数")
             elif "429" in str(e) or "RateLimit" in str(e):
-                logger.error("视觉模型请求被限流，请稍后再试或调整vision_max_retries和vision_retry_delay配置")
+                logger.error(
+                    "视觉模型请求被限流，请稍后再试或调整vision_max_retries和vision_retry_delay配置"
+                )
             elif "图片文件不存在" in str(e):
                 logger.error("图片文件不存在，可能是文件路径错误或文件已被删除")
             else:
@@ -915,7 +1046,9 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                     # 如果配置了视觉模型，使用它；否则使用当前会话的 provider
                     if vision_provider_id:
                         chat_provider_id = vision_provider_id
-                        logger.debug(f"使用配置的视觉模型 provider_id: {chat_provider_id}")
+                        logger.debug(
+                            f"使用配置的视觉模型 provider_id: {chat_provider_id}"
+                        )
                     elif not chat_provider_id:
                         # 如果既没有配置视觉模型，也没有从事件获取到 provider，使用默认配置
                         chat_provider_id = getattr(
@@ -925,7 +1058,9 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
 
                     # 检查是否有可用的 provider
                     if not chat_provider_id:
-                        error_msg = "未配置视觉模型(vision_provider_id)，无法进行图片分析"
+                        error_msg = (
+                            "未配置视觉模型(vision_provider_id)，无法进行图片分析"
+                        )
                         logger.error(error_msg)
                         raise ValueError(error_msg)
 
@@ -937,10 +1072,7 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                     from astrbot.api.message_components import Image, Plain
 
                     # 构建消息链
-                    message_items = [
-                        Plain(text=prompt),
-                        Image.fromFileSystem(img_path)
-                    ]
+                    message_items = [Plain(text=prompt), Image.fromFileSystem(img_path)]
 
                     # 方法1：尝试使用Context的AI服务调用
                     try:
@@ -967,14 +1099,21 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                             provider_manager = self.plugin.context.provider_manager
 
                             # 检查provider是否存在
-                            if not hasattr(provider_manager, "providers") or chat_provider_id not in provider_manager.providers:
-                                raise ValueError(f"Provider {chat_provider_id} 不存在。请检查配置。")
+                            if (
+                                not hasattr(provider_manager, "providers")
+                                or chat_provider_id not in provider_manager.providers
+                            ):
+                                raise ValueError(
+                                    f"Provider {chat_provider_id} 不存在。请检查配置。"
+                                )
 
                             provider = provider_manager.providers[chat_provider_id]
 
                             # 检查provider是否支持文本聊天
                             if not hasattr(provider, "text_chat"):
-                                raise ValueError(f"Provider {chat_provider_id} 不支持文本聊天功能。")
+                                raise ValueError(
+                                    f"Provider {chat_provider_id} 不支持文本聊天功能。"
+                                )
 
                             # 创建模拟消息对象
                             class MockMessage:
@@ -989,15 +1128,16 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
 
                             # 调用provider的text_chat方法
                             result = await provider.text_chat.text_chat(
-                                message=mock_message,
-                                session_id="vision_analysis"
+                                message=mock_message, session_id="vision_analysis"
                             )
 
                             logger.debug("Provider直接调用成功")
 
                         except Exception as provider_error:
                             logger.error(f"Provider直接调用也失败: {provider_error}")
-                            raise Exception(f"所有VLM调用方法都失败。Context错误: {context_error}，Provider错误: {provider_error}")
+                            raise Exception(
+                                f"所有VLM调用方法都失败。Context错误: {context_error}，Provider错误: {provider_error}"
+                            )
 
                     if result:
                         # 处理不同类型的响应
@@ -1010,19 +1150,30 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                         elif hasattr(result, "get_plain_text"):
                             # 如果result是MessageChain，直接获取纯文本
                             llm_response_text = result.get_plain_text()
-                            logger.debug(f"从MessageChain获取的响应文本: {llm_response_text}")
+                            logger.debug(
+                                f"从MessageChain获取的响应文本: {llm_response_text}"
+                            )
                         elif hasattr(result, "result_chain") and result.result_chain:
                             # 如果是旧API返回的结果格式
                             llm_response_text = result.result_chain.get_plain_text()
-                            logger.debug(f"从result_chain获取的响应文本: {llm_response_text}")
-                        elif hasattr(result, "completion_text") and result.completion_text:
+                            logger.debug(
+                                f"从result_chain获取的响应文本: {llm_response_text}"
+                            )
+                        elif (
+                            hasattr(result, "completion_text")
+                            and result.completion_text
+                        ):
                             # 从completion_text获取
                             llm_response_text = result.completion_text
-                            logger.debug(f"从completion_text获取的响应文本: {llm_response_text}")
+                            logger.debug(
+                                f"从completion_text获取的响应文本: {llm_response_text}"
+                            )
                         else:
                             # 兜底处理：尝试转换为字符串
                             llm_response_text = str(result)
-                            logger.debug(f"使用字符串转换获取的响应文本: {llm_response_text}")
+                            logger.debug(
+                                f"使用字符串转换获取的响应文本: {llm_response_text}"
+                            )
 
                         logger.debug(f"最终处理的LLM响应: {llm_response_text}")
                         return llm_response_text.strip()
@@ -1035,16 +1186,22 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                         or "exceeded your current request limit" in error_msg
                     )
                     if is_rate_limit:
-                        logger.warning(f"视觉模型请求被限流，正在重试 ({attempt + 1}/{max_retries})")
+                        logger.warning(
+                            f"视觉模型请求被限流，正在重试 ({attempt + 1}/{max_retries})"
+                        )
                     else:
-                        logger.error(f"视觉模型调用失败 (尝试 {attempt + 1}/{max_retries}): {e}")
+                        logger.error(
+                            f"视觉模型调用失败 (尝试 {attempt + 1}/{max_retries}): {e}"
+                        )
 
                     # 指数退避策略：每次重试延迟时间翻倍
                     if attempt < max_retries - 1:
                         await asyncio.sleep(retry_delay * (2**attempt))
                     else:
                         # 最后一次尝试失败，抛出异常并保留原始异常上下文
-                        raise Exception(f"视觉模型调用失败（已重试{max_retries}次）: {e}") from e
+                        raise Exception(
+                            f"视觉模型调用失败（已重试{max_retries}次）: {e}"
+                        ) from e
 
             # 达到最大重试次数（理论上不会到达这里，因为最后一次尝试会抛出异常）
             error_msg = f"视觉模型调用失败，达到最大重试次数（{max_retries}次）"
@@ -1092,6 +1249,7 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
         if hasattr(self, "_image_cache"):
             self._image_cache.clear()
         logger.debug("ImageProcessorService 资源已清理")
+
     async def _file_to_base64(self, file_path: str) -> str:
         """将文件转换为base64编码。
 
@@ -1107,6 +1265,67 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
         except Exception as e:
             logger.error(f"文件转换为base64失败: {e}")
             return ""
+
+    async def _file_to_gif_base64(self, file_path: str) -> str:
+        """将文件转换为 GIF 格式的 base64 编码（用于发送侧强制 GIF）。"""
+        if not getattr(self.plugin, "send_emoji_as_gif", True):
+            return await self._file_to_base64(file_path)
+        try:
+            stat_mtime = os.path.getmtime(file_path)
+        except Exception:
+            stat_mtime = None
+
+        cache_key = f"{file_path}:{stat_mtime}"
+        now = time.time()
+        cached = self._gif_base64_cache.get(cache_key)
+        if cached is not None:
+            cached_at, cached_b64 = cached
+            if now - cached_at <= self._gif_base64_cache_expire_time and cached_b64:
+                return cached_b64
+
+        try:
+            if file_path.lower().endswith(".gif"):
+                b64 = await self._file_to_base64(file_path)
+                if b64:
+                    self._gif_base64_cache[cache_key] = (now, b64)
+                return b64
+
+            if PILImage is None:
+                return await self._file_to_base64(file_path)
+
+            with PILImage.open(file_path) as im:
+                buf = BytesIO()
+                is_animated = bool(getattr(im, "is_animated", False))
+                n_frames = int(getattr(im, "n_frames", 1) or 1)
+
+                if is_animated and n_frames > 1:
+                    frames = []
+                    durations = []
+                    for frame_idx in range(n_frames):
+                        im.seek(frame_idx)
+                        frame = im.convert("RGBA")
+                        frames.append(frame)
+                        durations.append(int(im.info.get("duration", 100) or 100))
+                    frames[0].save(
+                        buf,
+                        format="GIF",
+                        save_all=True,
+                        append_images=frames[1:],
+                        duration=durations,
+                        loop=0,
+                        disposal=2,
+                    )
+                else:
+                    frame = im.convert("RGBA")
+                    frame.save(buf, format="GIF")
+
+                b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+                if b64:
+                    self._gif_base64_cache[cache_key] = (now, b64)
+                return b64
+        except Exception as e:
+            logger.error(f"文件转换为GIF base64失败: {e}")
+            return await self._file_to_base64(file_path)
 
     async def _store_image(self, src_path: str, category: str) -> str:
         """将图片存储到指定分类目录。
@@ -1145,7 +1364,9 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
             logger.error(f"存储图片失败: {e}")
             return src_path
 
-    async def search_images(self, query: str, limit: int = 1, idx: dict | None = None) -> list[tuple[str, str, str]]:
+    async def search_images(
+        self, query: str, limit: int = 1, idx: dict | None = None
+    ) -> list[tuple[str, str, str]]:
         """根据查询词搜索图片。
 
         Args:
@@ -1234,7 +1455,9 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                     has_fuzzy = False
                     for target in [category, desc] + tags[:2]:
                         if len(target) > 1 and len(query_lower) > 1:
-                            sim = calculate_similarity(query_lower[:MAX_STR_LENGTH], target[:MAX_STR_LENGTH])
+                            sim = calculate_similarity(
+                                query_lower[:MAX_STR_LENGTH], target[:MAX_STR_LENGTH]
+                            )
                             if sim >= 0.65:
                                 score = max(score, int(4 + (sim - 0.65) * 12))
                                 has_fuzzy = True
@@ -1257,7 +1480,9 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                 keyword_map = self._get_keyword_map()
                 if query in keyword_map:
                     category = keyword_map[query]
-                    logger.debug(f"未找到直接匹配，尝试映射查询 '{query}' -> 分类 '{category}'")
+                    logger.debug(
+                        f"未找到直接匹配，尝试映射查询 '{query}' -> 分类 '{category}'"
+                    )
                     for file_path, data in idx.items():
                         if not isinstance(data, dict):
                             continue
@@ -1327,8 +1552,9 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                 best_match = category
 
         if best_match:
-            logger.info(f"[smart_search] 模糊匹配: '{query}' -> '{best_match}' (相似度: {best_score:.2f})")
+            logger.info(
+                f"[smart_search] 模糊匹配: '{query}' -> '{best_match}' (相似度: {best_score:.2f})"
+            )
             results = await self.search_images(best_match, limit=limit, idx=idx)
 
         return results
-

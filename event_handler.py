@@ -86,7 +86,14 @@ class EventHandler:
         logger.warning(f"未知的图片处理模式: {mode}，跳过处理")
         return False
 
-    def _check_platform_emoji_metadata(self, img: Image, event: AstrMessageEvent | None = None) -> bool:
+    def _check_platform_emoji_metadata(
+        self,
+        img: Image,
+        event: AstrMessageEvent | None = None,
+        img_index: int | None = None,
+        image_segments: list[dict] | None = None,
+        image_file_map: dict[str, dict] | None = None,
+    ) -> bool:
         """检查图片元信息，判断是否为平台标记的表情包。
 
         支持的平台特征：
@@ -101,28 +108,116 @@ class EventHandler:
             bool: 是否为平台标记的表情包
         """
         try:
-            # 方式0: 从原始事件中查找 sub_type (最可靠的方法)
-            if event and hasattr(event, "message_obj") and hasattr(event.message_obj, "raw_message"):
-                raw_event = event.message_obj.raw_message
-                if hasattr(raw_event, "message") and isinstance(raw_event.message, list):
-                    # 遍历原始消息段，找到当前图片对应的消息段
-                    for msg_segment in raw_event.message:
-                        if isinstance(msg_segment, dict) and msg_segment.get("type") == "image":
-                            data = msg_segment.get("data", {})
-                            sub_type = data.get("sub_type")
-                            if sub_type == 1 or sub_type == "1":
-                                logger.debug(f"检测到表情包标记: sub_type={sub_type} (从原始事件)")
-                                return True
 
-                            # 同时检查 summary 字段
-                            summary = data.get("summary", "")
-                            if summary and ("表情" in summary or "emoji" in summary.lower() or "sticker" in summary.lower()):
-                                logger.debug(f"检测到表情包标记: summary='{summary}' (从原始事件)")
-                                return True
+            def normalize_str(value: object) -> str:
+                if value is None:
+                    return ""
+                try:
+                    s = str(value)
+                except Exception:
+                    return ""
+                s = s.strip()
+                if s.startswith("`") and s.endswith("`") and len(s) >= 2:
+                    s = s[1:-1].strip()
+                return s
+
+            def is_emoji_summary(summary: object) -> bool:
+                s = normalize_str(summary)
+                if not s:
+                    return False
+                s_lower = s.lower()
+                return "表情" in s or "emoji" in s_lower or "sticker" in s_lower
+
+            def is_sub_type_emoji(sub_type: object) -> bool:
+                if sub_type is None:
+                    return False
+                if sub_type == 1 or sub_type == "1":
+                    return True
+                try:
+                    return int(sub_type) == 1
+                except Exception:
+                    return False
+
+            # 方式0: 从原始事件中查找 sub_type (最可靠的方法)
+            if (
+                image_segments is None
+                and event
+                and hasattr(event, "message_obj")
+                and hasattr(event.message_obj, "raw_message")
+            ):
+                raw_event = event.message_obj.raw_message
+                if hasattr(raw_event, "message") and isinstance(
+                    raw_event.message, list
+                ):
+                    image_segments = [
+                        seg
+                        for seg in raw_event.message
+                        if isinstance(seg, dict) and seg.get("type") == "image"
+                    ]
+
+            if image_segments:
+                matched_data: dict[str, object] | None = None
+
+                if (
+                    img_index is not None
+                    and 0 <= img_index < len(image_segments)
+                    and isinstance(image_segments[img_index], dict)
+                ):
+                    matched_data = image_segments[img_index].get("data", {}) or {}
+                else:
+                    img_file = normalize_str(getattr(img, "file", ""))
+                    img_url = normalize_str(getattr(img, "url", ""))
+                    img_file_unique = normalize_str(getattr(img, "file_unique", ""))
+
+                    if image_file_map and img_file:
+                        matched_data = image_file_map.get(img_file)
+                        if matched_data is None and img_file_unique:
+                            matched_data = image_file_map.get(img_file_unique)
+
+                    if matched_data is None:
+                        for seg in image_segments:
+                            if not isinstance(seg, dict):
+                                continue
+                            data = seg.get("data", {}) or {}
+                            if not isinstance(data, dict):
+                                continue
+                            seg_file = normalize_str(data.get("file", ""))
+                            seg_url = normalize_str(data.get("url", ""))
+
+                            if seg_file and (
+                                seg_file == img_file
+                                or (img_file_unique and seg_file == img_file_unique)
+                                or (img_url and seg_file in img_url)
+                                or (img_file and seg_file in img_file)
+                            ):
+                                matched_data = data
+                                break
+
+                            if seg_url and (
+                                (img_url and seg_url == img_url)
+                                or (img_file and seg_url in img_file)
+                            ):
+                                matched_data = data
+                                break
+
+                if matched_data is not None:
+                    sub_type = matched_data.get("sub_type")
+                    if is_sub_type_emoji(sub_type):
+                        logger.debug(
+                            f"检测到表情包标记: sub_type={sub_type} (从原始事件)"
+                        )
+                        return True
+
+                    summary = matched_data.get("summary", "")
+                    if is_emoji_summary(summary):
+                        logger.debug(
+                            f"检测到表情包标记: summary='{summary}' (从原始事件)"
+                        )
+                        return True
 
             # 方式1: 检查 Image 对象的 subType 字段
             if hasattr(img, "subType") and img.subType:
-                if img.subType == 1 or img.subType == "1":
+                if is_sub_type_emoji(img.subType):
                     logger.debug(f"检测到表情包标记: subType={img.subType}")
                     return True
 
@@ -130,8 +225,10 @@ class EventHandler:
             if hasattr(img, "__dict__"):
                 img_dict = img.__dict__
                 sub_type_underscore = img_dict.get("sub_type")
-                if sub_type_underscore == 1 or sub_type_underscore == "1":
-                    logger.debug(f"检测到表情包标记: sub_type={sub_type_underscore} (从__dict__)")
+                if is_sub_type_emoji(sub_type_underscore):
+                    logger.debug(
+                        f"检测到表情包标记: sub_type={sub_type_underscore} (从__dict__)"
+                    )
                     return True
 
             # 方式3: 通过 toDict() 检查
@@ -141,16 +238,22 @@ class EventHandler:
                     data = raw_data["data"]
 
                     sub_type = data.get("sub_type") or data.get("subType")
-                    if sub_type == 1 or sub_type == "1":
-                        logger.debug(f"检测到表情包标记: sub_type={sub_type} (从toDict)")
+                    if is_sub_type_emoji(sub_type):
+                        logger.debug(
+                            f"检测到表情包标记: sub_type={sub_type} (从toDict)"
+                        )
                         return True
 
                     summary = data.get("summary", "")
-                    if summary and ("表情" in summary or "emoji" in summary.lower() or "sticker" in summary.lower()):
+                    if is_emoji_summary(summary):
                         logger.debug(f"检测到表情包标记: summary='{summary}'")
                         return True
 
-                    img_type = data.get("type") or data.get("imageType") or data.get("image_type")
+                    img_type = (
+                        data.get("type")
+                        or data.get("imageType")
+                        or data.get("image_type")
+                    )
                     if img_type in ["emoji", "sticker", "face", "meme"]:
                         logger.debug(f"检测到表情包标记: type='{img_type}'")
                         return True
@@ -173,11 +276,20 @@ class EventHandler:
 
         # 检查event对象是否正确
         if not hasattr(event, "get_messages"):
-            logger.error(f"Event object does not have get_messages method. Type: {type(event)}")
+            logger.error(
+                f"Event object does not have get_messages method. Type: {type(event)}"
+            )
             logger.error(f"Event attributes: {dir(event)}")
             return
 
         plugin_instance = self.plugin
+        try:
+            if hasattr(
+                plugin_instance, "is_meme_enabled_for_event"
+            ) and not plugin_instance.is_meme_enabled_for_event(event):
+                return
+        except Exception:
+            return
 
         force_entry = None
         if hasattr(plugin_instance, "get_force_capture_entry"):
@@ -193,9 +305,7 @@ class EventHandler:
 
         # 收集所有图片组件
         imgs: list[Image] = [
-            comp
-            for comp in event.get_messages()
-            if isinstance(comp, Image)
+            comp for comp in event.get_messages() if isinstance(comp, Image)
         ]
 
         # 如果没有图片，直接返回
@@ -207,14 +317,18 @@ class EventHandler:
             try:
                 temp_path: str = await img.convert_to_file_path()
                 if not os.path.exists(temp_path):
-                    await event.send(MessageChain([Plain(text="❌ 收录失败：图片临时文件不存在")]))
+                    await event.send(
+                        MessageChain([Plain(text="❌ 收录失败：图片临时文件不存在")])
+                    )
                 else:
                     success, idx = await plugin_instance._process_image(
                         event, temp_path, is_temp=True, is_platform_emoji=True
                     )
                     if success and idx:
                         await plugin_instance._save_index(idx)
-                        await event.send(MessageChain([Plain(text="✅ 已收录并自动分类入库")]))
+                        await event.send(
+                            MessageChain([Plain(text="✅ 已收录并自动分类入库")])
+                        )
                     else:
                         await event.send(
                             MessageChain(
@@ -242,10 +356,53 @@ class EventHandler:
 
         logger.debug(f"开始处理 {len(imgs)} 张图片")
 
-        for img in imgs:
+        raw_image_segments: list[dict] = []
+        raw_image_file_map: dict[str, dict] = {}
+        try:
+            raw_event = getattr(
+                getattr(event, "message_obj", None), "raw_message", None
+            )
+            raw_message = getattr(raw_event, "message", None)
+            if isinstance(raw_message, list):
+                raw_image_segments = [
+                    seg
+                    for seg in raw_message
+                    if isinstance(seg, dict) and seg.get("type") == "image"
+                ]
+
+                def normalize_str(value: object) -> str:
+                    if value is None:
+                        return ""
+                    try:
+                        s = str(value)
+                    except Exception:
+                        return ""
+                    s = s.strip()
+                    if s.startswith("`") and s.endswith("`") and len(s) >= 2:
+                        s = s[1:-1].strip()
+                    return s
+
+                for seg in raw_image_segments:
+                    data = seg.get("data", {}) or {}
+                    if not isinstance(data, dict):
+                        continue
+                    seg_file = normalize_str(data.get("file", ""))
+                    if seg_file and seg_file not in raw_image_file_map:
+                        raw_image_file_map[seg_file] = data
+        except Exception:
+            raw_image_segments = []
+            raw_image_file_map = {}
+
+        for i, img in enumerate(imgs):
             try:
                 # 检查图片元信息，只处理平台标记的表情包
-                is_platform_emoji = self._check_platform_emoji_metadata(img, event)
+                is_platform_emoji = self._check_platform_emoji_metadata(
+                    img,
+                    event,
+                    img_index=i,
+                    image_segments=raw_image_segments,
+                    image_file_map=raw_image_file_map,
+                )
 
                 if not is_platform_emoji:
                     # 获取 subType 值用于调试日志
@@ -314,13 +471,17 @@ class EventHandler:
                         for file_path in files:
                             try:
                                 if file_path.is_file():
-                                    if await self.plugin._safe_remove_file(str(file_path)):
+                                    if await self.plugin._safe_remove_file(
+                                        str(file_path)
+                                    ):
                                         deleted_count += 1
                                         logger.debug(f"已删除raw文件: {file_path}")
                                     else:
                                         logger.error(f"删除raw文件失败: {file_path}")
                             except Exception as e:
-                                logger.error(f"处理raw文件时发生错误: {file_path}, 错误: {e}")
+                                logger.error(
+                                    f"处理raw文件时发生错误: {file_path}, 错误: {e}"
+                                )
 
                         logger.info(f"清理raw目录完成，共删除 {deleted_count} 个文件")
                         total_deleted += deleted_count
@@ -373,7 +534,9 @@ class EventHandler:
             remove_count = max(0, remove_count)  # 确保不为负数
             safe_remove_count = min(remove_count, len(image_items))  # 确保不超出范围
 
-            logger.info(f"容量控制: 当前 {len(image_items)} 个，上限 {max_reg}，将删除 {safe_remove_count} 个最旧的")
+            logger.info(
+                f"容量控制: 当前 {len(image_items)} 个，上限 {max_reg}，将删除 {safe_remove_count} 个最旧的"
+            )
 
             for i in range(safe_remove_count):
                 remove_path = image_items[i][0]
@@ -405,7 +568,9 @@ class EventHandler:
                 if remove_path in image_index:
                     del image_index[remove_path]
 
-            logger.info(f"容量控制完成，删除了 {remove_count} 个表情包，当前数量: {len(image_index)}")
+            logger.info(
+                f"容量控制完成，删除了 {remove_count} 个表情包，当前数量: {len(image_index)}"
+            )
         except ValueError as e:
             logger.error(f"执行容量控制时配置值错误: {e}")
         except (FileNotFoundError, PermissionError) as e:

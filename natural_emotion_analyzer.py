@@ -2,6 +2,7 @@
 自然语言情绪分析器
 使用小模型对LLM回复进行语义分析，识别隐含情绪
 """
+
 import re
 import time
 
@@ -25,7 +26,7 @@ class NaturalEmotionAnalyzer:
             "total_analyses": 0,
             "cache_hits": 0,
             "avg_response_time": 0,
-            "successful_analyses": 0
+            "successful_analyses": 0,
         }
 
         # 小模型提示词模板
@@ -51,15 +52,17 @@ class NaturalEmotionAnalyzer:
             "thank": "感谢、感激",
             "dumb": "无语、傻眼",
             "troll": "调皮、搞怪",
-            "cry": "哭泣、流泪"
+            "cry": "哭泣、流泪",
         }
 
         # 构建分类说明（单行格式，更紧凑）
-        categories_text = ", ".join([
-            f"{key}({desc})"
-            for key, desc in categories_desc.items()
-            if key in self.categories
-        ])
+        categories_text = ", ".join(
+            [
+                f"{key}({desc})"
+                for key, desc in categories_desc.items()
+                if key in self.categories
+            ]
+        )
 
         # 精简提示词，移除冗余说明和大部分示例
         return f"""分析文本情绪，从以下分类选择最匹配的：{categories_text}
@@ -107,7 +110,9 @@ class NaturalEmotionAnalyzer:
         # 缓存结果
         if emotion:
             self._cache_result(cache_key, emotion)
-            logger.info(f"[情绪分析] {cleaned_text[:30]}... → {emotion} ({response_time:.0f}ms)")
+            logger.info(
+                f"[情绪分析] {cleaned_text[:30]}... → {emotion} ({response_time:.0f}ms)"
+            )
         else:
             logger.warning(f"[情绪分析] 分析失败: {cleaned_text[:30]}...")
 
@@ -129,7 +134,7 @@ class NaturalEmotionAnalyzer:
             response = await self.plugin.context.llm_generate(
                 chat_provider_id=provider_id,
                 prompt=prompt,
-                max_tokens=15  # 只需返回一个单词，大幅降低生成时间
+                max_tokens=15,  # 只需返回一个单词，大幅降低生成时间
             )
 
             if not response or not response.completion_text:
@@ -148,7 +153,10 @@ class NaturalEmotionAnalyzer:
     async def _get_text_provider(self, event: AstrMessageEvent) -> str | None:
         """获取文本模型提供商ID"""
         # 1. 优先使用插件配置的情绪分析专用模型
-        if hasattr(self.plugin, "emotion_analysis_provider_id") and self.plugin.emotion_analysis_provider_id:
+        if (
+            hasattr(self.plugin, "emotion_analysis_provider_id")
+            and self.plugin.emotion_analysis_provider_id
+        ):
             return self.plugin.emotion_analysis_provider_id
 
         # 2. 使用插件配置的文本模型
@@ -157,7 +165,9 @@ class NaturalEmotionAnalyzer:
 
         # 3. 使用当前会话的模型
         try:
-            return await self.plugin.context.get_current_chat_provider_id(event.unified_msg_origin)
+            return await self.plugin.context.get_current_chat_provider_id(
+                event.unified_msg_origin
+            )
         except Exception:
             return None
 
@@ -205,6 +215,7 @@ class NaturalEmotionAnalyzer:
     def _get_cache_key(self, text: str) -> str:
         """生成缓存键"""
         import hashlib
+
         return hashlib.md5(text.encode()).hexdigest()[:16]
 
     def _cache_result(self, cache_key: str, emotion: str):
@@ -213,7 +224,7 @@ class NaturalEmotionAnalyzer:
         if len(self.analysis_cache) >= self.cache_max_size:
             # 移除最旧的一半缓存
             items = list(self.analysis_cache.items())
-            self.analysis_cache = dict(items[len(items)//2:])
+            self.analysis_cache = dict(items[len(items) // 2 :])
 
         self.analysis_cache[cache_key] = emotion
 
@@ -222,7 +233,9 @@ class NaturalEmotionAnalyzer:
         # 更新平均响应时间
         total = self.stats["total_analyses"]
         current_avg = self.stats["avg_response_time"]
-        self.stats["avg_response_time"] = (current_avg * (total - 1) + response_time) / total
+        self.stats["avg_response_time"] = (
+            current_avg * (total - 1) + response_time
+        ) / total
 
         if success:
             self.stats["successful_analyses"] += 1
@@ -241,7 +254,7 @@ class NaturalEmotionAnalyzer:
             "cache_hit_rate": f"{cache_hit_rate:.1f}%",
             "success_rate": f"{success_rate:.1f}%",
             "avg_response_time": f"{self.stats['avg_response_time']:.0f}ms",
-            "cache_size": len(self.analysis_cache)
+            "cache_size": len(self.analysis_cache),
         }
 
     def clear_cache(self):
@@ -257,8 +270,9 @@ class SmartEmotionMatcher:
         self.plugin = plugin_instance
         self.natural_analyzer = NaturalEmotionAnalyzer(plugin_instance)
 
-    async def analyze_and_match_emotion(self, event: AstrMessageEvent, text: str,
-                                      use_natural_analysis: bool = True) -> str | None:
+    async def analyze_and_match_emotion(
+        self, event: AstrMessageEvent, text: str, use_natural_analysis: bool = True
+    ) -> str | None:
         """分析并匹配情绪
 
         Args:
@@ -273,7 +287,9 @@ class SmartEmotionMatcher:
             return None
 
         # 使用自然语言分析（主要方案）
-        if use_natural_analysis and getattr(self.plugin, "enable_natural_emotion_analysis", True):
+        if use_natural_analysis and getattr(
+            self.plugin, "enable_natural_emotion_analysis", True
+        ):
             emotion = await self.natural_analyzer.analyze_emotion(event, text)
             if emotion:
                 return emotion

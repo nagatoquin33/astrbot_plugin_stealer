@@ -202,27 +202,63 @@ class ConfigService:
 
     def _apply_config(self):
         """将配置字典应用到实例属性。"""
+
+        def normalize_id_list(value: object) -> list[str]:
+            if not isinstance(value, list):
+                return []
+            normalized: list[str] = []
+            seen: set[str] = set()
+            for item in value:
+                if item is None:
+                    continue
+                s = str(item).strip()
+                if not s or s in seen:
+                    continue
+                normalized.append(s)
+                seen.add(s)
+            return normalized
+
         # 基础功能
         self.steal_emoji = self._config.get("steal_emoji", True)
         self.auto_send = self._config.get("auto_send", True)
         self.emoji_chance = self._config.get("emoji_chance", 0.4)
         self.smart_emoji_selection = self._config.get("smart_emoji_selection", True)
+        self.send_emoji_as_gif = self._config.get("send_emoji_as_gif", True)
+
+        self.group_blacklist = normalize_id_list(
+            self._config.get("group_blacklist", [])
+        )
+        self.group_whitelist = normalize_id_list(
+            self._config.get("group_whitelist", [])
+        )
 
         # 模型配置
         self.vision_provider_id = self._config.get("vision_provider_id")
         self.content_filtration = self._config.get("content_filtration", False)
-        self.enable_natural_emotion_analysis = self._config.get("enable_natural_emotion_analysis", True)
-        self.emotion_analysis_provider_id = self._config.get("emotion_analysis_provider_id")
+        self.enable_natural_emotion_analysis = self._config.get(
+            "enable_natural_emotion_analysis", True
+        )
+        self.emotion_analysis_provider_id = self._config.get(
+            "emotion_analysis_provider_id"
+        )
 
         # 存储管理
         self.max_reg_num = self._config.get("max_reg_num", 100)
         self.do_replace = self._config.get("do_replace", True)
 
         # 节流控制
-        self.image_processing_mode = self._config.get("image_processing_mode", "probability")
-        self.image_processing_probability = self._config.get("image_processing_probability", 0.3)
-        self.image_processing_interval = self._config.get("image_processing_interval", 60)
-        self.image_processing_cooldown = self._config.get("image_processing_cooldown", 30)
+        self.image_processing_mode = self._config.get(
+            "image_processing_mode", "probability"
+        )
+        self.image_processing_probability = self._config.get(
+            "image_processing_probability", 0.3
+        )
+        self.image_processing_interval = self._config.get(
+            "image_processing_interval", 60
+        )
+        self.image_processing_cooldown = self._config.get(
+            "image_processing_cooldown", 30
+        )
 
         # WebUI 配置
         self.webui_enabled = self._config.get("webui_enabled", True)
@@ -233,14 +269,44 @@ class ConfigService:
         self.enable_raw_cleanup = self._config.get("enable_raw_cleanup", True)
         self.raw_cleanup_interval = self._config.get("raw_cleanup_interval", 30)
         self.enable_capacity_control = self._config.get("enable_capacity_control", True)
-        self.capacity_control_interval = self._config.get("capacity_control_interval", 60)
+        self.capacity_control_interval = self._config.get(
+            "capacity_control_interval", 60
+        )
         self.raw_retention_minutes = self._config.get("raw_retention_minutes", 30)
 
         self.categories = [
-            "happy", "sad", "angry", "shy", "surprised", "troll",
-            "cry", "confused", "embarrassed", "love", "disgust",
-            "fear", "excitement", "tired", "sigh", "thank", "dumb",
+            "happy",
+            "sad",
+            "angry",
+            "shy",
+            "surprised",
+            "troll",
+            "cry",
+            "confused",
+            "embarrassed",
+            "love",
+            "disgust",
+            "fear",
+            "excitement",
+            "tired",
+            "sigh",
+            "thank",
+            "dumb",
         ]
+
+    def is_group_allowed(self, group_id: str | None) -> bool:
+        if not group_id:
+            return True
+        gid = str(group_id).strip()
+        if not gid:
+            return True
+        whitelist = getattr(self, "group_whitelist", []) or []
+        blacklist = getattr(self, "group_blacklist", []) or []
+        if whitelist:
+            return gid in whitelist
+        if blacklist:
+            return gid not in blacklist
+        return True
 
     def _load_aliases(self):
         """加载别名文件。"""
@@ -298,7 +364,9 @@ class ConfigService:
 
         try:
             categories = None
-            if "categories" in config_dict and isinstance(config_dict["categories"], list):
+            if "categories" in config_dict and isinstance(
+                config_dict["categories"], list
+            ):
                 seen = set()
                 unique_categories = []
                 for item in config_dict["categories"]:
@@ -355,11 +423,13 @@ class ConfigService:
         result = []
         for cat_key in self.categories:
             info = self.category_info.get(cat_key, {"name": cat_key, "desc": ""})
-            result.append({
-                "key": cat_key,
-                "name": info.get("name", cat_key),
-                "desc": info.get("desc", "")
-            })
+            result.append(
+                {
+                    "key": cat_key,
+                    "name": info.get("name", cat_key),
+                    "desc": info.get("desc", ""),
+                }
+            )
         return result
 
     def cleanup(self):
