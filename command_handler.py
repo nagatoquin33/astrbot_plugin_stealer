@@ -883,3 +883,182 @@ class CommandHandler:
         except Exception as e:
             logger.error(f"重建索引失败: {e}", exc_info=True)
             yield event.plain_result(f"❌ 重建索引失败: {str(e)}")
+
+    async def get_emoji_count(self) -> int:
+        """获取表情包总数。
+
+        Returns:
+            int: 表情包数量
+        """
+        idx = await self.plugin.cache_service.load_index()
+        return len(idx)
+
+    async def get_emoji_info(self) -> dict:
+        """获取表情包信息。
+
+        Returns:
+            dict: 包含当前数量、最大数量等信息
+        """
+        idx = await self.plugin.cache_service.load_index()
+        return {
+            "current_count": len(idx),
+            "max_count": self.plugin.max_reg_num,
+            "available_emojis": len(idx),
+        }
+
+    async def get_available_emotions(self) -> list[str]:
+        """获取所有可用的情绪分类。
+
+        Returns:
+            list[str]: 情绪分类列表
+        """
+        idx = await self.plugin.cache_service.load_index()
+        s = set()
+        for v in idx.values():
+            if isinstance(v, dict):
+                emo = v.get("emotion")
+                if isinstance(emo, str) and emo:
+                    s.add(emo)
+        return sorted(s)
+
+    async def get_all_descriptions(self) -> list[str]:
+        """获取所有表情包描述。
+
+        Returns:
+            list[str]: 描述列表
+        """
+        image_index = await self.plugin.cache_service.load_index()
+        descriptions = []
+        for record in image_index.values():
+            if isinstance(record, dict):
+                description = record.get("desc")
+                if isinstance(description, str) and description:
+                    descriptions.append(description)
+        return descriptions
+
+    async def load_all_emoji_records(self) -> list[tuple[str, dict]]:
+        """加载所有有效的表情包记录。
+
+        Returns:
+            list[tuple[str, dict]]: (路径, 记录字典) 的列表
+        """
+        import os
+
+        idx = await self.plugin.cache_service.load_index()
+        return [
+            (k, v) for k, v in idx.items() if isinstance(v, dict) and os.path.exists(k)
+        ]
+
+    async def get_random_emojis(self, count: int | None = 1) -> list[tuple[str, str, str]]:
+        """获取随机表情包。
+
+        Args:
+            count: 数量
+
+        Returns:
+            list[tuple[str, str, str]]: (路径, 描述, 情绪) 的列表
+        """
+        import random
+
+        all_records = await self.load_all_emoji_records()
+        if not all_records:
+            return []
+        sample_count = max(1, int(count or 1))
+        picked_records = random.sample(all_records, min(sample_count, len(all_records)))
+        results = []
+        for image_path, record_dict in picked_records:
+            description = str(record_dict.get("desc", ""))
+            emotion = str(
+                record_dict.get(
+                    "emotion",
+                    record_dict.get(
+                        "category",
+                        self.plugin.categories[0] if self.plugin.categories else "开心",
+                    ),
+                )
+            )
+            results.append((image_path, description, emotion))
+        return results
+
+    async def get_emoji_by_emotion(self, emotion: str) -> tuple[str, str, str] | None:
+        """根据情绪获取表情包。
+
+        Args:
+            emotion: 情绪标签
+
+        Returns:
+            tuple[str, str, str] | None: (路径, 描述, 情绪) 或 None
+        """
+        import random
+
+        all_records = await self.load_all_emoji_records()
+        candidates = []
+        for image_path, record_dict in all_records:
+            record_emotion = str(
+                record_dict.get("emotion", record_dict.get("category", ""))
+            )
+            record_tags = record_dict.get("tags", [])
+            if emotion and (
+                emotion == record_emotion
+                or (
+                    isinstance(record_tags, list)
+                    and emotion in [str(tag) for tag in record_tags]
+                )
+            ):
+                candidates.append((image_path, record_dict))
+        if not candidates:
+            return None
+        picked_path, picked_record = random.choice(candidates)
+        return (
+            picked_path,
+            str(picked_record.get("desc", "")),
+            str(
+                picked_record.get(
+                    "emotion",
+                    picked_record.get(
+                        "category",
+                        self.plugin.categories[0] if self.plugin.categories else "开心",
+                    ),
+                )
+            ),
+        )
+
+    async def get_emoji_by_description(self, description: str) -> tuple[str, str, str] | None:
+        """根据描述获取表情包。
+
+        Args:
+            description: 描述文本
+
+        Returns:
+            tuple[str, str, str] | None: (路径, 描述, 情绪) 或 None
+        """
+        import random
+
+        all_records = await self.load_all_emoji_records()
+        candidates = []
+        for image_path, record_dict in all_records:
+            desc_text = str(record_dict.get("desc", ""))
+            if description and description in desc_text:
+                candidates.append((image_path, record_dict))
+        if not candidates:
+            for image_path, record_dict in all_records:
+                record_tags = record_dict.get("tags", [])
+                if isinstance(record_tags, list):
+                    if any(str(description) in str(tag) for tag in record_tags):
+                        candidates.append((image_path, record_dict))
+        if not candidates:
+            return None
+        picked_path, picked_record = random.choice(candidates)
+        return (
+            picked_path,
+            str(picked_record.get("desc", "")),
+            str(
+                picked_record.get(
+                    "emotion",
+                    picked_record.get(
+                        "category",
+                        self.plugin.categories[0] if self.plugin.categories else "开心",
+                    ),
+                )
+            ),
+        )

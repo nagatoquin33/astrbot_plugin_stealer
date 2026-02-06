@@ -1558,3 +1558,45 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
             results = await self.search_images(best_match, limit=limit, idx=idx)
 
         return results
+
+    async def safe_remove_file(self, file_path: str) -> bool:
+        """安全删除文件。
+
+        Args:
+            file_path: 文件路径
+
+        Returns:
+            bool: 是否删除成功
+        """
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                logger.debug(f"已删除文件: {file_path}")
+                return True
+            logger.debug(f"文件不存在，无需删除: {file_path}")
+            return True
+        except Exception as e:
+            logger.error(f"删除文件失败: {e}")
+            return False
+
+    async def pick_vision_provider(self, event) -> str | None:
+        """选择视觉模型提供商。
+
+        Args:
+            event: 消息事件对象
+
+        Returns:
+            str | None: 提供商ID
+        """
+        if self.vision_provider_id:
+            return self.vision_provider_id
+        if event is None:
+            return None
+        try:
+            if hasattr(self.plugin, "context"):
+                return await self.plugin.context.get_current_chat_provider_id(
+                    event.unified_msg_origin
+                )
+        except Exception as e:
+            logger.error(f"获取视觉模型提供者失败: {e}")
+            return None

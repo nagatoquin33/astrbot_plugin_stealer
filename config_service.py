@@ -432,6 +432,33 @@ class ConfigService:
             )
         return result
 
+    def get_group_id(self, event) -> str | None:
+        """从事件中提取群组ID。
+
+        Args:
+            event: 消息事件对象
+
+        Returns:
+            str | None: 群组ID，如果不存在则返回None
+        """
+        try:
+            if hasattr(event, "get_group_id"):
+                gid = event.get_group_id()
+                if gid:
+                    return str(gid)
+        except Exception:
+            pass
+
+        message_obj = getattr(event, "message_obj", None)
+        if message_obj is not None:
+            try:
+                gid = getattr(message_obj, "group_id", "") or ""
+                gid = str(gid).strip()
+                return gid or None
+            except Exception:
+                return None
+        return None
+
     def cleanup(self):
         """清理资源。"""
         pass

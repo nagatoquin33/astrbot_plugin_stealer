@@ -1,9 +1,7 @@
 import asyncio
 import inspect
 import json
-import math
 import os
-import random
 import re
 import shutil
 import time
@@ -11,13 +9,12 @@ from pathlib import Path
 from typing import Any
 
 from astrbot.api import AstrBotConfig, logger
-from astrbot.api.event import AstrMessageEvent, MessageChain, filter
+from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.event.filter import (
     EventMessageType,
     PermissionType,
     PlatformAdapterType,
 )
-from astrbot.api.message_components import Image as ImageComponent
 from astrbot.api.message_components import Plain
 from astrbot.api.star import Context, Star
 from astrbot.core.file_token_service import FileTokenService
@@ -33,7 +30,6 @@ from .event_handler import EventHandler
 from .image_processor_service import ImageProcessorService
 from .natural_emotion_analyzer import SmartEmotionMatcher
 from .task_scheduler import TaskScheduler
-from .text_similarity import calculate_hybrid_similarity
 from .web_server import WebServer
 
 try:
@@ -221,7 +217,7 @@ class Main(Star):
         self.backend_tag: str = self.BACKEND_TAG
         self._scanner_task: asyncio.Task | None = None
         self._migration_done: bool = False  # 迁移只执行一次
-        self._force_capture_windows: dict[str, dict[str, object]] = {}
+        # 强制捕获窗口已迁移到 EventHandler
 
         # 验证配置
         self._validate_config()
@@ -395,55 +391,16 @@ class Main(Star):
         return True  # 即使有问题也返回True，因为已经修复
 
     def _get_force_capture_key(self, event: AstrMessageEvent) -> str:
-        if hasattr(event, "get_session_id"):
-            try:
-                session_id = event.get_session_id()
-                if session_id:
-                    return str(session_id)
-            except Exception:
-                pass
-
-        if hasattr(event, "unified_msg_origin"):
-            try:
-                return str(event.unified_msg_origin)
-            except Exception:
-                pass
-
-        return "global"
+        """委托给 EventHandler。"""
+        return self.event_handler._get_force_capture_key(event)
 
     def _get_force_capture_sender_id(self, event: AstrMessageEvent) -> str | None:
-        for attr in ("sender_id", "user_id"):
-            value = getattr(event, attr, None)
-            if value:
-                return str(value)
-
-        message_obj = getattr(event, "message_obj", None)
-        if message_obj is not None:
-            for attr in ("sender_id", "user_id"):
-                value = getattr(message_obj, attr, None)
-                if value:
-                    return str(value)
-
-        return None
+        """委托给 EventHandler。"""
+        return self.event_handler._get_force_capture_sender_id(event)
 
     def _get_group_id(self, event: AstrMessageEvent) -> str | None:
-        try:
-            if hasattr(event, "get_group_id"):
-                gid = event.get_group_id()
-                if gid:
-                    return str(gid)
-        except Exception:
-            pass
-
-        message_obj = getattr(event, "message_obj", None)
-        if message_obj is not None:
-            try:
-                gid = getattr(message_obj, "group_id", "") or ""
-                gid = str(gid).strip()
-                return gid or None
-            except Exception:
-                return None
-        return None
+        """委托给 ConfigService。"""
+        return self.config_service.get_group_id(event)
 
     def is_meme_enabled_for_event(self, event: AstrMessageEvent) -> bool:
         group_id = self._get_group_id(event)
@@ -456,40 +413,18 @@ class Main(Star):
             return True
 
     def begin_force_capture(self, event: AstrMessageEvent, seconds: int) -> None:
-        key = self._get_force_capture_key(event)
-        sender_id = self._get_force_capture_sender_id(event)
-        until = time.time() + max(1, int(seconds))
-        self._force_capture_windows[key] = {"until": until, "sender_id": sender_id}
+        """委托给 EventHandler。"""
+        self.event_handler.begin_force_capture(event, seconds)
 
     def get_force_capture_entry(
         self, event: AstrMessageEvent
     ) -> dict[str, object] | None:
-        key = self._get_force_capture_key(event)
-        entry = self._force_capture_windows.get(key)
-        if not entry:
-            return None
-
-        try:
-            until = float(entry.get("until", 0))
-        except Exception:
-            self._force_capture_windows.pop(key, None)
-            return None
-
-        if time.time() > until:
-            self._force_capture_windows.pop(key, None)
-            return None
-
-        expected_sender_id = entry.get("sender_id")
-        if expected_sender_id:
-            current_sender_id = self._get_force_capture_sender_id(event)
-            if current_sender_id and str(current_sender_id) != str(expected_sender_id):
-                return None
-
-        return entry
+        """委托给 EventHandler。"""
+        return self.event_handler.get_force_capture_entry(event)
 
     def consume_force_capture(self, event: AstrMessageEvent) -> None:
-        key = self._get_force_capture_key(event)
-        self._force_capture_windows.pop(key, None)
+        """委托给 EventHandler。"""
+        self.event_handler.consume_force_capture(event)
 
     def _update_config_from_dict(self, config_dict: dict):
         """从配置字典更新插件配置。"""
@@ -835,241 +770,35 @@ class Main(Star):
         return
 
     async def _load_index(self) -> dict[str, Any]:
-        """加载分类索引文件。
-
-        Returns:
-            Dict[str, Any]: 键为文件路径，值为包含 category 与 tags 的字典。
-        """
+        """委托给 CacheService。"""
         try:
-            cache_data = self.cache_service.get_cache("index_cache")
-
-            logger.debug(
-                f"[_load_index] raw cache type: {type(cache_data)}, keys: {list(cache_data.keys())[:5] if cache_data else 'empty'}"
-            )
-
-            index_data = dict(cache_data) if cache_data else {}
-
-            logger.debug(f"[_load_index] converted to dict, {len(index_data)} items")
+            index_data = await self.cache_service.load_index()
 
             if not index_data and not self._migration_done:
                 logger.debug("[_load_index] cache empty, attempting migration...")
-                index_data = await self._migrate_legacy_data()
+                index_data = await self.cache_service.migrate_legacy_data(self.base_dir)
                 self._migration_done = True
-                logger.debug(
-                    f"[_load_index] migration returned {len(index_data)} items"
-                )
                 if index_data:
-                    self.cache_service.set_cache(
-                        "index_cache", index_data, persist=True
-                    )
+                    await self.cache_service.save_index(index_data)
 
             return index_data
-        except OSError as e:
-            logger.error(f"索引文件IO错误: {e}")
-            return {}
-        except json.JSONDecodeError as e:
-            logger.error(f"索引文件格式错误: {e}")
-            return {}
         except Exception as e:
             logger.error(f"加载索引失败: {e}", exc_info=True)
             return {}
 
     async def _migrate_legacy_data(self) -> dict[str, Any]:
-        """迁移旧版本数据到新版本。
-
-        Returns:
-            Dict[str, Any]: 迁移后的索引数据
-        """
-        try:
-            logger.info("开始检查和迁移旧版本数据...")
-
-            # 可能的旧版本数据路径
-            possible_paths = [
-                # 旧版本可能使用的路径
-                self.base_dir / "index.json",
-                self.base_dir / "image_index.json",
-                self.base_dir / "cache" / "index.json",
-                # 其他可能的路径
-                Path("data/plugin_data/astrbot_plugin_stealer/index.json"),
-                Path("data/plugin_data/astrbot_plugin_stealer/image_index.json"),
-            ]
-
-            migrated_data = {}
-
-            for old_path in possible_paths:
-                if old_path.exists():
-                    try:
-                        logger.info(f"发现旧版本索引文件: {old_path}")
-                        with open(old_path, encoding="utf-8") as f:
-                            old_data = json.load(f)
-
-                        if isinstance(old_data, dict) and old_data:
-                            logger.info(
-                                f"从 {old_path} 加载了 {len(old_data)} 条旧记录"
-                            )
-                            migrated_data.update(old_data)
-
-                            # 备份旧文件
-                            backup_path = old_path.with_suffix(".json.backup")
-                            shutil.copy2(old_path, backup_path)
-                            logger.info(f"已备份旧索引文件到: {backup_path}")
-
-                    except Exception as e:
-                        logger.error(f"迁移文件 {old_path} 失败: {e}")
-                        continue
-
-            # 如果没有找到任何旧数据，直接返回
-            if not migrated_data:
-                logger.info("未发现需要迁移的旧版本数据文件")
-                return {}
-
-            # --- 智能合并逻辑 ---
-            # 加载当前索引
-            try:
-                current_index = dict(self.cache_service.get_cache("index_cache") or {})
-            except Exception:
-                current_index = {}
-
-            # 建立当前索引的哈希映射
-            current_hash_map = {}
-            for k, v in current_index.items():
-                if isinstance(v, dict) and v.get("hash"):
-                    current_hash_map[v["hash"]] = k  # hash -> path
-
-            merged_count = 0
-
-            # 遍历旧数据，尝试合并到当前索引
-            for old_path, old_info in migrated_data.items():
-                if not isinstance(old_info, dict):
-                    continue
-
-                target_path = None
-
-                # 1. 路径完全匹配
-                if old_path in current_index:
-                    target_path = old_path
-                # 2. 哈希匹配（处理路径变更）
-                elif old_info.get("hash") in current_hash_map:
-                    target_path = current_hash_map[old_info["hash"]]
-
-                # 如果找到了对应的目标记录，且旧数据有描述/标签，保留之
-                if target_path:
-                    target_info = current_index[target_path]
-                    updated = False
-
-                    if old_info.get("desc") and not target_info.get("desc"):
-                        target_info["desc"] = old_info["desc"]
-                        updated = True
-
-                    if old_info.get("tags") and not target_info.get("tags"):
-                        target_info["tags"] = old_info["tags"]
-                        updated = True
-
-                    if updated:
-                        merged_count += 1
-
-            # 保存合并后的索引
-            if merged_count > 0:
-                logger.info(f"成功从旧数据中恢复了 {merged_count} 条记录的元数据")
-                await self._save_index(current_index)
-            else:
-                logger.info("旧数据已加载，但没有新的元数据需要合并")
-
-            return migrated_data
-
-        except Exception as e:
-            logger.error(f"数据迁移失败: {e}", exc_info=True)
-            return {}
+        """委托给 CacheService。"""
+        return await self.cache_service.migrate_legacy_data(self.base_dir)
 
     async def _rebuild_index_from_files(self) -> dict[str, Any]:
-        """从现有的分类文件重建索引。
-
-        Returns:
-            Dict[str, Any]: 重建的索引数据
-        """
-        try:
-            rebuilt_index = {}
-
-            if not self.categories_dir.exists():
-                return rebuilt_index
-
-            # 遍历所有分类目录
-            for category_dir in self.categories_dir.iterdir():
-                if not category_dir.is_dir():
-                    continue
-
-                category_name = category_dir.name
-                logger.info(f"重建分类 '{category_name}' 的索引...")
-
-                # 遍历分类目录中的图片文件
-                for img_file in category_dir.iterdir():
-                    if not img_file.is_file():
-                        continue
-
-                    # 检查是否是图片文件
-                    if img_file.suffix.lower() not in [
-                        ".jpg",
-                        ".jpeg",
-                        ".png",
-                        ".gif",
-                        ".webp",
-                    ]:
-                        continue
-
-                    # 尝试找到对应的raw文件
-                    raw_path = None
-                    if self.raw_dir.exists():
-                        # 查找同名文件
-                        potential_raw = self.raw_dir / img_file.name
-                        if potential_raw.exists():
-                            raw_path = str(potential_raw)
-                        else:
-                            # 查找相似名称的文件
-                            for raw_file in self.raw_dir.iterdir():
-                                if (
-                                    raw_file.is_file()
-                                    and raw_file.stem == img_file.stem
-                                ):
-                                    raw_path = str(raw_file)
-                                    break
-
-                    # 如果没找到raw文件，使用categories中的文件路径
-                    if not raw_path:
-                        raw_path = str(img_file)
-
-                    # 计算文件哈希
-                    try:
-                        file_hash = await self.image_processor_service._compute_hash(
-                            str(img_file)
-                        )
-                    except Exception as e:
-                        logger.debug(f"计算文件哈希失败: {e}")
-                        file_hash = ""
-
-                    # 创建索引记录
-                    rebuilt_index[raw_path] = {
-                        "hash": file_hash,
-                        "category": category_name,
-                        "created_at": int(img_file.stat().st_mtime),
-                        "migrated": True,  # 标记为迁移数据
-                    }
-
-            logger.info(f"从文件重建了 {len(rebuilt_index)} 条索引记录")
-            return rebuilt_index
-
-        except Exception as e:
-            logger.error(f"从文件重建索引失败: {e}", exc_info=True)
-            return {}
+        """委托给 CacheService。"""
+        return await self.cache_service.rebuild_index_from_files(
+            self.base_dir, self.categories_dir
+        )
 
     async def _save_index(self, idx: dict[str, Any]):
-        """保存分类索引文件。"""
-        try:
-            # 使用缓存服务保存索引
-            self.cache_service.set_cache("index_cache", idx)
-        except OSError as e:
-            logger.error(f"索引文件IO错误: {e}")
-        except Exception as e:
-            logger.error(f"保存索引文件失败: {e}", exc_info=True)
+        """委托给 CacheService。"""
+        await self.cache_service.save_index(idx)
 
     async def _load_aliases(self) -> dict[str, str]:
         """加载分类别名文件。
@@ -1165,44 +894,12 @@ class Main(Star):
         return False, idx
 
     async def _safe_remove_file(self, file_path: str) -> bool:
-        """安全删除文件。
-
-        Args:
-            file_path: 文件路径
-
-        Returns:
-            bool: 是否删除成功
-        """
-        try:
-            if os.path.exists(file_path):
-                os.remove(file_path)
-                logger.debug(f"已删除文件: {file_path}")
-                return True
-            logger.debug(f"文件不存在，无需删除: {file_path}")
-            return True
-        except Exception as e:
-            logger.error(f"删除文件失败: {e}")
-            return False
+        """委托给 ImageProcessorService。"""
+        return await self.image_processor_service.safe_remove_file(file_path)
 
     def _is_in_parentheses(self, text: str, index: int) -> bool:
-        """判断字符串中指定索引位置是否在括号内。
-
-        支持圆括号()和方括号[]。
-        """
-        parentheses_count = 0
-        bracket_count = 0
-
-        for i in range(index):
-            if text[i] == "(":
-                parentheses_count += 1
-            elif text[i] == ")":
-                parentheses_count -= 1
-            elif text[i] == "[":
-                bracket_count += 1
-            elif text[i] == "]":
-                bracket_count -= 1
-
-        return parentheses_count > 0 or bracket_count > 0
+        """委托给 EmotionAnalyzerService。"""
+        return self.emotion_analyzer_service.is_in_parentheses(text, index)
 
     async def _extract_emotions_from_text(
         self, event: AstrMessageEvent | None, text: str
@@ -1226,17 +923,8 @@ class Main(Star):
             return [], text
 
     async def _pick_vision_provider(self, event: AstrMessageEvent | None) -> str | None:
-        if self.vision_provider_id:
-            return self.vision_provider_id
-        if event is None:
-            return None
-        try:
-            return await self.context.get_current_chat_provider_id(
-                event.unified_msg_origin
-            )
-        except Exception as e:
-            logger.error(f"获取视觉模型提供者失败: {e}")
-            return None
+        """委托给 ImageProcessorService。"""
+        return await self.image_processor_service.pick_vision_provider(event)
 
     @filter.event_message_type(EventMessageType.ALL)
     @filter.platform_adapter_type(PlatformAdapterType.ALL)
@@ -1542,65 +1230,88 @@ class Main(Star):
             logger.error(f"[Stealer] 处理表情包响应时发生错误: {e}", exc_info=True)
             return False
 
-    async def _async_analyze_and_send_emoji(
-        self, event: AstrMessageEvent, cleaned_text: str, extracted_emotions: list
+
+    def _check_send_probability(self) -> bool:
+        """委托给 EmotionAnalyzerService。"""
+        return self.emotion_analyzer_service.check_send_probability()
+
+    async def _select_emoji(self, category: str, context_text: str = "") -> str | None:
+        """委托给 EmotionAnalyzerService。"""
+        return await self.emotion_analyzer_service.select_emoji(category, context_text)
+
+    async def _select_emoji_smart(self, category: str, context_text: str) -> str | None:
+        """委托给 EmotionAnalyzerService。"""
+        return await self.emotion_analyzer_service.select_emoji_smart(category, context_text)
+
+
+    async def _send_explicit_emojis(
+        self, event: AstrMessageEvent, emoji_paths: list[str], cleaned_text: str
     ):
-        """后台异步分析情绪并发送表情包"""
+        """委托给 EmotionAnalyzerService。"""
+        await self.emotion_analyzer_service.send_explicit_emojis(event, emoji_paths, cleaned_text)
+
+    async def _try_send_emoji(
+        self, event: AstrMessageEvent, emotions: list[str], cleaned_text: str
+    ) -> bool:
+        """委托给 EmotionAnalyzerService。"""
+        return await self.emotion_analyzer_service.try_send_emoji(event, emotions, cleaned_text)
+    async def _async_analyze_and_send_emoji(
+        self, event: AstrMessageEvent, text: str, emotions: list[str]
+    ):
+        """异步分析情绪并发送表情包（不阻塞主流程）。
+
+        Args:
+            event: 消息事件
+            text: 文本内容
+            emotions: 已提取的情绪列表（被动模式使用，智能模式忽略）
+        """
         try:
-            if not self.is_meme_enabled_for_event(event):
+            # 检查是否启用自动发送
+            if not self.auto_send:
+                logger.debug("[Stealer] 自动发送已禁用，跳过表情包发送")
                 return
 
-            all_emotions = []
+            # 检查群聊是否允许
+            if not self.is_meme_enabled_for_event(event):
+                logger.debug("[Stealer] 当前群聊已禁用表情包功能")
+                return
 
-            # 模式切换：LLM模式 vs 被动标签模式
-            if getattr(self, "enable_natural_emotion_analysis", True):
-                # LLM模式：使用轻量模型分析，忽略标签
-                logger.debug("[Stealer] LLM模式：后台使用轻量模型分析LLM回复")
+            # 判断模式
+            is_intelligent_mode = getattr(self, "enable_natural_emotion_analysis", True)
 
-                # 使用智能情绪匹配器分析LLM回复的真实情绪
-                analyzed_emotion = (
-                    await self.smart_emotion_matcher.analyze_and_match_emotion(
-                        event, cleaned_text, use_natural_analysis=True
-                    )
-                )
+            final_emotions = []
 
-                if analyzed_emotion:
-                    all_emotions = [analyzed_emotion]
-                    logger.debug(
-                        f"[Stealer] LLM模式：轻量模型识别情绪 {analyzed_emotion}"
+            if is_intelligent_mode:
+                # 智能模式：使用轻量模型分析
+                logger.debug("[Stealer] 智能模式：使用轻量模型分析情绪")
+                try:
+                    analyzed_emotion = await self.smart_emotion_matcher.analyze_and_match_emotion(
+                        event, text, use_natural_analysis=True
                     )
-                else:
-                    logger.debug(
-                        "[Stealer] LLM模式：轻量模型未识别到情绪，跳过表情包发送"
-                    )
+                    if analyzed_emotion:
+                        final_emotions = [analyzed_emotion]
+                        logger.info(f"[Stealer] 智能分析结果: {analyzed_emotion}")
+                    else:
+                        logger.debug("[Stealer] 智能分析未识别出情绪")
+                        return
+                except Exception as e:
+                    logger.error(f"[Stealer] 智能情绪分析失败: {e}", exc_info=True)
                     return
             else:
-                # 被动标签模式：依赖LLM插入的标签
-                if not extracted_emotions:
-                    logger.debug(
-                        "[Stealer] 被动标签模式：未提取到LLM插入的情绪标签，跳过表情包发送"
-                    )
-                    return
-                else:
-                    all_emotions = extracted_emotions
-                    logger.debug(
-                        f"[Stealer] 被动标签模式：检测到LLM插入的情绪标签 {all_emotions}"
-                    )
+                # 被动模式：使用已提取的情绪标签
+                logger.debug("[Stealer] 被动模式：使用已提取的情绪标签")
+                final_emotions = emotions
 
-            # 尝试发送表情包
-            # 注意：在发送前短暂等待，给 tool loop 留出设置 stealer_active_sent 标记的时间
-            # 这是因为 LLM 可能在第一轮回复后决定调用 tool，而我们的异步任务可能在 tool 执行前就完成了分析
-            await asyncio.sleep(0.5)
-
-            # 再次检查标记（tool 可能在等待期间被调用）
-            if event.get_extra("stealer_active_sent"):
-                logger.debug("[Stealer] 检测到 tool 已主动发送表情包，跳过自动发送")
+            # 如果没有情绪，跳过
+            if not final_emotions:
+                logger.debug("[Stealer] 没有可用的情绪标签，跳过发送")
                 return
 
-            await self._try_send_emoji(event, all_emotions, cleaned_text)
+            # 尝试发送表情包
+            await self._try_send_emoji(event, final_emotions, text)
 
         except Exception as e:
-            logger.error(f"[Stealer] 异步情绪分析和表情包发送失败: {e}", exc_info=True)
+            logger.error(f"[Stealer] 异步发送表情包失败: {e}", exc_info=True)
 
     def _validate_result(self, result) -> bool:
         """验证结果对象是否有效。"""
@@ -1651,363 +1362,11 @@ class Main(Star):
 
         event.set_result(new_result)
 
-    async def _try_send_emoji(
-        self, event: AstrMessageEvent, emotions: list[str], cleaned_text: str
-    ) -> bool:
-        """尝试发送表情包。"""
-        if not self.is_meme_enabled_for_event(event):
-            return False
 
-        # 如果本轮已经通过 LLM 工具主动发送过表情包，则跳过自动发送（避免重复）
-        # 典型场景：LLM模式下 LLM 先调用 send_emoji_by_id 发送了一张，但后台自然语言分析仍可能触发概率发送。
-        if event.get_extra("stealer_active_sent"):
-            logger.debug("[Stealer] 检测到 stealer_active_sent=True，跳过自动表情发送")
-            return False
 
-        # 1. 检查发送概率
-        if not self._check_send_probability():
-            return False
 
-        # 2. 智能选择表情包（传入上下文）
-        emoji_path = await self._select_emoji(emotions[0], cleaned_text)
-        if not emoji_path:
-            return False
 
-        # 3. 发送表情包
-        await self._send_emoji_with_text(event, emoji_path, cleaned_text)
 
-        logger.debug("已发送表情包")
-        return True
-
-    def _check_send_probability(self) -> bool:
-        """检查表情包发送概率。
-
-            说明：
-            - 被动标签模式（LLM 插入 &&emotion&&）
-        - LLM模式（自然语言分析 / 智能 LLM 模式）
-
-            以上两种模式共享同一个概率配置：self.emoji_chance。
-        """
-        try:
-            chance = float(self.emoji_chance)
-            if chance <= 0:
-                logger.debug("表情包自动发送概率为0，未触发图片发送")
-                return False
-            if chance > 1:
-                chance = 1.0
-            if random.random() >= chance:
-                logger.debug(f"表情包自动发送概率检查未通过 ({chance}), 未触发图片发送")
-                return False
-
-            logger.debug("表情包自动发送概率检查通过")
-            return True
-        except Exception as e:
-            logger.error(f"解析表情包自动发送概率配置失败: {e}")
-            return False
-
-    async def _select_emoji(self, category: str, context_text: str = "") -> str | None:
-        """选择表情包（智能或随机）"""
-        # 检查是否启用智能选择
-        use_smart = getattr(self, "smart_emoji_selection", True)
-
-        # 如果启用智能选择且提供了上下文，使用智能选择
-        if use_smart and context_text and len(context_text.strip()) > 5:
-            smart_path = await self._select_emoji_smart(category, context_text)
-            if smart_path:
-                return smart_path
-
-        # 降级到随机选择（原有逻辑）
-        cat_dir = self.base_dir / "categories" / category
-        if not cat_dir.exists():
-            logger.debug(f"情绪'{category}'对应的图片目录不存在")
-            return None
-
-        try:
-            files = [p for p in cat_dir.iterdir() if p.is_file()]
-            if not files:
-                logger.debug(f"情绪'{category}'对应的图片目录为空")
-                return None
-
-            logger.debug(
-                f"从'{category}'目录中找到 {len(files)} 张图片（{'智能选择失败，' if use_smart else ''}随机选择）"
-            )
-
-            # 改进的随机选择：避免重复
-            recent_usage_key = f"recent_usage_{category}"
-            recent_usage = getattr(self, recent_usage_key, [])
-
-            # 过滤最近使用的文件
-            available_files = [f for f in files if f.as_posix() not in recent_usage]
-
-            # 如果过滤后没有可用文件，清空历史
-            if not available_files:
-                available_files = files
-                recent_usage.clear()
-
-            # 随机选择
-            picked_image = random.choice(available_files)
-
-            # 更新最近使用历史
-            picked_path = picked_image.as_posix()
-            if picked_path in recent_usage:
-                recent_usage.remove(picked_path)
-            recent_usage.append(picked_path)
-
-            # 保持历史队列大小
-            max_recent = min(5, max(2, len(files) // 2))
-            if len(recent_usage) > max_recent:
-                recent_usage.pop(0)
-
-            setattr(self, recent_usage_key, recent_usage)
-
-            return picked_path
-        except Exception as e:
-            logger.error(f"选择表情包失败: {e}")
-            return None
-
-    async def _select_emoji_smart(self, category: str, context_text: str) -> str | None:
-        """智能选择表情包（多样性+匹配度+文本相似度）"""
-        try:
-            # 1. 加载索引，获取该分类下的所有表情包
-            idx = await self._load_index()
-            candidates = []
-            current_time = time.time()
-
-            # 获取最近使用历史（避免重复）
-            recent_usage_key = f"recent_usage_{category}"
-            recent_usage = getattr(self, recent_usage_key, [])
-
-            for file_path, data in idx.items():
-                if not isinstance(data, dict):
-                    continue
-
-                # 匹配分类
-                file_category = data.get("category", data.get("emotion", ""))
-                if file_category != category:
-                    continue
-
-                # 检查文件是否存在
-                if not os.path.exists(file_path):
-                    continue
-
-                candidates.append(
-                    {
-                        "path": file_path,
-                        "data": data,
-                        "last_used": data.get("last_used", 0),
-                        "use_count": data.get("use_count", 0),
-                        "desc": str(data.get("desc", "")).lower(),
-                        "tags": [str(t).lower() for t in data.get("tags", [])],
-                        "scenes": [str(s).lower() for s in data.get("scenes", [])],
-                    }
-                )
-
-            if not candidates:
-                logger.debug(f"分类 '{category}' 下没有可用的表情包")
-                return None
-
-            # 2. 强制避重：过滤最近使用的表情包
-            available_candidates = [
-                c for c in candidates if c["path"] not in recent_usage
-            ]
-
-            # 如果过滤后候选太少，只避免最近3个
-            if len(available_candidates) < max(2, len(candidates) * 0.3):
-                recent_3 = recent_usage[-3:] if len(recent_usage) >= 3 else recent_usage
-                available_candidates = [
-                    c for c in candidates if c["path"] not in recent_3
-                ]
-
-            # 如果还是没有候选，清空历史重新开始
-            if not available_candidates:
-                available_candidates = candidates
-                recent_usage.clear()
-
-            # 3. 计算多样性分数（权重70%）
-            for candidate in available_candidates:
-                diversity_score = 100  # 基础分数
-
-                # 时间多样性（使用时间越久分数越高）
-                time_since_last_use = current_time - candidate["last_used"]
-                if time_since_last_use < 300:  # 5分钟内大幅减分
-                    diversity_score -= 60
-                elif time_since_last_use < 1800:  # 30分钟内
-                    diversity_score -= 30
-                elif time_since_last_use < 3600:  # 1小时内
-                    diversity_score -= 10
-                else:
-                    # 超过1小时给予奖励
-                    hours_passed = time_since_last_use / 3600
-                    diversity_score += min(hours_passed * 5, 30)
-
-                # 频率多样性（使用次数越少分数越高）
-                use_count = candidate["use_count"]
-                if use_count == 0:
-                    diversity_score += 20  # 从未使用过的优先
-                elif use_count < 3:
-                    diversity_score += 10
-                elif use_count < 10:
-                    diversity_score += 0
-                else:
-                    diversity_score -= min(use_count * 2, 30)
-
-                candidate["diversity_score"] = max(diversity_score, 10)
-
-            # 4. 计算匹配分数（权重30%）
-            has_context = context_text and len(context_text.strip()) > 5
-
-            for candidate in available_candidates:
-                match_score = 10  # 基础匹配分数
-
-                if has_context:
-                    context_lower = context_text.lower()
-
-                    # 场景匹配
-                    for scene in candidate["scenes"]:
-                        if len(scene) > 2 and scene in context_lower:
-                            match_score += 25
-
-                    # 描述匹配
-                    desc = candidate["desc"]
-                    if desc and desc in context_lower:
-                        match_score += 20
-                    elif desc:
-                        desc_words = [w for w in desc.split() if len(w) > 1]
-                        matched_words = sum(
-                            1 for word in desc_words if word in context_lower
-                        )
-                        match_score += matched_words * 5
-
-                    # 标签匹配
-                    for tag in candidate["tags"]:
-                        if len(tag) > 1 and tag in context_lower:
-                            match_score += 8
-
-                    # 新增：文本相似度加成（类似MaiBot的编辑距离匹配）
-                    # 计算上下文与描述的整体相似度
-                    if desc and len(desc) > 3:
-                        similarity = calculate_hybrid_similarity(context_text, desc)
-                        # 相似度转换为分数加成（最多+15分）
-                        similarity_bonus = similarity * 15
-                        match_score += similarity_bonus
-
-                        if similarity > 0.3:  # 如果相似度较高，记录日志
-                            logger.debug(
-                                f"[相似度匹配] '{context_text[:20]}...' vs '{desc[:20]}...' = {similarity:.2f}"
-                            )
-
-                candidate["match_score"] = match_score
-
-            # 5. 计算综合分数：多样性70% + 匹配度30%
-            max_diversity = max(c["diversity_score"] for c in available_candidates)
-            max_match = max(c["match_score"] for c in available_candidates)
-
-            for candidate in available_candidates:
-                # 标准化到0-100
-                norm_diversity = (candidate["diversity_score"] / max_diversity) * 100
-                norm_match = (candidate["match_score"] / max_match) * 100
-
-                # 多样性权重更高
-                candidate["final_score"] = norm_diversity * 0.7 + norm_match * 0.3
-
-            # 6. 选择策略：从前40%候选中加权随机选择
-            available_candidates.sort(key=lambda x: x["final_score"], reverse=True)
-            top_40_percent = max(1, int(len(available_candidates) * 0.4))
-            top_candidates = available_candidates[:top_40_percent]
-
-            # 使用指数衰减权重，保持随机性
-            weights = [math.exp(-i * 0.3) for i in range(len(top_candidates))]
-            selected = random.choices(top_candidates, weights=weights, k=1)[0]
-
-            # 7. 更新使用历史和统计
-            selected_path = selected["path"]
-
-            # 更新索引中的使用统计
-            idx[selected_path]["last_used"] = int(current_time)
-            idx[selected_path]["use_count"] = idx[selected_path].get("use_count", 0) + 1
-            await self._save_index(idx)
-
-            # 更新最近使用历史
-            if selected_path in recent_usage:
-                recent_usage.remove(selected_path)
-            recent_usage.append(selected_path)
-
-            # 保持历史队列大小（最多记录8个）
-            max_recent = min(8, max(3, len(candidates) // 2))
-            if len(recent_usage) > max_recent:
-                recent_usage.pop(0)
-
-            setattr(self, recent_usage_key, recent_usage)
-
-            logger.info(
-                f"选择表情包: 多样性={selected['diversity_score']:.1f}, "
-                f"匹配度={selected['match_score']:.1f}, "
-                f"综合={selected['final_score']:.1f}"
-            )
-
-            return selected_path
-
-        except Exception as e:
-            logger.error(f"智能选择表情包失败: {e}", exc_info=True)
-            return None
-
-    async def _send_emoji_with_text(
-        self, event: AstrMessageEvent, emoji_path: str, cleaned_text: str
-    ):
-        """发送表情包（异步场景下直接发送新消息）"""
-        try:
-            if not self.is_meme_enabled_for_event(event):
-                return
-            b64 = await self.image_processor_service._file_to_gif_base64(emoji_path)
-
-            # 创建结果并发送
-            # 使用 event.send() 方法，传入 MessageChain 对象
-            await event.send(MessageChain([ImageComponent.fromBase64(b64)]))
-
-            logger.debug(f"[Stealer] 已发送表情包: {emoji_path}")
-
-        except Exception as e:
-            logger.error(f"发送表情包失败: {e}", exc_info=True)
-
-    async def _send_explicit_emojis(
-        self, event: AstrMessageEvent, emoji_paths: list[str], cleaned_text: str
-    ):
-        """发送显式指定的表情包列表和文本。"""
-        try:
-            # 获取当前结果
-            result = event.get_result()
-
-            # 创建新的结果对象
-            new_result = event.make_result().set_result_content_type(
-                result.result_content_type
-            )
-
-            # 添加除了Plain文本外的其他组件
-            for comp in result.chain:
-                if not isinstance(comp, Plain):
-                    new_result.chain.append(comp)
-
-            # 添加清理后的文本
-            if cleaned_text.strip():
-                new_result.message(cleaned_text.strip())
-
-            # 依次添加图片
-            for path in emoji_paths:
-                try:
-                    if os.path.exists(path):
-                        b64 = await self.image_processor_service._file_to_gif_base64(
-                            path
-                        )
-                        new_result.base64_image(b64)
-                    else:
-                        logger.warning(f"显式表情包文件不存在: {path}")
-                except Exception as e:
-                    logger.error(f"加载显式表情包失败: {path}, {e}")
-
-            # 设置新的结果对象
-            event.set_result(new_result)
-        except Exception as e:
-            logger.error(f"发送显式表情包失败: {e}", exc_info=True)
 
     @filter.command("meme on")
     async def meme_on(self, event: AstrMessageEvent):
@@ -2097,127 +1456,40 @@ class Main(Star):
             yield result
 
     async def get_count(self) -> int:
-        idx = await self._load_index()
-        return len(idx)
+        """委托给 CommandHandler。"""
+        return await self.command_handler.get_emoji_count()
 
     async def get_info(self) -> dict:
-        idx = await self._load_index()
-        return {
-            "current_count": len(idx),
-            "max_count": self.max_reg_num,
-            "available_emojis": len(idx),
-        }
+        """委托给 CommandHandler。"""
+        return await self.command_handler.get_emoji_info()
 
     async def get_emotions(self) -> list[str]:
-        idx = await self._load_index()
-        s = set()
-        for v in idx.values():
-            if isinstance(v, dict):
-                emo = v.get("emotion")
-                if isinstance(emo, str) and emo:
-                    s.add(emo)
-        return sorted(s)
+        """委托给 CommandHandler。"""
+        return await self.command_handler.get_available_emotions()
 
     async def get_descriptions(self) -> list[str]:
-        image_index = await self._load_index()
-        descriptions = []
-        for record in image_index.values():
-            if isinstance(record, dict):
-                description = record.get("desc")
-                if isinstance(description, str) and description:
-                    descriptions.append(description)
-        return descriptions
+        """委托给 CommandHandler。"""
+        return await self.command_handler.get_all_descriptions()
 
     async def _load_all_records(self) -> list[tuple[str, dict]]:
-        idx = await self._load_index()
-        return [
-            (k, v) for k, v in idx.items() if isinstance(v, dict) and os.path.exists(k)
-        ]
+        """委托给 CommandHandler。"""
+        return await self.command_handler.load_all_emoji_records()
 
     async def get_random_paths(
         self, count: int | None = 1
     ) -> list[tuple[str, str, str]]:
-        all_records = await self._load_all_records()
-        if not all_records:
-            return []
-        sample_count = max(1, int(count or 1))
-        picked_records = random.sample(all_records, min(sample_count, len(all_records)))
-        results = []
-        for image_path, record_dict in picked_records:
-            description = str(record_dict.get("desc", ""))
-            emotion = str(
-                record_dict.get(
-                    "emotion",
-                    record_dict.get(
-                        "category", self.categories[0] if self.categories else "开心"
-                    ),
-                )
-            )
-            results.append((image_path, description, emotion))
-        return results
+        """委托给 CommandHandler。"""
+        return await self.command_handler.get_random_emojis(count)
 
     async def get_by_emotion_path(self, emotion: str) -> tuple[str, str, str] | None:
-        all_records = await self._load_all_records()
-        candidates = []
-        for image_path, record_dict in all_records:
-            record_emotion = str(
-                record_dict.get("emotion", record_dict.get("category", ""))
-            )
-            record_tags = record_dict.get("tags", [])
-            if emotion and (
-                emotion == record_emotion
-                or (
-                    isinstance(record_tags, list)
-                    and emotion in [str(tag) for tag in record_tags]
-                )
-            ):
-                candidates.append((image_path, record_dict))
-        if not candidates:
-            return None
-        picked_path, picked_record = random.choice(candidates)
-        return (
-            picked_path,
-            str(picked_record.get("desc", "")),
-            str(
-                picked_record.get(
-                    "emotion",
-                    picked_record.get(
-                        "category", self.categories[0] if self.categories else "开心"
-                    ),
-                )
-            ),
-        )
+        """委托给 CommandHandler。"""
+        return await self.command_handler.get_emoji_by_emotion(emotion)
 
     async def get_by_description_path(
         self, description: str
     ) -> tuple[str, str, str] | None:
-        all_records = await self._load_all_records()
-        candidates = []
-        for image_path, record_dict in all_records:
-            desc_text = str(record_dict.get("desc", ""))
-            if description and description in desc_text:
-                candidates.append((image_path, record_dict))
-        if not candidates:
-            for image_path, record_dict in all_records:
-                record_tags = record_dict.get("tags", [])
-                if isinstance(record_tags, list):
-                    if any(str(description) in str(tag) for tag in record_tags):
-                        candidates.append((image_path, record_dict))
-        if not candidates:
-            return None
-        picked_path, picked_record = random.choice(candidates)
-        return (
-            picked_path,
-            str(picked_record.get("desc", "")),
-            str(
-                picked_record.get(
-                    "emotion",
-                    picked_record.get(
-                        "category", self.categories[0] if self.categories else "开心"
-                    ),
-                )
-            ),
-        )
+        """委托给 CommandHandler。"""
+        return await self.command_handler.get_emoji_by_description(description)
 
     @filter.permission_type(PermissionType.ADMIN)
     @filter.command("meme push")
@@ -2255,13 +1527,7 @@ class Main(Star):
         limit: int = 5,
         idx: dict | None = None,
     ):
-        """统一的表情包搜索逻辑（给 LLM 工具复用）。
-
-        委托给 ImageProcessorService.smart_search 实现。
-
-        Returns:
-            list[tuple[path, desc, emotion]]
-        """
+        """委托给 ImageProcessorService.smart_search。"""
         if idx is None:
             idx = self.cache_service.get_cache("index_cache") or {}
 
@@ -2274,7 +1540,7 @@ class Main(Star):
         """搜索表情包，返回候选列表供你选择。
 
         Args:
-            query(string): 搜索关键词
+            query(string): 搜索关键词（支持情绪词、描述词、场景词）
 
         推荐分类词汇：
         - confused: 困惑, 疑问, 不懂, 啥情况
@@ -2294,13 +1560,16 @@ class Main(Star):
         - embarrassed: 尴尬, 社死
 
         返回值：
-        - 成功：返回候选表情包列表（包含编号、描述、分类），请选择一个编号调用 send_emoji_by_id 发送
-        - 失败：返回错误提示
+        返回候选表情包列表，每个包含：
+        - 编号：用于调用 send_emoji_by_id
+        - 分类：表情包的情绪分类
+        - 描述：表情包的详细描述（这是你选择时的重要参考）
+        
+        请仔细阅读每个表情包的描述，选择最符合当前对话情境的一个。
         """
         logger.info(f"[Tool] LLM 搜索表情包: {query}")
 
-        # 标记为主动发送流程开始，避免自动发送重复触发
-        # 注意：必须在 tool 执行最开始就设置，因为 on_decorating_result 可能在 tool loop 中途触发
+        # 标记为主动发送流程开始
         event.set_extra("stealer_active_sent", True)
 
         try:
@@ -2314,15 +1583,15 @@ class Main(Star):
 
             idx = self.cache_service.get_cache("index_cache") or {}
 
-            results = await self._search_emoji_candidates(query, limit=5, idx=idx)
+            # 增加搜索结果数量，给LLM更多选择
+            results = await self._search_emoji_candidates(query, limit=8, idx=idx)
 
-            # 4. 如果仍然没结果
             if not results:
                 logger.warning(f"未找到匹配的表情包: {query}")
-                yield f"搜索失败：未找到与'{query}'匹配的表情包。建议尝试：happy, sad, angry, confused, troll 等分类词"
+                yield f"搜索失败：未找到与'{query}'匹配的表情包。\n\n建议尝试：\n- 情绪词：happy, sad, angry, confused, troll\n- 描述词：大笑, 无语, 哭了, 震惊\n- 场景词：尴尬, 社死, 躺平"
                 return
 
-            # 5. 构建候选列表，存入缓存供后续发送
+            # 构建候选列表
             candidates = []
             result_lines = [f"找到 {len(results)} 个匹配的表情包：\n"]
 
@@ -2337,19 +1606,19 @@ class Main(Star):
                             "emotion": emotion,
                         }
                     )
-                    # 截断描述，避免太长
-                    short_desc = desc[:50] + "..." if len(desc) > 50 else desc
-                    result_lines.append(f"  [{i + 1}] [{emotion}] {short_desc}")
+                    # 格式化输出
+                    result_lines.append(f"\n[{i + 1}] 分类：{emotion}")
+                    result_lines.append(f"    描述：{desc}")
 
             if not candidates:
                 yield "搜索失败：找到的表情包文件均已丢失"
                 return
 
-            # 存入实例属性，供 send_emoji_by_id 使用（临时存储，不持久化）
+            # 存入实例属性，供 send_emoji_by_id 使用
             self._emoji_candidates = candidates
 
             result_lines.append(
-                f"\n请调用 send_emoji_by_id 并传入编号(1-{len(candidates)})来发送你选择的表情包。"
+                f"\n\n请根据描述选择最合适的表情包，然后调用 send_emoji_by_id(编号) 发送。"
             )
 
             result_text = "\n".join(result_lines)
@@ -2362,18 +1631,22 @@ class Main(Star):
 
     @filter.llm_tool(name="send_emoji_by_id")
     async def send_emoji_by_id(self, event: AstrMessageEvent, emoji_id: int):
-        """发送指定编号的表情包。必须先调用 search_emoji 获取候选列表。
+        """发送你选择的表情包。必须先调用 search_emoji 获取候选列表。
 
         Args:
-            emoji_id(number): 表情包编号（1-5），从 search_emoji 返回的列表中选择
+            emoji_id(number): 表情包编号（从 search_emoji 返回的列表中选择）
 
         返回值：
-        - 成功：返回已发送的表情包描述
-        - 失败：返回错误提示
+        返回你发送的表情包的完整信息，包括：
+        - 分类：表情包的情绪分类
+        - 描述：表情包的详细描述
+        - 状态：发送成功/失败
+        
+        这样你就能清楚地知道自己发送了什么表情包。
         """
         logger.info(f"[Tool] LLM 选择发送表情包编号: {emoji_id}")
 
-        # 标记为主动发送，避免被动标签模式重复触发
+        # 标记为主动发送
         event.set_extra("stealer_active_sent", True)
 
         try:
@@ -2381,31 +1654,23 @@ class Main(Star):
                 yield "发送失败：当前群聊已禁用表情包功能"
                 return
 
-            tool_text: str | None = None
-            # LLM 可能会传入 2.0 / "2" 等，统一转为 int 处理
+            # 统一转为 int
             try:
                 emoji_id = int(emoji_id)
             except Exception:
-                tool_text = (
-                    f"发送失败：编号 {emoji_id} 无法解析为整数，请选择 1-5 之间的编号"
-                )
-                yield tool_text
+                yield f"发送失败：编号 {emoji_id} 无法解析为整数，请输入有效的数字编号"
                 return
 
-            # 从实例属性获取候选列表
+            # 获取候选列表
             candidates = getattr(self, "_emoji_candidates", None)
 
             if not candidates:
-                tool_text = (
-                    "发送失败：没有可用的候选列表，请先调用 search_emoji 搜索表情包"
-                )
-                yield tool_text
+                yield "发送失败：没有可用的候选列表。请先调用 search_emoji 搜索表情包。"
                 return
 
             # 验证编号范围
             if emoji_id < 1 or emoji_id > len(candidates):
-                tool_text = f"发送失败：编号 {emoji_id} 无效，请选择 1-{len(candidates)} 之间的编号"
-                yield tool_text
+                yield f"发送失败：编号 {emoji_id} 无效。可选编号范围：1-{len(candidates)}，请重新选择。"
                 return
 
             # 获取选中的表情包
@@ -2415,91 +1680,26 @@ class Main(Star):
             emotion = selected["emotion"]
 
             if not os.path.exists(path):
-                tool_text = "发送失败：表情包文件已丢失"
-                yield tool_text
+                yield f"发送失败：表情包文件已丢失。\n你选择的是：编号 {emoji_id}，分类 {emotion}，描述 {desc}\n请重新搜索并选择其他表情包。"
                 return
 
             # 发送表情包
             logger.info(f"[Tool] 发送选中的表情包: {path} (emotion={emotion})")
             b64 = await self.image_processor_service._file_to_gif_base64(path)
 
-            # 使用 event.send() 直接发送图片，而不是 yield
-            # 这样可以确保后续的 yield tool_text 能正常返回给 LLM
             from astrbot.api.event import MessageChain
             from astrbot.api.message_components import Image as ImageComponent
 
             await event.send(MessageChain([ImageComponent.fromBase64(b64)]))
 
-            # 返回成功信息给 LLM
-            tool_text = f"已发送表情包：{desc} (分类：{emotion})"
-            logger.info(f"[Tool] {tool_text}")
-            yield tool_text
+            # 返回详细的成功信息
+            success_msg = f"发送成功。\n\n你发送的表情包：\n- 编号：{emoji_id}\n- 分类：{emotion}\n- 描述：{desc}"
+            logger.info(f"[Tool] {success_msg}")
+            yield success_msg
             return
 
         except Exception as e:
             logger.error(f"[Tool] 发送表情包失败: {e}", exc_info=True)
-            tool_text = f"发送出错：{e}"
-            yield tool_text
+            yield f"发送出错：{e}"
             return
 
-    @filter.llm_tool(name="send_emoji")
-    async def send_emoji(self, event: AstrMessageEvent, query: str):
-        """快速发送表情包（自动选择最佳匹配）。如果你想自己选择，请改用 search_emoji + send_emoji_by_id。
-
-        Args:
-            query(string): 搜索关键词（如：开心、难过、无语、生气）
-
-        返回值：
-        - 成功：返回已发送的表情包描述
-        - 失败：返回错误提示
-        """
-        logger.info(f"[Tool] LLM 快速发送表情包: {query}")
-
-        # 标记为主动发送，避免被动标签模式重复触发
-        event.set_extra("stealer_active_sent", True)
-
-        try:
-            if not self.is_meme_enabled_for_event(event):
-                yield "发送失败：当前群聊已禁用表情包功能"
-                return
-
-            tool_text: str | None = None
-            if not self.cache_service.get_cache("index_cache"):
-                await self._load_index()
-
-            idx = self.cache_service.get_cache("index_cache") or {}
-
-            results = await self._search_emoji_candidates(query, limit=5, idx=idx)
-
-            if not results:
-                tool_text = f"发送失败：未找到与'{query}'匹配的表情包"
-                yield tool_text
-                return
-
-            # 发送最佳匹配
-            best_path, best_desc, best_emotion = results[0]
-            if not os.path.exists(best_path):
-                tool_text = "发送失败：文件丢失"
-                yield tool_text
-                return
-
-            logger.info(f"[Tool] 快速发送表情包: {best_path} (emotion={best_emotion})")
-            b64 = await self.image_processor_service._file_to_gif_base64(best_path)
-
-            # 使用 event.send() 直接发送图片，而不是 yield
-            # 这样可以确保后续的 yield tool_text 能正常返回给 LLM
-            from astrbot.api.event import MessageChain
-            from astrbot.api.message_components import Image as ImageComponent
-
-            await event.send(MessageChain([ImageComponent.fromBase64(b64)]))
-
-            tool_text = f"已发送表情包：{best_desc} (分类：{best_emotion})"
-            logger.info(f"[Tool] {tool_text}")
-            yield tool_text
-            return
-
-        except Exception as e:
-            logger.error(f"[Tool] 发送表情包失败: {e}", exc_info=True)
-            tool_text = f"发送出错：{e}"
-            yield tool_text
-            return

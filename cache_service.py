@@ -254,6 +254,208 @@ class CacheService:
             # 持久化更新后的缓存
             self.persist_all()
 
+    async def load_index(self) -> dict[str, Any]:
+        """加载分类索引文件。
+
+        Returns:
+            Dict[str, Any]: 键为文件路径，值为包含 category 与 tags 的字典。
+        """
+        try:
+            cache_data = self.get_cache("index_cache")
+            index_data = dict(cache_data) if cache_data else {}
+            return index_data
+        except Exception as e:
+            logger.error(f"加载索引失败: {e}", exc_info=True)
+            return {}
+
+    async def save_index(self, idx: dict[str, Any]):
+        """保存分类索引文件。"""
+        try:
+            self.set_cache("index_cache", idx, persist=True)
+        except Exception as e:
+            logger.error(f"保存索引文件失败: {e}", exc_info=True)
+
+    async def migrate_legacy_data(self, base_dir) -> dict[str, Any]:
+        """迁移旧版本数据到新版本。
+
+        Args:
+            base_dir: 插件基础目录
+
+        Returns:
+            Dict[str, Any]: 迁移后的索引数据
+        """
+        try:
+            import shutil
+            from pathlib import Path
+
+            logger.info("开始检查和迁移旧版本数据...")
+
+            # 可能的旧版本数据路径
+            possible_paths = [
+                Path(base_dir) / "index.json",
+                Path(base_dir) / "image_index.json",
+                Path(base_dir) / "cache" / "index.json",
+                Path("data/plugin_data/astrbot_plugin_stealer/index.json"),
+                Path("data/plugin_data/astrbot_plugin_stealer/image_index.json"),
+            ]
+
+            migrated_data = {}
+
+            for old_path in possible_paths:
+                if old_path.exists():
+                    try:
+                        logger.info(f"发现旧版本索引文件: {old_path}")
+                        with open(old_path, encoding="utf-8") as f:
+                            old_data = json.load(f)
+
+                        if isinstance(old_data, dict) and old_data:
+                            logger.info(f"从 {old_path} 加载了 {len(old_data)} 条旧记录")
+                            migrated_data.update(old_data)
+
+                            # 备份旧文件
+                            backup_path = old_path.with_suffix(".json.backup")
+                            shutil.copy2(old_path, backup_path)
+                            logger.info(f"已备份旧索引文件到: {backup_path}")
+
+                    except Exception as e:
+                        logger.error(f"迁移文件 {old_path} 失败: {e}")
+                        continue
+
+            if not migrated_data:
+                logger.info("未发现需要迁移的旧版本数据文件")
+                return {}
+
+            # 智能合并逻辑
+            try:
+                current_index = dict(self.get_cache("index_cache") or {})
+            except Exception:
+                current_index = {}
+
+            # 建立当前索引的哈希映射
+            current_hash_map = {}
+            for k, v in current_index.items():
+                if isinstance(v, dict) and v.get("hash"):
+                    current_hash_map[v["hash"]] = k
+
+            merged_count = 0
+
+            # 遍历旧数据，尝试合并到当前索引
+            for old_path, old_info in migrated_data.items():
+                if not isinstance(old_info, dict):
+                    continue
+
+                target_path = None
+
+                # 1. 路径完全匹配
+                if old_path in current_index:
+                    target_path = old_path
+                # 2. 哈希匹配（处理路径变更）
+                elif old_info.get("hash") in current_hash_map:
+                    target_path = current_hash_map[old_info["hash"]]
+
+                # 如果找到了对应的目标记录，且旧数据有描述/标签，保留之
+                if target_path:
+                    target_info = current_index[target_path]
+                    updated = False
+
+                    if old_info.get("desc") and not target_info.get("desc"):
+                        target_info["desc"] = old_info["desc"]
+                        updated = True
+
+                    if old_info.get("tags") and not target_info.get("tags"):
+                        target_info["tags"] = old_info["tags"]
+                        updated = True
+
+                    if updated:
+                        merged_count += 1
+
+            # 保存合并后的索引
+            if merged_count > 0:
+                logger.info(f"成功从旧数据中恢复了 {merged_count} 条记录的元数据")
+                await self.save_index(current_index)
+            else:
+                logger.info("旧数据已加载，但没有新的元数据需要合并")
+
+            return migrated_data
+
+        except Exception as e:
+            logger.error(f"数据迁移失败: {e}", exc_info=True)
+            return {}
+
+    async def rebuild_index_from_files(self, base_dir, categories_dir) -> dict[str, Any]:
+        """从现有的分类文件重建索引。
+
+        Args:
+            base_dir: 插件基础目录
+            categories_dir: 分类目录路径
+
+        Returns:
+            Dict[str, Any]: 重建的索引数据
+        """
+        try:
+            from pathlib import Path
+
+            rebuilt_index = {}
+
+            if not categories_dir.exists():
+                return rebuilt_index
+
+            # 遍历所有分类目录
+            for category_dir in categories_dir.iterdir():
+                if not category_dir.is_dir():
+                    continue
+
+                category_name = category_dir.name
+                logger.info(f"重建分类 '{category_name}' 的索引...")
+
+                # 遍历分类目录中的图片文件
+                for img_file in category_dir.iterdir():
+                    if not img_file.is_file():
+                        continue
+
+                    # 检查是否是图片文件
+                    if img_file.suffix.lower() not in [".jpg", ".jpeg", ".png", ".gif", ".webp"]:
+                        continue
+
+                    # 尝试找到对应的raw文件
+                    raw_dir = Path(base_dir) / "raw"
+                    raw_path = None
+                    if raw_dir.exists():
+                        potential_raw = raw_dir / img_file.name
+                        if potential_raw.exists():
+                            raw_path = str(potential_raw)
+                        else:
+                            for raw_file in raw_dir.iterdir():
+                                if raw_file.is_file() and raw_file.stem == img_file.stem:
+                                    raw_path = str(raw_file)
+                                    break
+
+                    # 如果没找到raw文件，使用categories中的文件路径
+                    if not raw_path:
+                        raw_path = str(img_file)
+
+                    # 计算文件哈希
+                    try:
+                        file_hash = self.compute_hash(Path(img_file).read_bytes())
+                    except Exception as e:
+                        logger.debug(f"计算文件哈希失败: {e}")
+                        file_hash = ""
+
+                    # 创建索引记录
+                    rebuilt_index[raw_path] = {
+                        "hash": file_hash,
+                        "category": category_name,
+                        "created_at": int(img_file.stat().st_mtime),
+                        "migrated": True,
+                    }
+
+            logger.info(f"从文件重建了 {len(rebuilt_index)} 条索引记录")
+            return rebuilt_index
+
+        except Exception as e:
+            logger.error(f"从文件重建索引失败: {e}", exc_info=True)
+            return {}
+
     def cleanup(self):
         """清理资源（持久化所有缓存）。"""
         self.persist_all()

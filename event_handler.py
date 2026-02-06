@@ -24,6 +24,9 @@ class EventHandler:
         self._last_process_time = 0  # 上次处理时间（用于interval和cooldown模式）
         self._process_count = 0  # 处理计数（用于interval模式）
 
+        # 强制捕获窗口
+        self._force_capture_windows: dict[str, dict[str, object]] = {}
+
     def _should_process_image(self) -> bool:
         """根据配置的节流模式判断是否应该处理图片。
 
@@ -579,6 +582,107 @@ class EventHandler:
             logger.error(f"执行容量控制时系统错误: {e}")
         except Exception as e:
             logger.error(f"执行容量控制时发生未预期错误: {e}", exc_info=True)
+
+    def _get_force_capture_key(self, event) -> str:
+        """获取强制捕获的唯一键。
+
+        Args:
+            event: 消息事件对象
+
+        Returns:
+            str: 唯一键
+        """
+        if hasattr(event, "get_session_id"):
+            try:
+                session_id = event.get_session_id()
+                if session_id:
+                    return str(session_id)
+            except Exception:
+                pass
+
+        if hasattr(event, "unified_msg_origin"):
+            try:
+                return str(event.unified_msg_origin)
+            except Exception:
+                pass
+
+        return "global"
+
+    def _get_force_capture_sender_id(self, event) -> str | None:
+        """获取发送者ID。
+
+        Args:
+            event: 消息事件对象
+
+        Returns:
+            str | None: 发送者ID
+        """
+        for attr in ("sender_id", "user_id"):
+            value = getattr(event, attr, None)
+            if value:
+                return str(value)
+
+        message_obj = getattr(event, "message_obj", None)
+        if message_obj is not None:
+            for attr in ("sender_id", "user_id"):
+                value = getattr(message_obj, attr, None)
+                if value:
+                    return str(value)
+
+        return None
+
+    def begin_force_capture(self, event, seconds: int) -> None:
+        """开始强制捕获窗口。
+
+        Args:
+            event: 消息事件对象
+            seconds: 捕获窗口持续时间（秒）
+        """
+        key = self._get_force_capture_key(event)
+        sender_id = self._get_force_capture_sender_id(event)
+        until = time.time() + max(1, int(seconds))
+        self._force_capture_windows[key] = {"until": until, "sender_id": sender_id}
+
+    def get_force_capture_entry(self, event) -> dict[str, object] | None:
+        """获取强制捕获条目。
+
+        Args:
+            event: 消息事件对象
+
+        Returns:
+            dict | None: 捕获条目，如果不存在或已过期则返回None
+        """
+        key = self._get_force_capture_key(event)
+        entry = self._force_capture_windows.get(key)
+        if not entry:
+            return None
+
+        try:
+            until = float(entry.get("until", 0))
+        except Exception:
+            self._force_capture_windows.pop(key, None)
+            return None
+
+        if time.time() > until:
+            self._force_capture_windows.pop(key, None)
+            return None
+
+        expected_sender_id = entry.get("sender_id")
+        if expected_sender_id:
+            current_sender_id = self._get_force_capture_sender_id(event)
+            if current_sender_id and str(current_sender_id) != str(expected_sender_id):
+                return None
+
+        return entry
+
+    def consume_force_capture(self, event) -> None:
+        """消费强制捕获条目。
+
+        Args:
+            event: 消息事件对象
+        """
+        key = self._get_force_capture_key(event)
+        self._force_capture_windows.pop(key, None)
 
     def cleanup(self):
         """清理资源。"""
