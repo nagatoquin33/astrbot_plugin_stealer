@@ -1,4 +1,6 @@
+import asyncio
 import hashlib
+import inspect
 import json
 from pathlib import Path
 from types import MappingProxyType
@@ -43,6 +45,8 @@ class CacheService:
 
         # 加载持久化的缓存
         self._load_caches()
+
+        self._index_lock = asyncio.Lock()
 
     def _load_caches(self):
         """加载持久化的缓存文件。"""
@@ -261,9 +265,10 @@ class CacheService:
             Dict[str, Any]: 键为文件路径，值为包含 category 与 tags 的字典。
         """
         try:
-            cache_data = self.get_cache("index_cache")
-            index_data = dict(cache_data) if cache_data else {}
-            return index_data
+            async with self._index_lock:
+                cache_data = self.get_cache("index_cache")
+                index_data = dict(cache_data) if cache_data else {}
+                return index_data
         except Exception as e:
             logger.error(f"加载索引失败: {e}", exc_info=True)
             return {}
@@ -271,9 +276,26 @@ class CacheService:
     async def save_index(self, idx: dict[str, Any]):
         """保存分类索引文件。"""
         try:
-            self.set_cache("index_cache", idx, persist=True)
+            async with self._index_lock:
+                self.set_cache("index_cache", idx, persist=True)
         except Exception as e:
             logger.error(f"保存索引文件失败: {e}", exc_info=True)
+
+    async def update_index(self, updater) -> dict[str, Any]:
+        try:
+            async with self._index_lock:
+                current = dict(self.get_cache("index_cache") or {})
+                result = updater(current)
+                if inspect.isawaitable(result):
+                    await result
+                self.set_cache("index_cache", current, persist=True)
+                return current
+        except Exception as e:
+            logger.error(f"更新索引失败: {e}", exc_info=True)
+            try:
+                return dict(self.get_cache("index_cache") or {})
+            except Exception:
+                return {}
 
     async def migrate_legacy_data(self, base_dir) -> dict[str, Any]:
         """迁移旧版本数据到新版本。

@@ -945,10 +945,19 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
 
             # 新逻辑：既然移除了元数据过滤，假设输入的都是表情包
             # 只需要处理情绪分类结果
-            if emotion_result in self.categories:
+            cfg = getattr(self.plugin, "config_service", None)
+            normalized = ""
+            if cfg and hasattr(cfg, "normalize_category_strict"):
+                try:
+                    normalized = cfg.normalize_category_strict(emotion_result)
+                except Exception:
+                    normalized = ""
+
+            if normalized and normalized in self.categories:
+                category = normalized
+            elif emotion_result in self.categories:
                 category = emotion_result
             else:
-                # 尝试从响应中提取有效类别
                 found_category = None
                 for valid_cat in self.categories:
                     if valid_cat in emotion_result:
@@ -958,7 +967,6 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                 if found_category:
                     category = found_category
                 else:
-                    # 如果无法提取有效分类，使用默认分类
                     logger.warning(
                         f"无法从响应中提取有效情绪分类: {emotion_result}，使用默认分类"
                     )

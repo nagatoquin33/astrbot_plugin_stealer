@@ -196,6 +196,15 @@ class NaturalEmotionAnalyzer:
         # 清理结果
         result = result_text.strip().lower()
 
+        cfg = getattr(self.plugin, "config_service", None)
+        if cfg and hasattr(cfg, "normalize_category_strict"):
+            try:
+                normalized = cfg.normalize_category_strict(result)
+                if normalized:
+                    return normalized
+            except Exception:
+                pass
+
         # 直接匹配分类
         for category in self.categories:
             if category.lower() in result:

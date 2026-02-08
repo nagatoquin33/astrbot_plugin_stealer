@@ -18,22 +18,34 @@ class CommandHandler:
 
     async def meme_on(self, event: AstrMessageEvent):
         """开启偷表情包功能。"""
-        self.plugin.steal_emoji = True
+        if hasattr(self.plugin, "_update_config_from_dict"):
+            self.plugin._update_config_from_dict({"steal_emoji": True})
+        else:
+            self.plugin.steal_emoji = True
         yield event.plain_result("已开启偷表情包")
 
     async def meme_off(self, event: AstrMessageEvent):
         """关闭偷表情包功能。"""
-        self.plugin.steal_emoji = False
+        if hasattr(self.plugin, "_update_config_from_dict"):
+            self.plugin._update_config_from_dict({"steal_emoji": False})
+        else:
+            self.plugin.steal_emoji = False
         yield event.plain_result("已关闭偷表情包")
 
     async def auto_on(self, event: AstrMessageEvent):
         """开启自动发送功能。"""
-        self.plugin.auto_send = True
+        if hasattr(self.plugin, "_update_config_from_dict"):
+            self.plugin._update_config_from_dict({"auto_send": True})
+        else:
+            self.plugin.auto_send = True
         yield event.plain_result("已开启自动发送")
 
     async def auto_off(self, event: AstrMessageEvent):
         """关闭自动发送功能。"""
-        self.plugin.auto_send = False
+        if hasattr(self.plugin, "_update_config_from_dict"):
+            self.plugin._update_config_from_dict({"auto_send": False})
+        else:
+            self.plugin.auto_send = False
         yield event.plain_result("已关闭自动发送")
 
     async def group_filter(
@@ -201,12 +213,22 @@ class CommandHandler:
             return
 
         if action == "on":
-            self.plugin.enable_natural_emotion_analysis = True
+            if hasattr(self.plugin, "_update_config_from_dict"):
+                self.plugin._update_config_from_dict(
+                    {"enable_natural_emotion_analysis": True}
+                )
+            else:
+                self.plugin.enable_natural_emotion_analysis = True
             yield event.plain_result(
                 "✅ 已启用自然语言情绪分析（LLM模式）\n\n💡 提示：如果之前使用被动标签模式，建议使用 /reset 清除AI对话上下文，避免继续输出 &&emotion&& 标签"
             )
         else:
-            self.plugin.enable_natural_emotion_analysis = False
+            if hasattr(self.plugin, "_update_config_from_dict"):
+                self.plugin._update_config_from_dict(
+                    {"enable_natural_emotion_analysis": False}
+                )
+            else:
+                self.plugin.enable_natural_emotion_analysis = False
             yield event.plain_result(
                 "❌ 已禁用自然语言情绪分析（被动标签模式）\n\n💡 提示：LLM现在会在回复开头插入 &&emotion&& 标签，插件会自动清理这些标签"
             )

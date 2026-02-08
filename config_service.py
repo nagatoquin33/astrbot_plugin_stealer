@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -32,23 +33,98 @@ class ConfigService:
         # 分类详细信息配置
         self.category_info_path = self.base_dir / "category_info.json"
         self.category_info = {
-            "happy": {"name": "开心", "desc": "快乐、高兴、愉悦的情绪"},
-            "sad": {"name": "难过", "desc": "悲伤、沮丧、失落的情绪"},
-            "angry": {"name": "生气", "desc": "愤怒、恼火、不满的情绪"},
-            "shy": {"name": "害羞", "desc": "羞涩、不好意思的情绪"},
-            "surprised": {"name": "惊讶", "desc": "意外、震惊、惊奇的情绪"},
-            "troll": {"name": "搞怪", "desc": "调皮、搞怪、发癫的情绪"},
-            "cry": {"name": "大哭", "desc": "哭泣、流泪、伤心的情绪"},
-            "confused": {"name": "困惑", "desc": "迷茫、不解、疑惑的情绪"},
-            "embarrassed": {"name": "尴尬", "desc": "窘迫、尴尬、为难的情绪"},
-            "love": {"name": "喜爱", "desc": "喜欢、爱慕、宠溺的情绪"},
-            "disgust": {"name": "厌恶", "desc": "讨厌、反感、嫌弃的情绪"},
-            "fear": {"name": "害怕", "desc": "恐惧、担心、害怕的情绪"},
-            "excitement": {"name": "兴奋", "desc": "激动、亢奋、兴奋的情绪"},
-            "tired": {"name": "疲惫", "desc": "劳累、疲倦、无力的情绪"},
-            "sigh": {"name": "叹气", "desc": "无奈、叹气、失望的情绪"},
-            "thank": {"name": "感谢", "desc": "感谢、道谢、感恩的情绪"},
-            "dumb": {"name": "无语", "desc": "呆滞、无语、傻眼的状态"},
+            "happy": {"name": "开心", "desc": "快乐、愉悦、满足、好心情"},
+            "sad": {"name": "难过", "desc": "悲伤、沮丧、失落、emo"},
+            "angry": {"name": "生气", "desc": "愤怒、恼火、不满、暴躁"},
+            "shy": {"name": "害羞", "desc": "羞涩、不好意思、腼腆"},
+            "surprised": {"name": "惊讶", "desc": "意外、震惊、惊奇、啊？"},
+            "troll": {"name": "整活", "desc": "调皮、搞怪、发癫、抽象"},
+            "cry": {"name": "哭哭", "desc": "哭泣、流泪、委屈、破防"},
+            "confused": {"name": "困惑", "desc": "迷茫、不解、疑惑、问号脸"},
+            "embarrassed": {"name": "尴尬", "desc": "社死、窘迫、为难、脚趾抠地"},
+            "love": {"name": "喜欢", "desc": "喜爱、爱慕、宠溺、心动"},
+            "disgust": {"name": "嫌弃", "desc": "厌恶、反感、讨厌、yue"},
+            "fear": {"name": "害怕", "desc": "恐惧、担心、紧张、怂"},
+            "excitement": {"name": "兴奋", "desc": "激动、亢奋、嗨、上头"},
+            "tired": {"name": "困倦", "desc": "疲惫、困、无力、想躺"},
+            "sigh": {"name": "无奈", "desc": "叹气、摆烂、算了、心累"},
+            "thank": {"name": "感谢", "desc": "道谢、感恩、收到、爱了"},
+            "dumb": {"name": "无语", "desc": "呆住、傻眼、离谱、沉默"},
+        }
+
+        self.category_aliases: dict[str, str] = {
+            "开心": "happy",
+            "高兴": "happy",
+            "快乐": "happy",
+            "哈哈": "happy",
+            "笑": "happy",
+            "难过": "sad",
+            "伤心": "sad",
+            "emo": "sad",
+            "沮丧": "sad",
+            "失落": "sad",
+            "生气": "angry",
+            "愤怒": "angry",
+            "恼火": "angry",
+            "暴躁": "angry",
+            "害羞": "shy",
+            "不好意思": "shy",
+            "腼腆": "shy",
+            "惊讶": "surprised",
+            "震惊": "surprised",
+            "意外": "surprised",
+            "搞怪": "troll",
+            "整活": "troll",
+            "发癫": "troll",
+            "抽象": "troll",
+            "哭": "cry",
+            "大哭": "cry",
+            "哭哭": "cry",
+            "委屈": "cry",
+            "破防": "cry",
+            "困惑": "confused",
+            "疑惑": "confused",
+            "迷茫": "confused",
+            "问号": "confused",
+            "尴尬": "embarrassed",
+            "社死": "embarrassed",
+            "为难": "embarrassed",
+            "喜欢": "love",
+            "喜爱": "love",
+            "爱": "love",
+            "心动": "love",
+            "嫌弃": "disgust",
+            "厌恶": "disgust",
+            "反感": "disgust",
+            "yue": "disgust",
+            "害怕": "fear",
+            "恐惧": "fear",
+            "紧张": "fear",
+            "怂": "fear",
+            "兴奋": "excitement",
+            "激动": "excitement",
+            "嗨": "excitement",
+            "上头": "excitement",
+            "疲惫": "tired",
+            "困": "tired",
+            "困倦": "tired",
+            "想睡": "tired",
+            "无奈": "sigh",
+            "叹气": "sigh",
+            "摆烂": "sigh",
+            "算了": "sigh",
+            "感谢": "thank",
+            "谢谢": "thank",
+            "多谢": "thank",
+            "感恩": "thank",
+            "无语": "dumb",
+            "傻眼": "dumb",
+            "离谱": "dumb",
+            "沉默": "dumb",
+            "其它": "",
+            "其他": "",
+            "其他表情": "",
+            "其他情绪": "",
         }
 
     def initialize(self):
@@ -264,6 +340,13 @@ class ConfigService:
         self.webui_enabled = self._config.get("webui_enabled", True)
         self.webui_host = self._config.get("webui_host", "0.0.0.0")
         self.webui_port = self._config.get("webui_port", 8899)
+        self.webui_auth_enabled = self._config.get("webui_auth_enabled", True)
+        self.webui_password = str(self._config.get("webui_password", "") or "").strip()
+        raw_timeout = self._config.get("webui_session_timeout", 3600)
+        try:
+            self.webui_session_timeout = int(raw_timeout) if raw_timeout else 3600
+        except Exception:
+            self.webui_session_timeout = 3600
 
         # 高级选项
         self.enable_raw_cleanup = self._config.get("enable_raw_cleanup", True)
@@ -400,19 +483,66 @@ class ConfigService:
         except Exception as e:
             logger.error(f"设置配置失败: {e}")
 
+    def normalize_category_strict(self, raw: str) -> str:
+        if not raw:
+            return ""
+
+        text = str(raw).strip()
+        if not text:
+            return ""
+
+        if text in self.categories:
+            return text
+
+        lowered = text.lower()
+        for cat in self.categories:
+            if cat.lower() == lowered:
+                return cat
+
+        alias_hit = self.category_aliases.get(text)
+        if alias_hit and alias_hit in self.categories:
+            return alias_hit
+
+        alias_hit_lower = self.category_aliases.get(lowered)
+        if alias_hit_lower and alias_hit_lower in self.categories:
+            return alias_hit_lower
+
+        for k, v in sorted(
+            self.category_aliases.items(),
+            key=lambda kv: len(str(kv[0] or "")),
+            reverse=True,
+        ):
+            if not v or v not in self.categories:
+                continue
+
+            key = str(k or "").strip()
+            if len(key) <= 1:
+                continue
+
+            key_lower = key.lower()
+            if key_lower.isascii():
+                if re.search(rf"\b{re.escape(key_lower)}\b", lowered):
+                    return v
+            else:
+                if key_lower in lowered:
+                    return v
+
+        return ""
+
     def _normalize_category(self, raw: str) -> str:
         """将模型返回的情绪类别规范化到内部英文标签。"""
         if not raw:
             return self.categories[0]
 
         text = str(raw).strip()
+        strict = self.normalize_category_strict(text)
+        if strict:
+            return strict
 
         if text in self.categories:
             return text
 
         # 旧分类兼容
-        if text == "搞怪":
-            return "troll" if "troll" in self.categories else "happy"
         if text in {"其它", "其他", "其他表情", "其他情绪"}:
             return self.categories[0]
 

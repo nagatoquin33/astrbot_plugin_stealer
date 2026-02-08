@@ -169,6 +169,24 @@
     "type": "int",
     "default": 8899
   },
+  "webui_auth_enabled": {
+    "description": "启用 WebUI 登录",
+    "type": "bool",
+    "default": true,
+    "hint": "✅ 开启：访问 WebUI 需要先登录（推荐）\n❌ 关闭：不需要登录即可访问（仅建议本地/内网调试使用）"
+  },
+  "webui_password": {
+    "description": "访问密码",
+    "type": "string",
+    "default": "",
+    "hint": "仅在“启用 WebUI 登录”开启时生效。留空将自动生成 6 位随机密码并在日志中提示"
+  },
+  "webui_session_timeout": {
+    "description": "会话超时时间（秒）",
+    "type": "int",
+    "default": 3600,
+    "hint": "登录会话的有效时长，超时需要重新登录"
+  },
   
   "_advanced_section": {
     "description": "=== 高级选项 ===",
@@ -209,5 +227,4 @@
     "hint": "容量控制检查间隔，10-1440分钟"
   }
 }
-
 

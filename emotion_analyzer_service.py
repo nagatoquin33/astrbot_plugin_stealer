@@ -1,3 +1,5 @@
+import asyncio
+import os
 import re
 
 from astrbot.api import logger
@@ -46,11 +48,48 @@ class EmotionAnalyzerService:
         self.categories = (
             plugin_instance.categories if hasattr(plugin_instance, "categories") else []
         )
+        # 智能模式是异步触发的，短时间多条消息会并发选图；这里用锁串行化选图，
+        # 防止“历史未更新”导致重复命中同一张图。
+        self._selection_lock = asyncio.Lock()
+
+    def _canon_path(self, path: str) -> str:
+        """规范化路径用于比较去重（Windows 下大小写/分隔符/相对路径可能不一致）。"""
+        try:
+            return os.path.normcase(os.path.abspath(os.path.normpath(path)))
+        except Exception:
+            return str(path or "")
+
+    def _get_recent_usage(self, category: str) -> list[str]:
+        """读取某个分类最近使用的图片列表（保存的是规范化路径）。"""
+        recent_usage_key = f"recent_usage_{category}"
+        recent_usage = getattr(self.plugin_instance, recent_usage_key, [])
+        if not isinstance(recent_usage, list):
+            recent_usage = []
+        normalized = []
+        for item in recent_usage:
+            if not item:
+                continue
+            normalized.append(self._canon_path(str(item)))
+        return normalized
+
+    def _set_recent_usage(self, category: str, recent_usage: list[str]) -> None:
+        """写回某个分类最近使用的图片列表（运行时内存态，不持久化）。"""
+        recent_usage_key = f"recent_usage_{category}"
+        setattr(self.plugin_instance, recent_usage_key, recent_usage)
 
     def normalize_category(self, category: str) -> str:
         """将任意文本归一化到预定义的情绪分类中。"""
         if not category:
             return ""
+
+        cfg = getattr(self.plugin_instance, "config_service", None)
+        if cfg and hasattr(cfg, "normalize_category_strict"):
+            try:
+                normalized = cfg.normalize_category_strict(category)
+                if normalized:
+                    return normalized
+            except Exception:
+                pass
 
         category = category.strip().lower()
 
@@ -161,19 +200,33 @@ class EmotionAnalyzerService:
         Returns:
             str | None: 表情包路径
         """
+        async with self._selection_lock:
+            use_smart = getattr(self.plugin_instance, "smart_emoji_selection", True)
+
+            if use_smart and context_text and len(context_text.strip()) > 5:
+                smart_path = await self._select_emoji_smart_impl(category, context_text)
+                if smart_path:
+                    return smart_path
+
+            return self._select_emoji_random_impl(category, use_smart=use_smart)
+
+    async def select_emoji_smart(self, category: str, context_text: str) -> str | None:
+        """智能选择表情包（多样性+匹配度+文本相似度）。
+
+        Args:
+            category: 情绪分类
+            context_text: 上下文文本
+
+        Returns:
+            str | None: 表情包路径
+        """
+        async with self._selection_lock:
+            return await self._select_emoji_smart_impl(category, context_text)
+
+    def _select_emoji_random_impl(self, category: str, use_smart: bool) -> str | None:
         import random
         from pathlib import Path
 
-        # 检查是否启用智能选择
-        use_smart = getattr(self.plugin_instance, "smart_emoji_selection", True)
-
-        # 如果启用智能选择且提供了上下文，使用智能选择
-        if use_smart and context_text and len(context_text.strip()) > 5:
-            smart_path = await self.select_emoji_smart(category, context_text)
-            if smart_path:
-                return smart_path
-
-        # 降级到随机选择（原有逻辑）
         base_dir = getattr(self.plugin_instance, "base_dir", None)
         if not base_dir:
             return None
@@ -193,56 +246,42 @@ class EmotionAnalyzerService:
                 f"从'{category}'目录中找到 {len(files)} 张图片（{'智能选择失败，' if use_smart else ''}随机选择）"
             )
 
-            # 改进的随机选择：避免重复
-            recent_usage_key = f"recent_usage_{category}"
-            recent_usage = getattr(self.plugin_instance, recent_usage_key, [])
+            recent_usage = self._get_recent_usage(category)
+            recent_set = set(recent_usage)
 
-            # 过滤最近使用的文件
-            available_files = [f for f in files if f.as_posix() not in recent_usage]
+            candidates = [(p, self._canon_path(str(p))) for p in files]
 
-            # 如果过滤后没有可用文件，清空历史
-            if not available_files:
-                available_files = files
-                recent_usage.clear()
+            # 用规范化路径做避重，避免 as_posix vs Windows 路径导致过滤失效
+            available = [p for p, canon in candidates if canon not in recent_set]
+            if not available:
+                available = [p for p, _ in candidates]
+                recent_usage = []
+                recent_set = set()
 
-            # 随机选择
-            picked_image = random.choice(available_files)
+            picked = random.choice(available)
+            picked_path = self._canon_path(str(picked))
 
-            # 更新最近使用历史
-            picked_path = picked_image.as_posix()
-            if picked_path in recent_usage:
-                recent_usage.remove(picked_path)
+            if picked_path in recent_set:
+                recent_usage = [p for p in recent_usage if p != picked_path]
             recent_usage.append(picked_path)
 
-            # 保持历史队列大小
-            max_recent = min(5, max(2, len(files) // 2))
+            # 控制内存队列大小，避免队列过短导致重复，也避免过长导致“可选集过小”
+            max_recent = min(10, max(3, len(files) // 2))
             if len(recent_usage) > max_recent:
-                recent_usage.pop(0)
+                recent_usage = recent_usage[-max_recent:]
 
-            setattr(self.plugin_instance, recent_usage_key, recent_usage)
-
-            return picked_path
+            self._set_recent_usage(category, recent_usage)
+            return str(picked)
         except Exception as e:
             logger.error(f"选择表情包失败: {e}")
             return None
 
-    async def select_emoji_smart(self, category: str, context_text: str) -> str | None:
-        """智能选择表情包（多样性+匹配度+文本相似度）。
-
-        Args:
-            category: 情绪分类
-            context_text: 上下文文本
-
-        Returns:
-            str | None: 表情包路径
-        """
+    async def _select_emoji_smart_impl(self, category: str, context_text: str) -> str | None:
         import math
-        import os
         import random
         import time
 
         try:
-            # 1. 加载索引，获取该分类下的所有表情包
             cache_service = getattr(self.plugin_instance, "cache_service", None)
             if not cache_service:
                 return None
@@ -251,26 +290,23 @@ class EmotionAnalyzerService:
             candidates = []
             current_time = time.time()
 
-            # 获取最近使用历史（避免重复）
-            recent_usage_key = f"recent_usage_{category}"
-            recent_usage = getattr(self.plugin_instance, recent_usage_key, [])
+            recent_usage = self._get_recent_usage(category)
 
             for file_path, data in idx.items():
                 if not isinstance(data, dict):
                     continue
 
-                # 匹配分类
                 file_category = data.get("category", data.get("emotion", ""))
                 if file_category != category:
                     continue
 
-                # 检查文件是否存在
                 if not os.path.exists(file_path):
                     continue
 
                 candidates.append(
                     {
-                        "path": file_path,
+                        "path": str(file_path),
+                        "canon": self._canon_path(str(file_path)),
                         "data": data,
                         "last_used": data.get("last_used", 0),
                         "use_count": data.get("use_count", 0),
@@ -284,68 +320,58 @@ class EmotionAnalyzerService:
                 logger.debug(f"分类 '{category}' 下没有可用的表情包")
                 return None
 
-            # 2. 强制避重：过滤最近使用的表情包
-            available_candidates = [
-                c for c in candidates if c["path"] not in recent_usage
-            ]
+            # 硬避重窗口：最近使用的若干张直接排除（窗口随候选数量自适应）
+            ban_size = min(12, max(4, len(candidates) // 3))
+            recent_ban = set(recent_usage[-ban_size:])
 
-            # 如果过滤后候选太少，只避免最近3个
-            if len(available_candidates) < max(2, len(candidates) * 0.3):
-                recent_3 = recent_usage[-3:] if len(recent_usage) >= 3 else recent_usage
+            available_candidates = [c for c in candidates if c["canon"] not in recent_ban]
+
+            if len(available_candidates) < 2:
+                recent_ban = set(recent_usage[-3:])
                 available_candidates = [
-                    c for c in candidates if c["path"] not in recent_3
+                    c for c in candidates if c["canon"] not in recent_ban
                 ]
 
-            # 如果还是没有候选，清空历史重新开始
             if not available_candidates:
                 available_candidates = candidates
-                recent_usage.clear()
+                recent_usage = []
 
-            # 3. 计算多样性分数（权重70%）
             for candidate in available_candidates:
-                diversity_score = 100  # 基础分数
+                diversity_score = 100
 
-                # 时间多样性（使用时间越久分数越高）
                 time_since_last_use = current_time - candidate["last_used"]
-                if time_since_last_use < 300:  # 5分钟内大幅减分
+                if time_since_last_use < 300:
                     diversity_score -= 60
-                elif time_since_last_use < 1800:  # 30分钟内
+                elif time_since_last_use < 1800:
                     diversity_score -= 30
-                elif time_since_last_use < 3600:  # 1小时内
+                elif time_since_last_use < 3600:
                     diversity_score -= 10
                 else:
-                    # 超过1小时给予奖励
                     hours_passed = time_since_last_use / 3600
                     diversity_score += min(hours_passed * 5, 30)
 
-                # 频率多样性（使用次数越少分数越高）
                 use_count = candidate["use_count"]
                 if use_count == 0:
-                    diversity_score += 20  # 从未使用过的优先
+                    diversity_score += 20
                 elif use_count < 3:
                     diversity_score += 10
-                elif use_count < 10:
-                    diversity_score += 0
-                else:
+                elif use_count >= 10:
                     diversity_score -= min(use_count * 2, 30)
 
                 candidate["diversity_score"] = max(diversity_score, 10)
 
-            # 4. 计算匹配分数（权重30%）
             has_context = context_text and len(context_text.strip()) > 5
 
             for candidate in available_candidates:
-                match_score = 10  # 基础匹配分数
+                match_score = 10
 
                 if has_context:
                     context_lower = context_text.lower()
 
-                    # 场景匹配
                     for scene in candidate["scenes"]:
                         if len(scene) > 2 and scene in context_lower:
                             match_score += 25
 
-                    # 描述匹配
                     desc = candidate["desc"]
                     if desc and desc in context_lower:
                         match_score += 20
@@ -356,64 +382,54 @@ class EmotionAnalyzerService:
                         )
                         match_score += matched_words * 5
 
-                    # 标签匹配
                     for tag in candidate["tags"]:
                         if len(tag) > 1 and tag in context_lower:
                             match_score += 8
 
-                    # 文本相似度加成
                     if desc and len(desc) > 3:
                         similarity = calculate_hybrid_similarity(context_text, desc)
-                        similarity_bonus = similarity * 15
-                        match_score += similarity_bonus
-
-                        if similarity > 0.3:
-                            logger.debug(
-                                f"[相似度匹配] '{context_text[:20]}...' vs '{desc[:20]}...' = {similarity:.2f}"
-                            )
+                        match_score += similarity * 15
 
                 candidate["match_score"] = match_score
 
-            # 5. 计算综合分数：多样性70% + 匹配度30%
-            max_diversity = max(c["diversity_score"] for c in available_candidates)
-            max_match = max(c["match_score"] for c in available_candidates)
+            max_diversity = max(c["diversity_score"] for c in available_candidates) or 1
+            max_match = max(c["match_score"] for c in available_candidates) or 1
 
             for candidate in available_candidates:
-                # 标准化到0-100
                 norm_diversity = (candidate["diversity_score"] / max_diversity) * 100
                 norm_match = (candidate["match_score"] / max_match) * 100
-
-                # 多样性权重更高
                 candidate["final_score"] = norm_diversity * 0.7 + norm_match * 0.3
 
-            # 6. 选择策略：从前40%候选中加权随机选择
             available_candidates.sort(key=lambda x: x["final_score"], reverse=True)
-            top_40_percent = max(1, int(len(available_candidates) * 0.4))
-            top_candidates = available_candidates[:top_40_percent]
+            # 不直接选第 1 名：保留一定随机性，避免总抽到同一张“最优图”
+            top_percent = max(1, int(len(available_candidates) * 0.6))
+            top_candidates = available_candidates[:top_percent]
 
-            # 使用指数衰减权重，保持随机性
-            weights = [math.exp(-i * 0.3) for i in range(len(top_candidates))]
+            weights = [math.exp(-i * 0.18) for i in range(len(top_candidates))]
             selected = random.choices(top_candidates, weights=weights, k=1)[0]
 
-            # 7. 更新使用历史和统计
             selected_path = selected["path"]
+            selected_canon = selected["canon"]
+            last_used = int(current_time)
 
-            # 更新索引中的使用统计
-            idx[selected_path]["last_used"] = int(current_time)
-            idx[selected_path]["use_count"] = idx[selected_path].get("use_count", 0) + 1
-            await cache_service.save_index(idx)
+            def updater(current: dict):
+                meta = current.get(selected_path)
+                if not isinstance(meta, dict):
+                    return
+                meta["last_used"] = last_used
+                meta["use_count"] = int(meta.get("use_count", 0) or 0) + 1
+                current[selected_path] = meta
 
-            # 更新最近使用历史
-            if selected_path in recent_usage:
-                recent_usage.remove(selected_path)
-            recent_usage.append(selected_path)
+            await cache_service.update_index(updater)
 
-            # 保持历史队列大小（最多记录8个）
-            max_recent = min(8, max(3, len(candidates) // 2))
+            recent_usage = [p for p in recent_usage if p != selected_canon]
+            recent_usage.append(selected_canon)
+
+            max_recent = min(16, max(5, len(candidates) // 2))
             if len(recent_usage) > max_recent:
-                recent_usage.pop(0)
+                recent_usage = recent_usage[-max_recent:]
 
-            setattr(self.plugin_instance, recent_usage_key, recent_usage)
+            self._set_recent_usage(category, recent_usage)
 
             logger.info(
                 f"选择表情包: 多样性={selected['diversity_score']:.1f}, "
@@ -422,7 +438,6 @@ class EmotionAnalyzerService:
             )
 
             return selected_path
-
         except Exception as e:
             logger.error(f"智能选择表情包失败: {e}", exc_info=True)
             return None

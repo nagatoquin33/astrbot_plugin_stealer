@@ -1,7 +1,9 @@
 import hashlib
+import hmac
 import logging
 import os
 import shutil
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -16,7 +18,10 @@ class WebServer:
         self.plugin = plugin
         self.host = host
         self.port = port
-        self.app = web.Application(client_max_size=50 * 1024 * 1024)
+        self.app = web.Application(
+            client_max_size=50 * 1024 * 1024,
+            middlewares=[self._error_middleware, self._auth_middleware],
+        )
         self.runner: web.AppRunner | None = None
         self.site: web.TCPSite | None = None
         self._started = False
@@ -27,7 +32,117 @@ class WebServer:
         # 图片数据目录 (数据目录下的 plugin_data/...)
         self.data_dir = self.plugin.base_dir
 
+        self._cookie_name = "stealer_webui_session"
+        self._sessions: dict[str, float] = {}
+
         self._setup_routes()
+
+    async def _error_middleware(self, app: web.Application, handler):
+        async def middleware_handler(request: web.Request):
+            try:
+                return await handler(request)
+            except web.HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"Unhandled WebUI error: {e}", exc_info=True)
+                if (request.path or "").startswith("/api/"):
+                    return web.json_response(
+                        {"success": False, "error": "Internal Server Error"},
+                        status=500,
+                    )
+                return web.Response(text="500 Internal Server Error", status=500)
+
+        return middleware_handler
+
+    def _is_auth_enabled(self) -> bool:
+        try:
+            enabled = getattr(self.plugin, "webui_auth_enabled", None)
+            if enabled is not None:
+                return bool(enabled)
+        except Exception:
+            pass
+        try:
+            cfg = getattr(self.plugin, "config_service", None)
+            enabled = getattr(cfg, "webui_auth_enabled", None)
+            if enabled is not None:
+                return bool(enabled)
+        except Exception:
+            pass
+        return True
+
+    def _get_expected_secret(self) -> str:
+        if not self._is_auth_enabled():
+            return ""
+
+        password = ""
+        try:
+            password = str(getattr(self.plugin, "webui_password", "") or "").strip()
+        except Exception:
+            password = ""
+        if password:
+            return password
+        try:
+            password = str(
+                getattr(getattr(self.plugin, "config_service", None), "webui_password", "")
+                or ""
+            ).strip()
+        except Exception:
+            password = ""
+        if password:
+            return password
+        return ""
+
+    def _get_session_timeout(self) -> int:
+        timeout = 3600
+        try:
+            timeout = int(getattr(self.plugin, "webui_session_timeout", 3600) or 3600)
+        except Exception:
+            timeout = 3600
+        if timeout == 3600:
+            try:
+                timeout = int(
+                    getattr(getattr(self.plugin, "config_service", None), "webui_session_timeout", 3600)
+                    or 3600
+                )
+            except Exception:
+                timeout = 3600
+        if timeout <= 0:
+            timeout = 3600
+        return timeout
+
+    async def _auth_middleware(self, app: web.Application, handler):
+        async def middleware_handler(request: web.Request):
+            if request.method == "OPTIONS":
+                return await handler(request)
+
+            expected = self._get_expected_secret()
+            if not expected:
+                return await handler(request)
+
+            path = request.path or "/"
+            if (
+                path in ("/", "/index.html")
+                or path.startswith("/web")
+                or path in ("/auth/info", "/auth/login", "/auth/logout")
+            ):
+                return await handler(request)
+
+            sid = str(request.cookies.get(self._cookie_name, "") or "").strip()
+            now = time.time()
+            exp = self._sessions.get(sid)
+            if not exp or exp < now:
+                if sid:
+                    self._sessions.pop(sid, None)
+                if path.startswith("/api/"):
+                    return web.json_response(
+                        {"success": False, "error": "Unauthorized"},
+                        status=401,
+                    )
+                raise web.HTTPUnauthorized(text="Unauthorized")
+
+            return await handler(request)
+
+        return middleware_handler
 
     def _setup_routes(self):
         self.app.router.add_get("/api/images", self.handle_list_images)
@@ -43,6 +158,9 @@ class WebServer:
         self.app.router.add_delete("/api/categories/{key}", self.handle_delete_category)
         self.app.router.add_get("/api/emotions", self.handle_get_emotions)
         self.app.router.add_get("/api/health", self.handle_health_check)
+        self.app.router.add_get("/auth/info", self.handle_auth_info)
+        self.app.router.add_post("/auth/login", self.handle_auth_login)
+        self.app.router.add_post("/auth/logout", self.handle_auth_logout)
 
         # 静态文件路由
         # 1. 前端页面 - 首页
@@ -53,17 +171,53 @@ class WebServer:
         # 2. 静态资源
         # 插件 web/index.html 如果引用了本地资源（js/css/img），这里提供静态托管。
         # 兼容直接打包在 web/ 目录下的资源结构。
-        if self.static_dir.exists():
-            self.app.router.add_static("/web", self.static_dir, show_index=False)
+        self.app.router.add_get("/web/{path:.*}", self.handle_web_static)
 
-        # 3. 图片资源 (映射到实际存储路径)
-        # 这里用插件 base_dir 作为根目录，URL 通过 /images/<relative_path> 访问。
-        # 仅在目录存在时启用。
-        if self.data_dir and Path(self.data_dir).exists():
-            logger.debug(f"Mounting static images dir: {self.data_dir}")
-            self.app.router.add_static("/images", str(self.data_dir), show_index=False)
-        else:
-            logger.warning(f"Images data dir not found: {self.data_dir}")
+        self.app.router.add_get("/images/{path:.*}", self.handle_images_static)
+
+    async def handle_web_static(self, request: web.Request) -> web.StreamResponse:
+        raw = str(request.match_info.get("path", "") or "")
+        raw = raw.lstrip("/")
+        if not raw:
+            raise web.HTTPNotFound()
+        if ".." in raw or raw.startswith(("/", "\\")) or ":" in raw:
+            raise web.HTTPBadRequest(text="invalid path")
+
+        base_dir = Path(self.static_dir).resolve()
+        try:
+            abs_path = (base_dir / Path(raw)).resolve()
+            abs_path.relative_to(base_dir)
+        except Exception:
+            raise web.HTTPNotFound()
+
+        if not abs_path.exists() or not abs_path.is_file():
+            raise web.HTTPNotFound()
+
+        return web.FileResponse(path=abs_path)
+
+    async def handle_images_static(self, request: web.Request) -> web.StreamResponse:
+        raw = str(request.match_info.get("path", "") or "")
+        raw = raw.lstrip("/")
+        if not raw:
+            raise web.HTTPNotFound()
+        if ".." in raw or raw.startswith(("/", "\\")) or ":" in raw:
+            raise web.HTTPBadRequest(text="invalid path")
+
+        base_dir = Path(self.data_dir).resolve()
+        try:
+            abs_path = (base_dir / Path(raw)).resolve()
+            abs_path.relative_to(base_dir)
+        except Exception:
+            raise web.HTTPNotFound()
+
+        if not abs_path.exists() or not abs_path.is_file():
+            raise web.HTTPNotFound()
+
+        try:
+            return web.FileResponse(path=abs_path)
+        except Exception as e:
+            logger.warning(f"Failed to serve image {abs_path}: {e}")
+            raise web.HTTPNotFound()
 
     async def start(self) -> bool:
         """启动 Web 服务器
@@ -177,8 +331,8 @@ class WebServer:
                 try:
                     abs_path = Path(path_str)
                     rel_path = abs_path.relative_to(self.data_dir)
-                    # aiohttp的add_static会自动处理URL编码/解码，我们只需要提供正常的路径
-                    # 使用正斜杠作为路径分隔符（Web标准）
+                    # /images 路由会负责将相对路径映射到插件数据目录
+                    # 使用正斜杠作为路径分隔符（Web 标准）
                     url = f"/images/{rel_path.as_posix()}"
 
                     # 检查文件是否存在
@@ -291,19 +445,11 @@ class WebServer:
         image_hash = request.match_info["hash"]
         add_to_blacklist = request.query.get("blacklist", "false").lower() == "true"
 
-        # 获取缓存的可变副本
-        index = self.plugin.cache_service.get_cache("index_cache")
-        if not index:
-            return web.json_response({"error": "Image index not found"}, status=404)
-
-        # 创建可变副本用于修改
-        index_copy = dict(index)
-        target_path = None
-
-        for path_str, meta in index_copy.items():
-            if meta.get("hash") == image_hash:
-                target_path = path_str
-                break
+        target = {"path": None}
+        await self.plugin.cache_service.update_index(
+            lambda current: self._remove_by_hash(current, image_hash, target)
+        )
+        target_path = target["path"]
 
         if target_path:
             try:
@@ -311,15 +457,7 @@ class WebServer:
                 if os.path.exists(target_path):
                     os.remove(target_path)
 
-                # 2. 更新索引（从副本中删除）
-                if target_path in index_copy:
-                    del index_copy[target_path]
-                    # 保存更新后的索引
-                    self.plugin.cache_service.set_cache(
-                        "index_cache", index_copy, persist=True
-                    )
-
-                # 3. 添加到黑名单（如果请求）
+                # 2. 添加到黑名单（如果请求）
                 if add_to_blacklist:
                     # 使用当前时间戳作为值
                     import time
@@ -340,6 +478,13 @@ class WebServer:
 
         return web.json_response({"error": "Image not found"}, status=404)
 
+    def _remove_by_hash(self, current: dict, image_hash: str, target: dict):
+        for path_str, meta in list(current.items()):
+            if isinstance(meta, dict) and meta.get("hash") == image_hash:
+                target["path"] = path_str
+                del current[path_str]
+                return
+
     async def handle_update_image(self, request):
         """更新图片信息 (Category, Tags, Desc)"""
         try:
@@ -350,59 +495,53 @@ class WebServer:
             new_tags = data.get("tags")  # list or comma separated string
             new_desc = data.get("desc")
 
-            index = self.plugin.cache_service.get_cache("index_cache")
-            if not index:
-                return web.json_response({"error": "Index not found"}, status=404)
+            updated = {"ok": False, "error": ""}
 
-            index_copy = dict(index)
-            target_path = None
-            meta = None
+            def updater(current: dict):
+                target_path = None
+                meta = None
+                for path_str, m in current.items():
+                    if isinstance(m, dict) and m.get("hash") == image_hash:
+                        target_path = path_str
+                        meta = m
+                        break
 
-            for path_str, m in index_copy.items():
-                if m.get("hash") == image_hash:
-                    target_path = path_str
-                    meta = m
-                    break
+                if not target_path or not meta:
+                    updated["error"] = "Image not found"
+                    return
 
-            if not target_path or not meta:
-                return web.json_response({"error": "Image not found"}, status=404)
+                if new_tags is not None:
+                    if isinstance(new_tags, str):
+                        meta["tags"] = [t.strip() for t in new_tags.split(",") if t.strip()]
+                    else:
+                        meta["tags"] = new_tags
 
-            # 更新 Tags 和 Desc
-            if new_tags is not None:
-                if isinstance(new_tags, str):
-                    new_tags = [t.strip() for t in new_tags.split(",") if t.strip()]
-                meta["tags"] = new_tags
+                if new_desc is not None:
+                    meta["desc"] = new_desc
 
-            if new_desc is not None:
-                meta["desc"] = new_desc
+                if new_category and new_category != meta.get("category"):
+                    old_path = Path(target_path)
+                    if not old_path.exists():
+                        updated["error"] = "Source file not found"
+                        return
 
-            # 如果分类改变，需要移动文件
-            if new_category and new_category != meta.get("category"):
-                old_path = Path(target_path)
-                if old_path.exists():
-                    # 创建新目录
                     new_cat_dir = self.data_dir / "categories" / new_category
                     new_cat_dir.mkdir(parents=True, exist_ok=True)
-
                     new_path = new_cat_dir / old_path.name
-
-                    # 移动文件
                     shutil.move(str(old_path), str(new_path))
 
-                    # 更新索引 Key 和 Path
-                    del index_copy[target_path]
+                    del current[target_path]
                     meta["path"] = str(new_path)
                     meta["category"] = new_category
-                    index_copy[str(new_path)] = meta
+                    current[str(new_path)] = meta
                 else:
-                    return web.json_response(
-                        {"error": "Source file not found"}, status=404
-                    )
-            else:
-                # 只是更新元数据
-                index_copy[target_path] = meta
+                    current[target_path] = meta
 
-            self.plugin.cache_service.set_cache("index_cache", index_copy, persist=True)
+                updated["ok"] = True
+
+            await self.plugin.cache_service.update_index(updater)
+            if not updated["ok"]:
+                return web.json_response({"error": updated["error"] or "Update failed"}, status=404)
             return web.json_response({"success": True})
 
         except Exception as e:
@@ -417,11 +556,7 @@ class WebServer:
             if not hashes:
                 return web.json_response({"success": True, "count": 0})
 
-            index = self.plugin.cache_service.get_cache("index_cache")
-            if not index:
-                return web.json_response({"success": True})
-
-            index_copy = dict(index)
+            index_copy = dict(self.plugin.cache_service.get_cache("index_cache") or {})
             deleted_count = 0
 
             paths_to_delete = []
@@ -442,8 +577,8 @@ class WebServer:
                     logger.warning(f"Failed to delete {path_str}: {e}")
 
             if deleted_count > 0:
-                self.plugin.cache_service.set_cache(
-                    "index_cache", index_copy, persist=True
+                await self.plugin.cache_service.update_index(
+                    lambda current: (current.clear(), current.update(index_copy))
                 )
 
             return web.json_response({"success": True, "count": deleted_count})
@@ -463,11 +598,7 @@ class WebServer:
                     {"error": "Missing hashes or category"}, status=400
                 )
 
-            index = self.plugin.cache_service.get_cache("index_cache")
-            if not index:
-                return web.json_response({"success": True})
-
-            index_copy = dict(index)
+            index_copy = dict(self.plugin.cache_service.get_cache("index_cache") or {})
             moved_count = 0
 
             target_dir = self.data_dir / "categories" / target_category
@@ -501,8 +632,8 @@ class WebServer:
                     logger.warning(f"Failed to move {old_path_str}: {e}")
 
             if moved_count > 0:
-                self.plugin.cache_service.set_cache(
-                    "index_cache", index_copy, persist=True
+                await self.plugin.cache_service.update_index(
+                    lambda current: (current.clear(), current.update(index_copy))
                 )
 
                 # 失效缓存
@@ -555,6 +686,53 @@ class WebServer:
     async def handle_health_check(self, request):
         return web.json_response({"status": "ok", "service": "emoji-manager-webui"})
 
+    async def handle_auth_info(self, request):
+        expected = self._get_expected_secret()
+        return web.json_response(
+            {
+                "requires_auth": bool(expected),
+                "session_timeout": self._get_session_timeout(),
+            }
+        )
+
+    async def handle_auth_login(self, request):
+        expected = self._get_expected_secret()
+        if not expected:
+            return web.json_response({"success": True, "requires_auth": False})
+
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+
+        provided = str((payload or {}).get("password", "") or "").strip()
+        if not provided or not hmac.compare_digest(provided, expected):
+            return web.json_response({"success": False, "error": "Unauthorized"}, status=401)
+
+        timeout = self._get_session_timeout()
+        sid = uuid.uuid4().hex
+        exp = time.time() + float(timeout)
+        self._sessions[sid] = exp
+
+        resp = web.json_response({"success": True, "expires_at": int(exp)})
+        resp.set_cookie(
+            self._cookie_name,
+            sid,
+            max_age=timeout,
+            httponly=True,
+            samesite="Lax",
+            path="/",
+        )
+        return resp
+
+    async def handle_auth_logout(self, request):
+        sid = str(request.cookies.get(self._cookie_name, "") or "").strip()
+        if sid:
+            self._sessions.pop(sid, None)
+        resp = web.json_response({"success": True})
+        resp.del_cookie(self._cookie_name, path="/")
+        return resp
+
     async def handle_upload_image(self, request):
         try:
             data = await request.post()
@@ -599,18 +777,19 @@ class WebServer:
             with open(file_path, "wb") as f:
                 f.write(file_content)
 
-            index = dict(self.plugin.cache_service.get_cache("index_cache") or {})
-
-            index[str(file_path)] = {
-                "hash": file_hash,
-                "path": str(file_path),
-                "category": category,
-                "tags": tags,
-                "desc": desc,
-                "created_at": timestamp,
-            }
-
-            self.plugin.cache_service.set_cache("index_cache", index, persist=True)
+            await self.plugin.cache_service.update_index(
+                lambda current: current.__setitem__(
+                    str(file_path),
+                    {
+                        "hash": file_hash,
+                        "path": str(file_path),
+                        "category": category,
+                        "tags": tags,
+                        "desc": desc,
+                        "created_at": timestamp,
+                    },
+                )
+            )
 
             rel_path = file_path.relative_to(self.data_dir)
             url = f"/images/{rel_path.as_posix()}"
@@ -710,8 +889,7 @@ class WebServer:
 
             updated_categories = [c for c in current_categories if c != category_key]
 
-            index = self.plugin.cache_service.get_cache("index_cache") or {}
-            index_copy = dict(index)
+            index_copy = dict(self.plugin.cache_service.get_cache("index_cache") or {})
 
             deleted_missing_count = 0
             deleted_file_count = 0
@@ -746,10 +924,9 @@ class WebServer:
                 except Exception as e:
                     logger.warning(f"删除分类文件失败: {old_path}, 错误: {e}")
 
-            if index_copy != index:
-                self.plugin.cache_service.set_cache(
-                    "index_cache", index_copy, persist=True
-                )
+            await self.plugin.cache_service.update_index(
+                lambda current: (current.clear(), current.update(index_copy))
+            )
 
             if self.data_dir:
                 category_dir = Path(self.data_dir) / "categories" / category_key

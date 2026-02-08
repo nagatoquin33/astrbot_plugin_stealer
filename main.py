@@ -1,10 +1,9 @@
 import asyncio
-import inspect
 import json
 import os
 import re
+import secrets
 import shutil
-import time
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +16,6 @@ from astrbot.api.event.filter import (
 )
 from astrbot.api.message_components import Plain
 from astrbot.api.star import Context, Star
-from astrbot.core.file_token_service import FileTokenService
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
 from .cache_service import CacheService
@@ -36,99 +34,6 @@ try:
     import aiofiles  # type: ignore
 except ImportError:
     aiofiles = None
-
-# ================= Monkey Patch Start =================
-# 修复 AstrBot Token 一次性销毁导致部分客户端无法预览/下载图片的问题
-#
-# 问题背景：
-# 部分客户端（QQ/NapCat、Lagrange）在下载图片前会先发送 HEAD 请求探测文件，
-# 导致 Token 被提前消费，后续 GET 请求失败返回 404。
-#
-# 优化方案：
-# 1. 使用访问计数而非全局禁用 pop()，减少对其他功能的影响
-# 2. Token 有效期缩短至 60 秒（表情包场景足够使用）
-# 3. 仅对插件注册的 Token 启用多次访问保护
-
-# 保存原始方法引用
-_original_handle_file = FileTokenService.handle_file
-_original_register_file = FileTokenService.register_file
-
-# 插件专用的 Token 标记集合（使用 set 提高查询效率）
-_plugin_reusable_tokens = set()
-
-
-async def patched_register_file(
-    self, file_path: str, timeout: float | None = None
-) -> str:
-    """重写注册方法，为插件的 Token 添加标记"""
-    # 调用原始注册方法
-    file_token = await _original_register_file(self, file_path, timeout)
-
-    # 检查调用栈，判断是否来自本插件
-    frame = inspect.currentframe()
-    try:
-        # 向上查找调用栈
-        caller_frame = frame.f_back
-        while caller_frame:
-            caller_file = caller_frame.f_code.co_filename
-            # 如果调用者是本插件，标记为可重复使用
-            if "astrbot_plugin_stealer" in caller_file:
-                _plugin_reusable_tokens.add(file_token)
-                # 为表情包场景设置更短的超时（60秒足够）
-                if timeout is None:
-                    # 重新注册，使用短超时
-                    async with self.lock:
-                        if file_token in self.staged_files:
-                            file_path_stored, _ = self.staged_files[file_token]
-                            expire_time = time.time() + 60  # 60秒超时
-                            self.staged_files[file_token] = (
-                                file_path_stored,
-                                expire_time,
-                            )
-                break
-            caller_frame = caller_frame.f_back
-    finally:
-        del frame
-
-    return file_token
-
-
-async def patched_handle_file(self, file_token: str) -> str:
-    """优化的 handle_file，仅对插件 Token 启用多次访问"""
-    async with self.lock:
-        await self._cleanup_expired_tokens()
-
-        if file_token not in self.staged_files:
-            raise KeyError(f"无效或过期的文件 token: {file_token}")
-
-        # 判断是否为插件的可重复使用 Token
-        if file_token in _plugin_reusable_tokens:
-            # 插件 Token：保留不删除，支持多次访问（HEAD + GET）
-            file_path, _ = self.staged_files[file_token]
-        else:
-            # 其他 Token：保持原有的一次性行为
-            file_path, _ = self.staged_files.pop(file_token)
-
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"文件不存在: {file_path}")
-        return file_path
-
-
-# 应用补丁
-FileTokenService.register_file = patched_register_file
-FileTokenService.handle_file = patched_handle_file
-
-
-# 清理函数（在插件卸载时调用）
-def _cleanup_monkey_patch():
-    """恢复原始方法并清理标记集合"""
-    FileTokenService.handle_file = _original_handle_file
-    FileTokenService.register_file = _original_register_file
-    _plugin_reusable_tokens.clear()
-
-
-# ================= Monkey Patch End =================
-
 
 class Main(Star):
     """表情包偷取与发送插件。
@@ -180,6 +85,15 @@ class Main(Star):
             base_dir=self.base_dir, astrbot_config=config
         )
         self.config_service.initialize()
+
+        if (
+            self.config_service.webui_enabled
+            and getattr(self.config_service, "webui_auth_enabled", True)
+            and not getattr(self.config_service, "webui_password", "")
+        ):
+            generated = f"{secrets.randbelow(1000000):06d}"
+            self.config_service.update_config_from_dict({"webui_password": generated})
+            logger.info(f"WebUI 访问密码已自动生成: {generated}")
 
         # 从配置服务获取初始配置
         self.auto_send = self.config_service.auto_send
@@ -273,6 +187,9 @@ class Main(Star):
         self.webui_enabled = self.config_service.webui_enabled
         self.webui_host = self.config_service.webui_host
         self.webui_port = self.config_service.webui_port
+        self.webui_auth_enabled = getattr(self.config_service, "webui_auth_enabled", True)
+        self.webui_password = getattr(self.config_service, "webui_password", "")
+        self.webui_session_timeout = getattr(self.config_service, "webui_session_timeout", 3600)
 
     def _auto_merge_existing_categories(self) -> None:
         current = list(getattr(self.config_service, "categories", []) or [])
@@ -348,7 +265,7 @@ class Main(Star):
             fixed.append("最大表情数量已重置为100")
 
         # 验证表情发送概率
-        if not isinstance(self.emoji_chance, (int, float)) or not (
+        if not isinstance(self.emoji_chance, int | float) or not (
             0 <= self.emoji_chance <= 1
         ):
             errors.append("表情发送概率必须在0-1之间")
@@ -438,6 +355,8 @@ class Main(Star):
                 old_webui_enabled = getattr(self, "webui_enabled", True)
                 old_webui_host = getattr(self, "webui_host", "0.0.0.0")
                 old_webui_port = getattr(self, "webui_port", 8899)
+                old_webui_password = getattr(self, "webui_password", "")
+                old_webui_session_timeout = getattr(self, "webui_session_timeout", 3600)
 
                 old_enable_raw_cleanup = getattr(self, "enable_raw_cleanup", True)
                 old_raw_cleanup_interval = getattr(self, "raw_cleanup_interval", 30)
@@ -452,6 +371,18 @@ class Main(Star):
 
                 # 统一同步所有配置
                 self._sync_all_config()
+
+                if (
+                    self.webui_enabled
+                    and getattr(self, "webui_auth_enabled", True)
+                    and not str(getattr(self, "webui_password", "") or "").strip()
+                ):
+                    generated = f"{secrets.randbelow(1000000):06d}"
+                    self.config_service.update_config_from_dict(
+                        {"webui_password": generated}
+                    )
+                    self._sync_all_config()
+                    logger.info(f"WebUI 访问密码已自动生成: {generated}")
 
                 try:
                     old_raw_cleanup_interval_i = int(old_raw_cleanup_interval)
@@ -535,6 +466,9 @@ class Main(Star):
                     old_webui_enabled != self.webui_enabled
                     or old_webui_host != self.webui_host
                     or old_webui_port != self.webui_port
+                    or old_webui_password != getattr(self, "webui_password", "")
+                    or old_webui_session_timeout
+                    != getattr(self, "webui_session_timeout", 3600)
                 ):
 
                     async def restart_webui():
@@ -708,13 +642,6 @@ class Main(Star):
 
     async def terminate(self):
         """插件销毁生命周期钩子。清理任务。"""
-
-        # 清理 Monkey Patch（优先执行，避免影响其他清理流程）
-        try:
-            _cleanup_monkey_patch()
-            logger.info("已恢复 FileTokenService 原始行为")
-        except Exception as e:
-            logger.error(f"清理 Monkey Patch 失败: {e}")
 
         # 停止WebUI
         if getattr(self, "web_server", None):
@@ -1021,9 +948,11 @@ class Main(Star):
                         logger.warning("event_handler 未初始化，跳过容量控制")
 
                     if self.cache_service:
-                        self.cache_service.set_cache(
-                            "index_cache", image_index, persist=True
-                        )
+                        def updater(current: dict):
+                            current.clear()
+                            current.update(image_index)
+
+                        await self.cache_service.update_index(updater)
 
                     logger.info("容量控制任务完成")
 
@@ -1564,7 +1493,7 @@ class Main(Star):
         - 编号：用于调用 send_emoji_by_id
         - 分类：表情包的情绪分类
         - 描述：表情包的详细描述（这是你选择时的重要参考）
-        
+
         请仔细阅读每个表情包的描述，选择最符合当前对话情境的一个。
         """
         logger.info(f"[Tool] LLM 搜索表情包: {query}")
@@ -1618,7 +1547,7 @@ class Main(Star):
             self._emoji_candidates = candidates
 
             result_lines.append(
-                f"\n\n请根据描述选择最合适的表情包，然后调用 send_emoji_by_id(编号) 发送。"
+                "\n\n请根据描述选择最合适的表情包，然后调用 send_emoji_by_id(编号) 发送。"
             )
 
             result_text = "\n".join(result_lines)
@@ -1641,7 +1570,7 @@ class Main(Star):
         - 分类：表情包的情绪分类
         - 描述：表情包的详细描述
         - 状态：发送成功/失败
-        
+
         这样你就能清楚地知道自己发送了什么表情包。
         """
         logger.info(f"[Tool] LLM 选择发送表情包编号: {emoji_id}")

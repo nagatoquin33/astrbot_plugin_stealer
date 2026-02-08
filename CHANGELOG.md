@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+2.2.2 增加webui登录功能，优化webui显示
 2.2.1 开始还技术债，把代码拆分优化，预计未来大概会重构一下。当然数据会保留。还优化了一下工具
 
 2.2.0 新增群聊黑白名单过滤（/meme group wl/bl 管理；白名单优先生效），并清理群聊过滤冗余同步逻辑。新增“真”表情包模式，原理为把图片改成gif格式，按寻思这能行。
