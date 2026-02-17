@@ -1524,7 +1524,7 @@ class Main(Star):
             candidates = []
             result_lines = [f"找到 {len(results)} 个匹配的表情包：\n"]
 
-            for i, (path, desc, emotion) in enumerate(results):
+            for i, (path, desc, emotion, tags) in enumerate(results):
                 if os.path.exists(path):
                     candidate_id = f"emoji_{i + 1}"
                     candidates.append(
@@ -1533,10 +1533,13 @@ class Main(Star):
                             "path": path,
                             "desc": desc,
                             "emotion": emotion,
+                            "tags": tags,
                         }
                     )
                     # 格式化输出
                     result_lines.append(f"\n[{i + 1}] 分类：{emotion}")
+                    if tags:
+                        result_lines.append(f"    标签：{tags}")
                     result_lines.append(f"    描述：{desc}")
 
             if not candidates:

@@ -1374,7 +1374,7 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
 
     async def search_images(
         self, query: str, limit: int = 1, idx: dict | None = None
-    ) -> list[tuple[str, str, str]]:
+    ) -> list[tuple[str, str, str, str]]:
         """根据查询词搜索图片。
 
         Args:
@@ -1382,7 +1382,7 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
             limit: 返回结果数量限制
 
         Returns:
-            list[tuple[str, str, str]]: 结果列表，每项为 (文件路径, 描述, 情绪)
+            list[tuple[str, str, str, str]]: 结果列表，每项为 (文件路径, 描述, 情绪, 标签)
         """
         try:
             if idx is None:
@@ -1409,6 +1409,7 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                 score = 0
                 desc = str(data.get("desc", "")).lower()
                 tags = [str(t).lower() for t in data.get("tags", [])]
+                tags_str = ", ".join(tags)
                 category = str(data.get("category", "")).lower()
 
                 if query_chars:
@@ -1418,7 +1419,7 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
 
                 if query_lower == category:
                     score = 20
-                    top_candidates.append((file_path, desc, category, score))
+                    top_candidates.append((file_path, desc, category, tags_str, score))
                     continue
 
                 if query_lower in category or category in query_lower:
@@ -1433,7 +1434,7 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                     score = max(score, matched * 3)
 
                 if score >= 15:
-                    top_candidates.append((file_path, desc, category, score))
+                    top_candidates.append((file_path, desc, category, tags_str, score))
                     continue
 
                 if query_lower == tags[0] if tags else False:
@@ -1448,7 +1449,7 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                             break
 
                 if score >= 15:
-                    top_candidates.append((file_path, desc, category, score))
+                    top_candidates.append((file_path, desc, category, tags_str, score))
                     continue
 
                 if score >= 12:
@@ -1456,7 +1457,7 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                         for tag in tags:
                             matched = sum(1 for token in query_tokens if token in tag)
                             score = max(score, matched * 2 + 10)
-                    top_candidates.append((file_path, desc, category, score))
+                    top_candidates.append((file_path, desc, category, tags_str, score))
                     continue
 
                 if score >= 10 and query_tokens:
@@ -1471,18 +1472,18 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                                 has_fuzzy = True
                                 break
                     if has_fuzzy:
-                        top_candidates.append((file_path, desc, category, score))
+                        top_candidates.append((file_path, desc, category, tags_str, score))
                         continue
 
                 if score > 0:
-                    top_candidates.append((file_path, desc, category, score))
+                    top_candidates.append((file_path, desc, category, tags_str, score))
 
                 if len(top_candidates) > top_k:
-                    top_candidates.sort(key=lambda x: x[3], reverse=True)
+                    top_candidates.sort(key=lambda x: x[4], reverse=True)
                     top_candidates = top_candidates[:top_k]
 
-            top_candidates.sort(key=lambda x: x[3], reverse=True)
-            results = [(item[0], item[1], item[2]) for item in top_candidates[:limit]]
+            top_candidates.sort(key=lambda x: x[4], reverse=True)
+            results = [(item[0], item[1], item[2], item[3]) for item in top_candidates[:limit]]
 
             if not results:
                 keyword_map = self._get_keyword_map()
@@ -1496,7 +1497,8 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                             continue
                         cat = str(data.get("category", "")).lower()
                         if cat == category:
-                            results.append((file_path, str(data.get("desc", "")), cat))
+                            tags_str = ", ".join(data.get("tags", []))
+                            results.append((file_path, str(data.get("desc", "")), cat, tags_str))
                             if len(results) >= limit:
                                 break
 
@@ -1511,7 +1513,7 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
         query: str,
         limit: int = 5,
         idx: dict | None = None,
-    ) -> list[tuple[str, str, str]]:
+    ) -> list[tuple[str, str, str, str]]:
         """智能搜索表情包（带多级 fallback）。
 
         搜索顺序：
@@ -1525,7 +1527,7 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
             idx: 索引缓存，为 None 时自动加载
 
         Returns:
-            list[tuple[path, desc, emotion]]
+            list[tuple[path, desc, emotion, tags]]
         """
         from .text_similarity import calculate_hybrid_similarity
 

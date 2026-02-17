@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+2.2.3 修复FC工具search_emoji缺少返回tags字段的问题，现在LLM可以看到完整的表情包信息（分类+标签+描述）
+
 2.2.2 增加webui登录功能，优化webui显示
 2.2.1 开始还技术债，把代码拆分优化，预计未来大概会重构一下。当然数据会保留。还优化了一下工具
 
