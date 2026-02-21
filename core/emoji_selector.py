@@ -41,6 +41,10 @@ class EmojiSelector:
     )
     SINGLE_HEX_PATTERN = re.compile(r"&([^&\s]+?)&")
 
+    # 选择器常量
+    MAX_RECENT_USAGE = 10  # 最近使用记录最大数量
+    MIN_RECENT_USAGE = 3  # 最近使用记录最小数量
+
     def __init__(self, plugin_instance):
         self.plugin = plugin_instance
         self.categories = (
@@ -193,7 +197,9 @@ class EmojiSelector:
                 recent_usage = [p for p in recent_usage if p != picked_path]
             recent_usage.append(picked_path)
 
-            max_recent = min(10, max(3, len(files) // 2))
+            max_recent = min(
+                self.MAX_RECENT_USAGE, max(self.MIN_RECENT_USAGE, len(files) // 2)
+            )
             if len(recent_usage) > max_recent:
                 recent_usage = recent_usage[-max_recent:]
 

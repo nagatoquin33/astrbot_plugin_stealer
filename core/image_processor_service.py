@@ -34,11 +34,6 @@ class ImageProcessorService:
         """
         self.plugin = plugin_instance
         self.plugin_config = getattr(plugin_instance, "plugin_config", None)
-        if not self.plugin_config:
-            # cfg = getattr(plugin_instance, "config_service", None)
-            # if cfg and getattr(cfg, "config", None):
-            #     self.plugin_config = cfg.config
-            pass
 
         self.raw_dir = self.plugin_config.raw_dir if self.plugin_config else None
         self.categories_dir = (
@@ -163,13 +158,11 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
         self.combined_analysis_prompt = self.emoji_classification_prompt
 
         # 配置参数
-        if (
-            hasattr(plugin_instance, "config_service")
-            and plugin_instance.config_service
-        ):
-            self.categories = list(plugin_instance.config_service.categories or [])
-        else:
-            self.categories = []
+        self.categories = list(
+            getattr(self.plugin_config, "categories", []) or []
+            if self.plugin_config
+            else []
+        )
         self.content_filtration = False
         self.vision_provider_id = ""
 
@@ -619,10 +612,10 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
         categories = [c for c in categories if isinstance(c, str) and c.strip()]
         info_map = {}
         try:
-            if hasattr(self.plugin, "config_service") and self.plugin.config_service:
-                info_map = (
-                    getattr(self.plugin.config_service, "category_info", {}) or {}
-                )
+            if self.plugin_config:
+                info_map = getattr(self.plugin_config, "category_info", {}) or {}
+            else:
+                info_map = {}
         except Exception:
             info_map = {}
 
@@ -743,11 +736,14 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
 
             # 新逻辑：既然移除了元数据过滤，假设输入的都是表情包
             # 只需要处理情绪分类结果
-            cfg = getattr(self.plugin, "config_service", None)
             normalized = ""
-            if cfg and hasattr(cfg, "normalize_category_strict"):
+            if self.plugin_config and hasattr(
+                self.plugin_config, "normalize_category_strict"
+            ):
                 try:
-                    normalized = cfg.normalize_category_strict(emotion_result)
+                    normalized = self.plugin_config.normalize_category_strict(
+                        emotion_result
+                    )
                 except Exception:
                     normalized = ""
 
@@ -834,8 +830,10 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                             logger.debug(f"从事件获取的聊天模型ID: {chat_provider_id}")
 
                     # 获取配置的视觉模型 provider_id
-                    vision_provider_id = getattr(
-                        self.plugin.config_service, "vision_provider_id", None
+                    vision_provider_id = (
+                        getattr(self.plugin_config, "vision_provider_id", None)
+                        if self.plugin_config
+                        else None
                     )
 
                     # 如果配置了视觉模型，使用它；否则使用当前会话的 provider

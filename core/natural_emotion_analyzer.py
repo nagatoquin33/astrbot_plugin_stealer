@@ -13,13 +13,17 @@ from astrbot.api.event import AstrMessageEvent
 class NaturalEmotionAnalyzer:
     """自然语言情绪分析器 - 使用小模型理解LLM回复的真实情绪"""
 
+    # 常量定义
+    CACHE_MAX_SIZE = 1000  # 缓存最大容量
+    TEXT_MAX_LENGTH = 200  # 文本最大长度
+
     def __init__(self, plugin_instance):
         self.plugin = plugin_instance
         self.categories = plugin_instance.categories
 
         # 缓存机制
         self.analysis_cache = {}
-        self.cache_max_size = 1000
+        self.cache_max_size = self.CACHE_MAX_SIZE
 
         # 性能统计
         self.stats = {
@@ -35,7 +39,6 @@ class NaturalEmotionAnalyzer:
     def _build_analysis_prompt(self) -> str:
         """构建情绪分析提示词（精简版）"""
         categories_desc = {}
-        # cfg = getattr(self.plugin, "config_service", None)
         cfg = getattr(self.plugin, "plugin_config", None)
         if cfg and hasattr(cfg, "DEFAULT_CATEGORY_INFO"):
             for key in self.categories:
@@ -175,8 +178,8 @@ class NaturalEmotionAnalyzer:
         cleaned = re.sub(r"\s+", " ", cleaned.strip())
 
         # 限制长度（小模型处理能力有限）
-        if len(cleaned) > 200:
-            cleaned = cleaned[:200] + "..."
+        if len(cleaned) > self.TEXT_MAX_LENGTH:
+            cleaned = cleaned[: self.TEXT_MAX_LENGTH] + "..."
 
         return cleaned
 
@@ -188,13 +191,15 @@ class NaturalEmotionAnalyzer:
         # 清理结果
         result = result_text.strip().lower()
 
-        cfg = getattr(self.plugin, "config_service", None)
+        cfg = getattr(self.plugin, "plugin_config", None)
         if cfg and hasattr(cfg, "normalize_category_strict"):
             try:
                 normalized = cfg.normalize_category_strict(result)
+                logger.debug(f"[情绪分析] 解析结果: '{result}' -> '{normalized}'")
                 if normalized:
                     return normalized
-            except Exception:
+            except Exception as e:
+                logger.error(f"[情绪分析] 解析异常: {e}")
                 return None
 
         return None

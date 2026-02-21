@@ -26,6 +26,19 @@ class EventHandler:
         # 强制捕获窗口
         self._force_capture_windows: dict[str, dict[str, object]] = {}
 
+    def _normalize_str(self, value: object) -> str:
+        """规范化字符串值。"""
+        if value is None:
+            return ""
+        try:
+            s = str(value)
+        except Exception:
+            return ""
+        s = s.strip()
+        if s.startswith("`") and s.endswith("`") and len(s) >= 2:
+            s = s[1:-1].strip()
+        return s
+
     def _should_process_image(self) -> bool:
         """根据配置的节流模式判断是否应该处理图片。
 
@@ -77,20 +90,8 @@ class EventHandler:
         """
         try:
 
-            def normalize_str(value: object) -> str:
-                if value is None:
-                    return ""
-                try:
-                    s = str(value)
-                except Exception:
-                    return ""
-                s = s.strip()
-                if s.startswith("`") and s.endswith("`") and len(s) >= 2:
-                    s = s[1:-1].strip()
-                return s
-
             def is_emoji_summary(summary: object) -> bool:
-                s = normalize_str(summary)
+                s = self._normalize_str(summary)
                 if not s:
                     return False
                 s_lower = s.lower()
@@ -133,9 +134,11 @@ class EventHandler:
                 ):
                     matched_data = image_segments[img_index].get("data", {}) or {}
                 else:
-                    img_file = normalize_str(getattr(img, "file", ""))
-                    img_url = normalize_str(getattr(img, "url", ""))
-                    img_file_unique = normalize_str(getattr(img, "file_unique", ""))
+                    img_file = self._normalize_str(getattr(img, "file", ""))
+                    img_url = self._normalize_str(getattr(img, "url", ""))
+                    img_file_unique = self._normalize_str(
+                        getattr(img, "file_unique", "")
+                    )
 
                     if image_file_map and img_file:
                         matched_data = image_file_map.get(img_file)
@@ -149,8 +152,8 @@ class EventHandler:
                             data = seg.get("data", {}) or {}
                             if not isinstance(data, dict):
                                 continue
-                            seg_file = normalize_str(data.get("file", ""))
-                            seg_url = normalize_str(data.get("url", ""))
+                            seg_file = self._normalize_str(data.get("file", ""))
+                            seg_url = self._normalize_str(data.get("url", ""))
 
                             if seg_file and (
                                 seg_file == img_file
@@ -338,23 +341,11 @@ class EventHandler:
                     if isinstance(seg, dict) and seg.get("type") == "image"
                 ]
 
-                def normalize_str(value: object) -> str:
-                    if value is None:
-                        return ""
-                    try:
-                        s = str(value)
-                    except Exception:
-                        return ""
-                    s = s.strip()
-                    if s.startswith("`") and s.endswith("`") and len(s) >= 2:
-                        s = s[1:-1].strip()
-                    return s
-
                 for seg in raw_image_segments:
                     data = seg.get("data", {}) or {}
                     if not isinstance(data, dict):
                         continue
-                    seg_file = normalize_str(data.get("file", ""))
+                    seg_file = self._normalize_str(data.get("file", ""))
                     if seg_file and seg_file not in raw_image_file_map:
                         raw_image_file_map[seg_file] = data
         except Exception:

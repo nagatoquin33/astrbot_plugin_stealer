@@ -119,11 +119,12 @@ class Main(Star):
         # 同步基础配置
         self.auto_send = self.plugin_config.auto_send
         self.emoji_chance = self.plugin_config.emoji_chance
-        # 强制使用智能模式
-        # self.smart_emoji_selection = True
         self.send_emoji_as_gif = self.plugin_config.send_emoji_as_gif
         self.max_reg_num = self.plugin_config.max_reg_num
         self.do_replace = self.plugin_config.do_replace
+        self.content_filtration = getattr(
+            self.plugin_config, "content_filtration", False
+        )
 
         # 清理与容量控制配置（内部常量）
         self.raw_cleanup_interval = getattr(
@@ -141,9 +142,6 @@ class Main(Star):
 
         self.steal_emoji = self.plugin_config.steal_emoji
 
-        # 内容过滤（默认开启，通过 Prompt 控制）
-        # self.content_filtration = True
-
         self.raw_retention_minutes = getattr(
             self.plugin_config, "raw_retention_minutes", 60
         )
@@ -154,18 +152,15 @@ class Main(Star):
         # 同步模型相关配置
         self.vision_provider_id = self._load_vision_provider_id()
 
-        # 强制启用自然语言分析（智能模式）
-        self.enable_natural_emotion_analysis = True
-        # 使用默认 Provider 或 Vision Provider
-        self.emotion_analysis_provider_id = ""
+        # 同步自然语言分析配置
+        self.enable_natural_emotion_analysis = getattr(
+            self.plugin_config, "enable_natural_emotion_analysis", True
+        )
+        self.emotion_analysis_provider_id = getattr(
+            self.plugin_config, "emotion_analysis_provider_id", ""
+        )
 
         # 同步图片处理节流配置
-        # self.image_processing_mode = self.plugin_config.image_processing_mode
-        # self.image_processing_probability = (
-        #     self.plugin_config.image_processing_probability
-        # )
-        # self.image_processing_interval = self.plugin_config.image_processing_interval
-        # self.image_processing_cooldown = self.plugin_config.image_processing_cooldown
         self.image_processing_cooldown = getattr(
             self.plugin_config, "image_processing_cooldown", 10
         )
@@ -185,9 +180,7 @@ class Main(Star):
             and not str(self.plugin_config.webui.password or "").strip()
         ):
             generated = f"{secrets.randbelow(1000000):06d}"
-            # self.config_service.update_config_from_dict({"webui_password": generated})
             self.plugin_config.webui.password = generated
-            # 手动触发保存 WebUI 配置
             self.plugin_config.save_webui_config()
             logger.info("WebUI 访问密码已自动生成，请在配置中查看")
             return True
@@ -332,9 +325,7 @@ class Main(Star):
                 old_webui_password = getattr(self, "webui_password", "")
                 old_webui_session_timeout = getattr(self, "webui_session_timeout", 3600)
 
-                # self.config_service.update_config_from_dict(config_dict)
                 # 直接更新 PluginConfig 属性
-                # 注意：config_dict 可能包含扁平的 key，也可能包含嵌套的 webui dict
                 for k, v in config_dict.items():
                     if k == "webui" and isinstance(v, dict):
                         # 处理嵌套 webui 更新
@@ -393,7 +384,7 @@ class Main(Star):
                 # 更新其他服务的配置
                 self.image_processor_service.update_config(
                     categories=self.categories,
-                    # content_filtration=self.content_filtration,
+                    content_filtration=self.content_filtration,
                     vision_provider_id=self.vision_provider_id,
                     emoji_classification_prompt=getattr(
                         self, "EMOJI_CLASSIFICATION_PROMPT", None
@@ -524,10 +515,6 @@ class Main(Star):
             if hasattr(self, "task_scheduler") and self.task_scheduler:
                 await self.task_scheduler.cleanup()
 
-            if hasattr(self, "config_service") and self.config_service:
-                # self.config_service.cleanup()
-                pass
-
             if (
                 hasattr(self, "image_processor_service")
                 and self.image_processor_service
@@ -601,15 +588,11 @@ class Main(Star):
     async def _save_aliases(self, aliases: dict[str, str]):
         """保存分类别名文件。"""
         try:
-            # self.config_service.update_aliases(aliases)
-            # 暂时不支持动态修改别名并持久化，因为已改为常量
             pass
         except OSError as e:
             logger.error(f"别名文件IO错误: {e}")
         except Exception as e:
             logger.error(f"保存别名文件失败: {e}", exc_info=True)
-
-        # _normalize_category 方法已迁移到 EmotionAnalyzer 类
 
     async def _process_image(
         self,
@@ -640,7 +623,7 @@ class Main(Star):
                     is_temp=is_temp,
                     idx=idx,
                     categories=self.categories,
-                    # content_filtration=self.content_filtration,
+                    content_filtration=self.content_filtration,
                     backend_tag=self.backend_tag,
                     is_platform_emoji=is_platform_emoji,
                 ),
@@ -1136,25 +1119,6 @@ class Main(Star):
             logger.debug("[Stealer] 未找到 Plain 组件，添加新的文本组件")
             result.message(cleaned_text)
 
-    def _update_result_with_cleaned_text(
-        self, event: AstrMessageEvent, result, cleaned_text: str
-    ):
-        """更新结果文本（重建消息链，不推荐使用）"""
-        new_result = event.make_result().set_result_content_type(
-            result.result_content_type
-        )
-
-        # 添加除了Plain文本外的其他组件
-        for comp in result.chain:
-            if not isinstance(comp, Plain):
-                new_result.chain.append(comp)
-
-        # 添加清理后的文本
-        if cleaned_text.strip():
-            new_result.message(cleaned_text.strip())
-
-        event.set_result(new_result)
-
     @filter.command("meme on")
     async def meme_on(self, event: AstrMessageEvent):
         """开启偷表情包功能。"""
@@ -1314,13 +1278,11 @@ class Main(Star):
         limit: int = 5,
         idx: dict | None = None,
     ):
-        """委托给 ImageProcessorService.smart_search。"""
+        """委托给 EmojiSelector.smart_search。"""
         if idx is None:
             idx = self.cache_service.get_cache("index_cache") or {}
 
-        return await self.image_processor_service.smart_search(
-            query, limit=limit, idx=idx
-        )
+        return await self.emoji_selector.smart_search(query, limit=limit, idx=idx)
 
     @filter.llm_tool(name="search_emoji")
     async def search_emoji(self, event: AstrMessageEvent, query: str):

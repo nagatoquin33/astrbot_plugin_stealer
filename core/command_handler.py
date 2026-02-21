@@ -108,7 +108,7 @@ class CommandHandler:
             return
 
         if raw_action in {"show", "list", "ls", "status"}:
-            cfg = getattr(self.plugin, "config_service", None)
+            cfg = getattr(self.plugin, "plugin_config", None)
             if cfg is None:
                 yield event.plain_result("❌ 配置服务不可用")
                 return
@@ -135,7 +135,7 @@ class CommandHandler:
             )
             return
 
-        cfg = getattr(self.plugin, "config_service", None)
+        cfg = getattr(self.plugin, "plugin_config", None)
         if cfg is None:
             yield event.plain_result("❌ 配置服务不可用")
             return

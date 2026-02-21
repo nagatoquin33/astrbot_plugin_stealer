@@ -4,7 +4,7 @@ from typing import Any, ClassVar
 
 from pydantic import BaseModel, Field
 
-from astrbot.api import AstrBotConfig
+from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent
 from astrbot.api.star import Context, StarTools
 
@@ -38,12 +38,15 @@ class PluginConfig(BaseModel):
     # === 内部常量/高级配置 ===
     max_reg_num: int = 100
     do_replace: bool = True
+    content_filtration: bool = False  # 内容审核开关
     enable_raw_cleanup: bool = True
     raw_cleanup_interval: int = 30
     enable_capacity_control: bool = True
     capacity_control_interval: int = 60
     raw_retention_minutes: int = 60
     image_processing_cooldown: int = 10
+    enable_natural_emotion_analysis: bool = True  # 情绪识别模式
+    emotion_analysis_provider_id: str = ""  # 情绪分析专用模型
 
     # === 分类信息 ===
     categories: list[str] = []
@@ -313,6 +316,30 @@ class PluginConfig(BaseModel):
                     pass
             elif isinstance(self._data, dict):
                 self._data[key] = value
+
+    def update_config(self, updates: dict) -> bool:
+        """批量更新配置项。
+
+        Args:
+            updates: 配置更新字典
+
+        Returns:
+            bool: 是否更新成功
+        """
+        try:
+            for key, value in updates.items():
+                setattr(self, key, value)
+
+            # 回写到 AstrBotConfig
+            if hasattr(self, "_data") and self._data is not None:
+                if hasattr(self._data, "save_config"):
+                    self._data.save_config(updates)
+                elif isinstance(self._data, dict):
+                    self._data.update(updates)
+            return True
+        except Exception as e:
+            logger.error(f"更新配置失败: {e}")
+            return False
 
     def save_categories(self) -> None:
         self._write_json_file(self.categories_path, self.categories)
