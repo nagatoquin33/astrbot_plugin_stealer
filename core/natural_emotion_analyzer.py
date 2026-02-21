@@ -34,26 +34,18 @@ class NaturalEmotionAnalyzer:
 
     def _build_analysis_prompt(self) -> str:
         """构建情绪分析提示词（精简版）"""
-        # 精简分类描述，只保留核心关键词
-        categories_desc = {
-            "happy": "开心、愉快",
-            "sad": "难过、失落",
-            "angry": "愤怒、生气",
-            "surprised": "惊讶、震惊",
-            "confused": "困惑、疑惑",
-            "shy": "害羞、腼腆",
-            "fear": "害怕、担心",
-            "disgust": "厌恶、反感",
-            "excitement": "兴奋、激动",
-            "tired": "疲惫、困倦",
-            "embarrassed": "尴尬、窘迫",
-            "love": "喜爱、温柔",
-            "sigh": "无奈、叹气",
-            "thank": "感谢、感激",
-            "dumb": "无语、傻眼",
-            "troll": "调皮、搞怪",
-            "cry": "哭泣、流泪",
-        }
+        categories_desc = {}
+        # cfg = getattr(self.plugin, "config_service", None)
+        cfg = getattr(self.plugin, "plugin_config", None)
+        if cfg and hasattr(cfg, "DEFAULT_CATEGORY_INFO"):
+            for key in self.categories:
+                info = cfg.DEFAULT_CATEGORY_INFO.get(key, {})
+                name = str(info.get("name", "")).strip()
+                desc = str(info.get("desc", "")).strip()
+                desc_text = desc or name or key
+                categories_desc[key] = desc_text
+        else:
+            categories_desc = {key: key for key in self.categories}
 
         # 构建分类说明（单行格式，更紧凑）
         categories_text = ", ".join(
@@ -203,21 +195,7 @@ class NaturalEmotionAnalyzer:
                 if normalized:
                     return normalized
             except Exception:
-                pass
-
-        # 直接匹配分类
-        for category in self.categories:
-            if category.lower() in result:
-                return category
-
-        # 尝试提取第一个有效单词
-        words = re.findall(r"\w+", result)
-        for word in words:
-            if word in [cat.lower() for cat in self.categories]:
-                # 找到对应的原始分类名
-                for cat in self.categories:
-                    if cat.lower() == word:
-                        return cat
+                return None
 
         return None
 

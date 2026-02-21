@@ -153,39 +153,45 @@
     "type": "text",
     "invisible": true
   },
-  "webui_enabled": {
-    "description": "启用 WebUI 管理界面",
-    "type": "bool",
-    "default": true
-  },
-  "webui_host": {
-    "description": "WebUI 监听地址",
-    "type": "string",
-    "default": "0.0.0.0",
-    "hint": "0.0.0.0 表示允许外部访问，127.0.0.1 仅本地访问"
-  },
-  "webui_port": {
-    "description": "WebUI 监听端口",
-    "type": "int",
-    "default": 8899
-  },
-  "webui_auth_enabled": {
-    "description": "启用 WebUI 登录",
-    "type": "bool",
-    "default": true,
-    "hint": "✅ 开启：访问 WebUI 需要先登录（推荐）\n❌ 关闭：不需要登录即可访问（仅建议本地/内网调试使用）"
-  },
-  "webui_password": {
-    "description": "访问密码",
-    "type": "string",
-    "default": "",
-    "hint": "仅在“启用 WebUI 登录”开启时生效。留空将自动生成 6 位随机密码并在日志中提示"
-  },
-  "webui_session_timeout": {
-    "description": "会话超时时间（秒）",
-    "type": "int",
-    "default": 3600,
-    "hint": "登录会话的有效时长，超时需要重新登录"
+  "webui": {
+    "description": "WebUI 管理界面配置",
+    "type": "object",
+    "items": {
+      "enabled": {
+        "description": "启用 WebUI 管理界面",
+        "type": "bool",
+        "default": true
+      },
+      "host": {
+        "description": "监听地址",
+        "type": "string",
+        "default": "0.0.0.0",
+        "hint": "0.0.0.0 表示允许外部访问，127.0.0.1 仅本地访问"
+      },
+      "port": {
+        "description": "监听端口",
+        "type": "int",
+        "default": 8899
+      },
+      "auth_enabled": {
+        "description": "启用登录验证",
+        "type": "bool",
+        "default": true,
+        "hint": "✅ 开启：访问 WebUI 需要先登录（推荐）\n❌ 关闭：不需要登录即可访问（仅建议本地/内网调试使用）"
+      },
+      "password": {
+        "description": "访问密码",
+        "type": "string",
+        "default": "",
+        "hint": "仅在“启用登录验证”开启时生效。留空将自动生成 6 位随机密码并在日志中提示"
+      },
+      "session_timeout": {
+        "description": "会话超时时间（秒）",
+        "type": "int",
+        "default": 3600,
+        "hint": "登录会话的有效时长，超时需要重新登录"
+      }
+    }
   },
   
   "_advanced_section": {

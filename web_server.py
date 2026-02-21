@@ -27,7 +27,7 @@ class WebServer:
         self._started = False
 
         # Web UI 静态文件目录 (插件目录下的 web 文件夹)
-        self.static_dir = Path(__file__).parent / "web"
+        self.static_dir = Path(__file__).resolve().parent / "web"
 
         # 图片数据目录 (数据目录下的 plugin_data/...)
         self.data_dir = self.plugin.base_dir
@@ -56,56 +56,53 @@ class WebServer:
 
     def _is_auth_enabled(self) -> bool:
         try:
-            enabled = getattr(self.plugin, "webui_auth_enabled", None)
-            if enabled is not None:
-                return bool(enabled)
+            auth_enabled = getattr(self.plugin, "webui_auth_enabled", True)
+            return bool(auth_enabled)
         except Exception:
-            pass
-        try:
-            cfg = getattr(self.plugin, "config_service", None)
-            enabled = getattr(cfg, "webui_auth_enabled", None)
-            if enabled is not None:
-                return bool(enabled)
-        except Exception:
-            pass
-        return True
+            return True
 
     def _get_expected_secret(self) -> str:
         if not self._is_auth_enabled():
             return ""
 
         password = ""
+        # 1. 尝试从 self.plugin.webui_password 获取 (如果 Main 类里有这个属性)
         try:
             password = str(getattr(self.plugin, "webui_password", "") or "").strip()
         except Exception:
             password = ""
         if password:
             return password
+
+        # 2. 尝试从 self.plugin.plugin_config.webui.password 获取
         try:
-            password = str(
-                getattr(getattr(self.plugin, "config_service", None), "webui_password", "")
-                or ""
-            ).strip()
+            plugin_config = getattr(self.plugin, "plugin_config", None)
+            if plugin_config and hasattr(plugin_config, "webui"):
+                password = str(plugin_config.webui.password or "").strip()
         except Exception:
             password = ""
+
         if password:
             return password
         return ""
 
     def _get_session_timeout(self) -> int:
         timeout = 3600
+        # 1. 尝试从 self.plugin.webui_session_timeout 获取
         try:
             timeout = int(getattr(self.plugin, "webui_session_timeout", 3600) or 3600)
         except Exception:
             timeout = 3600
+
+        # 如果是默认值，尝试从配置获取
         if timeout == 3600:
             try:
-                timeout = int(
-                    getattr(getattr(self.plugin, "config_service", None), "webui_session_timeout", 3600)
-                    or 3600
-                )
+                plugin_config = getattr(self.plugin, "plugin_config", None)
+                if plugin_config and hasattr(plugin_config, "webui"):
+                    timeout = int(plugin_config.webui.session_timeout or 3600)
             except Exception:
                 timeout = 3600
+
         if timeout <= 0:
             timeout = 3600
         return timeout
@@ -175,39 +172,70 @@ class WebServer:
 
         self.app.router.add_get("/images/{path:.*}", self.handle_images_static)
 
-    async def handle_web_static(self, request: web.Request) -> web.StreamResponse:
-        raw = str(request.match_info.get("path", "") or "")
-        raw = raw.lstrip("/")
+    def _resolve_safe_path(
+        self, raw: str, base_dir: Path
+    ) -> tuple[Path | None, str | None]:
+        raw = str(raw or "").lstrip("/")
         if not raw:
-            raise web.HTTPNotFound()
+            return None, "not_found"
         if ".." in raw or raw.startswith(("/", "\\")) or ":" in raw:
-            raise web.HTTPBadRequest(text="invalid path")
-
-        base_dir = Path(self.static_dir).resolve()
+            return None, "bad_request"
+        base_dir = base_dir.resolve()
         try:
             abs_path = (base_dir / Path(raw)).resolve()
             abs_path.relative_to(base_dir)
         except Exception:
+            return None, "not_found"
+        return abs_path, None
+
+    async def handle_web_static(self, request: web.Request) -> web.StreamResponse:
+        abs_path, error = self._resolve_safe_path(
+            request.match_info.get("path", ""), self.static_dir
+        )
+        if error == "bad_request":
+            raise web.HTTPBadRequest(text="invalid path")
+        if not abs_path:
             raise web.HTTPNotFound()
 
         if not abs_path.exists() or not abs_path.is_file():
             raise web.HTTPNotFound()
 
-        return web.FileResponse(path=abs_path)
+        # 改用手动读取并构造 Response，避免 Windows 下 FileResponse 可能的协议问题 (ERR_INVALID_HTTP_RESPONSE)
+        try:
+            import mimetypes
+
+            content_type, _ = mimetypes.guess_type(abs_path)
+            if not content_type:
+                content_type = "application/octet-stream"
+
+            # 读取文件内容
+            # 注意：对于大文件这可能会占用内存，但 web 目录下的静态资源通常较小
+            if content_type.startswith("text/") or content_type in (
+                "application/javascript",
+                "application/json",
+                "application/xml",
+            ):
+                try:
+                    content = abs_path.read_text(encoding="utf-8")
+                    return web.Response(text=content, content_type=content_type)
+                except UnicodeDecodeError:
+                    # 如果不是 UTF-8，尝试二进制
+                    pass
+
+            content = abs_path.read_bytes()
+            return web.Response(body=content, content_type=content_type)
+
+        except Exception as e:
+            logger.error(f"Failed to serve static file {abs_path}: {e}")
+            raise web.HTTPNotFound()
 
     async def handle_images_static(self, request: web.Request) -> web.StreamResponse:
-        raw = str(request.match_info.get("path", "") or "")
-        raw = raw.lstrip("/")
-        if not raw:
-            raise web.HTTPNotFound()
-        if ".." in raw or raw.startswith(("/", "\\")) or ":" in raw:
+        abs_path, error = self._resolve_safe_path(
+            request.match_info.get("path", ""), self.data_dir
+        )
+        if error == "bad_request":
             raise web.HTTPBadRequest(text="invalid path")
-
-        base_dir = Path(self.data_dir).resolve()
-        try:
-            abs_path = (base_dir / Path(raw)).resolve()
-            abs_path.relative_to(base_dir)
-        except Exception:
+        if not abs_path:
             raise web.HTTPNotFound()
 
         if not abs_path.exists() or not abs_path.is_file():
@@ -402,9 +430,9 @@ class WebServer:
 
             # 获取分类详细信息并附带数量
             categories_list = []
-            if hasattr(self.plugin, "config_service"):
+            if hasattr(self.plugin, "plugin_config"):
                 # 获取配置中的分类列表
-                base_categories = self.plugin.config_service.get_category_info()
+                base_categories = self.plugin.plugin_config.get_category_info()
                 for cat_info in base_categories:
                     key = cat_info["key"]
                     count = category_counts.get(key, 0)
@@ -445,11 +473,11 @@ class WebServer:
         image_hash = request.match_info["hash"]
         add_to_blacklist = request.query.get("blacklist", "false").lower() == "true"
 
-        target = {"path": None}
+        removed_paths: list[str] = []
         await self.plugin.cache_service.update_index(
-            lambda current: self._remove_by_hash(current, image_hash, target)
+            lambda current: self._remove_by_hashes(current, {image_hash}, removed_paths)
         )
-        target_path = target["path"]
+        target_path = removed_paths[0] if removed_paths else None
 
         if target_path:
             try:
@@ -462,7 +490,7 @@ class WebServer:
                     # 使用当前时间戳作为值
                     import time
 
-                    self.plugin.cache_service.set(
+                    await self.plugin.cache_service.set(
                         "blacklist_cache", image_hash, int(time.time()), persist=True
                     )
                     logger.info(f"Added image {image_hash} to blacklist")
@@ -478,12 +506,51 @@ class WebServer:
 
         return web.json_response({"error": "Image not found"}, status=404)
 
-    def _remove_by_hash(self, current: dict, image_hash: str, target: dict):
+    def _remove_by_hashes(
+        self, current: dict, hashes: set[str], removed_paths: list[str]
+    ):
         for path_str, meta in list(current.items()):
-            if isinstance(meta, dict) and meta.get("hash") == image_hash:
-                target["path"] = path_str
+            if isinstance(meta, dict) and meta.get("hash") in hashes:
+                removed_paths.append(path_str)
                 del current[path_str]
-                return
+
+    def _collect_items_by_hashes(
+        self, index_map: dict, hashes: set[str]
+    ) -> list[tuple[str, dict]]:
+        items: list[tuple[str, dict]] = []
+        for path_str, meta in index_map.items():
+            if isinstance(meta, dict) and meta.get("hash") in hashes:
+                items.append((path_str, meta))
+        return items
+
+    def _move_items_to_category(
+        self, index_map: dict, items: list[tuple[str, dict]], target_category: str
+    ) -> tuple[int, list[str]]:
+        moved_count = 0
+        moved_hashes: list[str] = []
+        target_dir = self.plugin.plugin_config.ensure_category_dir(target_category)
+
+        for old_path_str, meta in items:
+            try:
+                old_path = Path(old_path_str)
+                if not old_path.exists():
+                    continue
+
+                new_path = target_dir / old_path.name
+                shutil.move(str(old_path), str(new_path))
+
+                if old_path_str in index_map:
+                    del index_map[old_path_str]
+                meta["path"] = str(new_path)
+                meta["category"] = target_category
+                index_map[str(new_path)] = meta
+                moved_count += 1
+                if meta.get("hash"):
+                    moved_hashes.append(meta["hash"])
+            except Exception as e:
+                logger.warning(f"Failed to move {old_path_str}: {e}")
+
+        return moved_count, moved_hashes
 
     async def handle_update_image(self, request):
         """更新图片信息 (Category, Tags, Desc)"""
@@ -512,7 +579,9 @@ class WebServer:
 
                 if new_tags is not None:
                     if isinstance(new_tags, str):
-                        meta["tags"] = [t.strip() for t in new_tags.split(",") if t.strip()]
+                        meta["tags"] = [
+                            t.strip() for t in new_tags.split(",") if t.strip()
+                        ]
                     else:
                         meta["tags"] = new_tags
 
@@ -524,16 +593,12 @@ class WebServer:
                     if not old_path.exists():
                         updated["error"] = "Source file not found"
                         return
-
-                    new_cat_dir = self.data_dir / "categories" / new_category
-                    new_cat_dir.mkdir(parents=True, exist_ok=True)
-                    new_path = new_cat_dir / old_path.name
-                    shutil.move(str(old_path), str(new_path))
-
-                    del current[target_path]
-                    meta["path"] = str(new_path)
-                    meta["category"] = new_category
-                    current[str(new_path)] = meta
+                    moved, _ = self._move_items_to_category(
+                        current, [(target_path, meta)], new_category
+                    )
+                    if moved <= 0:
+                        updated["error"] = "Move failed"
+                        return
                 else:
                     current[target_path] = meta
 
@@ -541,7 +606,9 @@ class WebServer:
 
             await self.plugin.cache_service.update_index(updater)
             if not updated["ok"]:
-                return web.json_response({"error": updated["error"] or "Update failed"}, status=404)
+                return web.json_response(
+                    {"error": updated["error"] or "Update failed"}, status=404
+                )
             return web.json_response({"success": True})
 
         except Exception as e:
@@ -556,30 +623,20 @@ class WebServer:
             if not hashes:
                 return web.json_response({"success": True, "count": 0})
 
-            index_copy = dict(self.plugin.cache_service.get_cache("index_cache") or {})
-            deleted_count = 0
-
-            paths_to_delete = []
+            removed_paths: list[str] = []
             hash_set = set(hashes)
+            await self.plugin.cache_service.update_index(
+                lambda current: self._remove_by_hashes(current, hash_set, removed_paths)
+            )
 
-            for path_str, meta in index_copy.items():
-                if meta.get("hash") in hash_set:
-                    paths_to_delete.append(path_str)
-
-            for path_str in paths_to_delete:
+            deleted_count = 0
+            for path_str in removed_paths:
                 try:
                     if os.path.exists(path_str):
                         os.remove(path_str)
-                    if path_str in index_copy:
-                        del index_copy[path_str]
                     deleted_count += 1
                 except Exception as e:
                     logger.warning(f"Failed to delete {path_str}: {e}")
-
-            if deleted_count > 0:
-                await self.plugin.cache_service.update_index(
-                    lambda current: (current.clear(), current.update(index_copy))
-                )
 
             return web.json_response({"success": True, "count": deleted_count})
         except Exception as e:
@@ -598,48 +655,27 @@ class WebServer:
                     {"error": "Missing hashes or category"}, status=400
                 )
 
-            index_copy = dict(self.plugin.cache_service.get_cache("index_cache") or {})
+            moved_hashes: list[str] = []
             moved_count = 0
-
-            target_dir = self.data_dir / "categories" / target_category
-            target_dir.mkdir(parents=True, exist_ok=True)
-
-            items_to_move = []
             hash_set = set(hashes)
 
-            for path_str, meta in index_copy.items():
-                if meta.get("hash") in hash_set:
-                    if meta.get("category") != target_category:
-                        items_to_move.append((path_str, meta))
-
-            for old_path_str, meta in items_to_move:
-                try:
-                    old_path = Path(old_path_str)
-                    if not old_path.exists():
-                        continue
-
-                    new_path = target_dir / old_path.name
-
-                    shutil.move(str(old_path), str(new_path))
-
-                    del index_copy[old_path_str]
-                    meta["path"] = str(new_path)
-                    meta["category"] = target_category
-                    index_copy[str(new_path)] = meta
-
-                    moved_count += 1
-                except Exception as e:
-                    logger.warning(f"Failed to move {old_path_str}: {e}")
-
-            if moved_count > 0:
-                await self.plugin.cache_service.update_index(
-                    lambda current: (current.clear(), current.update(index_copy))
+            def updater(current: dict):
+                nonlocal moved_count, moved_hashes
+                items = self._collect_items_by_hashes(current, hash_set)
+                items = [
+                    (path_str, meta)
+                    for path_str, meta in items
+                    if meta.get("category") != target_category
+                ]
+                moved_count, moved_hashes = self._move_items_to_category(
+                    current, items, target_category
                 )
 
-                # 失效缓存
-                if hasattr(self.plugin, "image_processor_service"):
-                    for h in hashes:
-                        self.plugin.image_processor_service.invalidate_cache(h)
+            await self.plugin.cache_service.update_index(updater)
+
+            if moved_count > 0 and hasattr(self.plugin, "image_processor_service"):
+                for h in moved_hashes:
+                    self.plugin.image_processor_service.invalidate_cache(h)
 
             return web.json_response({"success": True, "count": moved_count})
         except Exception as e:
@@ -663,8 +699,8 @@ class WebServer:
 
             # 获取分类数量（配置的分类总数）
             categories_count = 0
-            if hasattr(self.plugin, "config_service"):
-                categories_count = len(self.plugin.config_service.categories)
+            if hasattr(self.plugin, "plugin_config"):
+                categories_count = len(self.plugin.plugin_config.categories)
 
             # 前端期望的数据结构是 { stats: { total, categories, today } }
             return web.json_response(
@@ -707,7 +743,9 @@ class WebServer:
 
         provided = str((payload or {}).get("password", "") or "").strip()
         if not provided or not hmac.compare_digest(provided, expected):
-            return web.json_response({"success": False, "error": "Unauthorized"}, status=401)
+            return web.json_response(
+                {"success": False, "error": "Unauthorized"}, status=401
+            )
 
         timeout = self._get_session_timeout()
         sid = uuid.uuid4().hex
@@ -769,9 +807,7 @@ class WebServer:
             timestamp = int(datetime.now().timestamp())
             unique_filename = f"{timestamp}_{uuid.uuid4().hex[:8]}{file_ext}"
 
-            category_dir = Path(self.data_dir) / "categories" / category
-            category_dir.mkdir(parents=True, exist_ok=True)
-
+            category_dir = self.plugin.plugin_config.ensure_category_dir(category)
             file_path = category_dir / unique_filename
 
             with open(file_path, "wb") as f:
@@ -854,14 +890,12 @@ class WebServer:
             if hasattr(self.plugin, "_update_config_from_dict"):
                 self.plugin._update_config_from_dict({"categories": category_keys})
             else:
-                self.plugin.config_service.update_config_from_dict(
-                    {"categories": category_keys}
-                )
+                self.plugin.plugin_config.categories = category_keys
                 if hasattr(self.plugin, "categories"):
                     self.plugin.categories = category_keys
 
-            self.plugin.config_service.category_info.update(category_info)
-            self.plugin.config_service.save_category_info()
+            self.plugin.plugin_config.category_info.update(category_info)
+            self.plugin.plugin_config.save_category_info()
 
             return web.json_response({"success": True, "categories": category_keys})
         except Exception as e:
@@ -875,12 +909,12 @@ class WebServer:
                 return web.json_response({"error": "分类Key无效"}, status=400)
 
             if (
-                not hasattr(self.plugin, "config_service")
-                or not self.plugin.config_service
+                not hasattr(self.plugin, "plugin_config")
+                or not self.plugin.plugin_config
             ):
                 return web.json_response({"error": "配置服务不可用"}, status=500)
 
-            current_categories = list(self.plugin.config_service.categories or [])
+            current_categories = list(self.plugin.plugin_config.categories or [])
             if category_key not in current_categories:
                 return web.json_response({"error": "分类不存在"}, status=404)
 
@@ -951,16 +985,14 @@ class WebServer:
                 except Exception as e:
                     logger.warning(f"删除空分类目录失败: {category_dir}, 错误: {e}")
 
-            if category_key in getattr(self.plugin.config_service, "category_info", {}):
-                del self.plugin.config_service.category_info[category_key]
-                self.plugin.config_service.save_category_info()
+            if category_key in getattr(self.plugin.plugin_config, "category_info", {}):
+                del self.plugin.plugin_config.category_info[category_key]
+                self.plugin.plugin_config.save_category_info()
 
             if hasattr(self.plugin, "_update_config_from_dict"):
                 self.plugin._update_config_from_dict({"categories": updated_categories})
             else:
-                self.plugin.config_service.update_config_from_dict(
-                    {"categories": updated_categories}
-                )
+                self.plugin.plugin_config.categories = updated_categories
                 if hasattr(self.plugin, "categories"):
                     self.plugin.categories = updated_categories
 
@@ -979,7 +1011,7 @@ class WebServer:
 
     async def handle_get_emotions(self, request):
         try:
-            category_info = self.plugin.config_service.get_category_info()
+            category_info = self.plugin.plugin_config.get_category_info()
             return web.json_response({"emotions": category_info})
         except Exception as e:
             logger.error(f"获取情绪分类失败: {e}")

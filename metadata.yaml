@@ -1,7 +1,7 @@
 name: astrbot_plugin_stealer
 display_name: 表情包小偷
 desc: 全人机代码，仿maibot的表情包偷取。让bot自动偷走（拾走）别人的表情包，并为己所用。配置好视觉模型就能自动识别分类，对话时根据情绪自动发送。现在还能让LLM自己选表情包发送，并且知道自己发了啥。
-version: 2.2.3
+version: 2.3.0
 author: nagatoquin33
 repo: https://github.com/nagatoquin33/astrbot_plugin_stealer
 

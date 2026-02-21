@@ -16,36 +16,32 @@ class CommandHandler:
         """
         self.plugin = plugin_instance
 
+    def _apply_config_updates(self, updates: dict) -> None:
+        updater = getattr(self.plugin, "_update_config_from_dict", None)
+        if callable(updater):
+            updater(updates)
+            return
+        for key, value in updates.items():
+            setattr(self.plugin, key, value)
+
     async def meme_on(self, event: AstrMessageEvent):
         """开启偷表情包功能。"""
-        if hasattr(self.plugin, "_update_config_from_dict"):
-            self.plugin._update_config_from_dict({"steal_emoji": True})
-        else:
-            self.plugin.steal_emoji = True
+        self._apply_config_updates({"steal_emoji": True})
         yield event.plain_result("已开启偷表情包")
 
     async def meme_off(self, event: AstrMessageEvent):
         """关闭偷表情包功能。"""
-        if hasattr(self.plugin, "_update_config_from_dict"):
-            self.plugin._update_config_from_dict({"steal_emoji": False})
-        else:
-            self.plugin.steal_emoji = False
+        self._apply_config_updates({"steal_emoji": False})
         yield event.plain_result("已关闭偷表情包")
 
     async def auto_on(self, event: AstrMessageEvent):
         """开启自动发送功能。"""
-        if hasattr(self.plugin, "_update_config_from_dict"):
-            self.plugin._update_config_from_dict({"auto_send": True})
-        else:
-            self.plugin.auto_send = True
+        self._apply_config_updates({"auto_send": True})
         yield event.plain_result("已开启自动发送")
 
     async def auto_off(self, event: AstrMessageEvent):
         """关闭自动发送功能。"""
-        if hasattr(self.plugin, "_update_config_from_dict"):
-            self.plugin._update_config_from_dict({"auto_send": False})
-        else:
-            self.plugin.auto_send = False
+        self._apply_config_updates({"auto_send": False})
         yield event.plain_result("已关闭自动发送")
 
     async def group_filter(
@@ -213,22 +209,12 @@ class CommandHandler:
             return
 
         if action == "on":
-            if hasattr(self.plugin, "_update_config_from_dict"):
-                self.plugin._update_config_from_dict(
-                    {"enable_natural_emotion_analysis": True}
-                )
-            else:
-                self.plugin.enable_natural_emotion_analysis = True
+            self._apply_config_updates({"enable_natural_emotion_analysis": True})
             yield event.plain_result(
                 "✅ 已启用自然语言情绪分析（LLM模式）\n\n💡 提示：如果之前使用被动标签模式，建议使用 /reset 清除AI对话上下文，避免继续输出 &&emotion&& 标签"
             )
         else:
-            if hasattr(self.plugin, "_update_config_from_dict"):
-                self.plugin._update_config_from_dict(
-                    {"enable_natural_emotion_analysis": False}
-                )
-            else:
-                self.plugin.enable_natural_emotion_analysis = False
+            self._apply_config_updates({"enable_natural_emotion_analysis": False})
             yield event.plain_result(
                 "❌ 已禁用自然语言情绪分析（被动标签模式）\n\n💡 提示：LLM现在会在回复开头插入 &&emotion&& 标签，插件会自动清理这些标签"
             )
@@ -356,7 +342,7 @@ class CommandHandler:
 
     async def push(self, event: AstrMessageEvent, category: str = "", alias: str = ""):
         """手动推送指定分类的表情包。支持使用分类名称或别名。"""
-        if not self.plugin.base_dir:
+        if not self.plugin.categories_dir:
             yield event.plain_result("插件未正确配置，缺少图片存储目录")
             return
 
@@ -383,7 +369,7 @@ class CommandHandler:
 
         # 将目标分类赋值给cat变量，保持后续代码兼容性
         cat = target_category
-        cat_dir = self.plugin.base_dir / "categories" / cat
+        cat_dir = self.plugin.categories_dir / cat
         if not cat_dir.exists() or not cat_dir.is_dir():
             yield event.plain_result(f"分类 {cat} 不存在")
             return
@@ -417,41 +403,9 @@ class CommandHandler:
 
     async def _force_clean_raw_directory(self) -> int:
         """强制清理raw目录中的所有文件（忽略保留期限），返回删除的文件数量。"""
-        try:
-            if not self.plugin.base_dir:
-                logger.warning("插件base_dir未设置，无法清理raw目录")
-                return 0
-
-            raw_dir = self.plugin.base_dir / "raw"
-            if not raw_dir.exists():
-                logger.info(f"raw目录不存在: {raw_dir}")
-                return 0
-
-            # 获取raw目录中的所有文件
-            files = list(raw_dir.iterdir())
-            if not files:
-                logger.info(f"raw目录已为空: {raw_dir}")
-                return 0
-
-            # 删除所有文件
-            deleted_count = 0
-            for file_path in files:
-                try:
-                    if file_path.is_file():
-                        if await self.plugin._safe_remove_file(str(file_path)):
-                            deleted_count += 1
-                            logger.debug(f"已强制删除文件: {file_path}")
-                        else:
-                            logger.error(f"强制删除文件失败: {file_path}")
-                except Exception as e:
-                    logger.error(f"处理raw文件时发生错误: {file_path}, 错误: {e}")
-
-            logger.info(f"强制清理raw目录完成，共删除 {deleted_count} 个文件")
-            return deleted_count
-
-        except Exception as e:
-            logger.error(f"强制清理raw目录失败: {e}")
-            raise
+        if hasattr(self.plugin, "_clean_raw_directory"):
+            return await self.plugin._clean_raw_directory()
+        return 0
 
     async def enforce_capacity(self, event: AstrMessageEvent):
         """手动执行容量控制，删除最旧的表情包以控制总数量。"""
@@ -788,14 +742,15 @@ class CommandHandler:
 
             legacy_metadata_count = 0
             legacy_data_map = {}  # 独立存储 legacy 数据
-            possible_legacy_paths = [
-                self.plugin.base_dir / "index.json",
-                self.plugin.base_dir / "image_index.json",
-                self.plugin.base_dir / "cache" / "index.json",
-                # 其他可能的路径
-                Path("data/plugin_data/astrbot_plugin_stealer/index.json"),
-                Path("data/plugin_data/astrbot_plugin_stealer/image_index.json"),
-            ]
+            possible_legacy_paths = []
+            if self.plugin.base_dir:
+                possible_legacy_paths.extend(
+                    [
+                        self.plugin.base_dir / "index.json",
+                        self.plugin.base_dir / "image_index.json",
+                        self.plugin.base_dir / "cache" / "index.json",
+                    ]
+                )
 
             for legacy_path in possible_legacy_paths:
                 if legacy_path.exists():
@@ -971,7 +926,9 @@ class CommandHandler:
             (k, v) for k, v in idx.items() if isinstance(v, dict) and os.path.exists(k)
         ]
 
-    async def get_random_emojis(self, count: int | None = 1) -> list[tuple[str, str, str]]:
+    async def get_random_emojis(
+        self, count: int | None = 1
+    ) -> list[tuple[str, str, str]]:
         """获取随机表情包。
 
         Args:
@@ -1045,7 +1002,9 @@ class CommandHandler:
             ),
         )
 
-    async def get_emoji_by_description(self, description: str) -> tuple[str, str, str] | None:
+    async def get_emoji_by_description(
+        self, description: str
+    ) -> tuple[str, str, str] | None:
         """根据描述获取表情包。
 
         Args:

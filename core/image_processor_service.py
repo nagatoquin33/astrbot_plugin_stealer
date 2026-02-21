@@ -17,210 +17,14 @@ except Exception:
     PILImage = None
 
 
-def levenshtein_distance(s1: str, s2: str) -> int:
-    """计算两个字符串之间的编辑距离（Levenshtein距离）。
-
-    编辑距离是将一个字符串转换为另一个字符串所需的最少编辑操作次数（插入、删除、替换）。
-
-    Args:
-        s1: 第一个字符串
-        s2: 第二个字符串
-
-    Returns:
-        int: 编辑距离，值越小表示两个字符串越相似
-    """
-    # 处理空字符串情况
-    if not s1:
-        return len(s2)
-    if not s2:
-        return len(s1)
-
-    # 创建距离矩阵
-    # dp[i][j] 表示 s1[0..i-1] 到 s2[0..j-1] 的编辑距离
-    dp = [[0] * (len(s2) + 1) for _ in range(len(s1) + 1)]
-
-    # 初始化第一行和第一列
-    for i in range(len(s1) + 1):
-        dp[i][0] = i
-    for j in range(len(s2) + 1):
-        dp[0][j] = j
-
-    # 填充距离矩阵
-    for i in range(1, len(s1) + 1):
-        for j in range(1, len(s2) + 1):
-            # 如果当前字符相同，不需要编辑操作
-            if s1[i - 1] == s2[j - 1]:
-                cost = 0
-            else:
-                cost = 1
-
-            # 取三种操作（删除、插入、替换）中的最小值
-            dp[i][j] = min(
-                dp[i - 1][j] + 1,  # 删除操作
-                dp[i][j - 1] + 1,  # 插入操作
-                dp[i - 1][j - 1] + cost,  # 替换操作
-            )
-
-    return dp[len(s1)][len(s2)]
-
-
-def calculate_similarity(s1: str, s2: str) -> float:
-    """计算两个字符串的相似度（0-1之间）。
-
-    Args:
-        s1: 第一个字符串
-        s2: 第二个字符串
-
-    Returns:
-        float: 相似度，1表示完全相同，0表示完全不同
-    """
-    if not s1 and not s2:
-        return 1.0
-    if not s1 or not s2:
-        return 0.0
-
-    distance = levenshtein_distance(s1, s2)
-    max_len = max(len(s1), len(s2))
-    return 1.0 - (distance / max_len)
-
-
 class ImageProcessorService:
     """图片处理服务类，负责处理所有与图片相关的操作。"""
-
-    # 有效分类集合作为类常量
-    VALID_CATEGORIES = {
-        "happy",  # 开心
-        "sad",  # 难过
-        "angry",  # 生气
-        "cry",  # 大哭
-        "shy",  # 害羞
-        "surprised",  # 惊讶
-        "love",  # 喜爱
-        "fear",  # 害怕
-        "tired",  # 疲惫
-        "disgust",  # 厌恶
-        "excitement",  # 兴奋
-        "embarrassed",  # 尴尬
-        "sigh",  # 叹气
-        "thank",  # 感谢 (新增)
-        "confused",  # 困惑 (新增)
-        "dumb",  # 无语/呆 (新增)
-        "troll",  # 发癫/搞怪 (新增)
-    }
 
     # 分类迁移映射表（用于自动迁移旧版本数据）
     # 从前前版本迁移到新版本(17分类)
     CATEGORY_MIGRATION_MAP = {
         "smirk": "troll",  # 坏笑 -> 发癫
     }
-
-    # 常见表达 → 分类映射（帮助LLM理解如何搜索）
-    EXPRESSION_TO_CATEGORY = {
-        "tired": [
-            "困了",
-            "累了",
-            "好累",
-            "疲惫",
-            "疲倦",
-            "想睡",
-            "想睡觉",
-            "困死了",
-            "累死了",
-            "精疲力尽",
-            "疲惫不堪",
-            "无精打采",
-        ],
-        "happy": [
-            "开心",
-            "高兴",
-            "快乐",
-            "愉快",
-            "爽",
-            "开心死了",
-            "笑死",
-            "乐呵呵",
-            "美滋滋",
-            "爽翻了",
-        ],
-        "sad": [
-            "难过",
-            "伤心",
-            "悲伤",
-            "心碎",
-            "哭了",
-            "泪目",
-            "悲痛",
-            "失落",
-            "沮丧",
-            "郁闷",
-        ],
-        "angry": [
-            "生气",
-            "愤怒",
-            "恼火",
-            "发火",
-            "怒了",
-            "气死",
-            "气死了",
-            "可恶",
-            "讨厌",
-            "抓狂",
-        ],
-        "cry": ["大哭", "哭了", "泪崩", "哭唧唧", "哭晕", "泪流满面", "哭辽"],
-        "shy": ["害羞", "不好意思", "羞涩", "脸红", "羞羞", "腼腆", "娇羞"],
-        "surprised": [
-            "惊讶",
-            "震惊",
-            "惊了",
-            "啥",
-            "卧槽",
-            "我草",
-            "居然",
-            "竟然",
-            "不可思议",
-            "卧了个槽",
-        ],
-        "love": [
-            "喜欢",
-            "爱了",
-            "爱你",
-            "么么哒",
-            "亲亲",
-            "心动了",
-            "喜欢死了",
-            "爱死",
-        ],
-        "fear": ["害怕", "吓人", "恐怖", "惊悚", "瑟瑟发抖", "怕怕", "恐惧"],
-        "disgust": ["恶心", "嫌弃", "厌恶", "鄙视", "呕吐", "嫌弃", "受不了", "无语"],
-        "excitement": [
-            "兴奋",
-            "激动",
-            "嗨",
-            "太棒了",
-            "给力",
-            "冲冲冲",
-            "冲鸭",
-            "激情",
-        ],
-        "embarrassed": ["尴尬", "脚趾抠地", "社死", "丢人", "不好意思", "窘迫"],
-        "sigh": ["叹气", "唉", "无奈", "叹息", "惆怅", "忧伤"],
-        "thank": ["谢谢", "感谢", "感恩", "多谢", "感激", "爱你", "笔芯"],
-        "confused": ["困惑", "疑惑", "不懂", "迷茫", "蒙圈", "黑人问号", "啥情况"],
-        "dumb": ["无语", "呆住", "傻了", "憨憨", "愚蠢", "呆滞", "石化"],
-        "troll": ["搞怪", "发癫", "神经", "犯病", "皮", "欠揍", "骚操作", "脑残"],
-    }
-
-    # 反向映射：关键词 → 分类
-    _KEYWORD_TO_CATEGORY = None
-
-    @classmethod
-    def _get_keyword_map(cls):
-        if cls._KEYWORD_TO_CATEGORY is None:
-            cls._KEYWORD_TO_CATEGORY = {}
-            for category, expressions in cls.EXPRESSION_TO_CATEGORY.items():
-                for expr in expressions:
-                    cls._KEYWORD_TO_CATEGORY[expr] = category
-        return cls._KEYWORD_TO_CATEGORY
 
     def __init__(self, plugin_instance):
         """初始化图片处理服务。
@@ -229,15 +33,17 @@ class ImageProcessorService:
             plugin_instance: StealerPlugin 实例，用于访问插件的配置和服务
         """
         self.plugin = plugin_instance
-        # 确保base_dir始终是字符串
-        if (
-            hasattr(plugin_instance, "base_dir")
-            and plugin_instance.base_dir is not None
-        ):
-            self.base_dir = str(plugin_instance.base_dir)
-        else:
-            # 如果没有base_dir，尝试从context获取数据目录
-            self.base_dir = None
+        self.plugin_config = getattr(plugin_instance, "plugin_config", None)
+        if not self.plugin_config:
+            # cfg = getattr(plugin_instance, "config_service", None)
+            # if cfg and getattr(cfg, "config", None):
+            #     self.plugin_config = cfg.config
+            pass
+
+        self.raw_dir = self.plugin_config.raw_dir if self.plugin_config else None
+        self.categories_dir = (
+            self.plugin_config.categories_dir if self.plugin_config else None
+        )
 
         # 增强存储系统组件
         self.lifecycle_manager = None
@@ -379,14 +185,12 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
         3. 删除空的旧分类文件夹
         4. 确保新分类文件夹存在
         """
-        if not self.base_dir:
-            return
-
-        categories_dir = Path(self.base_dir) / "categories"
-        if not categories_dir.exists():
+        categories_dir = self.categories_dir
+        if not categories_dir or not categories_dir.exists():
             return
 
         migrated_files = 0
+
         migrated_indices = 0
 
         # 遍历所有旧分类，执行迁移
@@ -395,8 +199,7 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
             if not old_dir.exists():
                 continue
 
-            new_dir = categories_dir / new_category
-            new_dir.mkdir(parents=True, exist_ok=True)
+            new_dir = self.plugin_config.ensure_category_dir(new_category)
 
             # 迁移图片文件
             for img_file in old_dir.glob("*"):
@@ -467,8 +270,7 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
 
         # 确保所有新分类文件夹存在
         for category in self.categories:
-            category_dir = categories_dir / category
-            category_dir.mkdir(parents=True, exist_ok=True)
+            self.plugin_config.ensure_category_dir(category)
 
         if migrated_files > 0 or migrated_indices > 0:
             logger.info(
@@ -636,13 +438,12 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                     logger.debug(f"图片分类结果有效（缓存）: {category}")
 
                     # 存储图片到raw目录（如果还没有存储的话）
-                    if self.base_dir:
-                        raw_dir = os.path.join(self.base_dir, "raw")
-                        os.makedirs(raw_dir, exist_ok=True)
+                    raw_dir = self.plugin_config.ensure_raw_dir()
+                    if raw_dir:
                         base_path = Path(file_path)
                         ext = base_path.suffix.lower() if base_path.suffix else ".jpg"
                         filename = f"{int(time.time())}_{hash_val[:8]}{ext}"
-                        raw_path = os.path.join(raw_dir, filename)
+                        raw_path = str(raw_dir / filename)
                         if is_temp:
                             shutil.move(file_path, raw_path)
                         else:
@@ -651,10 +452,9 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                         raw_path = file_path
 
                     # 复制图片到对应分类目录
-                    if self.base_dir:
-                        cat_dir = os.path.join(self.base_dir, "categories", category)
-                        os.makedirs(cat_dir, exist_ok=True)
-                        cat_path = os.path.join(cat_dir, os.path.basename(raw_path))
+                    cat_dir = self.plugin_config.ensure_category_dir(category)
+                    if cat_dir:
+                        cat_path = str(cat_dir / os.path.basename(raw_path))
 
                         # 检查文件是否仍然存在
                         if not os.path.exists(raw_path):
@@ -697,13 +497,12 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                 del self._image_cache[hash_val]
 
         # 首次处理：将图片存储到raw目录
-        if self.base_dir:
-            raw_dir = os.path.join(self.base_dir, "raw")
-            os.makedirs(raw_dir, exist_ok=True)
+        raw_dir = self.plugin_config.ensure_raw_dir()
+        if raw_dir:
             base_path = Path(file_path)
             ext = base_path.suffix.lower() if base_path.suffix else ".jpg"
             filename = f"{int(time.time())}_{hash_val[:8]}{ext}"
-            raw_path = os.path.join(raw_dir, filename)
+            raw_path = str(raw_dir / filename)
             if is_temp:
                 shutil.move(file_path, raw_path)
             else:
@@ -748,10 +547,9 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                     return False, None
 
                 # 复制图片到对应分类目录
-                if self.base_dir:
-                    cat_dir = os.path.join(self.base_dir, "categories", category)
-                    os.makedirs(cat_dir, exist_ok=True)
-                    cat_path = os.path.join(cat_dir, os.path.basename(raw_path))
+                cat_dir = self.plugin_config.ensure_category_dir(category)
+                if cat_dir:
+                    cat_path = str(cat_dir / os.path.basename(raw_path))
 
                     try:
                         shutil.copy2(raw_path, cat_path)
@@ -955,22 +753,11 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
 
             if normalized and normalized in self.categories:
                 category = normalized
-            elif emotion_result in self.categories:
-                category = emotion_result
             else:
-                found_category = None
-                for valid_cat in self.categories:
-                    if valid_cat in emotion_result:
-                        found_category = valid_cat
-                        break
-
-                if found_category:
-                    category = found_category
-                else:
-                    logger.warning(
-                        f"无法从响应中提取有效情绪分类: {emotion_result}，使用默认分类"
-                    )
-                    category = self.categories[0] if self.categories else "happy"
+                logger.warning(
+                    f"无法从响应中提取有效情绪分类: {emotion_result}，使用默认分类"
+                )
+                category = self.categories[0] if self.categories else "happy"
 
             return category, tags_result, desc_result, category, scenes_result
 
@@ -1014,10 +801,10 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
             # 路径处理和验证：使用pathlib确保跨平台兼容性
             img_path_obj = Path(img_path)
             if not img_path_obj.is_absolute():
-                # 如果是相对路径，根据base_dir构建绝对路径
-                if self.base_dir:
-                    img_path_obj = Path(self.base_dir) / img_path
-                    img_path_obj = img_path_obj.absolute()
+                if self.plugin_config and getattr(self.plugin_config, "data_dir", None):
+                    img_path_obj = (
+                        Path(self.plugin_config.data_dir) / img_path
+                    ).absolute()
                 else:
                     img_path_obj = img_path_obj.absolute()
 
@@ -1346,24 +1133,19 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
             str: 存储后的图片路径
         """
         try:
-            if not self.base_dir:
-                logger.error("base_dir未设置，无法存储图片")
+            cat_dir = self.plugin_config.ensure_category_dir(category)
+            if not cat_dir:
+                logger.error("分类目录未设置，无法存储图片")
                 return src_path
-
-            # 确保分类目录存在
-            cat_dir = os.path.join(self.base_dir, "categories", category)
-            os.makedirs(cat_dir, exist_ok=True)
 
             # 复制图片到分类目录
             filename = os.path.basename(src_path)
-            dest_path = os.path.join(cat_dir, filename)
+            dest_path = str(cat_dir / filename)
 
             # 如果文件已存在，生成新文件名
             if os.path.exists(dest_path):
                 base_name, ext = os.path.splitext(filename)
-                dest_path = os.path.join(
-                    cat_dir, f"{base_name}_{int(time.time())}{ext}"
-                )
+                dest_path = str(cat_dir / f"{base_name}_{int(time.time())}{ext}")
 
             shutil.copy2(src_path, dest_path)
             logger.debug(f"图片已存储到分类目录: {dest_path}")
@@ -1371,203 +1153,6 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
         except Exception as e:
             logger.error(f"存储图片失败: {e}")
             return src_path
-
-    async def search_images(
-        self, query: str, limit: int = 1, idx: dict | None = None
-    ) -> list[tuple[str, str, str, str]]:
-        """根据查询词搜索图片。
-
-        Args:
-            query: 搜索查询词
-            limit: 返回结果数量限制
-
-        Returns:
-            list[tuple[str, str, str, str]]: 结果列表，每项为 (文件路径, 描述, 情绪, 标签)
-        """
-        try:
-            if idx is None:
-                if hasattr(self.plugin, "_load_index"):
-                    idx = await self.plugin._load_index()
-                elif hasattr(self.plugin, "cache_service"):
-                    idx = self.plugin.cache_service.get_cache("index_cache") or {}
-
-            if not idx:
-                return []
-
-            query_lower = query.lower()
-            query_tokens = [t for t in query_lower.split() if len(t) > 1]
-            query_chars = set(query_lower) if len(query_lower) > 1 else set()
-
-            MAX_STR_LENGTH = 20
-            top_k = limit * 3
-            top_candidates = []
-
-            for file_path, data in idx.items():
-                if not isinstance(data, dict):
-                    continue
-
-                score = 0
-                desc = str(data.get("desc", "")).lower()
-                tags = [str(t).lower() for t in data.get("tags", [])]
-                tags_str = ", ".join(tags)
-                category = str(data.get("category", "")).lower()
-
-                if query_chars:
-                    all_text = category + " " + desc + " " + " ".join(tags)
-                    if not query_chars.intersection(set(all_text)):
-                        continue
-
-                if query_lower == category:
-                    score = 20
-                    top_candidates.append((file_path, desc, category, tags_str, score))
-                    continue
-
-                if query_lower in category or category in query_lower:
-                    score = 10
-
-                if query_lower == desc:
-                    score = max(score, 15)
-                elif query_lower in desc:
-                    score = max(score, 12)
-                elif query_tokens:
-                    matched = sum(1 for token in query_tokens if token in desc)
-                    score = max(score, matched * 3)
-
-                if score >= 15:
-                    top_candidates.append((file_path, desc, category, tags_str, score))
-                    continue
-
-                if query_lower == tags[0] if tags else False:
-                    score = max(score, 12)
-                elif tags and query_lower in tags[0]:
-                    score = max(score, 8)
-                elif query_tokens:
-                    for tag in tags:
-                        matched = sum(1 for token in query_tokens if token in tag)
-                        score = max(score, matched * 2)
-                        if score >= 15:
-                            break
-
-                if score >= 15:
-                    top_candidates.append((file_path, desc, category, tags_str, score))
-                    continue
-
-                if score >= 12:
-                    if query_tokens:
-                        for tag in tags:
-                            matched = sum(1 for token in query_tokens if token in tag)
-                            score = max(score, matched * 2 + 10)
-                    top_candidates.append((file_path, desc, category, tags_str, score))
-                    continue
-
-                if score >= 10 and query_tokens:
-                    has_fuzzy = False
-                    for target in [category, desc] + tags[:2]:
-                        if len(target) > 1 and len(query_lower) > 1:
-                            sim = calculate_similarity(
-                                query_lower[:MAX_STR_LENGTH], target[:MAX_STR_LENGTH]
-                            )
-                            if sim >= 0.65:
-                                score = max(score, int(4 + (sim - 0.65) * 12))
-                                has_fuzzy = True
-                                break
-                    if has_fuzzy:
-                        top_candidates.append((file_path, desc, category, tags_str, score))
-                        continue
-
-                if score > 0:
-                    top_candidates.append((file_path, desc, category, tags_str, score))
-
-                if len(top_candidates) > top_k:
-                    top_candidates.sort(key=lambda x: x[4], reverse=True)
-                    top_candidates = top_candidates[:top_k]
-
-            top_candidates.sort(key=lambda x: x[4], reverse=True)
-            results = [(item[0], item[1], item[2], item[3]) for item in top_candidates[:limit]]
-
-            if not results:
-                keyword_map = self._get_keyword_map()
-                if query in keyword_map:
-                    category = keyword_map[query]
-                    logger.debug(
-                        f"未找到直接匹配，尝试映射查询 '{query}' -> 分类 '{category}'"
-                    )
-                    for file_path, data in idx.items():
-                        if not isinstance(data, dict):
-                            continue
-                        cat = str(data.get("category", "")).lower()
-                        if cat == category:
-                            tags_str = ", ".join(data.get("tags", []))
-                            results.append((file_path, str(data.get("desc", "")), cat, tags_str))
-                            if len(results) >= limit:
-                                break
-
-            return results
-
-        except Exception as e:
-            logger.error(f"搜索图片失败: {e}")
-            return []
-
-    async def smart_search(
-        self,
-        query: str,
-        limit: int = 5,
-        idx: dict | None = None,
-    ) -> list[tuple[str, str, str, str]]:
-        """智能搜索表情包（带多级 fallback）。
-
-        搜索顺序：
-        1) 直接用 query 调用 search_images
-        2) 关键词映射（如"无语" -> dumb）
-        3) 模糊匹配到分类（相似度阈值 0.4）
-
-        Args:
-            query: 搜索关键词
-            limit: 返回结果数量
-            idx: 索引缓存，为 None 时自动加载
-
-        Returns:
-            list[tuple[path, desc, emotion, tags]]
-        """
-        from .text_similarity import calculate_hybrid_similarity
-
-        # 确保索引可用
-        if idx is None:
-            if hasattr(self.plugin, "cache_service"):
-                idx = self.plugin.cache_service.get_cache("index_cache") or {}
-            else:
-                idx = {}
-
-        # 1) 直接搜索
-        results = await self.search_images(query, limit=limit, idx=idx)
-        if results:
-            return results
-
-        # 2) 关键词映射
-        keyword_map = self._get_keyword_map()
-        if query in keyword_map:
-            mapped_category = keyword_map[query]
-            logger.info(f"[smart_search] 关键词映射: '{query}' -> '{mapped_category}'")
-            results = await self.search_images(mapped_category, limit=limit, idx=idx)
-            if results:
-                return results
-
-        # 3) 模糊匹配到分类
-        best_match = None
-        best_score = 0.0
-        for category in self.VALID_CATEGORIES:
-            score = calculate_hybrid_similarity(query, category)
-            if score > best_score and score > 0.4:
-                best_score = score
-                best_match = category
-
-        if best_match:
-            logger.info(
-                f"[smart_search] 模糊匹配: '{query}' -> '{best_match}' (相似度: {best_score:.2f})"
-            )
-            results = await self.search_images(best_match, limit=limit, idx=idx)
-
-        return results
 
     async def safe_remove_file(self, file_path: str) -> bool:
         """安全删除文件。

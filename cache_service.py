@@ -27,12 +27,7 @@ class CacheService:
             cache_dir = Path(StarTools.get_data_dir("astrbot_plugin_stealer")) / "cache"
 
         self._cache_dir = Path(cache_dir)
-        try:
-            self._cache_dir.mkdir(parents=True, exist_ok=True)
-            logger.info(f"缓存目录创建成功: {self._cache_dir}")
-        except Exception as e:
-            logger.error(f"创建缓存目录 {self._cache_dir} 失败: {e}")
-            raise Exception(f"无法创建缓存目录: {e}") from e
+        self._ensure_cache_dir()
 
         # 初始化不同类型的缓存
         self._caches: dict[str, dict[str, Any]] = {
@@ -51,7 +46,7 @@ class CacheService:
     def _load_caches(self):
         """加载持久化的缓存文件。"""
         for cache_name in self._caches.keys():
-            cache_file = self._cache_dir / f"{cache_name}.json"
+            cache_file = self._get_cache_file(cache_name)
             if cache_file.exists():
                 try:
                     with open(cache_file, encoding="utf-8") as f:
@@ -66,8 +61,8 @@ class CacheService:
             else:
                 logger.debug(f"[load_caches] cache file not found: {cache_file}")
 
-    def _save_cache(self, cache_name: str):
-        """保存指定类型的缓存到文件。
+    async def _save_cache_async(self, cache_name: str):
+        """异步保存指定类型的缓存到文件。
 
         Args:
             cache_name: 缓存类型名称
@@ -77,19 +72,57 @@ class CacheService:
             return
 
         try:
-            # 确保缓存目录存在
-            self._cache_dir.mkdir(parents=True, exist_ok=True)
-            cache_file = self._cache_dir / f"{cache_name}.json"
+            self._ensure_cache_dir()
+            cache_file = self._get_cache_file(cache_name)
 
             # 记录保存前的数据量
             data_size = len(self._caches[cache_name])
-            logger.debug(f"准备保存缓存 {cache_name}，数据量: {data_size}")
+            logger.debug(f"准备异步保存缓存 {cache_name}，数据量: {data_size}")
+
+            # 准备数据（在主线程序列化，避免多线程竞争问题，或者深拷贝）
+            # json.dumps 可能耗时，但在 executor 中做更安全
+            data_to_save = self._caches[cache_name]
+
+            def write_file():
+                with open(cache_file, "w", encoding="utf-8") as f:
+                    json.dump(data_to_save, f, ensure_ascii=False, indent=2)
+
+            await asyncio.to_thread(write_file)
+            logger.info(f"缓存文件 {cache_file} 保存成功 (Async)，数据量: {data_size}")
+        except Exception as e:
+            logger.error(f"保存缓存文件 {cache_file} 失败: {e}", exc_info=True)
+
+    def _save_cache(self, cache_name: str):
+        """同步保存指定类型的缓存到文件（仅用于非异步上下文）。
+
+        尽量使用 _save_cache_async。
+        """
+        if cache_name not in self._caches:
+            logger.warning(f"缓存类型 {cache_name} 不存在，无法保存")
+            return
+
+        try:
+            self._ensure_cache_dir()
+            cache_file = self._get_cache_file(cache_name)
+
+            # 记录保存前的数据量
+            data_size = len(self._caches[cache_name])
 
             with open(cache_file, "w", encoding="utf-8") as f:
                 json.dump(self._caches[cache_name], f, ensure_ascii=False, indent=2)
             logger.info(f"缓存文件 {cache_file} 保存成功，数据量: {data_size}")
         except Exception as e:
             logger.error(f"保存缓存文件 {cache_file} 失败: {e}", exc_info=True)
+
+    def _ensure_cache_dir(self) -> None:
+        try:
+            self._cache_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            logger.error(f"创建缓存目录 {self._cache_dir} 失败: {e}")
+            raise Exception(f"无法创建缓存目录: {e}") from e
+
+    def _get_cache_file(self, cache_name: str) -> Path:
+        return self._cache_dir / f"{cache_name}.json"
 
     def _clean_cache(self, cache: dict[str, Any]) -> None:
         """清理缓存，保持在最大大小以下。
@@ -117,7 +150,9 @@ class CacheService:
             return self._caches[cache_name].get(key)
         return None
 
-    def set(self, cache_name: str, key: str, value: Any, persist: bool = False) -> None:
+    async def set(
+        self, cache_name: str, key: str, value: Any, persist: bool = False
+    ) -> None:
         """设置指定类型缓存的数据。
 
         Args:
@@ -137,9 +172,9 @@ class CacheService:
 
         # 如果需要立即持久化
         if persist:
-            self._save_cache(cache_name)
+            await self._save_cache_async(cache_name)
 
-    def delete(self, cache_name: str, key: str, persist: bool = False) -> None:
+    async def delete(self, cache_name: str, key: str, persist: bool = False) -> None:
         """从指定类型的缓存中删除数据。
 
         Args:
@@ -153,9 +188,9 @@ class CacheService:
 
                 # 如果需要立即持久化
                 if persist:
-                    self._save_cache(cache_name)
+                    await self._save_cache_async(cache_name)
 
-    def clear(self, cache_name: str | None = None, persist: bool = False) -> None:
+    async def clear(self, cache_name: str | None = None, persist: bool = False) -> None:
         """清空缓存。
 
         Args:
@@ -167,13 +202,13 @@ class CacheService:
             if cache_name in self._caches:
                 self._caches[cache_name].clear()
                 if persist:
-                    self._save_cache(cache_name)
+                    await self._save_cache_async(cache_name)
         else:
             # 清空所有缓存
             for name in self._caches.keys():
                 self._caches[name].clear()
                 if persist:
-                    self._save_cache(name)
+                    await self._save_cache_async(name)
 
     def get_cache_size(self, cache_name: str) -> int:
         """获取指定类型缓存的大小。
@@ -204,10 +239,10 @@ class CacheService:
         hash_obj.update(data)
         return hash_obj.hexdigest()
 
-    def persist_all(self):
+    async def persist_all(self):
         """将所有缓存持久化到文件。"""
         for cache_name in self._caches.keys():
-            self._save_cache(cache_name)
+            await self._save_cache_async(cache_name)
 
     def get_cache(self, cache_name: str) -> dict[str, Any]:
         """获取指定类型的缓存字典（只读视图）。
@@ -225,7 +260,7 @@ class CacheService:
         logger.debug(f"[get_cache] {cache_name}: not found, returning empty dict")
         return {}
 
-    def set_cache(
+    async def set_cache(
         self, cache_name: str, cache_data: dict[str, Any], persist: bool = True
     ) -> None:
         """设置指定类型的缓存字典（完全替换模式）。
@@ -242,9 +277,9 @@ class CacheService:
             self._caches[cache_name].update(cache_data)
             logger.debug(f"[set_cache] {cache_name}: {old_len} -> {new_len} items")
             if persist:
-                self._save_cache(cache_name)
+                await self._save_cache_async(cache_name)
 
-    def update_config(self, max_cache_size: int | None = None):
+    async def update_config(self, max_cache_size: int | None = None):
         """更新缓存配置。
 
         Args:
@@ -256,7 +291,7 @@ class CacheService:
             for cache in self._caches.values():
                 self._clean_cache(cache)
             # 持久化更新后的缓存
-            self.persist_all()
+            await self.persist_all()
 
     async def load_index(self) -> dict[str, Any]:
         """加载分类索引文件。
@@ -277,7 +312,7 @@ class CacheService:
         """保存分类索引文件。"""
         try:
             async with self._index_lock:
-                self.set_cache("index_cache", idx, persist=True)
+                await self.set_cache("index_cache", idx, persist=True)
         except Exception as e:
             logger.error(f"保存索引文件失败: {e}", exc_info=True)
 
@@ -288,7 +323,7 @@ class CacheService:
                 result = updater(current)
                 if inspect.isawaitable(result):
                     await result
-                self.set_cache("index_cache", current, persist=True)
+                await self.set_cache("index_cache", current, persist=True)
                 return current
         except Exception as e:
             logger.error(f"更新索引失败: {e}", exc_info=True)
@@ -312,31 +347,40 @@ class CacheService:
 
             logger.info("开始检查和迁移旧版本数据...")
 
-            # 可能的旧版本数据路径
-            possible_paths = [
-                Path(base_dir) / "index.json",
-                Path(base_dir) / "image_index.json",
-                Path(base_dir) / "cache" / "index.json",
-                Path("data/plugin_data/astrbot_plugin_stealer/index.json"),
-                Path("data/plugin_data/astrbot_plugin_stealer/image_index.json"),
-            ]
+            base_dir_path = Path(base_dir) if base_dir else None
+            possible_paths = []
+            if base_dir_path:
+                possible_paths.extend(
+                    [
+                        base_dir_path / "index.json",
+                        base_dir_path / "image_index.json",
+                        base_dir_path / "cache" / "index.json",
+                    ]
+                )
 
             migrated_data = {}
+
+            # 同步文件操作放入 executor
+            def load_old_file(path):
+                with open(path, encoding="utf-8") as f:
+                    return json.load(f)
 
             for old_path in possible_paths:
                 if old_path.exists():
                     try:
                         logger.info(f"发现旧版本索引文件: {old_path}")
-                        with open(old_path, encoding="utf-8") as f:
-                            old_data = json.load(f)
+
+                        old_data = await asyncio.to_thread(load_old_file, old_path)
 
                         if isinstance(old_data, dict) and old_data:
-                            logger.info(f"从 {old_path} 加载了 {len(old_data)} 条旧记录")
+                            logger.info(
+                                f"从 {old_path} 加载了 {len(old_data)} 条旧记录"
+                            )
                             migrated_data.update(old_data)
 
                             # 备份旧文件
                             backup_path = old_path.with_suffix(".json.backup")
-                            shutil.copy2(old_path, backup_path)
+                            await asyncio.to_thread(shutil.copy2, old_path, backup_path)
                             logger.info(f"已备份旧索引文件到: {backup_path}")
 
                     except Exception as e:
@@ -404,7 +448,9 @@ class CacheService:
             logger.error(f"数据迁移失败: {e}", exc_info=True)
             return {}
 
-    async def rebuild_index_from_files(self, base_dir, categories_dir) -> dict[str, Any]:
+    async def rebuild_index_from_files(
+        self, base_dir, categories_dir
+    ) -> dict[str, Any]:
         """从现有的分类文件重建索引。
 
         Args:
@@ -436,7 +482,13 @@ class CacheService:
                         continue
 
                     # 检查是否是图片文件
-                    if img_file.suffix.lower() not in [".jpg", ".jpeg", ".png", ".gif", ".webp"]:
+                    if img_file.suffix.lower() not in [
+                        ".jpg",
+                        ".jpeg",
+                        ".png",
+                        ".gif",
+                        ".webp",
+                    ]:
                         continue
 
                     # 尝试找到对应的raw文件
@@ -448,7 +500,10 @@ class CacheService:
                             raw_path = str(potential_raw)
                         else:
                             for raw_file in raw_dir.iterdir():
-                                if raw_file.is_file() and raw_file.stem == img_file.stem:
+                                if (
+                                    raw_file.is_file()
+                                    and raw_file.stem == img_file.stem
+                                ):
                                     raw_path = str(raw_file)
                                     break
 
@@ -478,6 +533,6 @@ class CacheService:
             logger.error(f"从文件重建索引失败: {e}", exc_info=True)
             return {}
 
-    def cleanup(self):
+    async def cleanup(self):
         """清理资源（持久化所有缓存）。"""
-        self.persist_all()
+        await self.persist_all()
