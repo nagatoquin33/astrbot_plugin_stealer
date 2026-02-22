@@ -80,7 +80,7 @@ class EmojiSelector:
         except Exception:
             return str(path or "")
 
-    def _get_category_from_data(self, data: dict) -> str:
+    def _get_category_from_data(self, data: dict | None) -> str:
         """从数据字典中获取小写的分类名。
 
         Args:
@@ -89,6 +89,8 @@ class EmojiSelector:
         Returns:
             str: 小写的分类名，如果不存在则返回空字符串
         """
+        if not isinstance(data, dict):
+            return ""
         return str(data.get("category", "")).lower()
 
     def _get_recent_usage(self, category: str) -> list[str]:

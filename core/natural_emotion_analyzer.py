@@ -202,7 +202,11 @@ class NaturalEmotionAnalyzer:
                     return normalized
             except Exception as e:
                 logger.error(f"[情绪分析] 解析异常: {e}")
-                return None
+
+        # Fallback: 直接匹配分类名
+        if result in self.categories:
+            logger.debug(f"[情绪分析] Fallback 匹配: '{result}'")
+            return result
 
         return None
 
