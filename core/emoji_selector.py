@@ -56,12 +56,40 @@ class EmojiSelector:
         )
         self._selection_lock = asyncio.Lock()
 
+    def _check_group_allowed(self, event: AstrMessageEvent) -> bool:
+        """检查当前群组是否允许使用表情包功能。
+
+        Args:
+            event: 消息事件对象
+
+        Returns:
+            bool: True 表示允许，False 表示不允许
+        """
+        config = getattr(self.plugin, "plugin_config", None)
+        if not config:
+            return True
+        if not hasattr(config, "is_group_allowed"):
+            return True
+        group_id = config.get_group_id(event) if hasattr(config, "get_group_id") else None
+        return config.is_group_allowed(group_id)
+
     def _canon_path(self, path: str) -> str:
         """规范化路径用于比较去重。"""
         try:
             return os.path.normcase(os.path.abspath(os.path.normpath(path)))
         except Exception:
             return str(path or "")
+
+    def _get_category_from_data(self, data: dict) -> str:
+        """从数据字典中获取小写的分类名。
+
+        Args:
+            data: 图片元数据字典
+
+        Returns:
+            str: 小写的分类名，如果不存在则返回空字符串
+        """
+        return str(data.get("category", "")).lower()
 
     def _get_recent_usage(self, category: str) -> list[str]:
         recent_usage_key = f"recent_usage_{category}"
@@ -234,7 +262,7 @@ class EmojiSelector:
                 if not isinstance(data, dict):
                     continue
 
-                file_cat = str(data.get("category", "")).lower()
+                file_cat = self._get_category_from_data(data)
                 if file_cat != category:
                     continue
 
@@ -282,7 +310,7 @@ class EmojiSelector:
                 desc = str(data.get("desc", "")).lower()
                 tags = [str(t).lower() for t in data.get("tags", [])]
                 tags_str = ", ".join(tags)
-                category = str(data.get("category", "")).lower()
+                category = self._get_category_from_data(data)
 
                 # 快速过滤
                 if query_chars:
@@ -371,7 +399,7 @@ class EmojiSelector:
                     for file_path, data in idx.items():
                         if not isinstance(data, dict):
                             continue
-                        cat = str(data.get("category", "")).lower()
+                        cat = self._get_category_from_data(data)
                         if cat == mapped_cat:
                             tags_str = ", ".join(data.get("tags", []))
                             results.append(
@@ -469,12 +497,7 @@ class EmojiSelector:
             from astrbot.api.event import MessageChain
             from astrbot.api.message_components import Image as ImageComponent
 
-            config = getattr(self.plugin, "plugin_config", None)
-            if (
-                config
-                and hasattr(config, "is_group_allowed")
-                and not config.is_group_allowed(config.get_group_id(event))
-            ):
+            if not self._check_group_allowed(event):
                 return
 
             image_processor = getattr(self.plugin, "image_processor_service", None)
@@ -541,12 +564,7 @@ class EmojiSelector:
         self, event: AstrMessageEvent, emotions: list[str], cleaned_text: str
     ) -> bool:
         """尝试发送表情包。"""
-        config = getattr(self.plugin, "plugin_config", None)
-        if (
-            config
-            and hasattr(config, "is_group_allowed")
-            and not config.is_group_allowed(config.get_group_id(event))
-        ):
+        if not self._check_group_allowed(event):
             return False
 
         # 如果本轮已经通过 LLM 工具主动发送过表情包，则跳过自动发送
