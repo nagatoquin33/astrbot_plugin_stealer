@@ -289,7 +289,7 @@ class EmojiSelector:
         try:
             if idx is None:
                 if hasattr(self.plugin, "cache_service"):
-                    idx = self.plugin.cache_service.get_cache("index_cache") or {}
+                    idx = self.plugin.cache_service.get_index_cache()
 
             if not idx:
                 return []

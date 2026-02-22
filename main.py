@@ -203,7 +203,7 @@ class Main(Star):
             logger.warning(f"[Config] 扫描分类目录时出错: {e}")
 
         try:
-            index = self.cache_service.get_cache("index_cache") or {}
+            index = self.cache_service.get_index_cache()
             for meta in index.values():
                 if not isinstance(meta, dict):
                     continue
@@ -1241,7 +1241,7 @@ class Main(Star):
     ):
         """委托给 EmojiSelector.smart_search。"""
         if idx is None:
-            idx = self.cache_service.get_cache("index_cache") or {}
+            idx = self.cache_service.get_index_cache()
 
         return await self.emoji_selector.smart_search(query, limit=limit, idx=idx)
 
@@ -1287,11 +1287,11 @@ class Main(Star):
                 yield "搜索失败：当前群聊已禁用表情包功能"
                 return
 
-            if not self.cache_service.get_cache("index_cache"):
+            if not self.cache_service.get_index_cache():
                 logger.debug("索引未加载，正在加载...")
                 await self._load_index()
 
-            idx = self.cache_service.get_cache("index_cache") or {}
+            idx = self.cache_service.get_index_cache()
 
             # 增加搜索结果数量，给LLM更多选择
             results = await self._search_emoji_candidates(query, limit=self.MAX_SEARCH_RESULTS, idx=idx)

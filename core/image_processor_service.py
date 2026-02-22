@@ -450,7 +450,7 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
         """
         # 检查图片是否已存在（持久化索引 > 传入索引）
         if hasattr(self.plugin, "cache_service"):
-            persistent_idx = self.plugin.cache_service.get_cache("index_cache")
+            persistent_idx = self.plugin.cache_service.get_index_cache()
             for k, v in persistent_idx.items():
                 if isinstance(v, dict) and v.get("hash") == hash_val:
                     logger.debug(f"图片已存在于持久化索引中: {hash_val}")

@@ -255,6 +255,14 @@ class CacheService:
         for cache_name in self._caches.keys():
             await self._save_cache_async(cache_name)
 
+    def get_index_cache(self) -> dict[str, Any]:
+        """获取索引缓存的便捷方法。
+
+        Returns:
+            dict[str, Any]: 索引缓存字典（可变副本）
+        """
+        return dict(self.get_cache("index_cache"))
+
     def get_cache(self, cache_name: str) -> MappingProxyType:
         """获取指定类型的缓存字典（只读视图）。
 
@@ -312,7 +320,7 @@ class CacheService:
         """
         try:
             async with self._index_lock:
-                cache_data = self.get_cache("index_cache")
+                cache_data = self.get_index_cache()
                 index_data = dict(cache_data) if cache_data else {}
                 return index_data
         except Exception as e:
@@ -330,7 +338,7 @@ class CacheService:
     async def update_index(self, updater) -> dict[str, Any]:
         try:
             async with self._index_lock:
-                current = dict(self.get_cache("index_cache") or {})
+                current = self.get_index_cache()
                 result = updater(current)
                 if inspect.isawaitable(result):
                     await result
@@ -339,7 +347,7 @@ class CacheService:
         except Exception as e:
             logger.error(f"更新索引失败: {e}", exc_info=True)
             try:
-                return dict(self.get_cache("index_cache") or {})
+                return self.get_index_cache()
             except Exception:
                 return {}
 
@@ -404,7 +412,7 @@ class CacheService:
 
             # 智能合并逻辑
             try:
-                current_index = dict(self.get_cache("index_cache") or {})
+                current_index = self.get_index_cache()
             except Exception as e:
                 logger.warning(f"[migrate] 获取当前索引失败，将使用空索引: {e}")
                 current_index = {}

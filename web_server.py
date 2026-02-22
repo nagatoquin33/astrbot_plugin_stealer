@@ -441,7 +441,7 @@ class WebServer:
             # 但我们需要列表形式
 
             # 从 cache_service 获取持久化索引
-            index = self.plugin.cache_service.get_cache("index_cache") or {}
+            index = self.plugin.cache_service.get_index_cache()
 
             images = []
             category_counts = {}
@@ -768,7 +768,7 @@ class WebServer:
 
     async def handle_get_stats(self, request):
         try:
-            index = self.plugin.cache_service.get_cache("index_cache") or {}
+            index = self.plugin.cache_service.get_index_cache()
 
             # 计算今日新增
             today_start = (
@@ -933,7 +933,7 @@ class WebServer:
 
     async def handle_get_categories(self, request):
         try:
-            index = dict(self.plugin.cache_service.get_cache("index_cache") or {})
+            index = self.plugin.cache_service.get_index_cache()
             categories = {}
             for meta in index.values():
                 if isinstance(meta, dict):
@@ -1006,7 +1006,7 @@ class WebServer:
 
             updated_categories = [c for c in current_categories if c != category_key]
 
-            index_copy = dict(self.plugin.cache_service.get_cache("index_cache") or {})
+            index_copy = self.plugin.cache_service.get_index_cache()
 
             deleted_missing_count = 0
             deleted_file_count = 0
