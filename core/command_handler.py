@@ -1,5 +1,8 @@
+import json
+import os
 import random
 from pathlib import Path
+from typing import Any
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
@@ -8,7 +11,7 @@ from astrbot.api.event import AstrMessageEvent
 class CommandHandler:
     """命令处理服务类，负责处理所有与插件相关的命令操作。"""
 
-    def __init__(self, plugin_instance):
+    def __init__(self, plugin_instance: Any):
         """初始化命令处理服务。
 
         Args:
@@ -287,18 +290,24 @@ class CommandHandler:
         )
 
         # 基础状态信息
+        steal_mode = getattr(self.plugin, "steal_mode", "probability")
+        if steal_mode == "probability":
+            mode_desc = f"概率模式 (概率={getattr(self.plugin, 'steal_chance', 0.6)})"
+        else:
+            mode_desc = f"冷却模式 (冷却={getattr(self.plugin, 'image_processing_cooldown', 10)}秒)"
+
         status_text = "🔧 插件状态:\n"
         status_text += f"偷取: {stealing_status}\n"
+        status_text += f"偷图模式: {mode_desc}\n"
         status_text += f"自动发送: {auto_send_status}\n"
-        status_text += f"概率: {self.plugin.emoji_chance}\n"
-        status_text += f"替换: {self.plugin.do_replace}\n"
+        status_text += f"发送概率: {self.plugin.emoji_chance}\n"
         status_text += f"审核: {self.plugin.content_filtration}\n"
         status_text += f"视觉模型: {vision_model}\n\n"
 
         # 后台任务状态
         status_text += "⚙️ 后台任务:\n"
-        status_text += f"Raw清理: {'启用' if self.plugin.enable_raw_cleanup else '禁用'} ({self.plugin.raw_cleanup_interval}min)\n"
-        status_text += f"容量控制: {'启用' if self.plugin.enable_capacity_control else '禁用'} ({self.plugin.capacity_control_interval}min)\n\n"
+        status_text += "Raw清理: 自动 (30min)\n"
+        status_text += "容量控制: 自动 (60min)\n\n"
 
         # 表情包统计信息
         if total_count == 0:
@@ -339,50 +348,6 @@ class CommandHandler:
             status_text += f"  原始图片: {raw_count}张 | 分类图片: {total_count}张"
 
         yield event.plain_result(status_text)
-
-    async def push(self, event: AstrMessageEvent, category: str = "", alias: str = ""):
-        """手动推送指定分类的表情包。支持使用分类名称或别名。"""
-        if not self.plugin.categories_dir:
-            yield event.plain_result("插件未正确配置，缺少图片存储目录")
-            return
-
-        # 初始化目标分类变量
-        target_category = None
-
-        # 如果提供了别名，优先使用别名查找实际分类
-        if alias:
-            aliases = await self.plugin._load_aliases()
-            if alias in aliases:
-                # 别名存在，映射到实际分类名称
-                target_category = aliases[alias]
-            else:
-                yield event.plain_result("未找到指定的别名")
-                return
-
-        # 如果没有提供别名或别名不存在，使用分类参数
-        # 如果分类参数也为空，则使用默认分类
-        target_category = (
-            target_category
-            or category
-            or (self.plugin.categories[0] if self.plugin.categories else "happy")
-        )
-
-        # 将目标分类赋值给cat变量，保持后续代码兼容性
-        cat = target_category
-        cat_dir = self.plugin.categories_dir / cat
-        if not cat_dir.exists() or not cat_dir.is_dir():
-            yield event.plain_result(f"分类 {cat} 不存在")
-            return
-        files = [p for p in cat_dir.iterdir() if p.is_file()]
-        if not files:
-            yield event.plain_result("该分类暂无表情包")
-            return
-        pick = random.choice(files)
-        b64 = await self.plugin.image_processor_service._file_to_gif_base64(
-            pick.as_posix()
-        )
-        result = event.make_result().base64_image(b64)
-        yield result
 
     async def clean(self, event: AstrMessageEvent, mode: str = ""):
         """手动触发清理操作，清理raw目录中的原始图片文件，不影响已分类的表情包。
@@ -690,7 +655,7 @@ class CommandHandler:
 
             # 删除主文件（通常在raw目录）
             if Path(img_path).exists():
-                Path(img_path).unlink()
+                await self.plugin._safe_remove_file(img_path)
                 deleted_files.append(img_path)
                 logger.info(f"已删除主文件: {img_path}")
 
@@ -703,7 +668,7 @@ class CommandHandler:
                     if category_dir.is_dir():
                         category_file = category_dir / img_name
                         if category_file.exists():
-                            category_file.unlink()
+                            await self.plugin._safe_remove_file(str(category_file))
                             deleted_files.append(str(category_file))
                             logger.info(f"已删除分类文件: {category_file}")
 
@@ -738,8 +703,6 @@ class CommandHandler:
             old_count = len(old_index)
 
             # 尝试加载旧版本遗留文件（Legacy Data）- 独立存储，不修改 old_index
-            import json
-
             legacy_metadata_count = 0
             legacy_data_map = {}  # 独立存储 legacy 数据
             possible_legacy_paths = []
@@ -893,9 +856,10 @@ class CommandHandler:
         s = set()
         for v in idx.values():
             if isinstance(v, dict):
-                emo = v.get("emotion")
-                if isinstance(emo, str) and emo:
-                    s.add(emo)
+                # 使用 category 字段（新版本索引结构）
+                cat = v.get("category")
+                if isinstance(cat, str) and cat:
+                    s.add(cat)
         return sorted(s)
 
     async def get_all_descriptions(self) -> list[str]:
@@ -919,8 +883,6 @@ class CommandHandler:
         Returns:
             list[tuple[str, dict]]: (路径, 记录字典) 的列表
         """
-        import os
-
         idx = await self.plugin.cache_service.load_index()
         return [
             (k, v) for k, v in idx.items() if isinstance(v, dict) and os.path.exists(k)
@@ -937,8 +899,6 @@ class CommandHandler:
         Returns:
             list[tuple[str, str, str]]: (路径, 描述, 情绪) 的列表
         """
-        import random
-
         all_records = await self.load_all_emoji_records()
         if not all_records:
             return []
@@ -968,8 +928,6 @@ class CommandHandler:
         Returns:
             tuple[str, str, str] | None: (路径, 描述, 情绪) 或 None
         """
-        import random
-
         all_records = await self.load_all_emoji_records()
         candidates = []
         for image_path, record_dict in all_records:
@@ -1013,8 +971,6 @@ class CommandHandler:
         Returns:
             tuple[str, str, str] | None: (路径, 描述, 情绪) 或 None
         """
-        import random
-
         all_records = await self.load_all_emoji_records()
         candidates = []
         for image_path, record_dict in all_records:

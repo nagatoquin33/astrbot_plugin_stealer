@@ -21,6 +21,8 @@ class WebuiConfig(BaseModel):
 class PluginConfig(BaseModel):
     # === 基础功能 ===
     steal_emoji: bool = True
+    steal_mode: str = "probability"  # "probability" 或 "cooldown"
+    steal_chance: float = 0.6  # 概率模式下的偷图概率
     auto_send: bool = True
     emoji_chance: float = 0.4
     send_emoji_as_gif: bool = True
@@ -37,16 +39,18 @@ class PluginConfig(BaseModel):
 
     # === 内部常量/高级配置 ===
     max_reg_num: int = 100
-    do_replace: bool = True
     content_filtration: bool = False  # 内容审核开关
-    enable_raw_cleanup: bool = True
-    raw_cleanup_interval: int = 30
-    enable_capacity_control: bool = True
-    capacity_control_interval: int = 60
-    raw_retention_minutes: int = 60
     image_processing_cooldown: int = 10
     enable_natural_emotion_analysis: bool = True  # 情绪识别模式
     emotion_analysis_provider_id: str = ""  # 情绪分析专用模型
+
+    # === 内化常量（不再暴露给用户） ===
+    DO_REPLACE: ClassVar[bool] = True  # 达到上限始终替换旧表情
+    ENABLE_RAW_CLEANUP: ClassVar[bool] = True  # raw 始终自动清理
+    RAW_CLEANUP_INTERVAL: ClassVar[int] = 30  # 清理周期(分钟)，固定
+    ENABLE_CAPACITY_CONTROL: ClassVar[bool] = True  # 始终启用容量控制
+    CAPACITY_CONTROL_INTERVAL: ClassVar[int] = 60  # 容量检查周期(分钟)，固定
+    RAW_RETENTION_MINUTES: ClassVar[int] = 60  # 原始图片保留时间(分钟)，固定
 
     # === 分类信息 ===
     categories: list[str] = []
@@ -196,7 +200,6 @@ class PluginConfig(BaseModel):
         object.__setattr__(self, "raw_dir", data_dir / "raw")
         object.__setattr__(self, "categories_dir", data_dir / "categories")
         object.__setattr__(self, "cache_dir", data_dir / "cache")
-        object.__setattr__(self, "alias_path", data_dir / "aliases.json")
         object.__setattr__(self, "category_info_path", data_dir / "category_info.json")
 
         # 确保目录存在
@@ -214,12 +217,32 @@ class PluginConfig(BaseModel):
         except Exception:
             return None
 
-    def _write_json_file(self, path: Path, data: Any) -> None:
+    def _write_json_file(self, path: Path, data: Any) -> bool:
+        """写入 JSON 文件。
+
+        Args:
+            path: 文件路径
+            data: 要写入的数据
+
+        Returns:
+            bool: 是否写入成功
+        """
         try:
             with path.open("w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
+            return True
+        except PermissionError as e:
+            from astrbot.api import logger
+            logger.error(f"[Config] 权限不足，无法写入文件 {path}: {e}")
+            return False
+        except OSError as e:
+            from astrbot.api import logger
+            logger.error(f"[Config] 写入文件失败 {path}: {e}")
+            return False
+        except Exception as e:
+            from astrbot.api import logger
+            logger.error(f"[Config] 写入 JSON 文件时发生未知错误 {path}: {e}")
+            return False
 
     def _load_category_state(self) -> None:
         stored_categories = self._read_json_file(self.categories_path)
@@ -248,10 +271,12 @@ class PluginConfig(BaseModel):
             else {}
         )
 
-        self.categories = list(categories)
+        # 使用 BaseModel.__setattr__ 绕过自定义 __setattr__ 中的写文件逻辑，
+        # 避免初始化期间重复写文件（最后统一写一次即可）
+        BaseModel.__setattr__(self, "categories", list(categories))
         merged_info = dict(self.DEFAULT_CATEGORY_INFO)
         merged_info.update(info)
-        self.category_info = merged_info
+        BaseModel.__setattr__(self, "category_info", merged_info)
         self.save_categories()
         self.save_category_info()
 
@@ -290,7 +315,6 @@ class PluginConfig(BaseModel):
             "raw_dir",
             "categories_dir",
             "cache_dir",
-            "alias_path",
             "category_info_path",
         ):
             return
@@ -378,9 +402,16 @@ class PluginConfig(BaseModel):
             return None
 
         category = category.lower().strip()
+
+        # 1. 直接匹配当前配置的分类列表（包括用户自定义分类）
+        if category in self.categories:
+            return category
+
+        # 2. 匹配默认分类（兜底）
         if category in self.DEFAULT_CATEGORIES:
             return category
 
+        # 3. 别名查找
         return self.DEFAULT_CATEGORY_ALIASES.get(category)
 
     def get_keyword_map(self) -> dict[str, str]:

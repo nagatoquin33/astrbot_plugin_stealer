@@ -1,3 +1,5 @@
+import asyncio
+import asyncio
 import hashlib
 import hmac
 import logging
@@ -7,6 +9,7 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from aiohttp import web
 
@@ -14,28 +17,62 @@ logger = logging.getLogger("astrbot")
 
 
 class WebServer:
-    def __init__(self, plugin, host: str = "0.0.0.0", port: int = 8899):
+    """Web UI 服务器类，提供表情包管理界面。"""
+
+    # 常量定义
+    CLIENT_MAX_SIZE = 50 * 1024 * 1024  # 50MB 最大请求大小
+    SESSION_CLEANUP_INTERVAL = 300  # Session 清理间隔（秒）
+    SESSION_MAX_COUNT = 1000  # 最大 Session 数量
+
+    def __init__(self, plugin: Any, host: str = "0.0.0.0", port: int = 8899):
         self.plugin = plugin
-        self.host = host
-        self.port = port
-        self.app = web.Application(
-            client_max_size=50 * 1024 * 1024,
+        self.host: str = host
+        self.port: int = port
+        self.app: web.Application = web.Application(
+            client_max_size=self.CLIENT_MAX_SIZE,
             middlewares=[self._error_middleware, self._auth_middleware],
         )
         self.runner: web.AppRunner | None = None
         self.site: web.TCPSite | None = None
-        self._started = False
+        self._started: bool = False
 
         # Web UI 静态文件目录 (插件目录下的 web 文件夹)
-        self.static_dir = Path(__file__).resolve().parent / "web"
+        self.static_dir: Path = Path(__file__).resolve().parent / "web"
 
         # 图片数据目录 (数据目录下的 plugin_data/...)
-        self.data_dir = self.plugin.base_dir
+        self.data_dir: Path = self.plugin.base_dir
 
-        self._cookie_name = "stealer_webui_session"
+        self._cookie_name: str = "stealer_webui_session"
         self._sessions: dict[str, float] = {}
+        self._last_session_cleanup: float = 0.0  # 上次 session 清理时间
+        self._session_cleanup_interval: int = self.SESSION_CLEANUP_INTERVAL
 
         self._setup_routes()
+
+    # ── 响应快捷方法 ──────────────────────────────────────────
+
+    @staticmethod
+    def _ok(data: dict | None = None, **kwargs) -> web.Response:
+        """返回成功 JSON 响应。
+
+        用法:
+            self._ok()                          → {"success": True}
+            self._ok({"count": 3})              → {"success": True, "count": 3}
+            self._ok(count=3)                   → {"success": True, "count": 3}
+        """
+        body: dict = {"success": True}
+        if data:
+            body.update(data)
+        if kwargs:
+            body.update(kwargs)
+        return web.json_response(body)
+
+    @staticmethod
+    def _err(msg: str, status: int = 500) -> web.Response:
+        """返回失败 JSON 响应。"""
+        return web.json_response({"success": False, "error": msg}, status=status)
+
+    # ── 中间件 ────────────────────────────────────────────────
 
     async def _error_middleware(self, app: web.Application, handler):
         async def middleware_handler(request: web.Request):
@@ -46,10 +83,7 @@ class WebServer:
             except Exception as e:
                 logger.error(f"Unhandled WebUI error: {e}", exc_info=True)
                 if (request.path or "").startswith("/api/"):
-                    return web.json_response(
-                        {"success": False, "error": "Internal Server Error"},
-                        status=500,
-                    )
+                    return WebServer._err("Internal Server Error")
                 return web.Response(text="500 Internal Server Error", status=500)
 
         return middleware_handler
@@ -126,15 +160,32 @@ class WebServer:
 
             sid = str(request.cookies.get(self._cookie_name, "") or "").strip()
             now = time.time()
+
+            # 定期清理所有过期 session，防止内存泄漏
+            if now - self._last_session_cleanup > self._session_cleanup_interval:
+                expired = [k for k, v in self._sessions.items() if v < now]
+                for k in expired:
+                    self._sessions.pop(k, None)
+                self._last_session_cleanup = now
+
+                # 额外检查：如果 session 数量超过上限，清理最旧的一半
+                if len(self._sessions) > self.SESSION_MAX_COUNT:
+                    sorted_sessions = sorted(
+                        self._sessions.items(), key=lambda x: x[1]
+                    )
+                    to_remove = len(self._sessions) - self.SESSION_MAX_COUNT // 2
+                    for k, _ in sorted_sessions[:to_remove]:
+                        self._sessions.pop(k, None)
+                    logger.warning(
+                        f"Session 数量超过上限 {self.SESSION_MAX_COUNT}，已清理 {to_remove} 个最旧的 session"
+                    )
+
             exp = self._sessions.get(sid)
             if not exp or exp < now:
                 if sid:
                     self._sessions.pop(sid, None)
                 if path.startswith("/api/"):
-                    return web.json_response(
-                        {"success": False, "error": "Unauthorized"},
-                        status=401,
-                    )
+                    return WebServer._err("Unauthorized", 401)
                 raise web.HTTPUnauthorized(text="Unauthorized")
 
             return await handler(request)
@@ -175,17 +226,57 @@ class WebServer:
     def _resolve_safe_path(
         self, raw: str, base_dir: Path
     ) -> tuple[Path | None, str | None]:
+        """安全解析请求路径，防止路径遍历攻击。
+
+        Args:
+            raw: 原始请求路径
+            base_dir: 基础目录
+
+        Returns:
+            tuple: (解析后的安全路径, 错误类型) 或 (None, 错误类型)
+        """
         raw = str(raw or "").lstrip("/")
         if not raw:
             return None, "not_found"
-        if ".." in raw or raw.startswith(("/", "\\")) or ":" in raw:
+
+        # 安全检查：禁止路径遍历和绝对路径
+        if (
+            ".." in raw
+            or raw.startswith(("/", "\\"))
+            or ":" in raw  # Windows 驱动器字母
+            or "\x00" in raw  # 空字节注入
+        ):
+            logger.warning(f"可疑路径请求被拒绝: {raw!r}")
             return None, "bad_request"
+
+        # Windows 特殊设备名检查
+        win_reserved = {
+            "CON", "PRN", "AUX", "NUL",
+            "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+            "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+        }
+        name_part = raw.split("/")[0].split("\\")[0].upper()
+        if name_part in win_reserved:
+            logger.warning(f"Windows 保留设备名请求被拒绝: {raw!r}")
+            return None, "bad_request"
+
         base_dir = base_dir.resolve()
         try:
-            abs_path = (base_dir / Path(raw)).resolve()
-            abs_path.relative_to(base_dir)
-        except Exception:
+            # 标准化路径并验证是否在基础目录内
+            abs_path = (base_dir / raw).resolve()
+
+            # 双重检查：确保解析后的路径确实在基础目录内
+            # 使用 os.path.commonpath 更可靠
+            try:
+                abs_path.relative_to(base_dir)
+            except ValueError:
+                logger.warning(f"路径遍历尝试被阻止: {raw!r} -> {abs_path}")
+                return None, "not_found"
+
+        except Exception as e:
+            logger.debug(f"路径解析失败: {raw!r}, 错误: {e}")
             return None, "not_found"
+
         return abs_path, None
 
     async def handle_web_static(self, request: web.Request) -> web.StreamResponse:
@@ -216,13 +307,13 @@ class WebServer:
                 "application/xml",
             ):
                 try:
-                    content = abs_path.read_text(encoding="utf-8")
+                    content = await asyncio.to_thread(abs_path.read_text, encoding="utf-8")
                     return web.Response(text=content, content_type=content_type)
                 except UnicodeDecodeError:
                     # 如果不是 UTF-8，尝试二进制
                     pass
 
-            content = abs_path.read_bytes()
+            content = await asyncio.to_thread(abs_path.read_bytes)
             return web.Response(body=content, content_type=content_type)
 
         except Exception as e:
@@ -320,10 +411,12 @@ class WebServer:
             # - 在部分环境/代理下，如果传输过程中异常中断，curl 可能会报 Received HTTP/0.9
             # - 显式构造 Response 能确保状态行和头部稳定输出
             try:
-                content = index_file.read_text(encoding="utf-8")
+                content = await asyncio.to_thread(index_file.read_text, encoding="utf-8")
             except UnicodeDecodeError:
                 # 兼容被意外写入非 UTF-8 的情况（尽量仍返回合法 HTTP 响应）
-                content = index_file.read_text(encoding="utf-8", errors="replace")
+                content = await asyncio.to_thread(
+                    index_file.read_text, encoding="utf-8", errors="replace"
+                )
                 logger.warning(
                     "WebUI index.html is not valid UTF-8, returned with replacement characters.",
                 )
@@ -379,7 +472,7 @@ class WebServer:
                     # 预览增强：按需返回一些元信息（默认关闭，避免无谓 I/O）
                     if include_meta:
                         try:
-                            stat = abs_path.stat()
+                            stat = await asyncio.to_thread(abs_path.stat)
                             item.update(
                                 {
                                     "rel_path": rel_path.as_posix(),
@@ -455,7 +548,7 @@ class WebServer:
             # 按数量倒序排序分类列表
             categories_list.sort(key=lambda x: x["count"], reverse=True)
 
-            return web.json_response(
+            return self._ok(
                 {
                     "total": total,
                     "page": page,
@@ -466,7 +559,7 @@ class WebServer:
             )
         except Exception as e:
             logger.error(f"Error listing images: {e}")
-            return web.json_response({"error": str(e)}, status=500)
+            return self._err(str(e))
 
     async def handle_delete_image(self, request):
         """删除图片"""
@@ -481,15 +574,11 @@ class WebServer:
 
         if target_path:
             try:
-                # 1. 删除文件
-                if os.path.exists(target_path):
-                    os.remove(target_path)
+                # 1. 删除文件（通过统一入口）
+                await self.plugin._safe_remove_file(target_path)
 
                 # 2. 添加到黑名单（如果请求）
                 if add_to_blacklist:
-                    # 使用当前时间戳作为值
-                    import time
-
                     await self.plugin.cache_service.set(
                         "blacklist_cache", image_hash, int(time.time()), persist=True
                     )
@@ -499,12 +588,12 @@ class WebServer:
                 if hasattr(self.plugin, "image_processor_service"):
                     self.plugin.image_processor_service.invalidate_cache(image_hash)
 
-                return web.json_response({"success": True})
+                return self._ok()
             except Exception as e:
                 logger.error(f"Failed to delete image {target_path}: {e}")
-                return web.json_response({"error": str(e)}, status=500)
+                return self._err(str(e))
 
-        return web.json_response({"error": "Image not found"}, status=404)
+        return self._err("Image not found", 404)
 
     def _remove_by_hashes(
         self, current: dict, hashes: set[str], removed_paths: list[str]
@@ -523,7 +612,7 @@ class WebServer:
                 items.append((path_str, meta))
         return items
 
-    def _move_items_to_category(
+    async def _move_items_to_category(
         self, index_map: dict, items: list[tuple[str, dict]], target_category: str
     ) -> tuple[int, list[str]]:
         moved_count = 0
@@ -537,7 +626,7 @@ class WebServer:
                     continue
 
                 new_path = target_dir / old_path.name
-                shutil.move(str(old_path), str(new_path))
+                await asyncio.to_thread(shutil.move, str(old_path), str(new_path))
 
                 if old_path_str in index_map:
                     del index_map[old_path_str]
@@ -564,7 +653,7 @@ class WebServer:
 
             updated = {"ok": False, "error": ""}
 
-            def updater(current: dict):
+            async def updater(current: dict):
                 target_path = None
                 meta = None
                 for path_str, m in current.items():
@@ -593,7 +682,7 @@ class WebServer:
                     if not old_path.exists():
                         updated["error"] = "Source file not found"
                         return
-                    moved, _ = self._move_items_to_category(
+                    moved, _ = await self._move_items_to_category(
                         current, [(target_path, meta)], new_category
                     )
                     if moved <= 0:
@@ -606,14 +695,12 @@ class WebServer:
 
             await self.plugin.cache_service.update_index(updater)
             if not updated["ok"]:
-                return web.json_response(
-                    {"error": updated["error"] or "Update failed"}, status=404
-                )
-            return web.json_response({"success": True})
+                return self._err(updated["error"] or "Update failed", 404)
+            return self._ok()
 
         except Exception as e:
             logger.error(f"Failed to update image: {e}")
-            return web.json_response({"error": str(e)}, status=500)
+            return self._err(str(e))
 
     async def handle_batch_delete(self, request):
         """批量删除"""
@@ -621,7 +708,7 @@ class WebServer:
             data = await request.json()
             hashes = data.get("hashes", [])
             if not hashes:
-                return web.json_response({"success": True, "count": 0})
+                return self._ok(count=0)
 
             removed_paths: list[str] = []
             hash_set = set(hashes)
@@ -632,16 +719,15 @@ class WebServer:
             deleted_count = 0
             for path_str in removed_paths:
                 try:
-                    if os.path.exists(path_str):
-                        os.remove(path_str)
+                    await self.plugin._safe_remove_file(path_str)
                     deleted_count += 1
                 except Exception as e:
                     logger.warning(f"Failed to delete {path_str}: {e}")
 
-            return web.json_response({"success": True, "count": deleted_count})
+            return self._ok(count=deleted_count)
         except Exception as e:
             logger.error(f"Batch delete failed: {e}")
-            return web.json_response({"error": str(e)}, status=500)
+            return self._err(str(e))
 
     async def handle_batch_move(self, request):
         """批量移动"""
@@ -651,15 +737,13 @@ class WebServer:
             target_category = data.get("category")
 
             if not hashes or not target_category:
-                return web.json_response(
-                    {"error": "Missing hashes or category"}, status=400
-                )
+                return self._err("Missing hashes or category", 400)
 
             moved_hashes: list[str] = []
             moved_count = 0
             hash_set = set(hashes)
 
-            def updater(current: dict):
+            async def updater(current: dict):
                 nonlocal moved_count, moved_hashes
                 items = self._collect_items_by_hashes(current, hash_set)
                 items = [
@@ -667,7 +751,7 @@ class WebServer:
                     for path_str, meta in items
                     if meta.get("category") != target_category
                 ]
-                moved_count, moved_hashes = self._move_items_to_category(
+                moved_count, moved_hashes = await self._move_items_to_category(
                     current, items, target_category
                 )
 
@@ -677,10 +761,10 @@ class WebServer:
                 for h in moved_hashes:
                     self.plugin.image_processor_service.invalidate_cache(h)
 
-            return web.json_response({"success": True, "count": moved_count})
+            return self._ok(count=moved_count)
         except Exception as e:
             logger.error(f"Batch move failed: {e}")
-            return web.json_response({"error": str(e)}, status=500)
+            return self._err(str(e))
 
     async def handle_get_stats(self, request):
         try:
@@ -703,7 +787,7 @@ class WebServer:
                 categories_count = len(self.plugin.plugin_config.categories)
 
             # 前端期望的数据结构是 { stats: { total, categories, today } }
-            return web.json_response(
+            return self._ok(
                 {
                     "stats": {
                         "total": len(index),
@@ -714,17 +798,17 @@ class WebServer:
             )
         except Exception as e:
             logger.error(f"Error getting stats: {e}")
-            return web.json_response({"error": str(e)}, status=500)
+            return self._err(str(e))
 
     async def handle_get_config(self, request):
-        return web.json_response({"version": "1.0.0", "plugin_version": "0.1.0"})
+        return self._ok({"version": "1.0.0", "plugin_version": "0.1.0"})
 
     async def handle_health_check(self, request):
-        return web.json_response({"status": "ok", "service": "emoji-manager-webui"})
+        return self._ok({"status": "ok", "service": "emoji-manager-webui"})
 
     async def handle_auth_info(self, request):
         expected = self._get_expected_secret()
-        return web.json_response(
+        return self._ok(
             {
                 "requires_auth": bool(expected),
                 "session_timeout": self._get_session_timeout(),
@@ -734,7 +818,7 @@ class WebServer:
     async def handle_auth_login(self, request):
         expected = self._get_expected_secret()
         if not expected:
-            return web.json_response({"success": True, "requires_auth": False})
+            return self._ok(requires_auth=False)
 
         try:
             payload = await request.json()
@@ -743,16 +827,14 @@ class WebServer:
 
         provided = str((payload or {}).get("password", "") or "").strip()
         if not provided or not hmac.compare_digest(provided, expected):
-            return web.json_response(
-                {"success": False, "error": "Unauthorized"}, status=401
-            )
+            return self._err("Unauthorized", 401)
 
         timeout = self._get_session_timeout()
         sid = uuid.uuid4().hex
         exp = time.time() + float(timeout)
         self._sessions[sid] = exp
 
-        resp = web.json_response({"success": True, "expires_at": int(exp)})
+        resp = self._ok(expires_at=int(exp))
         resp.set_cookie(
             self._cookie_name,
             sid,
@@ -767,7 +849,7 @@ class WebServer:
         sid = str(request.cookies.get(self._cookie_name, "") or "").strip()
         if sid:
             self._sessions.pop(sid, None)
-        resp = web.json_response({"success": True})
+        resp = self._ok()
         resp.del_cookie(self._cookie_name, path="/")
         return resp
 
@@ -776,15 +858,15 @@ class WebServer:
             data = await request.post()
 
             if "file" not in data:
-                return web.json_response({"error": "没有上传文件"}, status=400)
+                return self._err("没有上传文件", 400)
 
             uploaded_file = data["file"]
             if not uploaded_file.filename:
-                return web.json_response({"error": "文件名无效"}, status=400)
+                return self._err("文件名无效", 400)
 
             category = data.get("emotion", "").strip()
             if not category:
-                return web.json_response({"error": "请选择情绪分类"}, status=400)
+                return self._err("请选择情绪分类", 400)
             tags_raw = data.get("tags", "").strip()
             tags = (
                 [t.strip() for t in tags_raw.split(",") if t.strip()]
@@ -796,13 +878,12 @@ class WebServer:
             file_ext = Path(uploaded_file.filename).suffix.lower()
             allowed_exts = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
             if file_ext not in allowed_exts:
-                return web.json_response(
-                    {"error": f"不支持的文件类型，允许: {', '.join(allowed_exts)}"},
-                    status=400,
+                return self._err(
+                    f"不支持的文件类型，允许: {', '.join(allowed_exts)}", 400
                 )
 
-            file_content = uploaded_file.file.read()
-            file_hash = hashlib.md5(file_content).hexdigest()
+            file_content = await asyncio.to_thread(uploaded_file.file.read)
+            file_hash = hashlib.sha256(file_content).hexdigest()
 
             timestamp = int(datetime.now().timestamp())
             unique_filename = f"{timestamp}_{uuid.uuid4().hex[:8]}{file_ext}"
@@ -810,8 +891,11 @@ class WebServer:
             category_dir = self.plugin.plugin_config.ensure_category_dir(category)
             file_path = category_dir / unique_filename
 
-            with open(file_path, "wb") as f:
-                f.write(file_content)
+            def _write_file():
+                with open(file_path, "wb") as f:
+                    f.write(file_content)
+
+            await asyncio.to_thread(_write_file)
 
             await self.plugin.cache_service.update_index(
                 lambda current: current.__setitem__(
@@ -830,9 +914,8 @@ class WebServer:
             rel_path = file_path.relative_to(self.data_dir)
             url = f"/images/{rel_path.as_posix()}"
 
-            return web.json_response(
+            return self._ok(
                 {
-                    "success": True,
                     "image": {
                         "hash": file_hash,
                         "url": url,
@@ -846,7 +929,7 @@ class WebServer:
 
         except Exception as e:
             logger.error(f"上传图片失败: {e}", exc_info=True)
-            return web.json_response({"error": str(e)}, status=500)
+            return self._err(str(e))
 
     async def handle_get_categories(self, request):
         try:
@@ -856,10 +939,10 @@ class WebServer:
                 if isinstance(meta, dict):
                     cat = meta.get("category", "unknown")
                     categories[cat] = categories.get(cat, 0) + 1
-            return web.json_response({"categories": categories})
+            return self._ok({"categories": categories})
         except Exception as e:
             logger.error(f"获取分类列表失败: {e}")
-            return web.json_response({"error": str(e)}, status=500)
+            return self._err(str(e))
 
     async def handle_update_categories(self, request):
         try:
@@ -867,7 +950,7 @@ class WebServer:
             new_categories_data = data.get("categories", [])
 
             if not isinstance(new_categories_data, list) or not new_categories_data:
-                return web.json_response({"error": "分类列表无效"}, status=400)
+                return self._err("分类列表无效", 400)
 
             # 拆分数据：提取 key 列表和 category_info
             category_keys = []
@@ -897,29 +980,29 @@ class WebServer:
             self.plugin.plugin_config.category_info.update(category_info)
             self.plugin.plugin_config.save_category_info()
 
-            return web.json_response({"success": True, "categories": category_keys})
+            return self._ok(categories=category_keys)
         except Exception as e:
             logger.error(f"更新分类列表失败: {e}", exc_info=True)
-            return web.json_response({"error": str(e)}, status=500)
+            return self._err(str(e))
 
     async def handle_delete_category(self, request):
         try:
             category_key = (request.match_info.get("key") or "").strip()
             if not category_key:
-                return web.json_response({"error": "分类Key无效"}, status=400)
+                return self._err("分类Key无效", 400)
 
             if (
                 not hasattr(self.plugin, "plugin_config")
                 or not self.plugin.plugin_config
             ):
-                return web.json_response({"error": "配置服务不可用"}, status=500)
+                return self._err("配置服务不可用", 500)
 
             current_categories = list(self.plugin.plugin_config.categories or [])
             if category_key not in current_categories:
-                return web.json_response({"error": "分类不存在"}, status=404)
+                return self._err("分类不存在", 404)
 
             if len(current_categories) <= 1:
-                return web.json_response({"error": "至少需要保留1个分类"}, status=400)
+                return self._err("至少需要保留1个分类", 400)
 
             updated_categories = [c for c in current_categories if c != category_key]
 
@@ -941,7 +1024,7 @@ class WebServer:
                     continue
 
                 try:
-                    old_path.unlink()
+                    await self.plugin._safe_remove_file(str(old_path))
                     deleted_file_count += 1
 
                     if "hash" in meta and hasattr(
@@ -958,9 +1041,20 @@ class WebServer:
                 except Exception as e:
                     logger.warning(f"删除分类文件失败: {old_path}, 错误: {e}")
 
-            await self.plugin.cache_service.update_index(
-                lambda current: (current.clear(), current.update(index_copy))
-            )
+            # 在 updater 内原子删除属于该分类的条目，避免竞态
+            deleted_in_updater: list[str] = []
+
+            def delete_category_updater(current: dict):
+                for path_str in list(current.keys()):
+                    meta = current[path_str]
+                    if not isinstance(meta, dict):
+                        continue
+                    if meta.get("category") != category_key:
+                        continue
+                    deleted_in_updater.append(path_str)
+                    del current[path_str]
+
+            await self.plugin.cache_service.update_index(delete_category_updater)
 
             if self.data_dir:
                 category_dir = Path(self.data_dir) / "categories" / category_key
@@ -981,7 +1075,9 @@ class WebServer:
                         except Exception:
                             pass
 
-                        shutil.rmtree(category_dir, ignore_errors=True)
+                        await asyncio.to_thread(
+                            shutil.rmtree, category_dir, True
+                        )
                 except Exception as e:
                     logger.warning(f"删除空分类目录失败: {category_dir}, 错误: {e}")
 
@@ -996,9 +1092,8 @@ class WebServer:
                 if hasattr(self.plugin, "categories"):
                     self.plugin.categories = updated_categories
 
-            return web.json_response(
+            return self._ok(
                 {
-                    "success": True,
                     "deleted": category_key,
                     "categories": updated_categories,
                     "deleted_files": deleted_file_count,
@@ -1007,12 +1102,12 @@ class WebServer:
             )
         except Exception as e:
             logger.error(f"删除分类失败: {e}", exc_info=True)
-            return web.json_response({"error": str(e)}, status=500)
+            return self._err(str(e))
 
     async def handle_get_emotions(self, request):
         try:
             category_info = self.plugin.plugin_config.get_category_info()
-            return web.json_response({"emotions": category_info})
+            return self._ok({"emotions": category_info})
         except Exception as e:
             logger.error(f"获取情绪分类失败: {e}")
-            return web.json_response({"error": str(e)}, status=500)
+            return self._err(str(e))

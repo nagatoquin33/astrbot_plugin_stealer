@@ -3,8 +3,10 @@
 使用小模型对LLM回复进行语义分析，识别隐含情绪
 """
 
+import hashlib
 import re
 import time
+from typing import Any
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
@@ -17,16 +19,16 @@ class NaturalEmotionAnalyzer:
     CACHE_MAX_SIZE = 1000  # 缓存最大容量
     TEXT_MAX_LENGTH = 200  # 文本最大长度
 
-    def __init__(self, plugin_instance):
+    def __init__(self, plugin_instance: Any):
         self.plugin = plugin_instance
-        self.categories = plugin_instance.categories
+        self.categories: list[str] = plugin_instance.categories
 
         # 缓存机制
-        self.analysis_cache = {}
-        self.cache_max_size = self.CACHE_MAX_SIZE
+        self.analysis_cache: dict[str, dict[str, Any]] = {}
+        self.cache_max_size: int = self.CACHE_MAX_SIZE
 
         # 性能统计
-        self.stats = {
+        self.stats: dict[str, float | int] = {
             "total_analyses": 0,
             "cache_hits": 0,
             "avg_response_time": 0,
@@ -206,9 +208,7 @@ class NaturalEmotionAnalyzer:
 
     def _get_cache_key(self, text: str) -> str:
         """生成缓存键"""
-        import hashlib
-
-        return hashlib.md5(text.encode()).hexdigest()[:16]
+        return hashlib.sha256(text.encode()).hexdigest()[:16]
 
     def _cache_result(self, cache_key: str, emotion: str):
         """缓存分析结果"""
@@ -235,14 +235,16 @@ class NaturalEmotionAnalyzer:
     def get_stats(self) -> dict:
         """获取性能统计"""
         total = self.stats["total_analyses"]
-        if total == 0:
+        cache_hits = self.stats["cache_hits"]
+        grand_total = total + cache_hits  # 总请求数 = LLM调用 + 缓存命中
+        if grand_total == 0:
             return {"message": "暂无分析数据"}
 
-        cache_hit_rate = (self.stats["cache_hits"] / total) * 100
-        success_rate = (self.stats["successful_analyses"] / total) * 100
+        cache_hit_rate = (cache_hits / grand_total) * 100
+        success_rate = (self.stats["successful_analyses"] / total) * 100 if total > 0 else 0.0
 
         return {
-            "total_analyses": total,
+            "total_analyses": grand_total,
             "cache_hit_rate": f"{cache_hit_rate:.1f}%",
             "success_rate": f"{success_rate:.1f}%",
             "avg_response_time": f"{self.stats['avg_response_time']:.0f}ms",

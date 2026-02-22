@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import hashlib
 import inspect
 import json
@@ -41,7 +42,9 @@ class CacheService:
         # 加载持久化的缓存
         self._load_caches()
 
+        # 锁保护
         self._index_lock = asyncio.Lock()
+        self._cache_lock = asyncio.Lock()  # 通用缓存锁
 
     def _load_caches(self):
         """加载持久化的缓存文件。"""
@@ -79,16 +82,15 @@ class CacheService:
             data_size = len(self._caches[cache_name])
             logger.debug(f"准备异步保存缓存 {cache_name}，数据量: {data_size}")
 
-            # 准备数据（在主线程序列化，避免多线程竞争问题，或者深拷贝）
-            # json.dumps 可能耗时，但在 executor 中做更安全
-            data_to_save = self._caches[cache_name]
+            # 深拷贝数据，避免 to_thread 执行 json.dump 期间主线程修改字典导致 RuntimeError
+            data_to_save = copy.deepcopy(self._caches[cache_name])
 
             def write_file():
                 with open(cache_file, "w", encoding="utf-8") as f:
                     json.dump(data_to_save, f, ensure_ascii=False, indent=2)
 
             await asyncio.to_thread(write_file)
-            logger.info(f"缓存文件 {cache_file} 保存成功 (Async)，数据量: {data_size}")
+            logger.debug(f"缓存文件 {cache_file} 保存成功 (Async)，数据量: {data_size}")
         except Exception as e:
             logger.error(f"保存缓存文件 {cache_file} 失败: {e}", exc_info=True)
 
@@ -108,9 +110,11 @@ class CacheService:
             # 记录保存前的数据量
             data_size = len(self._caches[cache_name])
 
+            # 深拷贝，防止写入过程中被其他协程修改
+            data_snapshot = copy.deepcopy(self._caches[cache_name])
             with open(cache_file, "w", encoding="utf-8") as f:
-                json.dump(self._caches[cache_name], f, ensure_ascii=False, indent=2)
-            logger.info(f"缓存文件 {cache_file} 保存成功，数据量: {data_size}")
+                json.dump(data_snapshot, f, ensure_ascii=False, indent=2)
+            logger.debug(f"缓存文件 {cache_file} 保存成功，数据量: {data_size}")
         except Exception as e:
             logger.error(f"保存缓存文件 {cache_file} 失败: {e}", exc_info=True)
 
@@ -164,11 +168,12 @@ class CacheService:
         if cache_name not in self._caches:
             return
 
-        # 设置缓存值
-        self._caches[cache_name][key] = value
+        async with self._cache_lock:
+            # 设置缓存值
+            self._caches[cache_name][key] = value
 
-        # 清理缓存，保持在最大大小以下
-        self._clean_cache(self._caches[cache_name])
+            # 清理缓存，保持在最大大小以下
+            self._clean_cache(self._caches[cache_name])
 
         # 如果需要立即持久化
         if persist:
@@ -183,12 +188,13 @@ class CacheService:
             persist: 是否立即持久化到文件
         """
         if cache_name in self._caches:
-            if key in self._caches[cache_name]:
-                del self._caches[cache_name][key]
+            async with self._cache_lock:
+                if key in self._caches[cache_name]:
+                    del self._caches[cache_name][key]
 
-                # 如果需要立即持久化
-                if persist:
-                    await self._save_cache_async(cache_name)
+            # 如果需要立即持久化
+            if persist:
+                await self._save_cache_async(cache_name)
 
     async def clear(self, cache_name: str | None = None, persist: bool = False) -> None:
         """清空缓存。
@@ -197,17 +203,22 @@ class CacheService:
             cache_name: 缓存类型名称，如果为None则清空所有缓存
             persist: 是否立即持久化到文件
         """
-        if cache_name:
-            # 清空指定类型的缓存
-            if cache_name in self._caches:
-                self._caches[cache_name].clear()
-                if persist:
-                    await self._save_cache_async(cache_name)
-        else:
-            # 清空所有缓存
-            for name in self._caches.keys():
-                self._caches[name].clear()
-                if persist:
+        async with self._cache_lock:
+            if cache_name:
+                # 清空指定类型的缓存
+                if cache_name in self._caches:
+                    self._caches[cache_name].clear()
+            else:
+                # 清空所有缓存
+                for name in self._caches.keys():
+                    self._caches[name].clear()
+
+        # 持久化在锁外执行
+        if persist:
+            if cache_name:
+                await self._save_cache_async(cache_name)
+            else:
+                for name in self._caches.keys():
                     await self._save_cache_async(name)
 
     def get_cache_size(self, cache_name: str) -> int:
@@ -244,21 +255,21 @@ class CacheService:
         for cache_name in self._caches.keys():
             await self._save_cache_async(cache_name)
 
-    def get_cache(self, cache_name: str) -> dict[str, Any]:
+    def get_cache(self, cache_name: str) -> MappingProxyType:
         """获取指定类型的缓存字典（只读视图）。
 
         Args:
             cache_name: 缓存类型名称
 
         Returns:
-            只读视图字典，如果不存在则返回空字典
+            只读视图 MappingProxyType，如果不存在则返回空的只读视图
         """
         if cache_name in self._caches:
             proxy = MappingProxyType(self._caches[cache_name])
             logger.debug(f"[get_cache] {cache_name}: {len(proxy)} items in cache")
             return proxy
-        logger.debug(f"[get_cache] {cache_name}: not found, returning empty dict")
-        return {}
+        logger.debug(f"[get_cache] {cache_name}: not found, returning empty proxy")
+        return MappingProxyType({})
 
     async def set_cache(
         self, cache_name: str, cache_data: dict[str, Any], persist: bool = True
@@ -394,7 +405,8 @@ class CacheService:
             # 智能合并逻辑
             try:
                 current_index = dict(self.get_cache("index_cache") or {})
-            except Exception:
+            except Exception as e:
+                logger.warning(f"[migrate] 获取当前索引失败，将使用空索引: {e}")
                 current_index = {}
 
             # 建立当前索引的哈希映射

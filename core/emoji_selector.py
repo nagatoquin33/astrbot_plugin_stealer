@@ -3,13 +3,14 @@ import os
 import random
 import re
 from pathlib import Path
+from typing import Any
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
 # 尝试导入文本相似度计算模块
 try:
-    from .text_similarity import calculate_hybrid_similarity, calculate_similarity
+    from .text_similarity import calculate_hybrid_similarity, calculate_simple_similarity as calculate_similarity
 except ImportError:
     # 如果导入失败，提供简单的降级实现
     def calculate_similarity(s1: str, s2: str) -> float:
@@ -45,9 +46,12 @@ class EmojiSelector:
     MAX_RECENT_USAGE = 10  # 最近使用记录最大数量
     MIN_RECENT_USAGE = 3  # 最近使用记录最小数量
 
-    def __init__(self, plugin_instance):
+    # 相似度阈值常量
+    SIMILARITY_THRESHOLD = 0.65  # 模糊匹配相似度阈值
+
+    def __init__(self, plugin_instance: Any):
         self.plugin = plugin_instance
-        self.categories = (
+        self.categories: list[str] = (
             plugin_instance.categories if hasattr(plugin_instance, "categories") else []
         )
         self._selection_lock = asyncio.Lock()
@@ -333,8 +337,8 @@ class EmojiSelector:
                             sim = calculate_similarity(
                                 query_lower[:MAX_STR_LENGTH], target[:MAX_STR_LENGTH]
                             )
-                            if sim >= 0.65:
-                                score = max(score, int(4 + (sim - 0.65) * 12))
+                            if sim >= self.SIMILARITY_THRESHOLD:
+                                score = max(score, int(4 + (sim - self.SIMILARITY_THRESHOLD) * 12))
                                 has_fuzzy = True
                                 break
                     if has_fuzzy:
@@ -434,8 +438,6 @@ class EmojiSelector:
 
     def check_send_probability(self) -> bool:
         """检查表情包发送概率。"""
-        import random
-
         try:
             emoji_chance = getattr(self.plugin, "emoji_chance", 0.4)
             chance = float(emoji_chance)
@@ -459,6 +461,11 @@ class EmojiSelector:
     ) -> None:
         """发送表情包（异步场景下直接发送新消息）。"""
         try:
+            # 检查是否已通过 LLM 工具主动发送过表情包
+            if event.get_extra("stealer_active_sent"):
+                logger.debug("[Stealer] 已主动发送过表情包，跳过自动发送")
+                return
+
             from astrbot.api.event import MessageChain
             from astrbot.api.message_components import Image as ImageComponent
 
@@ -489,8 +496,6 @@ class EmojiSelector:
         self, event: AstrMessageEvent, emoji_paths: list[str], cleaned_text: str
     ) -> None:
         """发送显式指定的表情包列表和文本。"""
-        import os
-
         from astrbot.api.message_components import Plain
 
         try:

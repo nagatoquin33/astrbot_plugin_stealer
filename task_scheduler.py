@@ -1,5 +1,6 @@
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
+from typing import Any
 
 from astrbot.api import logger
 
@@ -9,12 +10,24 @@ class TaskScheduler:
 
     def __init__(self):
         """初始化任务调度器。"""
-        self._tasks: dict[str, asyncio.Task] = {}  # 任务字典，key为任务名称
-        self._task_callbacks: dict[str, Callable] = {}  # 任务回调函数
+        self._tasks: dict[str, asyncio.Task[Any]] = {}  # 任务字典，key为任务名称
+        self._task_callbacks: dict[str, Callable[..., Any]] = {}  # 任务回调函数
+
+    @staticmethod
+    def _task_done_callback(task: asyncio.Task[Any]) -> None:
+        """任务完成回调，记录未处理的异常。"""
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.error(
+                f"后台任务 '{task.get_name()}' 异常退出: {exc!r}",
+                exc_info=exc,
+            )
 
     def create_task(
-        self, name: str, coro, replace_existing: bool = True
-    ) -> asyncio.Task | None:
+        self, name: str, coro: Coroutine[Any, Any, Any], replace_existing: bool = True
+    ) -> asyncio.Task[Any] | None:
         """创建一个新的后台任务。
 
         Args:
@@ -35,6 +48,7 @@ class TaskScheduler:
 
         try:
             task = asyncio.create_task(coro, name=name)
+            task.add_done_callback(self._task_done_callback)
             self._tasks[name] = task
             logger.info(f"创建任务: {name}")
             return task
@@ -79,15 +93,15 @@ class TaskScheduler:
     def schedule_interval_task(
         self,
         name: str,
-        callback: Callable,
+        callback: Callable[..., Coroutine[Any, Any, Any]],
         interval: float,
         replace_existing: bool = True,
-    ) -> asyncio.Task | None:
+    ) -> asyncio.Task[Any] | None:
         """调度一个定期执行的任务。
 
         Args:
             name: 任务名称
-            callback: 定期执行的回调函数
+            callback: 定期执行的异步回调函数
             interval: 执行间隔（秒）
             replace_existing: 如果任务已存在，是否替换
 

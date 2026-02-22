@@ -1,6 +1,8 @@
 import asyncio
 import os
+import random
 import time
+from typing import Any
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain
@@ -10,18 +12,17 @@ from astrbot.api.message_components import Image, Plain
 class EventHandler:
     """事件处理服务类，负责处理所有与插件相关的事件操作。"""
 
-    def __init__(self, plugin_instance):
+    def __init__(self, plugin_instance: Any):
         """初始化事件处理服务。
 
         Args:
             plugin_instance: Main 实例，用于访问插件的配置和服务
         """
         self.plugin = plugin_instance
-        self._scanner_task: asyncio.Task | None = None
 
         # 图片处理节流相关
-        self._last_process_time = 0  # 上次处理时间（用于interval和cooldown模式）
-        self._process_count = 0  # 处理计数（用于interval模式）
+        self._last_process_time: float = 0.0  # 上次处理时间（用于interval和cooldown模式）
+        self._process_count: int = 0  # 处理计数（用于interval模式）
 
         # 强制捕获窗口
         self._force_capture_windows: dict[str, dict[str, object]] = {}
@@ -40,32 +41,61 @@ class EventHandler:
         return s
 
     def _should_process_image(self) -> bool:
-        """根据配置的节流模式判断是否应该处理图片。
+        """根据偷图模式（概率/冷却）判断是否应该处理图片。
 
-        简化为单一冷却模式。
+        - probability 模式：每次收到图片按 steal_chance 概率决定
+        - cooldown 模式：两次偷取之间至少间隔 image_processing_cooldown 秒
         """
-        current_time = time.time()
+        steal_mode = getattr(self.plugin, "steal_mode", "probability")
 
-        # 冷却模式：两次处理之间至少间隔N秒
+        if steal_mode == "cooldown":
+            return self._check_cooldown()
+        else:
+            return self._check_probability()
+
+    def _check_cooldown(self) -> bool:
+        """冷却模式：两次处理之间至少间隔 N 秒。"""
         cooldown = getattr(self.plugin, "image_processing_cooldown", 10)
         try:
             cooldown = int(cooldown)
         except Exception:
             cooldown = 10
 
+        current_time = time.time()
         time_since_last = current_time - self._last_process_time
 
-        if time_since_last >= cooldown:
-            self._last_process_time = current_time
+        if time_since_last < cooldown:
             logger.debug(
-                f"节流检查：通过（冷却={cooldown}秒，距上次={time_since_last:.1f}秒）"
-            )
-            return True
-        else:
-            logger.debug(
-                f"节流检查：跳过（冷却={cooldown}秒，距上次={time_since_last:.1f}秒）"
+                f"冷却检查：跳过（冷却={cooldown}秒，距上次={time_since_last:.1f}秒）"
             )
             return False
+
+        self._last_process_time = current_time
+        logger.debug(
+            f"冷却检查：通过（冷却={cooldown}秒，距上次={time_since_last:.1f}秒）"
+        )
+        return True
+
+    def _check_probability(self) -> bool:
+        """概率模式：每次按 steal_chance 概率决定是否偷取。"""
+        steal_chance = getattr(self.plugin, "steal_chance", 0.6)
+        try:
+            steal_chance = float(steal_chance)
+        except Exception:
+            steal_chance = 0.6
+
+        if steal_chance <= 0:
+            logger.debug("偷图概率为0，跳过偷取")
+            return False
+        if steal_chance >= 1.0:
+            logger.debug("偷图概率为1.0，直接通过")
+            return True
+        if random.random() >= steal_chance:
+            logger.debug(f"概率检查：未通过（概率={steal_chance}）")
+            return False
+
+        logger.debug(f"概率检查：通过（概率={steal_chance}）")
+        return True
 
     def _check_platform_emoji_metadata(
         self,
@@ -401,17 +431,7 @@ class EventHandler:
                 logger.error(f"处理图片失败: {e}", exc_info=True)
 
     async def _clean_raw_directory(self) -> int:
-        """按时间定时清理raw目录中的原始图片。"""
-        try:
-            # 使用简化的清理逻辑
-            return await self._clean_raw_directory_legacy()
-
-        except Exception as e:
-            logger.error(f"清理raw目录失败: {e}")
-            return 0
-
-    async def _clean_raw_directory_legacy(self) -> int:
-        """简化的raw目录清理逻辑：清理所有raw文件"""
+        """清理raw目录中的所有原始图片文件。"""
         try:
             total_deleted = 0
 
@@ -459,23 +479,12 @@ class EventHandler:
     async def _enforce_capacity(self, image_index: dict):
         """执行容量控制，删除最旧的图片。"""
         try:
-            # 使用简化的容量控制逻辑
-            await self._enforce_capacity_legacy(image_index)
-
-        except Exception as e:
-            logger.error(f"执行容量控制失败: {e}")
-
-    async def _enforce_capacity_legacy(self, image_index: dict):
-        """原有的容量控制逻辑（保持向后兼容）"""
-        try:
             max_reg = int(self.plugin.max_reg_num)
             if max_reg <= 0:
                 logger.warning(f"容量控制上限无效: max_reg_num={max_reg}，跳过容量控制")
                 return
 
             if len(image_index) <= max_reg:
-                return
-            if not self.plugin.do_replace:
                 return
 
             image_items = []
@@ -542,6 +551,48 @@ class EventHandler:
         except Exception as e:
             logger.error(f"执行容量控制时发生未预期错误: {e}", exc_info=True)
 
+    def _enforce_capacity_sync(self, image_index: dict) -> None:
+        """同步版本的容量控制，仅删除索引条目（不删除文件）。
+
+        用于在 cache_service.update_index 的更新器中调用，文件删除由异步版本处理。
+
+        Args:
+            image_index: 图片索引字典，将被就地修改
+        """
+        try:
+            max_reg = int(getattr(self.plugin, "max_reg_num", 0))
+            if max_reg <= 0:
+                return
+
+            if len(image_index) <= max_reg:
+                return
+
+            # 收集并按创建时间排序
+            image_items = []
+            for file_path, image_info in image_index.items():
+                created_at = (
+                    int(image_info.get("created_at", 0))
+                    if isinstance(image_info, dict)
+                    else 0
+                )
+                image_items.append((file_path, created_at))
+
+            if not image_items:
+                return
+
+            image_items.sort(key=lambda x: x[1])
+
+            remove_count = min(len(image_items) - max_reg, len(image_items))
+            logger.info(f"[容量控制-索引] 将删除 {remove_count} 个最旧条目")
+
+            for i in range(remove_count):
+                remove_path = image_items[i][0]
+                if remove_path in image_index:
+                    del image_index[remove_path]
+
+        except Exception as e:
+            logger.error(f"同步容量控制失败: {e}")
+
     def _get_force_capture_key(self, event) -> str:
         """获取强制捕获的唯一键。
 
@@ -566,6 +617,21 @@ class EventHandler:
                 pass
 
         return "global"
+
+    def _cleanup_expired_capture_windows(self) -> int:
+        """清理所有过期的强制捕获窗口。
+
+        Returns:
+            int: 清理的过期窗口数量
+        """
+        now = time.time()
+        expired_keys = [
+            key for key, entry in self._force_capture_windows.items()
+            if isinstance(entry, dict) and float(entry.get("until", 0)) < now
+        ]
+        for key in expired_keys:
+            self._force_capture_windows.pop(key, None)
+        return len(expired_keys)
 
     def _get_force_capture_sender_id(self, event) -> str | None:
         """获取发送者ID。
@@ -611,6 +677,9 @@ class EventHandler:
         Returns:
             dict | None: 捕获条目，如果不存在或已过期则返回None
         """
+        # 先清理所有过期的捕获窗口
+        self._cleanup_expired_capture_windows()
+
         key = self._get_force_capture_key(event)
         entry = self._force_capture_windows.get(key)
         if not entry:
@@ -645,9 +714,9 @@ class EventHandler:
 
     def cleanup(self):
         """清理资源。"""
-        # 取消扫描任务
-        if self._scanner_task and not self._scanner_task.done():
-            self._scanner_task.cancel()
+        # 清理强制捕获窗口
+        if hasattr(self, "_force_capture_windows"):
+            self._force_capture_windows.clear()
         # 清理插件引用
         self.plugin = None
         logger.debug("EventHandler 资源已清理")

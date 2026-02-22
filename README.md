@@ -11,7 +11,7 @@
 
 </div>
 
-> **v2.3.0** - 代码重构，建议重装插件，数据可保留
+> **v2.3.1** - 代码质量修复：异步 I/O、安全加固、内存优化、Bug 修复
 
 ## 📑 目录
 
@@ -49,7 +49,7 @@ webui预计以后会加个token登录之类的。
 
 ## 🌟 核心功能
 
-*   **自动收集**: 默默保存群聊中的表情包（过滤色图/无关图片）。
+*   **自动收集**: 自动偷取群聊中的表情包，支持概率模式或冷却模式（过滤色图/无关图片）。
 *   **智能分类**: 利用 LLM/VLM 识别不仅是内容，更是**情绪** (happy, sad, angry...)。
 *   **情感共鸣**: 结合 Bot 当前回复的情绪，自动发送匹配的表情包。
 *   **不那么聪明的后置分析**：使用小参数量的llm进行语义分析，后置发送表情包。
@@ -61,10 +61,7 @@ webui预计以后会加个token登录之类的。
 ## 🚀 快速开始
 
 1.  **安装**: 在 AstrBot 插件管理中安装 `astrbot_plugin_stealer`。
-2.  **配置视觉模型** (必须):
-    ```bash
-    /meme set_vision <provider_id>  # 例如: doubao, gemini, qwenvl...
-    ```
+2.  **确保会话已配置视觉模型** (必须): 插件会自动使用当前会话的视觉模型进行表情分类。
 3.  **开启**:
     ```bash
     /meme on      # 开启偷图
@@ -77,11 +74,16 @@ webui预计以后会加个token登录之类的。
 | :--- | :--- | :--- |
 | `max_reg_num` | 100 | 最大存储表情数量 (超过自动清理旧图) |
 | `emoji_chance` | 0.4 | 自动回复时附带表情的概率 (0-1) |
+| `steal_mode` | probability | 偷图模式：`probability`=概率模式，`cooldown`=冷却模式 |
+| `steal_chance` | 0.6 | 概率模式下的偷图概率 (0-1) |
+| `image_processing_cooldown` | 10 | 冷却模式下两次偷取的最小间隔 (秒) |
 | `send_emoji_as_gif` | true | 真表情包样式（GIF发送）；开启会在大图/动图/高频发送场景增加内存占用 |
 | `group_whitelist` | [] | 群聊白名单（优先生效）；非空时：只有白名单内的群会偷/发 |
 | `group_blacklist` | [] | 群聊黑名单；白名单为空时：黑名单内的群不会偷/发 |
-| `raw_cleanup_interval` | 30 | 原始缓存清理间隔 (分钟) |
-| `webui_port` | 8899 | WebUI 端口 |
+| `enable_natural_emotion_analysis` | true | 启用后置轻量 LLM 语义分析模式 |
+| `emotion_analysis_provider_id` | "" | 情绪分析专用模型 Provider ID（为空则使用默认模型） |
+| `webui.port` | 8899 | WebUI 端口 |
+| `webui.auth_enabled` | true | WebUI 是否启用登录验证 |
 
 ## 🧠 内存占用提示
 
@@ -122,18 +124,21 @@ webui预计以后会加个token登录之类的。
 
 ## 🎮 指令列表 (前缀: `/meme`)
 
-| 指令 | 说明 |
-| :--- | :--- |
-| `on` / `off` | 开启/关闭 表情包收集 |
-| `auto_on` / `auto_off` | 开启/关闭 自动发送表情 |
-| `set_vision <id>` | 设置视觉模型提供商 (Provider ID) |
-| `status` | 查看当前统计与状态 |
-| `push [分类] [别名]` | 手动发送一张表情 (不填则随机) |
-| `group ...` | 管理群聊黑白名单：`/meme group show` / `wl|bl add|del <群号>` / `wl|bl clear` |
-| `偷` | 开启30秒强制收录窗口（无视概率，发送1张图将自动分类并入库） |
-| `clean` | 清理未分类的原始缓存 |
-| `rebuild_index` | 重建索引并恢复旧数据 |
-| `debug_image` | [回复图片] 调试图片识别结果 |
+| 指令 | 权限 | 说明 |
+| :--- | :--- | :--- |
+| `on` / `off` | 所有人 | 开启/关闭 表情包收集 |
+| `auto_on` / `auto_off` | 所有人 | 开启/关闭 自动发送表情 |
+| `status` | 所有人 | 查看插件运行状态和表情包统计 |
+| `list [分类] [数量]` | 所有人 | 列出已收集的表情包 |
+| `emotion_stats` | 所有人 | 查看情绪分析统计信息和当前模式 |
+| `group <wl\|bl> <add\|del\|clear\|show> [群号]` | 管理员 | 管理群聊黑白名单 |
+| `偷` | 管理员 | 开启30秒强制收录窗口（无视概率，发送的图片直接入库） |
+| `clean [force]` | 所有人 | 清理未分类的原始缓存 |
+| `capacity` | 管理员 | 立即执行容量控制，清理超出上限的旧表情包 |
+| `delete <序号\|文件名>` | 管理员 | 删除指定表情包 |
+| `rebuild_index` | 管理员 | 重建索引并恢复旧数据 |
+| `natural_analysis <on\|off>` | 管理员 | 切换情绪识别模式 |
+| `clear_emotion_cache` | 管理员 | 清空情绪分析缓存，释放内存 |
 
 ### ⚠️ 分类删除提醒
 

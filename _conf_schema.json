@@ -1,6 +1,6 @@
 {
-  "_basic_section": {
-    "description": "=== 基础功能 ===",
+  "_steal_section": {
+    "description": "=== 偷图设置 ===",
     "type": "text",
     "invisible": true
   },
@@ -8,6 +8,46 @@
     "description": "开启表情包偷取功能",
     "type": "bool",
     "default": true
+  },
+  "steal_mode": {
+    "description": "偷图模式",
+    "type": "string",
+    "default": "probability",
+    "options": ["probability", "cooldown"],
+    "hint": "probability=概率模式：每次收到图片按概率决定是否偷取\ncooldown=冷却模式：两次偷取之间必须间隔指定秒数"
+  },
+  "steal_chance": {
+    "description": "偷图概率（概率模式生效）",
+    "type": "float",
+    "default": 0.6,
+    "slider": {
+      "min": 0.0,
+      "max": 1.0,
+      "step": 0.1
+    },
+    "hint": "概率模式下每次收到图片时尝试偷取的概率，0.0=从不偷取，1.0=每次都偷。建议 0.4-0.8"
+  },
+  "image_processing_cooldown": {
+    "description": "偷图冷却时间/秒（冷却模式生效）",
+    "type": "int",
+    "default": 10,
+    "slider": {
+      "min": 0,
+      "max": 120,
+      "step": 5
+    },
+    "hint": "冷却模式下两次偷取之间的最小间隔（秒）。0=不限制"
+  },
+  "content_filtration": {
+    "description": "内容审核（过滤不当图片）",
+    "type": "bool",
+    "default": false
+  },
+
+  "_send_section": {
+    "description": "=== 发送设置 ===",
+    "type": "text",
+    "invisible": true
   },
   "auto_send": {
     "description": "自动随聊发送表情包",
@@ -23,33 +63,40 @@
       "max": 1.0,
       "step": 0.1
     },
-    "hint": "调节自动发送表情包的概率，0.0=从不发送，1.0=每次都发送，建议设置在0.2-0.6之间"
+    "hint": "自动发送表情包的概率，0.0=从不发送，1.0=每次都发送，建议 0.2-0.6"
   },
   "send_emoji_as_gif": {
     "description": "真表情包样式（GIF发送）",
     "type": "bool",
     "default": true,
-    "hint": "✅ 开启：发送时尽量以 GIF 输出（更接近“真表情包”样式；非 GIF 会在发送侧转换）\n❌ 关闭：按原文件格式发送（png/jpg/gif 等）\n\n内存提示：开启后在“超大图/动图/高频发送大量不同表情包”场景下，会出现较高瞬时内存占用"
+    "hint": "✅ 开启：以 GIF 输出（更接近真表情包样式）\n❌ 关闭：按原文件格式发送（png/jpg/gif 等）\n\n⚠️ 开启后高频发送大图/动图场景会有较高瞬时内存占用"
   },
 
-  "_group_filter_section": {
-    "description": "=== 群聊过滤 ===",
+  "smart_emoji_selection": {
+    "description": "智能表情包选择",
+    "type": "bool",
+    "default": true,
+    "hint": "✅ 开启=综合评分选择（多样性+匹配度+相似度）\n❌ 关闭=随机选择（仍会避免短期重复）"
+  },
+
+  "_emotion_section": {
+    "description": "=== 情绪识别 ===",
     "type": "text",
     "invisible": true
   },
-  "group_whitelist": {
-    "description": "群聊白名单（优先生效）",
-    "type": "list",
-    "default": [],
-    "hint": "填写群号列表。白名单非空时：只有白名单内的群会偷/发。"
+  "enable_natural_emotion_analysis": {
+    "description": "情绪识别模式",
+    "type": "bool",
+    "default": true,
+    "hint": "✅ 开启=LLM模式（轻量模型分析语义，不修改LLM回复）\n❌ 关闭=被动标签模式（LLM插入情绪标签，会修改回复内容）\n\n⚠️ 切换模式后建议使用 /reset 清除对话上下文"
   },
-  "group_blacklist": {
-    "description": "群聊黑名单",
-    "type": "list",
-    "default": [],
-    "hint": "填写群号列表。白名单为空时：黑名单内的群不会偷/发。"
+  "emotion_analysis_provider_id": {
+    "description": "情绪分析专用模型（LLM模式）",
+    "type": "string",
+    "hint": "留空则使用当前会话模型，建议使用轻量免费模型",
+    "_special": "select_provider"
   },
-  
+
   "_model_section": {
     "description": "=== 模型配置 ===",
     "type": "text",
@@ -61,42 +108,25 @@
     "hint": "留空则使用当前会话模型",
     "_special": "select_provider"
   },
-  "content_filtration": {
-    "description": "开启内容审核（过滤不当图片）",
-    "type": "bool",
-    "default": false
-  },
-  
-  "_emotion_mode_section": {
-    "description": "=== 情绪识别模式 ===",
+
+  "_group_section": {
+    "description": "=== 群聊过滤 ===",
     "type": "text",
     "invisible": true
   },
-  "enable_natural_emotion_analysis": {
-    "description": "情绪识别模式",
-    "type": "bool",
-    "default": true,
-    "hint": "✅ 开启=LLM模式（轻量模型分析语义，不修改LLM回复）\n❌ 关闭=被动标签模式（LLM插入情绪标签，会修改回复内容）\n\n⚠️ 重要：切换模式后建议使用 /reset 命令清除AI的对话上下文，避免bot继续输出 &&emotion&& 标签"
+  "group_whitelist": {
+    "description": "群聊白名单（优先生效）",
+    "type": "list",
+    "default": [],
+    "hint": "填写群号列表。白名单非空时：只有白名单内的群会偷/发"
   },
-  "emotion_analysis_provider_id": {
-    "description": "情绪分析专用模型（LLM模式）",
-    "type": "string",
-    "hint": "留空则使用当前会话模型，建议使用轻量模型如Qwen/Qwen3-8B这类的免费模型",
-    "_special": "select_provider"
+  "group_blacklist": {
+    "description": "群聊黑名单",
+    "type": "list",
+    "default": [],
+    "hint": "填写群号列表。白名单为空时：黑名单内的群不会偷/发"
   },
-  
-  "_emoji_selection_section": {
-    "description": "=== 表情包选择策略 ===",
-    "type": "text",
-    "invisible": true
-  },
-  "smart_emoji_selection": {
-    "description": "智能表情包选择（两种模式通用）",
-    "type": "bool",
-    "default": true,
-    "hint": "✅ 开启=综合评分选择（多样性+匹配度+相似度）\n❌ 关闭=随机选择（仍会避免短期重复，保留最近5个历史）"
-  },
-  
+
   "_storage_section": {
     "description": "=== 存储管理 ===",
     "type": "text",
@@ -111,43 +141,9 @@
       "max": 2000,
       "step": 10
     },
-    "hint": "表情包存储上限，超过后将自动清理旧的表情包"
+    "hint": "表情包存储上限，超过后自动清理旧表情包"
   },
-  "do_replace": {
-    "description": "达到上限时替换旧表情包",
-    "type": "bool",
-    "default": true
-  },
-  
-  "_throttle_section": {
-    "description": "=== 节流控制（减少API消耗） ===",
-    "type": "text",
-    "invisible": true
-  },
-  "image_processing_mode": {
-    "description": "图片处理模式",
-    "type": "string",
-    "default": "probability",
-    "options": ["always", "probability", "interval"],
-    "labels": ["总是处理", "概率处理（推荐）", "间隔处理"]
-  },
-  "image_processing_probability": {
-    "description": "概率模式：处理概率",
-    "type": "float",
-    "default": 0.3,
-    "slider": {
-      "min": 0.0,
-      "max": 1.0,
-      "step": 0.05
-    },
-    "hint": "图片处理概率，推荐设置0.3（30%），用于减少API消耗"
-  },
-  "image_processing_interval": {
-    "description": "间隔模式：处理间隔（秒）",
-    "type": "int",
-    "default": 60
-  },
-  
+
   "_webui_section": {
     "description": "=== WebUI 管理界面 ===",
     "type": "text",
@@ -158,7 +154,7 @@
     "type": "object",
     "items": {
       "enabled": {
-        "description": "启用 WebUI 管理界面",
+        "description": "启用 WebUI",
         "type": "bool",
         "default": true
       },
@@ -166,7 +162,7 @@
         "description": "监听地址",
         "type": "string",
         "default": "0.0.0.0",
-        "hint": "0.0.0.0 表示允许外部访问，127.0.0.1 仅本地访问"
+        "hint": "0.0.0.0=允许外部访问，127.0.0.1=仅本地访问"
       },
       "port": {
         "description": "监听端口",
@@ -177,60 +173,20 @@
         "description": "启用登录验证",
         "type": "bool",
         "default": true,
-        "hint": "✅ 开启：访问 WebUI 需要先登录（推荐）\n❌ 关闭：不需要登录即可访问（仅建议本地/内网调试使用）"
+        "hint": "✅ 开启：访问需登录（推荐）\n❌ 关闭：无需登录（仅建议内网使用）"
       },
       "password": {
         "description": "访问密码",
         "type": "string",
         "default": "",
-        "hint": "仅在“启用登录验证”开启时生效。留空将自动生成 6 位随机密码并在日志中提示"
+        "hint": "仅在登录验证开启时生效。留空将自动生成 6 位随机密码"
       },
       "session_timeout": {
-        "description": "会话超时时间（秒）",
+        "description": "会话超时时间/秒",
         "type": "int",
         "default": 3600,
-        "hint": "登录会话的有效时长，超时需要重新登录"
+        "hint": "登录会话有效时长，超时需重新登录"
       }
     }
-  },
-  
-  "_advanced_section": {
-    "description": "=== 高级选项 ===",
-    "type": "text",
-    "invisible": true
-  },
-  "enable_raw_cleanup": {
-    "description": "自动清理原始图片",
-    "type": "bool",
-    "default": true
-  },
-  "raw_cleanup_interval": {
-    "description": "清理检查周期（分钟）",
-    "type": "int",
-    "default": 30,
-    "slider": {
-      "min": 5,
-      "max": 1440,
-      "step": 5
-    },
-    "hint": "自动清理原始图片的间隔时间，5-1440分钟"
-  },
-  "enable_capacity_control": {
-    "description": "启用后台容量控制任务",
-    "type": "bool",
-    "default": true,
-    "hint": "开启后，后台会定期检查并执行容量控制（删除旧图）和无效索引清理。关闭则不会自动清理。"
-  },
-  "capacity_control_interval": {
-    "description": "容量检查周期（分钟）",
-    "type": "int",
-    "default": 60,
-    "slider": {
-      "min": 10,
-      "max": 1440,
-      "step": 10
-    },
-    "hint": "容量控制检查间隔，10-1440分钟"
   }
 }
-

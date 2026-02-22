@@ -26,6 +26,15 @@ class ImageProcessorService:
         "smirk": "troll",  # 坏笑 -> 发癫
     }
 
+    # 分类结果常量
+    CATEGORY_FILTERED = "过滤不通过"
+    CATEGORY_NOT_EMOJI = "非表情包"
+
+    # 缓存常量
+    IMAGE_CACHE_MAX_SIZE = 500  # 最大缓存条目数
+    GIF_CACHE_MAX_SIZE = 200  # 最大 GIF base64 缓存条目数
+    CACHE_EXPIRE_TIME = 3600  # 缓存过期时间（秒）
+
     def __init__(self, plugin_instance):
         """初始化图片处理服务。
 
@@ -40,20 +49,13 @@ class ImageProcessorService:
             self.plugin_config.categories_dir if self.plugin_config else None
         )
 
-        # 增强存储系统组件
-        self.lifecycle_manager = None
-        self.statistics_tracker = None
-
         # 图片分类结果缓存，key为图片哈希，value为分类结果元组
-        self._image_cache = {}
-        # 缓存过期时间（秒），默认1小时
-        self._cache_expire_time = getattr(
-            plugin_instance, "image_cache_expire_time", 3600
-        )
+        self._image_cache: dict[str, dict] = {}
+        self._image_cache_max_size = self.IMAGE_CACHE_MAX_SIZE
+        self._cache_expire_time = self.CACHE_EXPIRE_TIME
         self._gif_base64_cache: dict[str, tuple[float, str]] = {}
-        self._gif_base64_cache_expire_time = getattr(
-            plugin_instance, "gif_base64_cache_expire_time", 3600
-        )
+        self._gif_base64_cache_max_size = self.GIF_CACHE_MAX_SIZE
+        self._gif_base64_cache_expire_time = self.CACHE_EXPIRE_TIME
 
         # 尝试从插件实例获取提示词配置，如果不存在则使用默认值
         # 表情包含义与场景分析提示词（统一使用）
@@ -167,9 +169,10 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
         self.vision_provider_id = ""
 
         # 执行自动迁移检查（在插件启动时运行一次）
-        self._auto_migrate_categories()
+        # 注意：_auto_migrate_categories 是异步方法，需在 initialize() 中调用
+        # self._auto_migrate_categories() 已移至 initialize()
 
-    def _auto_migrate_categories(self):
+    async def _auto_migrate_categories(self):
         """自动迁移旧版本分类到新分类系统。
 
         该方法会：
@@ -214,7 +217,7 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                             counter += 1
 
                     try:
-                        shutil.move(str(img_file), str(target_path))
+                        await asyncio.to_thread(shutil.move, str(img_file), str(target_path))
                         migrated_files += 1
                     except Exception as e:
                         logger.error(f"迁移文件失败 {img_file} -> {target_path}: {e}")
@@ -225,31 +228,28 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                 try:
                     import json
 
-                    with open(old_index, encoding="utf-8") as f:
-                        old_data = json.load(f)
+                    def _migrate_index(old_index_path, new_dir_path, old_cat, new_cat):
+                        """同步迁移索引（在线程中执行）"""
+                        with open(old_index_path, encoding="utf-8") as f:
+                            old_data = json.load(f)
+                        for item in old_data:
+                            if isinstance(item, dict) and item.get("category") == old_cat:
+                                item["category"] = new_cat
+                        new_index_path = new_dir_path / "index.json"
+                        if new_index_path.exists():
+                            with open(new_index_path, encoding="utf-8") as f:
+                                new_data = json.load(f)
+                            new_data.extend(old_data)
+                        else:
+                            new_data = old_data
+                        with open(new_index_path, "w", encoding="utf-8") as f:
+                            json.dump(new_data, f, ensure_ascii=False, indent=2)
+                        old_index_path.unlink()
+                        return len(old_data)
 
-                    # 更新分类字段
-                    for item in old_data:
-                        if (
-                            isinstance(item, dict)
-                            and item.get("category") == old_category
-                        ):
-                            item["category"] = new_category
-
-                    # 合并到新索引
-                    new_index = new_dir / "index.json"
-                    if new_index.exists():
-                        with open(new_index, encoding="utf-8") as f:
-                            new_data = json.load(f)
-                        new_data.extend(old_data)
-                    else:
-                        new_data = old_data
-
-                    with open(new_index, "w", encoding="utf-8") as f:
-                        json.dump(new_data, f, ensure_ascii=False, indent=2)
-
-                    old_index.unlink()
-                    migrated_indices += len(old_data)
+                    migrated_indices += await asyncio.to_thread(
+                        _migrate_index, old_index, new_dir, old_category, new_category
+                    )
                 except Exception as e:
                     logger.error(f"迁移索引失败 {old_index}: {e}")
 
@@ -303,6 +303,82 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
             self.emoji_classification_with_filter_prompt = (
                 emoji_classification_with_filter_prompt
             )
+
+    async def _store_and_index_image(
+        self,
+        file_path: str,
+        is_temp: bool,
+        category: str,
+        hash_val: str,
+        idx: dict[str, Any],
+        tags: list[str] | None = None,
+        desc: str = "",
+        scenes: list[str] | None = None,
+        already_in_raw: bool = False,
+    ) -> tuple[bool, dict[str, Any] | None]:
+        """将图片存储到 raw → 复制到分类目录 → 删除 raw → 更新索引。
+
+        Args:
+            already_in_raw: 若为 True，则 file_path 已在 raw 目录中，
+                            跳过 move/copy-to-raw 步骤，直接作为 raw_path 使用。
+
+        Returns:
+            (成功与否, 更新后的索引)
+        """
+        if already_in_raw:
+            raw_path = file_path
+        else:
+            # 存储图片到raw目录
+            raw_dir = self.plugin_config.ensure_raw_dir()
+            if raw_dir:
+                base_path = Path(file_path)
+                ext = base_path.suffix.lower() if base_path.suffix else ".jpg"
+                filename = f"{int(time.time())}_{hash_val[:8]}{ext}"
+                raw_path = str(raw_dir / filename)
+                if is_temp:
+                    await asyncio.to_thread(shutil.move, file_path, raw_path)
+                else:
+                    await asyncio.to_thread(shutil.copy2, file_path, raw_path)
+            else:
+                raw_path = file_path
+
+        # 复制图片到对应分类目录
+        cat_dir = self.plugin_config.ensure_category_dir(category)
+        cat_path = str(cat_dir / os.path.basename(raw_path)) if cat_dir else raw_path
+
+        if not os.path.exists(raw_path):
+            logger.warning(f"原始文件已不存在，可能被清理: {raw_path}")
+            return False, None
+
+        try:
+            if cat_dir:
+                await asyncio.to_thread(shutil.copy2, raw_path, cat_path)
+        except FileNotFoundError:
+            logger.warning(f"复制文件时发现文件已被删除: {raw_path}")
+            return False, None
+
+        # 立即删除raw目录中的原始文件
+        try:
+            if os.path.exists(raw_path):
+                await self.plugin._safe_remove_file(raw_path)
+                logger.debug(f"已删除已分类的原始文件: {raw_path}")
+        except Exception as e:
+            logger.warning(f"删除已分类的原始文件失败: {raw_path}, 错误: {e}")
+
+        # 更新图片索引
+        entry: dict[str, Any] = {
+            "hash": hash_val,
+            "category": category,
+            "created_at": int(time.time()),
+        }
+        if tags:
+            entry["tags"] = tags
+        if desc:
+            entry["desc"] = desc
+        if scenes:
+            entry["scenes"] = scenes
+        idx[cat_path] = entry
+        return True, idx
 
     async def process_image(
         self,
@@ -372,15 +448,7 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
         Args:
             is_platform_emoji: 是否为平台标记的表情包，如果是则跳过元数据过滤
         """
-        # 检查图片是否已存在（索引中）
-        for k, v in idx.items():
-            if isinstance(v, dict) and v.get("hash") == hash_val:
-                logger.debug(f"图片已存在于索引中: {hash_val}")
-                if is_temp and os.path.exists(file_path):
-                    await self.plugin._safe_remove_file(file_path)
-                return False, None
-
-        # 检查图片是否已存在于持久化索引中
+        # 检查图片是否已存在（持久化索引 > 传入索引）
         if hasattr(self.plugin, "cache_service"):
             persistent_idx = self.plugin.cache_service.get_cache("index_cache")
             for k, v in persistent_idx.items():
@@ -397,6 +465,14 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                 if is_temp and os.path.exists(file_path):
                     await self.plugin._safe_remove_file(file_path)
                 return False, None
+        else:
+            # 无 cache_service 时回退到传入的 idx
+            for k, v in idx.items():
+                if isinstance(v, dict) and v.get("hash") == hash_val:
+                    logger.debug(f"图片已存在于索引中: {hash_val}")
+                    if is_temp and os.path.exists(file_path):
+                        await self.plugin._safe_remove_file(file_path)
+                    return False, None
 
         # 检查图片是否已存在于缓存中
         if hash_val in self._image_cache:
@@ -411,9 +487,10 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                 tags = cached_result["tags"]
                 desc = cached_result["desc"]
                 emotion = cached_result["emotion"]
+                scenes = cached_result.get("scenes", [])
 
                 # 缓存结果处理：跳过VLM调用，直接使用缓存
-                if category == "过滤不通过" or emotion == "过滤不通过":
+                if category == self.CATEGORY_FILTERED or emotion == self.CATEGORY_FILTERED:
                     logger.debug(f"图片内容过滤不通过（缓存），跳过存储: {hash_val}")
                     if is_temp and os.path.exists(file_path):
                         await self.plugin._safe_remove_file(file_path)
@@ -429,58 +506,10 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                 # 处理有效分类的缓存结果
                 if category and category in self.categories:
                     logger.debug(f"图片分类结果有效（缓存）: {category}")
-
-                    # 存储图片到raw目录（如果还没有存储的话）
-                    raw_dir = self.plugin_config.ensure_raw_dir()
-                    if raw_dir:
-                        base_path = Path(file_path)
-                        ext = base_path.suffix.lower() if base_path.suffix else ".jpg"
-                        filename = f"{int(time.time())}_{hash_val[:8]}{ext}"
-                        raw_path = str(raw_dir / filename)
-                        if is_temp:
-                            shutil.move(file_path, raw_path)
-                        else:
-                            shutil.copy2(file_path, raw_path)
-                    else:
-                        raw_path = file_path
-
-                    # 复制图片到对应分类目录
-                    cat_dir = self.plugin_config.ensure_category_dir(category)
-                    if cat_dir:
-                        cat_path = str(cat_dir / os.path.basename(raw_path))
-
-                        # 检查文件是否仍然存在
-                        if not os.path.exists(raw_path):
-                            logger.warning(
-                                f"原始文件已不存在（缓存分支），可能被清理: {raw_path}"
-                            )
-                            return False, None
-
-                        try:
-                            shutil.copy2(raw_path, cat_path)
-                        except FileNotFoundError:
-                            logger.warning(
-                                f"复制文件时发现文件已被删除（缓存分支）: {raw_path}"
-                            )
-                            return False, None
-
-                    # 图片已成功分类，立即删除raw目录中的原始文件
-                    try:
-                        if os.path.exists(raw_path):
-                            await self.plugin._safe_remove_file(raw_path)
-                            logger.debug(f"已删除已分类的原始文件（缓存）: {raw_path}")
-                    except Exception as e:
-                        logger.warning(
-                            f"删除已分类的原始文件失败（缓存）: {raw_path}, 错误: {e}"
-                        )
-
-                    # 更新图片索引（使用分类文件路径）
-                    idx[cat_path] = {
-                        "hash": hash_val,
-                        "category": category,
-                        "created_at": int(time.time()),
-                    }
-                    return True, idx
+                    return await self._store_and_index_image(
+                        file_path, is_temp, category, hash_val, idx,
+                        tags=tags, desc=desc, scenes=scenes,
+                    )
                 else:
                     # 处理无法分类的缓存结果
                     logger.debug(f"图片无法分类（缓存），留在raw目录: {hash_val}")
@@ -497,16 +526,14 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
             filename = f"{int(time.time())}_{hash_val[:8]}{ext}"
             raw_path = str(raw_dir / filename)
             if is_temp:
-                shutil.move(file_path, raw_path)
+                await asyncio.to_thread(shutil.move, file_path, raw_path)
             else:
-                shutil.copy2(file_path, raw_path)
+                await asyncio.to_thread(shutil.copy2, file_path, raw_path)
         else:
             raw_path = file_path
 
         # 过滤和分类图片（合并为一次VLM调用以提高效率）
         try:
-            # 统一调用VLM分类，不再区分平台标记
-            # 移除元数据预过滤后，所有图片都直接进入VLM分析
             category, tags, desc, emotion, scenes = await self.classify_image(
                 event=event,
                 file_path=raw_path,
@@ -517,57 +544,27 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
             logger.debug(f"图片分类结果: category={category}, emotion={emotion}")
 
             # 处理内容过滤不通过的情况
-            if category == "过滤不通过" or emotion == "过滤不通过":
+            if category == self.CATEGORY_FILTERED or emotion == self.CATEGORY_FILTERED:
                 logger.debug(f"图片内容过滤不通过，跳过存储: {raw_path}")
-                if is_temp:
-                    await self.plugin._safe_remove_file(raw_path)
+                await self.plugin._safe_remove_file(raw_path)
                 return False, None
 
             # 处理非表情包的情况
             if category == "非表情包" or emotion == "非表情包":
                 logger.debug(f"图片非表情包，跳过存储: {raw_path}")
-                if is_temp:
-                    await self.plugin._safe_remove_file(raw_path)
+                await self.plugin._safe_remove_file(raw_path)
                 return False, None
 
-            # 处理有效分类结果
+            # 处理有效分类结果 —— 复用公共方法完成存储和索引
             if category and category in self.categories:
                 logger.debug(f"图片分类结果有效: {category}")
 
-                # 检查文件是否仍然存在（可能被清理任务删除）
-                if not os.path.exists(raw_path):
-                    logger.warning(f"原始文件已不存在，可能被清理任务删除: {raw_path}")
-                    return False, None
-
-                # 复制图片到对应分类目录
-                cat_dir = self.plugin_config.ensure_category_dir(category)
-                if cat_dir:
-                    cat_path = str(cat_dir / os.path.basename(raw_path))
-
-                    try:
-                        shutil.copy2(raw_path, cat_path)
-                    except FileNotFoundError:
-                        logger.warning(f"复制文件时发现文件已被删除: {raw_path}")
-                        return False, None
-
-                # 图片已成功分类，立即删除raw目录中的原始文件
-                # 这样可以避免raw目录积压大量文件
-                try:
-                    if os.path.exists(raw_path):
-                        await self.plugin._safe_remove_file(raw_path)
-                        logger.debug(f"已删除已分类的原始文件: {raw_path}")
-                except Exception as e:
-                    logger.warning(f"删除已分类的原始文件失败: {raw_path}, 错误: {e}")
-
-                # 更新图片索引（使用分类文件路径而不是raw路径）
-                idx[cat_path] = {
-                    "hash": hash_val,
-                    "category": category,
-                    "tags": tags,
-                    "desc": desc,
-                    "scenes": scenes,  # 新增：适用场景
-                    "created_at": int(time.time()),
-                }
+                success, idx = await self._store_and_index_image(
+                    raw_path, is_temp=False, category=category,
+                    hash_val=hash_val, idx=idx,
+                    tags=tags, desc=desc, scenes=scenes,
+                    already_in_raw=True,
+                )
 
                 # 将结果存入缓存，避免重复处理
                 self._image_cache[hash_val] = {
@@ -575,11 +572,12 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                     "tags": tags,
                     "desc": desc,
                     "emotion": emotion,
-                    "scenes": scenes,  # 新增：适用场景
+                    "scenes": scenes,
                     "timestamp": time.time(),
                 }
+                self._evict_image_cache()
 
-                return True, idx
+                return success, idx
             else:
                 logger.warning(
                     f"图片分类结果无效: {category}，图片将留在raw目录等待清理"
@@ -591,20 +589,17 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                     "tags": tags,
                     "desc": desc,
                     "emotion": emotion,
-                    "scenes": scenes,  # 新增：适用场景
+                    "scenes": scenes,
                     "timestamp": time.time(),
                 }
+                self._evict_image_cache()
 
-                # 分类失败时，图片留在raw目录，不添加到索引，不占用配额
                 return False, None
         except Exception as e:
-            # 异常处理：记录详细上下文并确保资源正确释放
             error_msg = f"处理图片失败 [图片路径: {raw_path}]: {e}"
             logger.error(error_msg)
-            # 确保临时文件被正确清理
             if is_temp:
                 await self.plugin._safe_remove_file(raw_path)
-            # 重新抛出异常，添加更多上下文信息
             raise Exception(error_msg) from e
 
     def _build_emotion_list_str(self, categories: list[str] | None = None) -> str:
@@ -711,9 +706,9 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
             logger.debug(f"VLM响应: {response}")
 
             # 处理审核不通过的情况
-            if "过滤不通过" in response:
+            if self.CATEGORY_FILTERED in response:
                 logger.warning(f"图片内容审核不通过: {file_path}")
-                return "过滤不通过", [], "", "过滤不通过", []
+                return self.CATEGORY_FILTERED, [], "", self.CATEGORY_FILTERED, []
 
             # 统一的响应格式: 情绪分类|语义标签(用逗号分隔)|画面描述(一句话)
             parts = [p.strip() for p in response.strip().split("|")]
@@ -891,6 +886,12 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                             logger.debug("尝试直接使用provider")
                             provider_manager = self.plugin.context.provider_manager
 
+                            # 检查 provider_manager 是否存在
+                            if provider_manager is None:
+                                raise ValueError(
+                                    "Provider manager 未初始化。请检查插件配置。"
+                                )
+
                             # 检查provider是否存在
                             if (
                                 not hasattr(provider_manager, "providers")
@@ -1007,19 +1008,22 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
             raise Exception(error_msg) from e
 
     async def _compute_hash(self, file_path: str) -> str:
-        """计算文件的MD5哈希值。
+        """计算文件的SHA256哈希值。
 
         Args:
             file_path: 文件路径
 
         Returns:
-            str: MD5哈希值
+            str: SHA256哈希值
         """
-        try:
-            hasher = hashlib.md5()
-            with open(file_path, "rb") as f:
+        def _sync_hash(fp: str) -> str:
+            hasher = hashlib.sha256()
+            with open(fp, "rb") as f:
                 hasher.update(f.read())
             return hasher.hexdigest()
+
+        try:
+            return await asyncio.to_thread(_sync_hash, file_path)
         except FileNotFoundError as e:
             logger.error(f"文件不存在: {e}")
             return ""
@@ -1035,6 +1039,33 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
         if hasattr(self, "_image_cache") and image_hash in self._image_cache:
             del self._image_cache[image_hash]
             logger.debug(f"已失效缓存: {image_hash}")
+
+    def _evict_image_cache(self) -> None:
+        """淘汰 _image_cache 中最旧的条目，保持在最大容量以内。"""
+        if len(self._image_cache) <= self._image_cache_max_size:
+            return
+        # 按 timestamp 排序，保留最新的一半
+        sorted_items = sorted(
+            self._image_cache.items(),
+            key=lambda kv: kv[1].get("timestamp", 0),
+        )
+        keep = sorted_items[len(sorted_items) // 2 :]
+        self._image_cache.clear()
+        self._image_cache.update(keep)
+        logger.debug(f"_image_cache 淘汰完成，当前 {len(self._image_cache)} 条")
+
+    def _evict_gif_base64_cache(self) -> None:
+        """淘汰 _gif_base64_cache 中最旧的条目，保持在最大容量以内。"""
+        if len(self._gif_base64_cache) <= self._gif_base64_cache_max_size:
+            return
+        sorted_items = sorted(
+            self._gif_base64_cache.items(),
+            key=lambda kv: kv[1][0],  # cached_at timestamp
+        )
+        keep = sorted_items[len(sorted_items) // 2 :]
+        self._gif_base64_cache.clear()
+        self._gif_base64_cache.update(keep)
+        logger.debug(f"_gif_base64_cache 淘汰完成，当前 {len(self._gif_base64_cache)} 条")
 
     def cleanup(self):
         """清理资源。"""
@@ -1052,9 +1083,12 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
         Returns:
             str: base64编码
         """
-        try:
-            with open(file_path, "rb") as f:
+        def _sync_read_and_encode(fp: str) -> str:
+            with open(fp, "rb") as f:
                 return base64.b64encode(f.read()).decode("utf-8")
+
+        try:
+            return await asyncio.to_thread(_sync_read_and_encode, file_path)
         except Exception as e:
             logger.error(f"文件转换为base64失败: {e}")
             return ""
@@ -1081,76 +1115,49 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                 b64 = await self._file_to_base64(file_path)
                 if b64:
                     self._gif_base64_cache[cache_key] = (now, b64)
+                    self._evict_gif_base64_cache()
                 return b64
 
             if PILImage is None:
                 return await self._file_to_base64(file_path)
 
-            with PILImage.open(file_path) as im:
-                buf = BytesIO()
-                is_animated = bool(getattr(im, "is_animated", False))
-                n_frames = int(getattr(im, "n_frames", 1) or 1)
+            def _sync_convert_to_gif(fp: str) -> str:
+                with PILImage.open(fp) as im:
+                    buf = BytesIO()
+                    is_animated = bool(getattr(im, "is_animated", False))
+                    n_frames = int(getattr(im, "n_frames", 1) or 1)
 
-                if is_animated and n_frames > 1:
-                    frames = []
-                    durations = []
-                    for frame_idx in range(n_frames):
-                        im.seek(frame_idx)
+                    if is_animated and n_frames > 1:
+                        frames = []
+                        durations = []
+                        for frame_idx in range(n_frames):
+                            im.seek(frame_idx)
+                            frame = im.convert("RGBA")
+                            frames.append(frame)
+                            durations.append(int(im.info.get("duration", 100) or 100))
+                        frames[0].save(
+                            buf,
+                            format="GIF",
+                            save_all=True,
+                            append_images=frames[1:],
+                            duration=durations,
+                            loop=0,
+                            disposal=2,
+                        )
+                    else:
                         frame = im.convert("RGBA")
-                        frames.append(frame)
-                        durations.append(int(im.info.get("duration", 100) or 100))
-                    frames[0].save(
-                        buf,
-                        format="GIF",
-                        save_all=True,
-                        append_images=frames[1:],
-                        duration=durations,
-                        loop=0,
-                        disposal=2,
-                    )
-                else:
-                    frame = im.convert("RGBA")
-                    frame.save(buf, format="GIF")
+                        frame.save(buf, format="GIF")
 
-                b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
-                if b64:
-                    self._gif_base64_cache[cache_key] = (now, b64)
-                return b64
+                    return base64.b64encode(buf.getvalue()).decode("utf-8")
+
+            b64 = await asyncio.to_thread(_sync_convert_to_gif, file_path)
+            if b64:
+                self._gif_base64_cache[cache_key] = (now, b64)
+                self._evict_gif_base64_cache()
+            return b64
         except Exception as e:
             logger.error(f"文件转换为GIF base64失败: {e}")
             return await self._file_to_base64(file_path)
-
-    async def _store_image(self, src_path: str, category: str) -> str:
-        """将图片存储到指定分类目录。
-
-        Args:
-            src_path: 源图片路径
-            category: 分类名称
-
-        Returns:
-            str: 存储后的图片路径
-        """
-        try:
-            cat_dir = self.plugin_config.ensure_category_dir(category)
-            if not cat_dir:
-                logger.error("分类目录未设置，无法存储图片")
-                return src_path
-
-            # 复制图片到分类目录
-            filename = os.path.basename(src_path)
-            dest_path = str(cat_dir / filename)
-
-            # 如果文件已存在，生成新文件名
-            if os.path.exists(dest_path):
-                base_name, ext = os.path.splitext(filename)
-                dest_path = str(cat_dir / f"{base_name}_{int(time.time())}{ext}")
-
-            shutil.copy2(src_path, dest_path)
-            logger.debug(f"图片已存储到分类目录: {dest_path}")
-            return dest_path
-        except Exception as e:
-            logger.error(f"存储图片失败: {e}")
-            return src_path
 
     async def safe_remove_file(self, file_path: str) -> bool:
         """安全删除文件。
@@ -1163,7 +1170,7 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
         """
         try:
             if os.path.exists(file_path):
-                os.remove(file_path)
+                await asyncio.to_thread(os.remove, file_path)
                 logger.debug(f"已删除文件: {file_path}")
                 return True
             logger.debug(f"文件不存在，无需删除: {file_path}")
