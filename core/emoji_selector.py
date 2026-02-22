@@ -310,7 +310,14 @@ class EmojiSelector:
 
                 score = 0
                 desc = str(data.get("desc", "")).lower()
-                tags = [str(t).lower() for t in data.get("tags", [])]
+                # 安全处理 tags 字段，兼容字符串和列表类型
+                raw_tags = data.get("tags", [])
+                if isinstance(raw_tags, str):
+                    tags = [t.strip().lower() for t in raw_tags.split(",") if t.strip()]
+                elif isinstance(raw_tags, list):
+                    tags = [str(t).lower() for t in raw_tags if t]
+                else:
+                    tags = []
                 tags_str = ", ".join(tags)
                 category = self._get_category_from_data(data)
 
@@ -403,7 +410,14 @@ class EmojiSelector:
                             continue
                         cat = self._get_category_from_data(data)
                         if cat == mapped_cat:
-                            tags_str = ", ".join(data.get("tags", []))
+                            # 安全处理 tags 字段
+                            raw_tags = data.get("tags", [])
+                            if isinstance(raw_tags, str):
+                                tags_str = raw_tags
+                            elif isinstance(raw_tags, list):
+                                tags_str = ", ".join(str(t) for t in raw_tags)
+                            else:
+                                tags_str = ""
                             results.append(
                                 (file_path, str(data.get("desc", "")), cat, tags_str)
                             )

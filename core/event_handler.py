@@ -551,21 +551,25 @@ class EventHandler:
         except Exception as e:
             logger.error(f"执行容量控制时发生未预期错误: {e}", exc_info=True)
 
-    def _enforce_capacity_sync(self, image_index: dict) -> None:
-        """同步版本的容量控制，仅删除索引条目（不删除文件）。
-
-        用于在 cache_service.update_index 的更新器中调用，文件删除由异步版本处理。
+    def _enforce_capacity_sync(self, image_index: dict) -> list[str]:
+        """同步版本的容量控制，删除索引条目并返回需要删除的文件路径。
 
         Args:
-            image_index: 图片索引字典，将被就地修改
+            image_index: 索引字典
+
+        Returns:
+            list[str]: 需要删除的文件路径列表
         """
+        files_to_delete = []
+
         try:
-            max_reg = int(getattr(self.plugin, "max_reg_num", 0))
+            max_reg = int(self.plugin.max_reg_num)
             if max_reg <= 0:
-                return
+                logger.warning(f"[容量控制-索引] 上限无效: max_reg_num={max_reg}，跳过")
+                return files_to_delete
 
             if len(image_index) <= max_reg:
-                return
+                return files_to_delete
 
             # 收集并按创建时间排序
             image_items = []
@@ -578,7 +582,7 @@ class EventHandler:
                 image_items.append((file_path, created_at))
 
             if not image_items:
-                return
+                return files_to_delete
 
             image_items.sort(key=lambda x: x[1])
 
@@ -588,10 +592,25 @@ class EventHandler:
             for i in range(remove_count):
                 remove_path = image_items[i][0]
                 if remove_path in image_index:
+                    # 收集文件路径供后续删除
+                    files_to_delete.append(remove_path)
+
+                    # 同时收集分类目录中的副本
+                    if isinstance(image_index[remove_path], dict):
+                        category = image_index[remove_path].get("category", "")
+                        if category and self.plugin.base_dir:
+                            file_name = os.path.basename(remove_path)
+                            category_file_path = os.path.join(
+                                self.plugin.base_dir, "categories", category, file_name
+                            )
+                            files_to_delete.append(category_file_path)
+
                     del image_index[remove_path]
 
         except Exception as e:
             logger.error(f"同步容量控制失败: {e}")
+
+        return files_to_delete
 
     def _get_force_capture_key(self, event) -> str:
         """获取强制捕获的唯一键。

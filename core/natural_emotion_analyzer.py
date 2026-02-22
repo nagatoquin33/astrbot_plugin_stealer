@@ -134,11 +134,15 @@ class NaturalEmotionAnalyzer:
                 max_tokens=15,  # 只需返回一个单词，大幅降低生成时间
             )
 
-            if not response or not response.completion_text:
+            # 安全获取响应文本
+            if not response:
+                return None
+            result_text = getattr(response, "completion_text", None)
+            if not result_text:
                 return None
 
             # 解析结果
-            result_text = response.completion_text.strip().lower()
+            result_text = result_text.strip().lower()
             emotion = self._parse_emotion_result(result_text)
 
             return emotion

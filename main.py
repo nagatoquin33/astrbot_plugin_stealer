@@ -753,18 +753,26 @@ class Main(Star):
                     # 2) 容量控制（使用原子更新器避免竞态条件）
                     if hasattr(self, "event_handler") and self.event_handler:
                         removed_count = 0
+                        files_to_delete: list[str] = []
 
                         def capacity_updater(current: dict):
-                            nonlocal removed_count
+                            nonlocal removed_count, files_to_delete
                             old_count = len(current)
-                            # 直接在 current 上执行容量控制
-                            self.event_handler._enforce_capacity_sync(current)
+                            # 直接在 current 上执行容量控制，返回要删除的文件
+                            files_to_delete = self.event_handler._enforce_capacity_sync(current)
                             removed_count = old_count - len(current)
 
                         if self.cache_service:
                             await self.cache_service.update_index(capacity_updater)
                             if removed_count > 0:
                                 logger.info(f"容量控制：已删除 {removed_count} 个最旧条目")
+                                # 删除实际文件
+                                for file_path in files_to_delete:
+                                    try:
+                                        if os.path.exists(file_path):
+                                            await self._safe_remove_file(file_path)
+                                    except Exception as e:
+                                        logger.warning(f"删除文件失败: {file_path}, {e}")
                     else:
                         logger.warning("event_handler 未初始化，跳过容量控制")
 
