@@ -351,10 +351,11 @@ class EmojiSelector:
                     continue
 
                 # 标签匹配
-                if query_lower == tags[0] if tags else False:
-                    score = max(score, 12)
-                elif tags and query_lower in tags[0]:
-                    score = max(score, 8)
+                if tags:
+                    if query_lower == tags[0]:
+                        score = max(score, 12)
+                    elif query_lower in tags[0]:
+                        score = max(score, 8)
                 elif query_tokens:
                     for tag in tags:
                         matched = sum(1 for token in query_tokens if token in tag)

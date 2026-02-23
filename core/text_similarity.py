@@ -35,7 +35,7 @@ def calculate_simple_similarity(text1: str, text2: str) -> float:
     union = words1 | words2
 
     # Jaccard相似度
-    if len(union) == 0:
+    if not union:
         return 0.0
 
     return len(intersection) / len(union)
@@ -135,7 +135,7 @@ def _levenshtein_distance(s1: str, s2: str) -> int:
     if len(s1) < len(s2):
         return _levenshtein_distance(s2, s1)
 
-    if len(s2) == 0:
+    if not s2:
         return len(s1)
 
     previous_row = range(len(s2) + 1)

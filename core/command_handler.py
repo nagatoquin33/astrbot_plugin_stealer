@@ -1,6 +1,7 @@
 import json
 import os
 import random
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -314,13 +315,11 @@ class CommandHandler:
             status_text += "📊 表情包统计:\n暂无表情包数据"
         else:
             # 按分类统计
-            category_stats = {}
-
-            for img_path, img_info in image_index.items():
-                if isinstance(img_info, dict):
-                    # 统计分类
-                    category = img_info.get("category", "未分类")
-                    category_stats[category] = category_stats.get(category, 0) + 1
+            category_stats = Counter(
+                img_info.get("category", "未分类")
+                for img_info in image_index.values()
+                if isinstance(img_info, dict)
+            )
 
             # 构建统计信息
             status_text += "📊 表情包统计:\n"
@@ -416,11 +415,11 @@ class CommandHandler:
                 yield event.plain_result(f"✅ 成功迁移 {len(migrated_data)} 条记录")
 
                 # 显示迁移的分类统计
-                category_stats = {}
-                for record in migrated_data.values():
-                    if isinstance(record, dict):
-                        category = record.get("category", "未分类")
-                        category_stats[category] = category_stats.get(category, 0) + 1
+                category_stats = Counter(
+                    record.get("category", "未分类")
+                    for record in migrated_data.values()
+                    if isinstance(record, dict)
+                )
 
                 if category_stats:
                     stats_text = "迁移的分类统计:\n"
@@ -796,11 +795,11 @@ class CommandHandler:
             new_count = len(final_index)
 
             # 按分类统计
-            category_stats = {}
-            for img_info in final_index.values():
-                if isinstance(img_info, dict):
-                    cat = img_info.get("category", "未分类")
-                    category_stats[cat] = category_stats.get(cat, 0) + 1
+            category_stats = Counter(
+                img_info.get("category", "未分类")
+                for img_info in final_index.values()
+                if isinstance(img_info, dict)
+            )
 
             # 构建结果消息
             result_msg = "✅ 索引重建完成！\n\n"

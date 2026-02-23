@@ -232,15 +232,12 @@ class PluginConfig(BaseModel):
                 json.dump(data, f, ensure_ascii=False, indent=2)
             return True
         except PermissionError as e:
-            from astrbot.api import logger
             logger.error(f"[Config] 权限不足，无法写入文件 {path}: {e}")
             return False
         except OSError as e:
-            from astrbot.api import logger
             logger.error(f"[Config] 写入文件失败 {path}: {e}")
             return False
         except Exception as e:
-            from astrbot.api import logger
             logger.error(f"[Config] 写入 JSON 文件时发生未知错误 {path}: {e}")
             return False
 

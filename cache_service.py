@@ -456,13 +456,10 @@ class CacheService:
                         merged_count += 1
 
             # 保存合并后的索引
-            if merged_count > 0:
-                logger.info(f"成功从旧数据中恢复了 {merged_count} 条记录的元数据")
-                await self.save_index(current_index)
-            else:
-                logger.info("旧数据已加载，但没有新的元数据需要合并")
+            logger.info(f"成功从旧数据中恢复了 {merged_count} 条记录的元数据")
+            await self.save_index(current_index)
 
-            return migrated_data
+            return current_index
 
         except Exception as e:
             logger.error(f"数据迁移失败: {e}", exc_info=True)

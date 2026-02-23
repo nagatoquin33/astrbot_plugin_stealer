@@ -22,7 +22,6 @@ class EventHandler:
 
         # 图片处理节流相关
         self._last_process_time: float = 0.0  # 上次处理时间（用于interval和cooldown模式）
-        self._process_count: int = 0  # 处理计数（用于interval模式）
 
         # 强制捕获窗口
         self._force_capture_windows: dict[str, dict[str, object]] = {}

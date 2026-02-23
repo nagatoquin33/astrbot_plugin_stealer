@@ -62,8 +62,6 @@ class Main(Star):
 
     # 从外部文件加载的提示词（已迁移到ImageProcessorService）
 
-    # 缓存相关常量和方法已迁移到CacheService类
-
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
         super().__init__(context)
 
@@ -517,22 +515,19 @@ class Main(Star):
             await self.task_scheduler.cancel_task("capacity_control_loop")
 
             # 清理各服务资源
-            if hasattr(self, "cache_service") and self.cache_service:
+            if self.cache_service:
                 await self.cache_service.cleanup()
 
-            if hasattr(self, "task_scheduler") and self.task_scheduler:
+            if self.task_scheduler:
                 await self.task_scheduler.cleanup()
 
-            if (
-                hasattr(self, "image_processor_service")
-                and self.image_processor_service
-            ):
+            if self.image_processor_service:
                 self.image_processor_service.cleanup()
 
-            if hasattr(self, "command_handler") and self.command_handler:
+            if self.command_handler:
                 self.command_handler.cleanup()
 
-            if hasattr(self, "event_handler") and self.event_handler:
+            if self.event_handler:
                 self.event_handler.cleanup()
 
         except Exception as e:

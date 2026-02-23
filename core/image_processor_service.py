@@ -515,8 +515,8 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
                     logger.debug(f"图片无法分类（缓存），留在raw目录: {hash_val}")
                     return False, None
             else:
-                # 缓存过期，从缓存中移除
-                del self._image_cache[hash_val]
+                # 缓存过期，从缓存中移除（安全删除）
+                self._image_cache.pop(hash_val, None)
 
         # 首次处理：将图片存储到raw目录
         raw_dir = self.plugin_config.ensure_raw_dir()
@@ -1036,8 +1036,8 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
 
     def invalidate_cache(self, image_hash: str):
         """失效指定图片的缓存。"""
-        if hasattr(self, "_image_cache") and image_hash in self._image_cache:
-            del self._image_cache[image_hash]
+        if hasattr(self, "_image_cache"):
+            self._image_cache.pop(image_hash, None)
             logger.debug(f"已失效缓存: {image_hash}")
 
     def _evict_image_cache(self) -> None:
