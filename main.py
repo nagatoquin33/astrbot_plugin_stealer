@@ -122,16 +122,20 @@ class Main(Star):
         self.smart_emoji_selection = self.plugin_config.smart_emoji_selection
 
         self.steal_emoji = self.plugin_config.steal_emoji
-        self.categories = list(
-            self.plugin_config.categories or []
-        ) or list(self.plugin_config.DEFAULT_CATEGORIES)
+        self.categories = list(self.plugin_config.categories or []) or list(
+            self.plugin_config.DEFAULT_CATEGORIES
+        )
 
         # 同步模型相关配置
         self.vision_provider_id = self._load_vision_provider_id()
 
         # 同步自然语言分析配置
-        self.enable_natural_emotion_analysis = self.plugin_config.enable_natural_emotion_analysis
-        self.emotion_analysis_provider_id = self.plugin_config.emotion_analysis_provider_id
+        self.enable_natural_emotion_analysis = (
+            self.plugin_config.enable_natural_emotion_analysis
+        )
+        self.emotion_analysis_provider_id = (
+            self.plugin_config.emotion_analysis_provider_id
+        )
 
         # 同步图片处理节流配置
         self.image_processing_cooldown = self.plugin_config.image_processing_cooldown
@@ -248,7 +252,9 @@ class Main(Star):
 
         # 验证偷图模式
         if self.steal_mode not in ("probability", "cooldown"):
-            errors.append(f"偷图模式 '{self.steal_mode}' 无效，必须为 probability 或 cooldown")
+            errors.append(
+                f"偷图模式 '{self.steal_mode}' 无效，必须为 probability 或 cooldown"
+            )
             self.steal_mode = "probability"
             fixed.append("偷图模式已重置为 probability")
 
@@ -440,9 +446,7 @@ class Main(Star):
                 prompts_path = plugin_dir / "prompts.json"
                 if prompts_path.exists():
                     if aiofiles:
-                        async with aiofiles.open(
-                            prompts_path, encoding="utf-8"
-                        ) as f:
+                        async with aiofiles.open(prompts_path, encoding="utf-8") as f:
                             content = await f.read()
                         prompts = json.loads(content)
                     else:
@@ -623,7 +627,7 @@ class Main(Star):
             logger.warning(f"图片处理超时: {file_path}")
             if is_temp:
                 await self._safe_remove_file(file_path)
-            return False, idx
+            return False, idx if idx is not None else {}
         except FileNotFoundError as e:
             logger.error(f"文件不存在错误: {e}")
         except PermissionError as e:
@@ -636,7 +640,8 @@ class Main(Star):
         # 异常情况下的清理和返回
         if is_temp:
             await self._safe_remove_file(file_path)
-        return False, idx
+        # 确保返回有效的索引字典
+        return False, idx if idx is not None else {}
 
     async def _safe_remove_file(self, file_path: str) -> bool:
         """委托给 ImageProcessorService。"""
@@ -763,20 +768,26 @@ class Main(Star):
                             nonlocal removed_count, files_to_delete
                             old_count = len(current)
                             # 直接在 current 上执行容量控制，返回要删除的文件
-                            files_to_delete = self.event_handler._enforce_capacity_sync(current)
+                            files_to_delete = self.event_handler._enforce_capacity_sync(
+                                current
+                            )
                             removed_count = old_count - len(current)
 
                         if self.cache_service:
                             await self.cache_service.update_index(capacity_updater)
                             if removed_count > 0:
-                                logger.info(f"容量控制：已删除 {removed_count} 个最旧条目")
+                                logger.info(
+                                    f"容量控制：已删除 {removed_count} 个最旧条目"
+                                )
                                 # 删除实际文件
                                 for file_path in files_to_delete:
                                     try:
                                         if os.path.exists(file_path):
                                             await self._safe_remove_file(file_path)
                                     except Exception as e:
-                                        logger.warning(f"删除文件失败: {file_path}, {e}")
+                                        logger.warning(
+                                            f"删除文件失败: {file_path}, {e}"
+                                        )
                     else:
                         logger.warning("event_handler 未初始化，跳过容量控制")
 
@@ -950,7 +961,9 @@ class Main(Star):
                 # LLM模式：不修改消息链，直接异步分析
                 logger.debug("[Stealer] LLM模式：保持消息链不变，异步分析语义")
                 self._safe_create_task(
-                    self._async_analyze_and_send_emoji(event, text_without_explicit, []),
+                    self._async_analyze_and_send_emoji(
+                        event, text_without_explicit, []
+                    ),
                     name="emoji_analyze_intelligent",
                 )
                 return False  # 不修改消息链
@@ -1088,7 +1101,8 @@ class Main(Star):
         其余 Plain 清空，从而保留非文本组件（图片、引用等）的位置。
         """
         plain_components = [
-            comp for comp in result.chain
+            comp
+            for comp in result.chain
             if isinstance(comp, Plain) and hasattr(comp, "text")
         ]
 
@@ -1312,7 +1326,9 @@ class Main(Star):
             idx = self.cache_service.get_index_cache_readonly()
 
             # 增加搜索结果数量，给LLM更多选择
-            results = await self._search_emoji_candidates(query, limit=self.MAX_SEARCH_RESULTS, idx=idx)
+            results = await self._search_emoji_candidates(
+                query, limit=self.MAX_SEARCH_RESULTS, idx=idx
+            )
 
             if not results:
                 logger.warning(f"未找到匹配的表情包: {query}")

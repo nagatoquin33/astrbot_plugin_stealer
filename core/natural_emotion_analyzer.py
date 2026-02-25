@@ -132,6 +132,7 @@ class NaturalEmotionAnalyzer:
             prompt = self.emotion_analysis_prompt.format(text=text)
 
             # 调用LLM（限制 max_tokens 提升速度）
+            logger.debug(f"[情绪分析] 调用LLM，provider_id={provider_id}")
             response = await self.plugin.context.llm_generate(
                 chat_provider_id=provider_id,
                 prompt=prompt,
@@ -140,9 +141,11 @@ class NaturalEmotionAnalyzer:
 
             # 安全获取响应文本
             if not response:
+                logger.warning("[情绪分析] LLM返回空响应")
                 return None
             result_text = response.completion_text
             if not result_text:
+                logger.warning("[情绪分析] LLM返回空文本")
                 return None
 
             # 解析结果
@@ -152,21 +155,35 @@ class NaturalEmotionAnalyzer:
             return emotion
 
         except Exception as e:
-            logger.error(f"[情绪分析] LLM调用失败: {e}")
+            error_msg = str(e)
+            if "Provider" in error_msg or "提供商" in error_msg:
+                logger.error(
+                    f"[情绪分析] 模型提供商错误: {e}\n"
+                    f"  配置的provider_id: {provider_id}\n"
+                    f"  提示: 请检查插件配置中的'情绪分析专用模型'是否有效，"
+                    f"  或尝试清空该配置使用默认模型"
+                )
+            else:
+                logger.error(f"[情绪分析] LLM调用失败: {e}")
             return None
 
     async def _get_text_provider(self, event: AstrMessageEvent) -> str | None:
         """获取文本模型提供商ID"""
         # 1. 优先使用插件配置的情绪分析专用模型
-        if self.plugin.emotion_analysis_provider_id:
-            return self.plugin.emotion_analysis_provider_id
+        configured_provider = self.plugin.emotion_analysis_provider_id
+        if configured_provider:
+            logger.debug(f"[情绪分析] 尝试使用配置的提供商: {configured_provider}")
+            return configured_provider
 
         # 2. 使用当前会话的模型
         try:
-            return await self.plugin.context.get_current_chat_provider_id(
+            current_provider = await self.plugin.context.get_current_chat_provider_id(
                 event.unified_msg_origin
             )
-        except Exception:
+            logger.debug(f"[情绪分析] 使用当前会话模型: {current_provider}")
+            return current_provider
+        except Exception as e:
+            logger.error(f"[情绪分析] 获取当前会话模型失败: {e}")
             return None
 
     def _clean_text(self, text: str) -> str:
@@ -246,7 +263,9 @@ class NaturalEmotionAnalyzer:
             return {"message": "暂无分析数据"}
 
         cache_hit_rate = (cache_hits / grand_total) * 100
-        success_rate = (self.stats["successful_analyses"] / total) * 100 if total > 0 else 0.0
+        success_rate = (
+            (self.stats["successful_analyses"] / total) * 100 if total > 0 else 0.0
+        )
 
         return {
             "total_analyses": grand_total,

@@ -21,7 +21,9 @@ class EventHandler:
         self.plugin = plugin_instance
 
         # 图片处理节流相关
-        self._last_process_time: float = 0.0  # 上次处理时间（用于interval和cooldown模式）
+        self._last_process_time: float = (
+            0.0  # 上次处理时间（用于interval和cooldown模式）
+        )
 
         # 强制捕获窗口
         self._force_capture_windows: dict[str, dict[str, object]] = {}
@@ -459,7 +461,9 @@ class EventHandler:
                                 )
 
                         if deleted_count > 0:
-                            logger.info(f"清理raw目录完成，共删除 {deleted_count} 个文件")
+                            logger.info(
+                                f"清理raw目录完成，共删除 {deleted_count} 个文件"
+                            )
                         total_deleted += deleted_count
                 else:
                     logger.debug(f"raw目录不存在: {raw_dir}")
@@ -526,9 +530,7 @@ class EventHandler:
         except Exception as e:
             logger.error(f"执行容量控制时发生未预期错误: {e}", exc_info=True)
 
-    def _select_items_for_removal(
-        self, image_index: dict
-    ) -> list[tuple[str, int]]:
+    def _select_items_for_removal(self, image_index: dict) -> list[tuple[str, int]]:
         """从索引中选出需要移除的条目（按创建时间从旧到新排序后取最旧的）。
 
         Returns:
@@ -629,7 +631,8 @@ class EventHandler:
         """
         now = time.time()
         expired_keys = [
-            key for key, entry in self._force_capture_windows.items()
+            key
+            for key, entry in self._force_capture_windows.items()
             if isinstance(entry, dict) and float(entry.get("until", 0)) < now
         ]
         for key in expired_keys:

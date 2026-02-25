@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.5] - 2026-02-25
+- 智能选择算法：多维度评分 + 加权随机选择
+- 内存优化：GIF缓存限制50条/10MB
+- 增强错误日志，便于诊断模型配置问题
+- WebUI 移动端适配
+
 ## [2.3.4] - 2026-02-25
 - 精简代码，修复默认视觉模型bug
 

@@ -215,7 +215,11 @@ class PluginConfig(BaseModel):
                 return None
             with path.open("r", encoding="utf-8") as f:
                 return json.load(f)
-        except Exception:
+        except json.JSONDecodeError as e:
+            logger.warning(f"[Config] JSON 解析失败 {path}: {e}")
+            return None
+        except Exception as e:
+            logger.debug(f"[Config] 读取文件失败 {path}: {e}")
             return None
 
     def _write_json_file(self, path: Path, data: Any) -> bool:

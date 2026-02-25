@@ -12,6 +12,7 @@ from astrbot.api.event import AstrMessageEvent
 try:
     from .text_similarity import calculate_hybrid_similarity
     from .text_similarity import calculate_simple_similarity as calculate_similarity
+    from .text_similarity import _extract_words
 except ImportError:
     # 如果导入失败，提供简单的降级实现
     def calculate_similarity(s1: str, s2: str) -> float:
@@ -122,9 +123,9 @@ class EmojiSelector:
 
             # 三种标记格式依次提取: &&tag&&, 残缺 &&tag, 单个 &tag&
             patterns = [
-                (self.HEX_PATTERN, True),          # 完整标记：总是清理
+                (self.HEX_PATTERN, True),  # 完整标记：总是清理
                 (self.INCOMPLETE_HEX_PATTERN, False),  # 残缺标记：仅匹配时清理
-                (self.SINGLE_HEX_PATTERN, True),    # 单标记：总是清理
+                (self.SINGLE_HEX_PATTERN, True),  # 单标记：总是清理
             ]
             for pattern, always_clean in patterns:
                 cleaned_text, found = self._extract_with_pattern(
@@ -235,6 +236,21 @@ class EmojiSelector:
     async def _select_emoji_smart_impl(
         self, category: str, context_text: str
     ) -> str | None:
+        """智能选择表情包（改进版多维度评分）
+
+        评分维度：
+        1. 描述匹配 (40%): 上下文与描述的相似度
+        2. 标签匹配 (30%): 上下文与标签的匹配度
+        3. 多样性奖励 (15%): 增加选择多样性
+        4. 历史惩罚 (15%): 避免重复发送
+
+        Args:
+            category: 情绪分类
+            context_text: 上下文文本
+
+        Returns:
+            str | None: 表情包路径
+        """
         try:
             cache_service = self.plugin.cache_service
             if not cache_service:
@@ -245,6 +261,12 @@ class EmojiSelector:
                 return None
 
             candidates = []
+            context_lower = context_text.lower()
+            context_words = set(_extract_words(context_text))
+
+            # 获取该分类的最近使用记录
+            recent_usage = self._get_recent_usage(category)
+            recent_set = set(recent_usage)
 
             for file_path, data in idx.items():
                 if not isinstance(data, dict):
@@ -253,16 +275,106 @@ class EmojiSelector:
                 if self._get_category_from_data(data) != category:
                     continue
 
-                desc = str(data.get("desc", ""))
-                score = calculate_hybrid_similarity(context_text, desc)
-                if score > 0.3:
-                    candidates.append((file_path, score))
+                # 1. 描述匹配分数 (0-1)
+                desc = str(data.get("desc", "")).lower()
+                desc_score = calculate_hybrid_similarity(context_text, desc)
 
-            if candidates:
-                candidates.sort(key=lambda x: x[1], reverse=True)
-                return candidates[0][0]
+                # 2. 标签匹配分数 (0-1)
+                tags = self._parse_tags(data.get("tags", []))
+                tag_score = 0.0
+                if tags:
+                    # 计算标签与上下文的匹配度
+                    matched_tags = sum(1 for t in tags if t in context_lower)
+                    tag_score = min(1.0, matched_tags / max(len(tags), 1))
 
-            return None
+                    # 额外检查上下文词汇与标签的重叠
+                    tag_words = set()
+                    for t in tags:
+                        tag_words.update(_extract_words(t))
+                    if context_words & tag_words:
+                        tag_score = min(1.0, tag_score + 0.3)
+
+                # 3. 综合基础分数
+                base_score = desc_score * 0.4 + tag_score * 0.3
+
+                # 如果基础分数太低，跳过
+                if base_score < 0.15:
+                    continue
+
+                # 4. 多样性奖励 (添加随机因子)
+                diversity_bonus = random.uniform(0, 0.15)
+
+                # 5. 历史使用惩罚
+                canon_path = self._canon_path(file_path)
+                history_penalty = 0.0
+                if canon_path in recent_set:
+                    # 根据使用次数递减惩罚
+                    use_count = recent_usage.count(canon_path)
+                    history_penalty = min(0.3, use_count * 0.1)
+
+                # 最终分数
+                final_score = base_score + diversity_bonus - history_penalty
+                final_score = max(0, final_score)
+
+                if final_score > 0.1:
+                    candidates.append((file_path, final_score, desc_score, tag_score))
+
+            if not candidates:
+                # 降级：放宽条件再试一次
+                for file_path, data in idx.items():
+                    if not isinstance(data, dict):
+                        continue
+                    if self._get_category_from_data(data) != category:
+                        continue
+                    desc = str(data.get("desc", ""))
+                    score = calculate_hybrid_similarity(context_text, desc)
+                    if score > 0.1:
+                        candidates.append((file_path, score, score, 0.0))
+
+            if not candidates:
+                return None
+
+            # 使用加权随机选择而非直接取最高分（增加多样性）
+            candidates.sort(key=lambda x: x[1], reverse=True)
+
+            # 从前3个候选中随机选择（如果有的话）
+            top_n = min(3, len(candidates))
+            if top_n > 1:
+                # 加权随机：分数越高被选中概率越大
+                top_candidates = candidates[:top_n]
+                weights = [c[1] for c in top_candidates]
+                total_weight = sum(weights)
+                if total_weight > 0:
+                    r = random.uniform(0, total_weight)
+                    cumulative = 0
+                    for i, (path, score, _, _) in enumerate(top_candidates):
+                        cumulative += score
+                        if r <= cumulative:
+                            # 更新最近使用记录
+                            picked_path = self._canon_path(path)
+                            if picked_path not in recent_set:
+                                recent_usage.append(picked_path)
+                                if len(recent_usage) > self.MAX_RECENT_USAGE:
+                                    recent_usage = recent_usage[
+                                        -self.MAX_RECENT_USAGE :
+                                    ]
+                                self._set_recent_usage(category, recent_usage)
+                            return path
+
+            # 返回最高分的
+            result = candidates[0][0]
+            picked_path = self._canon_path(result)
+            if picked_path not in recent_set:
+                recent_usage.append(picked_path)
+                if len(recent_usage) > self.MAX_RECENT_USAGE:
+                    recent_usage = recent_usage[-self.MAX_RECENT_USAGE :]
+                self._set_recent_usage(category, recent_usage)
+
+            logger.debug(
+                f"[智能选择] 分类={category}, 候选={len(candidates)}, "
+                f"选中分数={candidates[0][1]:.2f} (desc={candidates[0][2]:.2f}, tag={candidates[0][3]:.2f})"
+            )
+            return result
 
         except Exception as e:
             logger.error(f"智能选择表情包失败: {e}")
@@ -386,7 +498,9 @@ class EmojiSelector:
                         query_lower[:max_str_len], target[:max_str_len]
                     )
                     if sim >= self.SIMILARITY_THRESHOLD:
-                        score = max(score, int(4 + (sim - self.SIMILARITY_THRESHOLD) * 12))
+                        score = max(
+                            score, int(4 + (sim - self.SIMILARITY_THRESHOLD) * 12)
+                        )
                         break
 
         return score
@@ -462,11 +576,15 @@ class EmojiSelector:
 
     async def _encode_emoji(self, emoji_path: str) -> str | None:
         """将表情包文件编码为 base64，失败返回 None。"""
+        if not emoji_path or not isinstance(emoji_path, str):
+            logger.warning(f"[表情包编码] 无效的文件路径: {emoji_path!r}")
+            return None
         if not os.path.exists(emoji_path):
             logger.warning(f"表情包文件不存在: {emoji_path}")
             return None
         image_processor = self.plugin.image_processor_service
         if not image_processor:
+            logger.warning("[表情包编码] image_processor_service 未初始化")
             return None
         try:
             return await image_processor._file_to_gif_base64(emoji_path)

@@ -168,9 +168,7 @@ class WebServer:
 
                 # 额外检查：如果 session 数量超过上限，清理最旧的一半
                 if len(self._sessions) > self.SESSION_MAX_COUNT:
-                    sorted_sessions = sorted(
-                        self._sessions.items(), key=lambda x: x[1]
-                    )
+                    sorted_sessions = sorted(self._sessions.items(), key=lambda x: x[1])
                     to_remove = len(self._sessions) - self.SESSION_MAX_COUNT // 2
                     for k, _ in sorted_sessions[:to_remove]:
                         self._sessions.pop(k, None)
@@ -249,9 +247,28 @@ class WebServer:
 
         # Windows 特殊设备名检查
         win_reserved = {
-            "CON", "PRN", "AUX", "NUL",
-            "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-            "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+            "CON",
+            "PRN",
+            "AUX",
+            "NUL",
+            "COM1",
+            "COM2",
+            "COM3",
+            "COM4",
+            "COM5",
+            "COM6",
+            "COM7",
+            "COM8",
+            "COM9",
+            "LPT1",
+            "LPT2",
+            "LPT3",
+            "LPT4",
+            "LPT5",
+            "LPT6",
+            "LPT7",
+            "LPT8",
+            "LPT9",
         }
         name_part = raw.split("/")[0].split("\\")[0].upper()
         if name_part in win_reserved:
@@ -305,7 +322,9 @@ class WebServer:
                 "application/xml",
             ):
                 try:
-                    content = await asyncio.to_thread(abs_path.read_text, encoding="utf-8")
+                    content = await asyncio.to_thread(
+                        abs_path.read_text, encoding="utf-8"
+                    )
                     return web.Response(text=content, content_type=content_type)
                 except UnicodeDecodeError:
                     # 如果不是 UTF-8，尝试二进制
@@ -409,7 +428,9 @@ class WebServer:
             # - 在部分环境/代理下，如果传输过程中异常中断，curl 可能会报 Received HTTP/0.9
             # - 显式构造 Response 能确保状态行和头部稳定输出
             try:
-                content = await asyncio.to_thread(index_file.read_text, encoding="utf-8")
+                content = await asyncio.to_thread(
+                    index_file.read_text, encoding="utf-8"
+                )
             except UnicodeDecodeError:
                 # 兼容被意外写入非 UTF-8 的情况（尽量仍返回合法 HTTP 响应）
                 content = await asyncio.to_thread(
@@ -1073,9 +1094,7 @@ class WebServer:
                         except Exception:
                             pass
 
-                        await asyncio.to_thread(
-                            shutil.rmtree, category_dir, True
-                        )
+                        await asyncio.to_thread(shutil.rmtree, category_dir, True)
                 except Exception as e:
                     logger.warning(f"删除空分类目录失败: {category_dir}, 错误: {e}")
 

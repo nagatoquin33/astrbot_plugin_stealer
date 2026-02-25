@@ -284,6 +284,71 @@ select.codex-input {
     font-family: 'EB Garamond', serif;
 }
 
+/* Mobile Responsive Styles */
+@media (max-width: 640px) {
+    body {
+        font-size: 16px;
+    }
+
+    h1 {
+        font-size: 1.5rem;
+    }
+
+    h2 {
+        font-size: 1.25rem;
+    }
+
+    .codex-panel {
+        background-size: 8px 8px;
+    }
+
+    .codex-btn {
+        padding: 10px 16px;
+        font-size: 0.9rem;
+    }
+
+    .codex-input {
+        padding: 12px;
+        font-size: 16px; /* Prevent zoom on iOS */
+    }
+
+    /* Touch-friendly tap targets */
+    .nav-btn {
+        width: 44px;
+        height: 44px;
+    }
+
+    /* Modal adjustments for mobile */
+    .modal-content {
+        margin: 8px;
+        max-height: calc(100vh - 16px);
+    }
+
+    /* Improve touch scrolling */
+    .custom-scrollbar {
+        -webkit-overflow-scrolling: touch;
+    }
+}
+
+/* Prevent text selection on buttons for better mobile experience */
+.codex-btn,
+.nav-btn {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
+/* Improve touch response */
+@media (hover: none) {
+    .item-card:hover {
+        transform: none;
+    }
+
+    .item-card:active {
+        transform: scale(0.98);
+    }
+}
+
 /* Spinner */
 .spinner {
     border: 3px solid rgba(197, 160, 89, 0.2);

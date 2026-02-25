@@ -32,7 +32,8 @@ class ImageProcessorService:
 
     # 缓存常量
     IMAGE_CACHE_MAX_SIZE = 500  # 最大缓存条目数
-    GIF_CACHE_MAX_SIZE = 200  # 最大 GIF base64 缓存条目数
+    GIF_CACHE_MAX_SIZE = 50  # 最大 GIF base64 缓存条目数（减小以降低内存占用）
+    GIF_CACHE_MAX_SIZE_BYTES = 10 * 1024 * 1024  # GIF 缓存最大总字节数 (10MB)
     CACHE_EXPIRE_TIME = 3600  # 缓存过期时间（秒）
 
     def __init__(self, plugin_instance):
@@ -73,20 +74,28 @@ class ImageProcessorService:
             plugin_instance, "EMOJI_CLASSIFICATION_PROMPT", _FALLBACK_PROMPT
         )
         self.emoji_classification_with_filter_prompt = getattr(
-            plugin_instance, "EMOJI_CLASSIFICATION_WITH_FILTER_PROMPT", _FALLBACK_FILTER_PROMPT
+            plugin_instance,
+            "EMOJI_CLASSIFICATION_WITH_FILTER_PROMPT",
+            _FALLBACK_FILTER_PROMPT,
         )
 
         # 保留combined_analysis_prompt作为备用
         self.combined_analysis_prompt = self.emoji_classification_prompt
 
         # 配置参数（初始值从 plugin_config 读取，后续通过 update_config 更新）
-        self.categories = list(self.plugin_config.categories or []) if self.plugin_config else []
-        self.content_filtration = bool(
-            getattr(self.plugin_config, "content_filtration", False)
-        ) if self.plugin_config else False
-        self.vision_provider_id = str(
-            self.plugin_config.vision_provider_id or ""
-        ) if self.plugin_config else ""
+        self.categories = (
+            list(self.plugin_config.categories or []) if self.plugin_config else []
+        )
+        self.content_filtration = (
+            bool(getattr(self.plugin_config, "content_filtration", False))
+            if self.plugin_config
+            else False
+        )
+        self.vision_provider_id = (
+            str(self.plugin_config.vision_provider_id or "")
+            if self.plugin_config
+            else ""
+        )
         # 框架 VLM provider 缓存，None 表示未查询过
         self._cached_framework_vlm_id: str | None = None
 
@@ -139,7 +148,9 @@ class ImageProcessorService:
                             counter += 1
 
                     try:
-                        await asyncio.to_thread(shutil.move, str(img_file), str(target_path))
+                        await asyncio.to_thread(
+                            shutil.move, str(img_file), str(target_path)
+                        )
                         migrated_files += 1
                     except Exception as e:
                         logger.error(f"迁移文件失败 {img_file} -> {target_path}: {e}")
@@ -155,7 +166,10 @@ class ImageProcessorService:
                         with open(old_index_path, encoding="utf-8") as f:
                             old_data = json.load(f)
                         for item in old_data:
-                            if isinstance(item, dict) and item.get("category") == old_cat:
+                            if (
+                                isinstance(item, dict)
+                                and item.get("category") == old_cat
+                            ):
                                 item["category"] = new_cat
                         new_index_path = new_dir_path / "index.json"
                         if new_index_path.exists():
@@ -377,10 +391,15 @@ class ImageProcessorService:
         cached = self._get_valid_cache(hash_val)
         if cached is not None:
             return await self._handle_classification_result(
-                cached["category"], cached["emotion"],
-                cached.get("tags", []), cached.get("desc", ""),
+                cached["category"],
+                cached["emotion"],
+                cached.get("tags", []),
+                cached.get("desc", ""),
                 cached.get("scenes", []),
-                file_path, is_temp, hash_val, idx,
+                file_path,
+                is_temp,
+                hash_val,
+                idx,
                 from_cache=True,
             )
 
@@ -390,8 +409,10 @@ class ImageProcessorService:
         # ── VLM 分类 ──
         try:
             category, tags, desc, emotion, scenes = await self.classify_image(
-                event=event, file_path=raw_path,
-                categories=categories, content_filtration=content_filtration,
+                event=event,
+                file_path=raw_path,
+                categories=categories,
+                content_filtration=content_filtration,
             )
         except Exception as e:
             logger.error(f"处理图片失败 [{raw_path}]: {e}")
@@ -404,17 +425,30 @@ class ImageProcessorService:
 
         # ── 处理分类结果 ──
         return await self._handle_classification_result(
-            category, emotion, tags, desc, scenes,
-            raw_path, False, hash_val, idx,
-            from_cache=False, already_in_raw=True,
+            category,
+            emotion,
+            tags,
+            desc,
+            scenes,
+            raw_path,
+            False,
+            hash_val,
+            idx,
+            from_cache=False,
+            already_in_raw=True,
         )
 
     # ── _process_image_legacy 的辅助方法 ──
 
     async def _is_duplicate_or_blacklisted(
-        self, hash_val: str, idx: dict, file_path: str, is_temp: bool,
+        self,
+        hash_val: str,
+        idx: dict,
+        file_path: str,
+        is_temp: bool,
     ) -> bool:
         """检查图片是否已存在于索引或黑名单中。"""
+
         async def _cleanup_temp():
             if is_temp and os.path.exists(file_path):
                 await self.plugin._safe_remove_file(file_path)
@@ -437,8 +471,7 @@ class ImageProcessorService:
                 return True
         else:
             if any(
-                isinstance(v, dict) and v.get("hash") == hash_val
-                for v in idx.values()
+                isinstance(v, dict) and v.get("hash") == hash_val for v in idx.values()
             ):
                 logger.debug(f"图片已存在于索引中: {hash_val}")
                 await _cleanup_temp()
@@ -457,13 +490,21 @@ class ImageProcessorService:
         return None
 
     def _put_image_cache(
-        self, hash_val: str, category: str,
-        tags: list, desc: str, emotion: str, scenes: list,
+        self,
+        hash_val: str,
+        category: str,
+        tags: list,
+        desc: str,
+        emotion: str,
+        scenes: list,
     ) -> None:
         """写入分类缓存并淘汰过期条目。"""
         self._image_cache[hash_val] = {
-            "category": category, "tags": tags, "desc": desc,
-            "emotion": emotion, "scenes": scenes,
+            "category": category,
+            "tags": tags,
+            "desc": desc,
+            "emotion": emotion,
+            "scenes": scenes,
             "timestamp": time.time(),
         }
         self._evict_image_cache()
@@ -484,10 +525,15 @@ class ImageProcessorService:
 
     async def _handle_classification_result(
         self,
-        category: str, emotion: str,
-        tags: list, desc: str, scenes: list,
-        file_path: str, is_temp: bool,
-        hash_val: str, idx: dict,
+        category: str,
+        emotion: str,
+        tags: list,
+        desc: str,
+        scenes: list,
+        file_path: str,
+        is_temp: bool,
+        hash_val: str,
+        idx: dict,
         from_cache: bool = False,
         already_in_raw: bool = False,
     ) -> tuple[bool, dict[str, Any] | None]:
@@ -516,8 +562,14 @@ class ImageProcessorService:
         if category and category in self.categories:
             logger.debug(f"分类有效（{source}）: {category}")
             return await self._store_and_index_image(
-                file_path, is_temp, category, hash_val, idx,
-                tags=tags, desc=desc, scenes=scenes,
+                file_path,
+                is_temp,
+                category,
+                hash_val,
+                idx,
+                tags=tags,
+                desc=desc,
+                scenes=scenes,
                 already_in_raw=already_in_raw,
             )
 
@@ -633,10 +685,18 @@ class ImageProcessorService:
                 normalized = self.plugin_config.normalize_category_strict(raw)
                 if normalized and normalized in self.categories:
                     return normalized
-            except Exception:
-                pass
-        logger.warning(f"无法识别情绪分类: {raw!r}，使用默认分类")
-        return self.categories[0] if self.categories else "happy"
+            except Exception as e:
+                logger.debug(f"[分类规范化] 异常: {e}")
+
+        # 获取默认分类
+        default_categories = (
+            list(self.plugin_config.DEFAULT_CATEGORIES)
+            if self.plugin_config
+            else ["happy"]
+        )
+        fallback = self.categories[0] if self.categories else default_categories[0]
+        logger.warning(f"无法识别情绪分类: {raw!r}，使用默认分类: {fallback}")
+        return fallback
 
     async def _call_vision_model(
         self, event: AstrMessageEvent | None, img_path: str, prompt: str
@@ -664,7 +724,8 @@ class ImageProcessorService:
         if not img_path_obj.is_absolute():
             data_dir = getattr(self.plugin_config, "data_dir", None)
             img_path_obj = (
-                (Path(data_dir) / img_path).absolute() if data_dir
+                (Path(data_dir) / img_path).absolute()
+                if data_dir
                 else img_path_obj.absolute()
             )
         img_path = str(img_path_obj)
@@ -714,20 +775,28 @@ class ImageProcessorService:
                 error_msg = str(e)
                 is_rate_limit = any(
                     kw in error_msg
-                    for kw in ("429", "RateLimit", "exceeded your current request limit")
+                    for kw in (
+                        "429",
+                        "RateLimit",
+                        "exceeded your current request limit",
+                    )
                 )
+                is_provider_error = "Provider" in error_msg or "提供商" in error_msg
                 if is_rate_limit:
-                    logger.warning(
-                        f"VLM请求被限流 ({attempt + 1}/{max_retries})"
+                    logger.warning(f"VLM请求被限流 ({attempt + 1}/{max_retries})")
+                elif is_provider_error:
+                    logger.error(
+                        f"VLM模型提供商错误 ({attempt + 1}/{max_retries}): {e}\n"
+                        f"  当前provider_id: {provider_id}\n"
+                        f"  提示: 请检查插件配置中的'视觉模型'是否有效，"
+                        f"  或尝试清空该配置使用框架全局的图片描述模型"
                     )
                 else:
-                    logger.error(
-                        f"VLM调用失败 ({attempt + 1}/{max_retries}): {e}"
-                    )
+                    logger.error(f"VLM调用失败 ({attempt + 1}/{max_retries}): {e}")
 
             # 指数退避
             if attempt < max_retries - 1:
-                await asyncio.sleep(retry_delay * (2 ** attempt))
+                await asyncio.sleep(retry_delay * (2**attempt))
 
         raise Exception(
             f"视觉模型调用失败（已重试{max_retries}次）: {last_error}"
@@ -742,6 +811,7 @@ class ImageProcessorService:
         Returns:
             str: SHA256哈希值
         """
+
         def _sync_hash(fp: str) -> str:
             hasher = hashlib.sha256()
             with open(fp, "rb") as f:
@@ -782,16 +852,38 @@ class ImageProcessorService:
 
     def _evict_gif_base64_cache(self) -> None:
         """淘汰 _gif_base64_cache 中最旧的条目，保持在最大容量以内。"""
+        # 检查条目数量
         if len(self._gif_base64_cache) <= self._gif_base64_cache_max_size:
-            return
+            # 还需要检查总字节数
+            total_bytes = sum(len(v[1]) for v in self._gif_base64_cache.values())
+            if total_bytes <= self.GIF_CACHE_MAX_SIZE_BYTES:
+                return
+
+        # 按时间排序，淘汰旧条目
         sorted_items = sorted(
             self._gif_base64_cache.items(),
             key=lambda kv: kv[1][0],  # cached_at timestamp
         )
-        keep = sorted_items[len(sorted_items) // 2 :]
+
+        # 计算需要保留的条目
+        target_count = self._gif_base64_cache_max_size // 2
+        target_bytes = self.GIF_CACHE_MAX_SIZE_BYTES // 2
+
+        # 从新到旧保留，直到满足条件
+        keep_items = []
+        current_bytes = 0
+        for key, value in reversed(sorted_items):
+            if len(keep_items) >= target_count or current_bytes >= target_bytes:
+                break
+            keep_items.append((key, value))
+            current_bytes += len(value[1])
+
         self._gif_base64_cache.clear()
-        self._gif_base64_cache.update(keep)
-        logger.debug(f"_gif_base64_cache 淘汰完成，当前 {len(self._gif_base64_cache)} 条")
+        self._gif_base64_cache.update(keep_items)
+        logger.debug(
+            f"_gif_base64_cache 淘汰完成，当前 {len(self._gif_base64_cache)} 条，"
+            f"总大小 {current_bytes / 1024 / 1024:.2f}MB"
+        )
 
     def cleanup(self):
         """清理资源。"""
@@ -808,6 +900,7 @@ class ImageProcessorService:
         Returns:
             str: base64编码
         """
+
         def _sync_read_and_encode(fp: str) -> str:
             with open(fp, "rb") as f:
                 return base64.b64encode(f.read()).decode("utf-8")
@@ -931,7 +1024,12 @@ class ImageProcessorService:
         """
         # 1. 优先使用插件配置的视觉模型
         if self.vision_provider_id:
+            logger.debug(f"[视觉模型] 使用插件配置的提供商: {self.vision_provider_id}")
             return self.vision_provider_id
+        else:
+            logger.debug(
+                "[视觉模型] 插件未配置 vision_provider_id，尝试使用框架全局配置"
+            )
 
         # 2. 使用缓存的框架 VLM provider（避免每次都读配置）
         if self._cached_framework_vlm_id is not None:
