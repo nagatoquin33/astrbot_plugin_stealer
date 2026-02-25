@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.6] - 2026-02-25
+- WebUI 代码重构瘦身：拆分公共逻辑，保持接口与行为不变
+- 配置更新流程去重：保留双模式与旧版本迁移链路
+- 代码质量检查：执行 `ruff check . --no-cache` 并修复 import 排序
+
 ## [2.3.5] - 2026-02-25
 - 智能选择算法：多维度评分 + 加权随机选择
 - 内存优化：GIF缓存限制50条/10MB

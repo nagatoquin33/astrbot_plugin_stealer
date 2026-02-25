@@ -10,9 +10,13 @@ from astrbot.api.event import AstrMessageEvent
 
 # 尝试导入文本相似度计算模块
 try:
-    from .text_similarity import calculate_hybrid_similarity
-    from .text_similarity import calculate_simple_similarity as calculate_similarity
-    from .text_similarity import _extract_words
+    from .text_similarity import (
+        _extract_words,
+        calculate_hybrid_similarity,
+    )
+    from .text_similarity import (
+        calculate_simple_similarity as calculate_similarity,
+    )
 except ImportError:
     # 如果导入失败，提供简单的降级实现
     def calculate_similarity(s1: str, s2: str) -> float:

@@ -325,6 +325,64 @@ class Main(Star):
         """委托给 EventHandler。"""
         self.event_handler.consume_force_capture(event)
 
+    def _snapshot_webui_runtime(self) -> tuple[bool, str, int, str, int]:
+        """获取当前 WebUI 运行态配置快照。"""
+        return (
+            getattr(self, "webui_enabled", True),
+            getattr(self, "webui_host", "0.0.0.0"),
+            getattr(self, "webui_port", 8899),
+            getattr(self, "webui_password", ""),
+            getattr(self, "webui_session_timeout", 3600),
+        )
+
+    def _is_webui_runtime_changed(
+        self, old_state: tuple[bool, str, int, str, int]
+    ) -> bool:
+        return old_state != self._snapshot_webui_runtime()
+
+    async def _restart_webui(self) -> None:
+        logger.info("检测到 WebUI 配置变更，正在重启 WebUI...")
+        if self.web_server:
+            await self.web_server.stop()
+            self.web_server = None
+
+        if not self.webui_enabled:
+            return
+
+        try:
+            self.web_server = WebServer(self, host=self.webui_host, port=self.webui_port)
+            await self.web_server.start()
+        except Exception as e:
+            logger.error(f"重启 WebUI 失败: {e}")
+
+    def _apply_plugin_config_updates(self, config_dict: dict) -> None:
+        """将更新字典写回 PluginConfig（包含 webui 嵌套字段兼容）。"""
+        for k, v in config_dict.items():
+            if k == "webui" and isinstance(v, dict):
+                current_webui = self.plugin_config.webui
+                for wk, wv in v.items():
+                    setattr(current_webui, wk, wv)
+                self.plugin_config.save_webui_config()
+            elif k.startswith("webui_"):
+                # 兼容旧版扁平 key：webui_enabled -> webui.enabled
+                wk = k[6:]
+                if hasattr(self.plugin_config.webui, wk):
+                    setattr(self.plugin_config.webui, wk, v)
+                    self.plugin_config.save_webui_config()
+            else:
+                setattr(self.plugin_config, k, v)
+
+    def _sync_image_processor_from_runtime(self) -> None:
+        self.image_processor_service.update_config(
+            categories=self.categories,
+            content_filtration=self.content_filtration,
+            vision_provider_id=self.vision_provider_id,
+            emoji_classification_prompt=getattr(
+                self, "EMOJI_CLASSIFICATION_PROMPT", None
+            ),
+            combined_analysis_prompt=getattr(self, "COMBINED_ANALYSIS_PROMPT", None),
+        )
+
     def _update_config_from_dict(self, config_dict: dict):
         """从配置字典更新插件配置。"""
         if not config_dict:
@@ -333,30 +391,8 @@ class Main(Star):
         try:
             # 使用配置服务更新配置
             if self.plugin_config:
-                # 记录旧的 WebUI 配置，用于判断是否需要重启 Web Server
-                old_webui_enabled = getattr(self, "webui_enabled", True)
-                old_webui_host = getattr(self, "webui_host", "0.0.0.0")
-                old_webui_port = getattr(self, "webui_port", 8899)
-                old_webui_password = getattr(self, "webui_password", "")
-                old_webui_session_timeout = getattr(self, "webui_session_timeout", 3600)
-
-                # 直接更新 PluginConfig 属性
-                for k, v in config_dict.items():
-                    if k == "webui" and isinstance(v, dict):
-                        # 处理嵌套 webui 更新
-                        current_webui = self.plugin_config.webui
-                        for wk, wv in v.items():
-                            setattr(current_webui, wk, wv)
-                        # 触发 webui 保存
-                        self.plugin_config.save_webui_config()
-                    elif k.startswith("webui_"):
-                        # 兼容旧的扁平 key (webui_enabled -> webui.enabled)
-                        wk = k[6:]  # remove 'webui_' prefix
-                        if hasattr(self.plugin_config.webui, wk):
-                            setattr(self.plugin_config.webui, wk, v)
-                            self.plugin_config.save_webui_config()
-                    else:
-                        setattr(self.plugin_config, k, v)
+                old_webui_state = self._snapshot_webui_runtime()
+                self._apply_plugin_config_updates(config_dict)
 
                 # 统一同步所有配置
                 self._sync_all_config()
@@ -366,44 +402,11 @@ class Main(Star):
 
                 # 检查 WebUI 配置是否变化并重启
                 # 注意：on_config_update 可能是同步调用，重启操作涉及IO，使用 create_task 异步执行
-                if (
-                    old_webui_enabled != self.webui_enabled
-                    or old_webui_host != self.webui_host
-                    or old_webui_port != self.webui_port
-                    or old_webui_password != getattr(self, "webui_password", "")
-                    or old_webui_session_timeout
-                    != getattr(self, "webui_session_timeout", 3600)
-                ):
-
-                    async def restart_webui():
-                        logger.info("检测到 WebUI 配置变更，正在重启 WebUI...")
-                        if self.web_server:
-                            await self.web_server.stop()
-                            self.web_server = None
-
-                        if self.webui_enabled:
-                            try:
-                                self.web_server = WebServer(
-                                    self, host=self.webui_host, port=self.webui_port
-                                )
-                                await self.web_server.start()
-                            except Exception as e:
-                                logger.error(f"重启 WebUI 失败: {e}")
-
-                    self._safe_create_task(restart_webui(), name="restart_webui")
+                if self._is_webui_runtime_changed(old_webui_state):
+                    self._safe_create_task(self._restart_webui(), name="restart_webui")
 
                 # 更新其他服务的配置
-                self.image_processor_service.update_config(
-                    categories=self.categories,
-                    content_filtration=self.content_filtration,
-                    vision_provider_id=self.vision_provider_id,
-                    emoji_classification_prompt=getattr(
-                        self, "EMOJI_CLASSIFICATION_PROMPT", None
-                    ),
-                    combined_analysis_prompt=getattr(
-                        self, "COMBINED_ANALYSIS_PROMPT", None
-                    ),
-                )
+                self._sync_image_processor_from_runtime()
 
                 # 为新增的分类创建对应的目录
                 try:
@@ -480,11 +483,7 @@ class Main(Star):
             self._sync_all_config()
 
             # 将关键配置同步到子服务（_sync_all_config 只更新 main 实例属性）
-            self.image_processor_service.update_config(
-                categories=self.categories,
-                content_filtration=self.content_filtration,
-                vision_provider_id=self.vision_provider_id,
-            )
+            self._sync_image_processor_from_runtime()
 
             # 启动独立的后台任务
             # raw目录清理任务
