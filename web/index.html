@@ -174,9 +174,9 @@
 
         <!-- Preview Modal -->
         <div v-if="previewOpen" class="fixed inset-0 z-50 modal-overlay flex items-center justify-center p-2 sm:p-4" @click.self="closePreview">
-            <div class="modal-content w-full max-w-6xl flex flex-col max-h-[95vh] sm:max-h-[90vh] overflow-hidden">
+            <div class="modal-content w-full max-w-6xl flex flex-col lg:flex-row max-h-[95vh] sm:max-h-[90vh] overflow-hidden">
                 <!-- 图片预览区 - 移动端优先显示 -->
-                <div class="w-full lg:w-2/3 bg-black/80 flex items-center justify-center relative p-2 sm:p-4 lg:p-8 border-b lg:border-b-0 lg:border-r border-amber-900/30 group min-h-[200px] sm:min-h-[300px] lg:min-h-0">
+                <div class="w-full lg:w-2/3 bg-black/80 flex items-center justify-center relative p-2 sm:p-4 lg:p-8 border-b lg:border-b-0 lg:border-r border-amber-900/30 group min-h-[200px] sm:min-h-[300px] lg:min-h-0 lg:h-auto">
                     <button @click.stop="prevImage" class="nav-btn left-2 sm:left-4 opacity-70 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity" v-if="images.length > 1">
                         <svg class="w-6 h-6 sm:w-8 sm:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
                     </button>
