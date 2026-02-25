@@ -42,7 +42,7 @@ class ImageProcessorService:
             plugin_instance: StealerPlugin 实例，用于访问插件的配置和服务
         """
         self.plugin = plugin_instance
-        self.plugin_config = getattr(plugin_instance, "plugin_config", None)
+        self.plugin_config = plugin_instance.plugin_config
 
         self.raw_dir = self.plugin_config.raw_dir if self.plugin_config else None
         self.categories_dir = (
@@ -57,116 +57,38 @@ class ImageProcessorService:
         self._gif_base64_cache_max_size = self.GIF_CACHE_MAX_SIZE
         self._gif_base64_cache_expire_time = self.CACHE_EXPIRE_TIME
 
-        # 尝试从插件实例获取提示词配置，如果不存在则使用默认值
-        # 表情包含义与场景分析提示词（统一使用）
-        # 注意：正常情况下会使用 prompts.json 中的优化版本，这里只是备用
+        # 提示词配置：正常运行时由 prompts.json 加载并通过 update_config 注入，
+        # 以下仅为 prompts.json 缺失时的最小化 fallback
+        _FALLBACK_PROMPT = (
+            "分析表情包：从 `{emotion_list}` 中选择情绪分类。"
+            "返回格式：情绪分类|语义标签(逗号分隔)|画面描述(一句话)"
+        )
+        _FALLBACK_FILTER_PROMPT = (
+            "审核图片是否含不当内容，不当则返回'过滤不通过'。"
+            "否则从 `{emotion_list}` 中选择情绪分类。"
+            "返回格式：情绪分类|语义标签(逗号分隔)|画面描述(一句话)"
+        )
+
         self.emoji_classification_prompt = getattr(
-            plugin_instance,
-            "EMOJI_CLASSIFICATION_PROMPT",
-            """# 表情包含义与场景分析专家
-
-你是中文互联网文化专家，精通贴吧、微博、小红书等平台的梗文化和表情包使用习惯。
-
-## 任务目标
-分析表情包的情绪、语义标签和画面内容。
-
-## 分析要求
-
-### 1. 情绪识别
-从以下情绪列表中选择最匹配的分类：`{emotion_list}`
-
-**分析重点：**
-- 面部表情和肢体语言（最重要）
-- 图片中的文字内容和网络梗
-- 整体传达的情绪氛围
-- 幽默和讽刺意味
-
-### 2. 语义标签
-提取表情包的关键语义标签，体现网络文化特色：
-- 使用网络流行语和梗
-- 突出幽默、讽刺、调侃等元素
-- 每个标签简洁有力
-- 多个标签用逗号分隔
-
-### 3. 画面描述
-用一句话描述画面内容：
-- 简洁明了，突出重点
-- 描述主要人物、动作、表情
-- 体现表情包的核心特征
-
-## 输出格式
-严格按照以下格式返回，使用竖线'|'分隔，不要添加任何其他内容：
-情绪分类|语义标签(用逗号分隔)|画面描述(一句话)
-
-**示例：**
-happy|大笑,熊猫人,指人|熊猫人指着屏幕大笑
-troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
-
-## 重要提醒
-- 直接输出结果，不要解释过程
-- 必须体现网络文化和梗的特色
-- 语义标签要准确反映表情包含义
-- 画面描述要简洁生动""",
+            plugin_instance, "EMOJI_CLASSIFICATION_PROMPT", _FALLBACK_PROMPT
         )
-
-        # 带审核的表情包分析提示词（合并版本）
         self.emoji_classification_with_filter_prompt = getattr(
-            plugin_instance,
-            "EMOJI_CLASSIFICATION_WITH_FILTER_PROMPT",
-            """# 表情包内容审核与分析专家
-
-你是中文互联网文化专家，精通贴吧、微博、小红书等平台的梗文化和表情包使用习惯。
-
-## 第一步：内容审核
-首先判断图片是否包含不当内容：
-- 如果包含裸露、暴力、血腥、政治敏感或违法内容，直接返回'过滤不通过'
-- 否则继续进行表情包分析
-
-## 第二步：表情包分析（仅在通过审核后）
-
-### 1. 情绪识别
-从以下情绪列表中选择最匹配的分类：`{emotion_list}`
-
-### 2. 语义标签
-提取表情包的关键语义标签，体现网络文化特色：
-- 使用网络流行语和梗
-- 突出幽默、讽刺、调侃等元素
-- 每个标签简洁有力
-- 多个标签用逗号分隔
-
-### 3. 画面描述
-用一句话描述画面内容：
-- 简洁明了，突出重点
-- 描述主要人物、动作、表情
-- 体现表情包的核心特征
-
-## 输出格式
-- 如果内容审核不通过，只返回：过滤不通过
-- 如果审核通过，严格按照以下格式返回，使用竖线'|'分隔：
-情绪分类|语义标签(用逗号分隔)|画面描述(一句话)
-
-**示例：**
-happy|大笑,熊猫人,指人|熊猫人指着屏幕大笑
-troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
-
-## 重要提醒
-- 直接输出结果，不要解释过程
-- 必须体现网络文化和梗的特色
-- 语义标签要准确反映表情包含义
-- 画面描述要简洁生动""",
+            plugin_instance, "EMOJI_CLASSIFICATION_WITH_FILTER_PROMPT", _FALLBACK_FILTER_PROMPT
         )
 
-        # 保留combined_analysis_prompt作为备用（现在基本不使用）
+        # 保留combined_analysis_prompt作为备用
         self.combined_analysis_prompt = self.emoji_classification_prompt
 
-        # 配置参数
-        self.categories = list(
-            getattr(self.plugin_config, "categories", []) or []
-            if self.plugin_config
-            else []
-        )
-        self.content_filtration = False
-        self.vision_provider_id = ""
+        # 配置参数（初始值从 plugin_config 读取，后续通过 update_config 更新）
+        self.categories = list(self.plugin_config.categories or []) if self.plugin_config else []
+        self.content_filtration = bool(
+            getattr(self.plugin_config, "content_filtration", False)
+        ) if self.plugin_config else False
+        self.vision_provider_id = str(
+            self.plugin_config.vision_provider_id or ""
+        ) if self.plugin_config else ""
+        # 框架 VLM provider 缓存，None 表示未查询过
+        self._cached_framework_vlm_id: str | None = None
 
         # 执行自动迁移检查（在插件启动时运行一次）
         # 注意：_auto_migrate_categories 是异步方法，需在 initialize() 中调用
@@ -295,6 +217,8 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
             self.content_filtration = content_filtration
         if vision_provider_id is not None:
             self.vision_provider_id = vision_provider_id
+            # 插件 provider 变更时，重置框架缓存以便重新解析
+            self._cached_framework_vlm_id = None
         if emoji_classification_prompt is not None:
             self.emoji_classification_prompt = emoji_classification_prompt
         if combined_analysis_prompt is not None:
@@ -443,176 +367,168 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
         hash_val: str,
         is_platform_emoji: bool = False,
     ) -> tuple[bool, dict[str, Any] | None]:
-        """使用原有系统处理图片（保持向后兼容）
+        """处理图片：去重 → 缓存检查 → VLM 分类 → 存储索引。"""
 
-        Args:
-            is_platform_emoji: 是否为平台标记的表情包，如果是则跳过元数据过滤
-        """
-        # 检查图片是否已存在（持久化索引 > 传入索引）
-        if hasattr(self.plugin, "cache_service"):
-            persistent_idx = self.plugin.cache_service.get_index_cache()
-            for k, v in persistent_idx.items():
-                if isinstance(v, dict) and v.get("hash") == hash_val:
-                    logger.debug(f"图片已存在于持久化索引中: {hash_val}")
-                    if is_temp and os.path.exists(file_path):
-                        await self.plugin._safe_remove_file(file_path)
-                    return False, None
+        # ── 去重：持久化索引 / 黑名单 / 传入索引 ──
+        if await self._is_duplicate_or_blacklisted(hash_val, idx, file_path, is_temp):
+            return False, None
 
-            # 检查图片是否在黑名单中
-            blacklist = self.plugin.cache_service.get_cache("blacklist_cache")
-            if blacklist and hash_val in blacklist:
-                logger.debug(f"图片在黑名单中，跳过存储: {hash_val}")
-                if is_temp and os.path.exists(file_path):
-                    await self.plugin._safe_remove_file(file_path)
-                return False, None
-        else:
-            # 无 cache_service 时回退到传入的 idx
-            for k, v in idx.items():
-                if isinstance(v, dict) and v.get("hash") == hash_val:
-                    logger.debug(f"图片已存在于索引中: {hash_val}")
-                    if is_temp and os.path.exists(file_path):
-                        await self.plugin._safe_remove_file(file_path)
-                    return False, None
-
-        # 检查图片是否已存在于缓存中
-        if hash_val in self._image_cache:
-            cached_result = self._image_cache[hash_val]
-            # 检查缓存是否过期
-            if time.time() - cached_result["timestamp"] < self._cache_expire_time:
-                logger.debug(
-                    f"图片分类结果已缓存: {hash_val} -> {cached_result['category']}"
-                )
-
-                category = cached_result["category"]
-                tags = cached_result["tags"]
-                desc = cached_result["desc"]
-                emotion = cached_result["emotion"]
-                scenes = cached_result.get("scenes", [])
-
-                # 缓存结果处理：跳过VLM调用，直接使用缓存
-                if category == self.CATEGORY_FILTERED or emotion == self.CATEGORY_FILTERED:
-                    logger.debug(f"图片内容过滤不通过（缓存），跳过存储: {hash_val}")
-                    if is_temp and os.path.exists(file_path):
-                        await self.plugin._safe_remove_file(file_path)
-                    return False, None
-
-                # 处理非表情包的缓存结果
-                if category == "非表情包" or emotion == "非表情包":
-                    logger.debug(f"图片非表情包（缓存），跳过存储: {hash_val}")
-                    if is_temp and os.path.exists(file_path):
-                        await self.plugin._safe_remove_file(file_path)
-                    return False, None
-
-                # 处理有效分类的缓存结果
-                if category and category in self.categories:
-                    logger.debug(f"图片分类结果有效（缓存）: {category}")
-                    return await self._store_and_index_image(
-                        file_path, is_temp, category, hash_val, idx,
-                        tags=tags, desc=desc, scenes=scenes,
-                    )
-                else:
-                    # 处理无法分类的缓存结果
-                    logger.debug(f"图片无法分类（缓存），留在raw目录: {hash_val}")
-                    return False, None
-            else:
-                # 缓存过期，从缓存中移除（安全删除）
-                self._image_cache.pop(hash_val, None)
-
-        # 首次处理：将图片存储到raw目录
-        raw_dir = self.plugin_config.ensure_raw_dir()
-        if raw_dir:
-            base_path = Path(file_path)
-            ext = base_path.suffix.lower() if base_path.suffix else ".jpg"
-            filename = f"{int(time.time())}_{hash_val[:8]}{ext}"
-            raw_path = str(raw_dir / filename)
-            if is_temp:
-                await asyncio.to_thread(shutil.move, file_path, raw_path)
-            else:
-                await asyncio.to_thread(shutil.copy2, file_path, raw_path)
-        else:
-            raw_path = file_path
-
-        # 过滤和分类图片（合并为一次VLM调用以提高效率）
-        try:
-            category, tags, desc, emotion, scenes = await self.classify_image(
-                event=event,
-                file_path=raw_path,
-                categories=categories,
-                content_filtration=content_filtration,
+        # ── 内存缓存命中 ──
+        cached = self._get_valid_cache(hash_val)
+        if cached is not None:
+            return await self._handle_classification_result(
+                cached["category"], cached["emotion"],
+                cached.get("tags", []), cached.get("desc", ""),
+                cached.get("scenes", []),
+                file_path, is_temp, hash_val, idx,
+                from_cache=True,
             )
 
-            logger.debug(f"图片分类结果: category={category}, emotion={emotion}")
+        # ── 存入 raw 目录 ──
+        raw_path = await self._move_to_raw(file_path, hash_val, is_temp)
 
-            # 处理内容过滤不通过的情况
-            if category == self.CATEGORY_FILTERED or emotion == self.CATEGORY_FILTERED:
-                logger.debug(f"图片内容过滤不通过，跳过存储: {raw_path}")
-                await self.plugin._safe_remove_file(raw_path)
-                return False, None
-
-            # 处理非表情包的情况
-            if category == "非表情包" or emotion == "非表情包":
-                logger.debug(f"图片非表情包，跳过存储: {raw_path}")
-                await self.plugin._safe_remove_file(raw_path)
-                return False, None
-
-            # 处理有效分类结果 —— 复用公共方法完成存储和索引
-            if category and category in self.categories:
-                logger.debug(f"图片分类结果有效: {category}")
-
-                success, idx = await self._store_and_index_image(
-                    raw_path, is_temp=False, category=category,
-                    hash_val=hash_val, idx=idx,
-                    tags=tags, desc=desc, scenes=scenes,
-                    already_in_raw=True,
-                )
-
-                # 将结果存入缓存，避免重复处理
-                self._image_cache[hash_val] = {
-                    "category": category,
-                    "tags": tags,
-                    "desc": desc,
-                    "emotion": emotion,
-                    "scenes": scenes,
-                    "timestamp": time.time(),
-                }
-                self._evict_image_cache()
-
-                return success, idx
-            else:
-                logger.warning(
-                    f"图片分类结果无效: {category}，图片将留在raw目录等待清理"
-                )
-
-                # 将无法分类的结果也存入缓存，避免重复处理
-                self._image_cache[hash_val] = {
-                    "category": category,
-                    "tags": tags,
-                    "desc": desc,
-                    "emotion": emotion,
-                    "scenes": scenes,
-                    "timestamp": time.time(),
-                }
-                self._evict_image_cache()
-
-                return False, None
+        # ── VLM 分类 ──
+        try:
+            category, tags, desc, emotion, scenes = await self.classify_image(
+                event=event, file_path=raw_path,
+                categories=categories, content_filtration=content_filtration,
+            )
         except Exception as e:
-            error_msg = f"处理图片失败 [图片路径: {raw_path}]: {e}"
-            logger.error(error_msg)
+            logger.error(f"处理图片失败 [{raw_path}]: {e}")
             if is_temp:
                 await self.plugin._safe_remove_file(raw_path)
-            raise Exception(error_msg) from e
+            raise
+
+        # ── 缓存结果 ──
+        self._put_image_cache(hash_val, category, tags, desc, emotion, scenes)
+
+        # ── 处理分类结果 ──
+        return await self._handle_classification_result(
+            category, emotion, tags, desc, scenes,
+            raw_path, False, hash_val, idx,
+            from_cache=False, already_in_raw=True,
+        )
+
+    # ── _process_image_legacy 的辅助方法 ──
+
+    async def _is_duplicate_or_blacklisted(
+        self, hash_val: str, idx: dict, file_path: str, is_temp: bool,
+    ) -> bool:
+        """检查图片是否已存在于索引或黑名单中。"""
+        async def _cleanup_temp():
+            if is_temp and os.path.exists(file_path):
+                await self.plugin._safe_remove_file(file_path)
+
+        # 持久化索引
+        if hasattr(self.plugin, "cache_service"):
+            persistent_idx = self.plugin.cache_service.get_index_cache()
+            if any(
+                isinstance(v, dict) and v.get("hash") == hash_val
+                for v in persistent_idx.values()
+            ):
+                logger.debug(f"图片已存在于持久化索引中: {hash_val}")
+                await _cleanup_temp()
+                return True
+
+            blacklist = self.plugin.cache_service.get_cache("blacklist_cache")
+            if blacklist and hash_val in blacklist:
+                logger.debug(f"图片在黑名单中: {hash_val}")
+                await _cleanup_temp()
+                return True
+        else:
+            if any(
+                isinstance(v, dict) and v.get("hash") == hash_val
+                for v in idx.values()
+            ):
+                logger.debug(f"图片已存在于索引中: {hash_val}")
+                await _cleanup_temp()
+                return True
+
+        return False
+
+    def _get_valid_cache(self, hash_val: str) -> dict | None:
+        """获取有效（未过期）的分类缓存，过期则清除。"""
+        cached = self._image_cache.get(hash_val)
+        if cached is None:
+            return None
+        if time.time() - cached.get("timestamp", 0) < self._cache_expire_time:
+            return cached
+        self._image_cache.pop(hash_val, None)
+        return None
+
+    def _put_image_cache(
+        self, hash_val: str, category: str,
+        tags: list, desc: str, emotion: str, scenes: list,
+    ) -> None:
+        """写入分类缓存并淘汰过期条目。"""
+        self._image_cache[hash_val] = {
+            "category": category, "tags": tags, "desc": desc,
+            "emotion": emotion, "scenes": scenes,
+            "timestamp": time.time(),
+        }
+        self._evict_image_cache()
+
+    async def _move_to_raw(self, file_path: str, hash_val: str, is_temp: bool) -> str:
+        """将图片移动/复制到 raw 目录，返回 raw 路径。"""
+        raw_dir = self.plugin_config.ensure_raw_dir()
+        if not raw_dir:
+            return file_path
+        ext = Path(file_path).suffix.lower() or ".jpg"
+        filename = f"{int(time.time())}_{hash_val[:8]}{ext}"
+        raw_path = str(raw_dir / filename)
+        if is_temp:
+            await asyncio.to_thread(shutil.move, file_path, raw_path)
+        else:
+            await asyncio.to_thread(shutil.copy2, file_path, raw_path)
+        return raw_path
+
+    async def _handle_classification_result(
+        self,
+        category: str, emotion: str,
+        tags: list, desc: str, scenes: list,
+        file_path: str, is_temp: bool,
+        hash_val: str, idx: dict,
+        from_cache: bool = False,
+        already_in_raw: bool = False,
+    ) -> tuple[bool, dict[str, Any] | None]:
+        """根据分类结果决定存储、跳过或清理。"""
+        source = "缓存" if from_cache else "VLM"
+
+        # 过滤不通过
+        if category == self.CATEGORY_FILTERED or emotion == self.CATEGORY_FILTERED:
+            logger.debug(f"图片过滤不通过（{source}）: {hash_val}")
+            if is_temp and os.path.exists(file_path):
+                await self.plugin._safe_remove_file(file_path)
+            elif not from_cache and os.path.exists(file_path):
+                await self.plugin._safe_remove_file(file_path)
+            return False, None
+
+        # 非表情包
+        if category == self.CATEGORY_NOT_EMOJI or emotion == self.CATEGORY_NOT_EMOJI:
+            logger.debug(f"非表情包（{source}）: {hash_val}")
+            if is_temp and os.path.exists(file_path):
+                await self.plugin._safe_remove_file(file_path)
+            elif not from_cache and os.path.exists(file_path):
+                await self.plugin._safe_remove_file(file_path)
+            return False, None
+
+        # 有效分类
+        if category and category in self.categories:
+            logger.debug(f"分类有效（{source}）: {category}")
+            return await self._store_and_index_image(
+                file_path, is_temp, category, hash_val, idx,
+                tags=tags, desc=desc, scenes=scenes,
+                already_in_raw=already_in_raw,
+            )
+
+        # 无效分类
+        logger.warning(f"分类无效（{source}）: {category!r}，图片留在raw目录等待清理")
+        return False, None
 
     def _build_emotion_list_str(self, categories: list[str] | None = None) -> str:
         categories = categories if categories is not None else (self.categories or [])
         categories = [c for c in categories if isinstance(c, str) and c.strip()]
-        info_map = {}
-        try:
-            if self.plugin_config:
-                info_map = getattr(self.plugin_config, "category_info", {}) or {}
-            else:
-                info_map = {}
-        except Exception:
-            info_map = {}
+        info_map = getattr(self.plugin_config, "category_info", None) or {}
 
         lines = []
         for raw_key in categories:
@@ -652,360 +568,170 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
 
         Args:
             event: 消息事件
-            file_path: 图片路径
-            categories: 分类列表
-            backend_tag: 后端标签
-            content_filtration: 是否进行内容过滤（可选）
+            file_path: 图片绝对路径
+            categories: 分类列表（可选，默认使用 self.categories）
+            backend_tag: 后端标签（保留接口兼容）
+            content_filtration: 是否进行内容过滤（可选，默认使用 self.content_filtration）
 
         Returns:
-            tuple: (category, tags, desc, emotion, scenes)，其中：
-                  - category: 主要分类（emotion类别）
-                  - tags: 语义标签列表
-                  - desc: 画面描述（一句话）
-                  - emotion: 情绪标签（与category相同）
-                  - scenes: 适用场景列表（新格式下为空列表）
+            tuple: (category, tags, desc, emotion, scenes)
         """
+        # 路径验证（单一入口，_call_vision_model 不再重复）
+        file_path = os.path.abspath(file_path)
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"分类图片时文件不存在: {file_path}")
+
         try:
-            # 确保file_path是绝对路径
-            file_path = os.path.abspath(file_path)
-
-            # 检查文件是否存在
-            if not os.path.exists(file_path):
-                error_msg = f"分类图片时文件不存在: {file_path}"
-                logger.error(error_msg)
-                raise FileNotFoundError(error_msg)
-
-            # 移除元数据预过滤，直接使用VLM进行准确判断
-            # 原因：现在有了更准确的表情包识别方法，不需要基于图片尺寸的粗糙过滤
-            logger.debug("跳过元数据过滤，直接使用VLM进行表情包判断")
-
             # 确定是否进行内容过滤
             should_filter = (
                 content_filtration
                 if content_filtration is not None
-                else getattr(self.plugin, "content_filtration", True)
+                else self.content_filtration
             )
 
             prompt_categories = categories if isinstance(categories, list) else None
             emotion_list_str = self._build_emotion_list_str(prompt_categories)
 
             # 根据是否开启审核选择合适的提示词
-            if should_filter:
-                # 使用合并的审核+分析提示词，一次调用完成
-                prompt = self.emoji_classification_with_filter_prompt.format(
-                    emotion_list=emotion_list_str
-                )
-            else:
-                # 使用纯分析提示词
-                prompt = self.emoji_classification_prompt.format(
-                    emotion_list=emotion_list_str
-                )
+            prompt_template = (
+                self.emoji_classification_with_filter_prompt
+                if should_filter
+                else self.emoji_classification_prompt
+            )
+            prompt = prompt_template.format(emotion_list=emotion_list_str)
 
-            # 调用视觉模型进行分析
+            # 调用视觉模型
             response = await self._call_vision_model(event, file_path, prompt)
-            logger.debug(f"VLM响应: {response}")
 
-            # 处理审核不通过的情况
+            # 处理审核不通过
             if self.CATEGORY_FILTERED in response:
                 logger.warning(f"图片内容审核不通过: {file_path}")
                 return self.CATEGORY_FILTERED, [], "", self.CATEGORY_FILTERED, []
 
-            # 统一的响应格式: 情绪分类|语义标签(用逗号分隔)|画面描述(一句话)
+            # 解析响应：情绪分类|语义标签(逗号分隔)|画面描述(一句话)
             parts = [p.strip() for p in response.strip().split("|")]
-
-            emotion_result = (
-                parts[0]
-                if len(parts) > 0
-                else (self.categories[0] if self.categories else "happy")
-            )
-
-            # 语义标签作为tags
+            emotion_result = parts[0] if parts else ""
             tags_str = parts[1] if len(parts) > 1 else ""
             tags_result = [t.strip() for t in tags_str.split(",") if t.strip()]
-
-            # 画面描述作为desc
             desc_result = parts[2] if len(parts) > 2 else "表情包"
 
-            # 适用场景设为空（新格式不再包含场景）
-            scenes_result = []
+            # 规范化分类
+            category = self._normalize_category(emotion_result)
+            return category, tags_result, desc_result, category, []
 
-            # 新逻辑：既然移除了元数据过滤，假设输入的都是表情包
-            # 只需要处理情绪分类结果
-            normalized = ""
-            if self.plugin_config and hasattr(
-                self.plugin_config, "normalize_category_strict"
-            ):
-                try:
-                    normalized = self.plugin_config.normalize_category_strict(
-                        emotion_result
-                    )
-                except Exception:
-                    normalized = ""
-
-            if normalized and normalized in self.categories:
-                category = normalized
-            else:
-                logger.warning(
-                    f"无法从响应中提取有效情绪分类: {emotion_result}，使用默认分类"
-                )
-                category = self.categories[0] if self.categories else "happy"
-
-            return category, tags_result, desc_result, category, scenes_result
-
+        except (FileNotFoundError, ValueError):
+            # 配置错误 / 文件不存在，直接抛出不吞异常
+            raise
         except Exception as e:
-            # 添加更多上下文信息
-            error_msg = f"图片分类失败 [图片路径: {file_path}]: {e}"
-            logger.error(error_msg)
-
-            # 检查错误类型，添加更明确的错误提醒
-            if "未配置视觉模型" in str(e) or "vision_model" in str(e).lower():
-                logger.error("请检查插件配置，确保已正确设置视觉模型(vision_model)参数")
-            elif "429" in str(e) or "RateLimit" in str(e):
-                logger.error(
-                    "视觉模型请求被限流，请稍后再试或调整vision_max_retries和vision_retry_delay配置"
-                )
-            elif "图片文件不存在" in str(e):
-                logger.error("图片文件不存在，可能是文件路径错误或文件已被删除")
-            else:
-                logger.error("视觉模型调用失败，可能是模型配置错误或API密钥问题")
-
-            # 根据测试要求，无法分类时返回空字符串
+            logger.error(f"图片分类失败 [{file_path}]: {e}")
             return "", [], "", "", []
+
+    def _normalize_category(self, raw: str) -> str:
+        """将 VLM 返回的分类文本规范化为有效分类名。"""
+        if self.plugin_config:
+            try:
+                normalized = self.plugin_config.normalize_category_strict(raw)
+                if normalized and normalized in self.categories:
+                    return normalized
+            except Exception:
+                pass
+        logger.warning(f"无法识别情绪分类: {raw!r}，使用默认分类")
+        return self.categories[0] if self.categories else "happy"
 
     async def _call_vision_model(
         self, event: AstrMessageEvent | None, img_path: str, prompt: str
     ) -> str:
-        """调用视觉模型的共享辅助方法。
+        """调用视觉模型分析图片。
+
+        使用 context.llm_generate 调用指定的视觉模型 provider，
+        支持指数退避重试。
 
         Args:
-            event: 消息事件
-            img_path: 图片路径
+            event: 消息事件（用于 provider 解析）
+            img_path: 图片绝对路径（调用方需保证已验证）
             prompt: 提示词
 
         Returns:
-            str: LLM响应文本
+            str: 模型响应文本
 
         Raises:
-            Exception: 当视觉模型调用失败时抛出，包含详细的错误信息和上下文
+            ValueError: 未配置视觉模型
+            FileNotFoundError: 图片文件不存在
+            Exception: 模型调用失败（已重试）
         """
-        try:
-            # 路径处理和验证：使用pathlib确保跨平台兼容性
-            img_path_obj = Path(img_path)
-            if not img_path_obj.is_absolute():
-                if self.plugin_config and getattr(self.plugin_config, "data_dir", None):
-                    img_path_obj = (
-                        Path(self.plugin_config.data_dir) / img_path
-                    ).absolute()
+        # 路径规范化
+        img_path_obj = Path(img_path)
+        if not img_path_obj.is_absolute():
+            data_dir = getattr(self.plugin_config, "data_dir", None)
+            img_path_obj = (
+                (Path(data_dir) / img_path).absolute() if data_dir
+                else img_path_obj.absolute()
+            )
+        img_path = str(img_path_obj)
+
+        if not os.path.exists(img_path):
+            raise FileNotFoundError(f"图片文件不存在: {img_path}")
+
+        # 解析 provider
+        provider_id = await self._resolve_vision_provider(event)
+        if not provider_id:
+            raise ValueError(
+                "未配置视觉模型(vision_provider_id)，无法进行图片分析。"
+                "请在插件配置或 AstrBot 全局配置中设置。"
+            )
+
+        # 构建图片 URL（file:// 协议）
+        file_url = f"file:///{img_path.replace(chr(92), '/')}"
+
+        # 重试配置
+        max_retries = int(getattr(self.plugin, "vision_max_retries", 3))
+        retry_delay = float(getattr(self.plugin, "vision_retry_delay", 1.0))
+        last_error: Exception | None = None
+
+        for attempt in range(max_retries):
+            try:
+                logger.debug(
+                    f"调用VLM (尝试 {attempt + 1}/{max_retries}), "
+                    f"provider={provider_id}, 图片={img_path}"
+                )
+                result = await self.plugin.context.llm_generate(
+                    chat_provider_id=provider_id,
+                    prompt=prompt,
+                    image_urls=[file_url],
+                )
+
+                # LLMResponse.completion_text 是 @property，自动处理 result_chain
+                text = (result.completion_text or "").strip() if result else ""
+                if text:
+                    logger.debug(f"VLM响应: {text[:200]}")
+                    return text
+
+                logger.warning("VLM返回空响应")
+                last_error = Exception("VLM返回空响应")
+
+            except Exception as e:
+                last_error = e
+                error_msg = str(e)
+                is_rate_limit = any(
+                    kw in error_msg
+                    for kw in ("429", "RateLimit", "exceeded your current request limit")
+                )
+                if is_rate_limit:
+                    logger.warning(
+                        f"VLM请求被限流 ({attempt + 1}/{max_retries})"
+                    )
                 else:
-                    img_path_obj = img_path_obj.absolute()
-
-            img_path = str(img_path_obj)
-            if not os.path.exists(img_path):
-                error_msg = f"图片文件不存在: {img_path}"
-                logger.error(error_msg)
-                raise FileNotFoundError(error_msg)
-
-            # 获取重试配置：使用getattr避免直接访问不存在的属性
-            max_retries = int(getattr(self.plugin, "vision_max_retries", 3))
-            retry_delay = float(getattr(self.plugin, "vision_retry_delay", 1.0))
-
-            # 实现指数退避重试机制
-            for attempt in range(max_retries):
-                try:
-                    # 获取当前会话使用的聊天模型ID
-                    chat_provider_id = None
-                    if event:
-                        if hasattr(event, "unified_msg_origin"):
-                            umo = event.unified_msg_origin
-                            chat_provider_id = (
-                                await self.plugin.context.get_current_chat_provider_id(
-                                    umo=umo
-                                )
-                            )
-                            logger.debug(f"从事件获取的聊天模型ID: {chat_provider_id}")
-
-                    # 获取配置的视觉模型 provider_id
-                    vision_provider_id = (
-                        getattr(self.plugin_config, "vision_provider_id", None)
-                        if self.plugin_config
-                        else None
+                    logger.error(
+                        f"VLM调用失败 ({attempt + 1}/{max_retries}): {e}"
                     )
 
-                    # 如果配置了视觉模型，使用它；否则使用当前会话的 provider
-                    if vision_provider_id:
-                        chat_provider_id = vision_provider_id
-                        logger.debug(
-                            f"使用配置的视觉模型 provider_id: {chat_provider_id}"
-                        )
-                    elif not chat_provider_id:
-                        # 如果既没有配置视觉模型，也没有从事件获取到 provider，使用默认配置
-                        chat_provider_id = getattr(
-                            self.plugin, "default_chat_provider_id", None
-                        )
-                        logger.debug(f"使用默认聊天模型ID: {chat_provider_id}")
+            # 指数退避
+            if attempt < max_retries - 1:
+                await asyncio.sleep(retry_delay * (2 ** attempt))
 
-                    # 检查是否有可用的 provider
-                    if not chat_provider_id:
-                        error_msg = (
-                            "未配置视觉模型(vision_provider_id)，无法进行图片分析"
-                        )
-                        logger.error(error_msg)
-                        raise ValueError(error_msg)
-
-                    # 根据AstrBot开发文档，使用正确的VLM调用方式
-                    logger.debug(f"准备调用VLM，图片路径: {img_path}")
-                    logger.debug(f"准备调用VLM，provider_id: {chat_provider_id}")
-
-                    # 根据开发文档，构建包含文本和图片的消息
-                    from astrbot.api.message_components import Image, Plain
-
-                    # 构建消息链
-                    message_items = [Plain(text=prompt), Image.fromFileSystem(img_path)]
-
-                    # 方法1：尝试使用Context的AI服务调用
-                    try:
-                        # 检查是否有直接的AI调用方法
-                        if hasattr(self.plugin.context, "llm_generate"):
-                            logger.debug("使用context.llm_generate方法")
-                            # 使用file://协议传递本地图片路径
-                            file_url = f"file:///{img_path.replace(chr(92), '/')}"  # 处理Windows路径
-                            result = await self.plugin.context.llm_generate(
-                                chat_provider_id=chat_provider_id,
-                                prompt=prompt,
-                                image_urls=[file_url],
-                            )
-                            logger.debug("context.llm_generate调用成功")
-                        else:
-                            raise AttributeError("context.llm_generate方法不存在")
-
-                    except Exception as context_error:
-                        logger.warning(f"Context方法调用失败: {context_error}")
-
-                        # 方法2：尝试直接使用provider
-                        try:
-                            logger.debug("尝试直接使用provider")
-                            provider_manager = self.plugin.context.provider_manager
-
-                            # 检查 provider_manager 是否存在
-                            if provider_manager is None:
-                                raise ValueError(
-                                    "Provider manager 未初始化。请检查插件配置。"
-                                )
-
-                            # 检查provider是否存在
-                            if (
-                                not hasattr(provider_manager, "providers")
-                                or chat_provider_id not in provider_manager.providers
-                            ):
-                                raise ValueError(
-                                    f"Provider {chat_provider_id} 不存在。请检查配置。"
-                                )
-
-                            provider = provider_manager.providers[chat_provider_id]
-
-                            # 检查provider是否支持文本聊天
-                            if not hasattr(provider, "text_chat"):
-                                raise ValueError(
-                                    f"Provider {chat_provider_id} 不支持文本聊天功能。"
-                                )
-
-                            # 创建模拟消息对象
-                            class MockMessage:
-                                def __init__(self, text, image_path):
-                                    self.message_str = text
-                                    self.message_chain = message_items
-                                    self.sender_id = "vision_analysis"
-                                    self.session_id = "vision_analysis"
-                                    self.unified_msg_origin = None
-
-                            mock_message = MockMessage(prompt, img_path)
-
-                            # 调用provider的text_chat方法
-                            result = await provider.text_chat.text_chat(
-                                message=mock_message, session_id="vision_analysis"
-                            )
-
-                            logger.debug("Provider直接调用成功")
-
-                        except Exception as provider_error:
-                            logger.error(f"Provider直接调用也失败: {provider_error}")
-                            raise Exception(
-                                f"所有VLM调用方法都失败。Context错误: {context_error}，Provider错误: {provider_error}"
-                            )
-
-                    if result:
-                        # 处理不同类型的响应
-                        llm_response_text = ""
-
-                        if isinstance(result, str):
-                            # 如果result是字符串，直接使用
-                            llm_response_text = result
-                            logger.debug(f"直接获取的字符串响应: {llm_response_text}")
-                        elif hasattr(result, "get_plain_text"):
-                            # 如果result是MessageChain，直接获取纯文本
-                            llm_response_text = result.get_plain_text()
-                            logger.debug(
-                                f"从MessageChain获取的响应文本: {llm_response_text}"
-                            )
-                        elif hasattr(result, "result_chain") and result.result_chain:
-                            # 如果是旧API返回的结果格式
-                            llm_response_text = result.result_chain.get_plain_text()
-                            logger.debug(
-                                f"从result_chain获取的响应文本: {llm_response_text}"
-                            )
-                        elif (
-                            hasattr(result, "completion_text")
-                            and result.completion_text
-                        ):
-                            # 从completion_text获取
-                            llm_response_text = result.completion_text
-                            logger.debug(
-                                f"从completion_text获取的响应文本: {llm_response_text}"
-                            )
-                        else:
-                            # 兜底处理：尝试转换为字符串
-                            llm_response_text = str(result)
-                            logger.debug(
-                                f"使用字符串转换获取的响应文本: {llm_response_text}"
-                            )
-
-                        logger.debug(f"最终处理的LLM响应: {llm_response_text}")
-                        return llm_response_text.strip()
-                except Exception as e:
-                    error_msg = str(e)
-                    # 检查是否为限流错误（HTTP 429或包含限流关键词）
-                    is_rate_limit = (
-                        "429" in error_msg
-                        or "RateLimit" in error_msg
-                        or "exceeded your current request limit" in error_msg
-                    )
-                    if is_rate_limit:
-                        logger.warning(
-                            f"视觉模型请求被限流，正在重试 ({attempt + 1}/{max_retries})"
-                        )
-                    else:
-                        logger.error(
-                            f"视觉模型调用失败 (尝试 {attempt + 1}/{max_retries}): {e}"
-                        )
-
-                    # 指数退避策略：每次重试延迟时间翻倍
-                    if attempt < max_retries - 1:
-                        await asyncio.sleep(retry_delay * (2**attempt))
-                    else:
-                        # 最后一次尝试失败，抛出异常并保留原始异常上下文
-                        raise Exception(
-                            f"视觉模型调用失败（已重试{max_retries}次）: {e}"
-                        ) from e
-
-            # 达到最大重试次数（理论上不会到达这里，因为最后一次尝试会抛出异常）
-            error_msg = f"视觉模型调用失败，达到最大重试次数（{max_retries}次）"
-            logger.error(error_msg)
-            raise Exception(error_msg)
-        except Exception as e:
-            # 添加上下文信息并重新抛出异常
-            error_msg = f"视觉模型调用失败 [图片路径: {img_path}]: {e}"
-            logger.error(error_msg)
-            raise Exception(error_msg) from e
+        raise Exception(
+            f"视觉模型调用失败（已重试{max_retries}次）: {last_error}"
+        ) from last_error
 
     async def _compute_hash(self, file_path: str) -> str:
         """计算文件的SHA256哈希值。
@@ -1069,9 +795,8 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
 
     def cleanup(self):
         """清理资源。"""
-        # 清理图片缓存
-        if hasattr(self, "_image_cache"):
-            self._image_cache.clear()
+        self._image_cache.clear()
+        self._gif_base64_cache.clear()
         logger.debug("ImageProcessorService 资源已清理")
 
     async def _file_to_base64(self, file_path: str) -> str:
@@ -1188,15 +913,53 @@ troll|小丑,嘲讽,阴阳怪气|卡通人物做鬼脸嘲笑
         Returns:
             str | None: 提供商ID
         """
+        return await self._resolve_vision_provider(event)
+
+    async def _resolve_vision_provider(self, event=None) -> str | None:
+        """统一的视觉模型 provider 解析逻辑。
+
+        优先级：
+        1. 插件配置的 vision_provider_id
+        2. AstrBot 框架配置的 default_image_caption_provider_id（视觉描述模型）
+        3. 都未配置时返回 None
+
+        Args:
+            event: 消息事件对象（可选）
+
+        Returns:
+            str | None: 提供商ID，未配置时返回 None
+        """
+        # 1. 优先使用插件配置的视觉模型
         if self.vision_provider_id:
             return self.vision_provider_id
-        if event is None:
-            return None
+
+        # 2. 使用缓存的框架 VLM provider（避免每次都读配置）
+        if self._cached_framework_vlm_id is not None:
+            # 空字符串表示已查询过但没有配置
+            return self._cached_framework_vlm_id or None
+
+        # 3. 首次查询：从 AstrBot 框架配置获取 default_image_caption_provider_id
+        framework_vlm_id = ""
         try:
             if hasattr(self.plugin, "context"):
-                return await self.plugin.context.get_current_chat_provider_id(
-                    event.unified_msg_origin
+                astrbot_config = self.plugin.context.get_config()
+                provider_settings = astrbot_config.get("provider_settings", {})
+                framework_vlm_id = str(
+                    provider_settings.get("default_image_caption_provider_id", "") or ""
                 )
         except Exception as e:
-            logger.error(f"获取视觉模型提供者失败: {e}")
-            return None
+            logger.debug(f"读取框架视觉模型配置失败: {e}")
+
+        # 缓存结果（update_config 时会重置为 None 以便重新查询）
+        self._cached_framework_vlm_id = framework_vlm_id
+
+        if framework_vlm_id:
+            logger.info(f"使用框架全局图片描述模型: {framework_vlm_id}")
+            return framework_vlm_id
+
+        logger.warning(
+            "未配置视觉模型，无法进行图片分类。"
+            "请在插件配置中设置 vision_provider_id，"
+            "或在 AstrBot 全局配置中设置 default_image_caption_provider_id。"
+        )
+        return None

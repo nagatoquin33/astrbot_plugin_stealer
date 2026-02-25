@@ -10,7 +10,8 @@ from astrbot.api.event import AstrMessageEvent
 
 # 尝试导入文本相似度计算模块
 try:
-    from .text_similarity import calculate_hybrid_similarity, calculate_simple_similarity as calculate_similarity
+    from .text_similarity import calculate_hybrid_similarity
+    from .text_similarity import calculate_simple_similarity as calculate_similarity
 except ImportError:
     # 如果导入失败，提供简单的降级实现
     def calculate_similarity(s1: str, s2: str) -> float:
@@ -51,10 +52,9 @@ class EmojiSelector:
 
     def __init__(self, plugin_instance: Any):
         self.plugin = plugin_instance
-        self.categories: list[str] = (
-            plugin_instance.categories if hasattr(plugin_instance, "categories") else []
-        )
+        self.categories: list[str] = getattr(plugin_instance, "categories", [])
         self._selection_lock = asyncio.Lock()
+        self._recent_usage: dict[str, list[str]] = {}  # category -> [canon_path, ...]
 
     def _check_group_allowed(self, event: AstrMessageEvent) -> bool:
         """检查当前群组是否允许使用表情包功能。
@@ -65,12 +65,10 @@ class EmojiSelector:
         Returns:
             bool: True 表示允许，False 表示不允许
         """
-        config = getattr(self.plugin, "plugin_config", None)
+        config = self.plugin.plugin_config
         if not config:
             return True
-        if not hasattr(config, "is_group_allowed"):
-            return True
-        group_id = config.get_group_id(event) if hasattr(config, "get_group_id") else None
+        group_id = config.get_group_id(event)
         return config.is_group_allowed(group_id)
 
     def _canon_path(self, path: str) -> str:
@@ -94,26 +92,16 @@ class EmojiSelector:
         return str(data.get("category", "")).lower()
 
     def _get_recent_usage(self, category: str) -> list[str]:
-        recent_usage_key = f"recent_usage_{category}"
-        recent_usage = getattr(self.plugin, recent_usage_key, [])
-        if not isinstance(recent_usage, list):
-            recent_usage = []
-        normalized = []
-        for item in recent_usage:
-            if not item:
-                continue
-            normalized.append(self._canon_path(str(item)))
-        return normalized
+        return list(self._recent_usage.get(category, []))
 
     def _set_recent_usage(self, category: str, recent_usage: list[str]) -> None:
-        recent_usage_key = f"recent_usage_{category}"
-        setattr(self.plugin, recent_usage_key, recent_usage)
+        self._recent_usage[category] = recent_usage
 
     def normalize_category(self, category: str) -> str:
         """归一化分类名称，返回有效分类或空字符串。"""
         if not category:
             return ""
-        cfg = getattr(self.plugin, "plugin_config", None)
+        cfg = self.plugin.plugin_config
         if not cfg:
             return ""
         try:
@@ -132,55 +120,59 @@ class EmojiSelector:
             cleaned_text = str(text)
             valid_categories = set(self.categories)
 
-            # 1. 处理显式包裹标记
-            temp_text = cleaned_text
-            for match in self.HEX_PATTERN.finditer(cleaned_text):
-                original = match.group(0)
-                emotion = match.group(1).strip()
-                norm_cat = self.normalize_category(emotion)
-
-                if norm_cat and norm_cat in valid_categories and norm_cat not in seen:
-                    seen.add(norm_cat)
-                    res.append(norm_cat)
-                temp_text = temp_text.replace(original, "", 1)
-            cleaned_text = temp_text
-
-            # 2. 处理残缺标记
-            temp_text = cleaned_text
-            for match in self.INCOMPLETE_HEX_PATTERN.finditer(cleaned_text):
-                original = match.group(0)
-                emotion = match.group(1).strip()
-                norm_cat = self.normalize_category(emotion)
-
-                if norm_cat and norm_cat in valid_categories and norm_cat not in seen:
-                    logger.debug(f"检测到残缺情绪标签: {emotion} -> {norm_cat}")
-                    seen.add(norm_cat)
-                    res.append(norm_cat)
-                    temp_text = temp_text.replace(original, "", 1)
-            cleaned_text = temp_text
-
-            # 3. 处理单个&包裹
-            temp_text = cleaned_text
-            for match in self.SINGLE_HEX_PATTERN.finditer(cleaned_text):
-                original = match.group(0)
-                emotion = match.group(1).strip()
-                norm_cat = self.normalize_category(emotion)
-
-                if norm_cat and norm_cat in valid_categories and norm_cat not in seen:
-                    seen.add(norm_cat)
-                    res.append(norm_cat)
-                    temp_text = temp_text.replace(original, "", 1)
-            cleaned_text = temp_text
+            # 三种标记格式依次提取: &&tag&&, 残缺 &&tag, 单个 &tag&
+            patterns = [
+                (self.HEX_PATTERN, True),          # 完整标记：总是清理
+                (self.INCOMPLETE_HEX_PATTERN, False),  # 残缺标记：仅匹配时清理
+                (self.SINGLE_HEX_PATTERN, True),    # 单标记：总是清理
+            ]
+            for pattern, always_clean in patterns:
+                cleaned_text, found = self._extract_with_pattern(
+                    pattern, cleaned_text, valid_categories, seen, always_clean
+                )
+                res.extend(found)
 
             return res, cleaned_text
         except Exception as e:
             logger.error(f"提取文本情绪失败: {e}")
             return [], text
 
+    @staticmethod
+    def _extract_with_pattern(
+        pattern: re.Pattern,
+        text: str,
+        valid_categories: set[str],
+        seen: set[str],
+        always_clean: bool,
+    ) -> tuple[str, list[str]]:
+        """用指定正则从文本中提取情绪标签并清理原文。
+
+        Args:
+            pattern: 编译好的正则
+            text: 待处理文本
+            valid_categories: 合法分类集合
+            seen: 已出现的分类（去重用，会被原地修改）
+            always_clean: True=无论是否匹配到分类都清理标记; False=仅匹配到有效分类时清理
+
+        Returns:
+            (cleaned_text, new_emotions)
+        """
+        found: list[str] = []
+        temp = text
+        for match in pattern.finditer(text):
+            norm_cat = match.group(1).strip().lower()
+            if norm_cat in valid_categories and norm_cat not in seen:
+                seen.add(norm_cat)
+                found.append(norm_cat)
+                temp = temp.replace(match.group(0), "", 1)
+            elif always_clean:
+                temp = temp.replace(match.group(0), "", 1)
+        return temp, found
+
     async def select_emoji(self, category: str, context_text: str = "") -> str | None:
         """选择表情包（智能或随机）。"""
         async with self._selection_lock:
-            use_smart = getattr(self.plugin, "smart_emoji_selection", True)
+            use_smart = self.plugin.smart_emoji_selection
 
             if use_smart and context_text and len(context_text.strip()) > 5:
                 smart_path = await self._select_emoji_smart_impl(category, context_text)
@@ -195,11 +187,8 @@ class EmojiSelector:
             return await self._select_emoji_smart_impl(category, context_text)
 
     def _select_emoji_random_impl(self, category: str, use_smart: bool) -> str | None:
-        categories_dir = None
-        if self.plugin.plugin_config and getattr(
-            self.plugin.plugin_config, "categories_dir", None
-        ):
-            categories_dir = self.plugin.plugin_config.categories_dir
+        cfg = self.plugin.plugin_config
+        categories_dir = cfg.categories_dir if cfg else None
 
         if not categories_dir:
             return None
@@ -247,29 +236,24 @@ class EmojiSelector:
         self, category: str, context_text: str
     ) -> str | None:
         try:
-            cache_service = getattr(self.plugin, "cache_service", None)
+            cache_service = self.plugin.cache_service
             if not cache_service:
                 return None
 
-            idx = await cache_service.load_index()
+            idx = cache_service.get_index_cache_readonly()
+            if not idx:
+                return None
+
             candidates = []
 
-            # 这里重用了 search_images 的核心逻辑，但加入了 context_text 的匹配
-            # 为了减少重复，我们可以直接调用 search_images 搜索 context_text
-            # 但 context_text 是长文本，search_images 适合短语
-            # 所以这里保留独立逻辑，或者复用 calculate_hybrid_similarity
-
-            # 简化版实现：
             for file_path, data in idx.items():
                 if not isinstance(data, dict):
                     continue
 
-                file_cat = self._get_category_from_data(data)
-                if file_cat != category:
+                if self._get_category_from_data(data) != category:
                     continue
 
                 desc = str(data.get("desc", ""))
-
                 score = calculate_hybrid_similarity(context_text, desc)
                 if score > 0.3:
                     candidates.append((file_path, score))
@@ -284,14 +268,24 @@ class EmojiSelector:
             logger.error(f"智能选择表情包失败: {e}")
             return None
 
+    @staticmethod
+    def _parse_tags(raw_tags: Any) -> list[str]:
+        """安全解析 tags 字段，兼容字符串和列表类型。"""
+        if isinstance(raw_tags, str):
+            return [t.strip().lower() for t in raw_tags.split(",") if t.strip()]
+        if isinstance(raw_tags, list):
+            return [str(t).lower() for t in raw_tags if t]
+        return []
+
     async def search_images(
         self, query: str, limit: int = 1, idx: dict | None = None
     ) -> list[tuple[str, str, str, str]]:
-        """根据查询词搜索图片。"""
+        """根据查询词搜索图片（纯评分搜索，不含关键词映射）。"""
         try:
             if idx is None:
-                if hasattr(self.plugin, "cache_service"):
-                    idx = self.plugin.cache_service.get_index_cache()
+                cache_service = self.plugin.cache_service
+                if cache_service:
+                    idx = cache_service.get_index_cache_readonly()
 
             if not idx:
                 return []
@@ -302,134 +296,100 @@ class EmojiSelector:
 
             MAX_STR_LENGTH = 20
             top_k = limit * 3
-            top_candidates = []
+            top_candidates: list[tuple[str, str, str, str, int]] = []
 
             for file_path, data in idx.items():
                 if not isinstance(data, dict):
                     continue
 
-                score = 0
                 desc = str(data.get("desc", "")).lower()
-                # 安全处理 tags 字段，兼容字符串和列表类型
-                raw_tags = data.get("tags", [])
-                if isinstance(raw_tags, str):
-                    tags = [t.strip().lower() for t in raw_tags.split(",") if t.strip()]
-                elif isinstance(raw_tags, list):
-                    tags = [str(t).lower() for t in raw_tags if t]
-                else:
-                    tags = []
+                tags = self._parse_tags(data.get("tags", []))
                 tags_str = ", ".join(tags)
                 category = self._get_category_from_data(data)
 
-                # 快速过滤
+                # 快速字符级过滤
                 if query_chars:
                     all_text = category + " " + desc + " " + " ".join(tags)
                     if not query_chars.intersection(set(all_text)):
                         continue
 
-                # 精确匹配分类
-                if query_lower == category:
-                    score = 20
-                    top_candidates.append((file_path, desc, category, tags_str, score))
-                    continue
-
-                # 包含匹配分类
-                if query_lower in category or category in query_lower:
-                    score = 10
-
-                # 描述匹配
-                if query_lower == desc:
-                    score = max(score, 15)
-                elif query_lower in desc:
-                    score = max(score, 12)
-                elif query_tokens:
-                    matched = sum(1 for token in query_tokens if token in desc)
-                    score = max(score, matched * 3)
-
-                if score >= 15:
-                    top_candidates.append((file_path, desc, category, tags_str, score))
-                    continue
-
-                # 标签匹配
-                if tags:
-                    if query_lower == tags[0]:
-                        score = max(score, 12)
-                    elif query_lower in tags[0]:
-                        score = max(score, 8)
-                elif query_tokens:
-                    for tag in tags:
-                        matched = sum(1 for token in query_tokens if token in tag)
-                        score = max(score, matched * 2)
-                        if score >= 15:
-                            break
-
-                if score >= 15:
-                    top_candidates.append((file_path, desc, category, tags_str, score))
-                    continue
-
-                # 模糊匹配 (降级)
-                if score >= 10 and query_tokens:
-                    has_fuzzy = False
-                    for target in [category, desc] + tags[:2]:
-                        if len(target) > 1 and len(query_lower) > 1:
-                            sim = calculate_similarity(
-                                query_lower[:MAX_STR_LENGTH], target[:MAX_STR_LENGTH]
-                            )
-                            if sim >= self.SIMILARITY_THRESHOLD:
-                                score = max(score, int(4 + (sim - self.SIMILARITY_THRESHOLD) * 12))
-                                has_fuzzy = True
-                                break
-                    if has_fuzzy:
-                        top_candidates.append(
-                            (file_path, desc, category, tags_str, score)
-                        )
-                        continue
+                score = self._score_entry(
+                    query_lower, query_tokens, category, desc, tags, MAX_STR_LENGTH
+                )
 
                 if score > 0:
                     top_candidates.append((file_path, desc, category, tags_str, score))
-
-                if len(top_candidates) > top_k:
-                    top_candidates.sort(key=lambda x: x[4], reverse=True)
-                    top_candidates = top_candidates[:top_k]
+                    # 定期裁剪，避免候选列表过大
+                    if len(top_candidates) > top_k:
+                        top_candidates.sort(key=lambda x: x[4], reverse=True)
+                        top_candidates = top_candidates[:top_k]
 
             top_candidates.sort(key=lambda x: x[4], reverse=True)
-            results = [
+            return [
                 (item[0], item[1], item[2], item[3]) for item in top_candidates[:limit]
             ]
-
-            # 如果没有结果，尝试关键词映射
-            if not results:
-                cfg = getattr(self.plugin, "plugin_config", None)
-                keyword_map = cfg.get_keyword_map() if cfg else {}
-                if query in keyword_map:
-                    mapped_cat = keyword_map[query]
-                    logger.debug(f"尝试映射查询 '{query}' -> 分类 '{mapped_cat}'")
-                    # 递归调用（注意避免无限递归，这里只映射一次）
-                    # 为了简单，直接在 idx 中找分类匹配
-                    for file_path, data in idx.items():
-                        if not isinstance(data, dict):
-                            continue
-                        cat = self._get_category_from_data(data)
-                        if cat == mapped_cat:
-                            # 安全处理 tags 字段
-                            raw_tags = data.get("tags", [])
-                            if isinstance(raw_tags, str):
-                                tags_str = raw_tags
-                            elif isinstance(raw_tags, list):
-                                tags_str = ", ".join(str(t) for t in raw_tags)
-                            else:
-                                tags_str = ""
-                            results.append(
-                                (file_path, str(data.get("desc", "")), cat, tags_str)
-                            )
-                            if len(results) >= limit:
-                                break
-
-            return results
 
         except Exception as e:
             logger.error(f"搜索图片失败: {e}")
             return []
+
+    def _score_entry(
+        self,
+        query_lower: str,
+        query_tokens: list[str],
+        category: str,
+        desc: str,
+        tags: list[str],
+        max_str_len: int,
+    ) -> int:
+        """计算单条索引条目与查询的匹配得分。"""
+        # 精确匹配分类
+        if query_lower == category:
+            return 20
+
+        score = 0
+
+        # 包含匹配分类
+        if query_lower in category or category in query_lower:
+            score = 10
+
+        # 描述匹配
+        if query_lower == desc:
+            score = max(score, 15)
+        elif query_lower in desc:
+            score = max(score, 12)
+        elif query_tokens:
+            matched = sum(1 for t in query_tokens if t in desc)
+            score = max(score, matched * 3)
+
+        if score >= 15:
+            return score
+
+        # 标签匹配
+        if tags:
+            if query_lower == tags[0]:
+                score = max(score, 12)
+            elif query_lower in tags[0]:
+                score = max(score, 8)
+            if query_tokens:
+                for tag in tags:
+                    matched = sum(1 for t in query_tokens if t in tag)
+                    score = max(score, matched * 2)
+                    if score >= 15:
+                        return score
+
+        # 模糊匹配（降级）
+        if score >= 10 and query_tokens:
+            for target in [category, desc] + tags[:2]:
+                if len(target) > 1 and len(query_lower) > 1:
+                    sim = calculate_similarity(
+                        query_lower[:max_str_len], target[:max_str_len]
+                    )
+                    if sim >= self.SIMILARITY_THRESHOLD:
+                        score = max(score, int(4 + (sim - self.SIMILARITY_THRESHOLD) * 12))
+                        break
+
+        return score
 
     async def smart_search(
         self,
@@ -453,13 +413,12 @@ class EmojiSelector:
             list[tuple[path, desc, emotion, tags]]
         """
         # 1) 直接搜索
-
         results = await self.search_images(query, limit=limit, idx=idx)
         if results:
             return results
 
         # 2) 关键词映射
-        cfg = getattr(self.plugin, "plugin_config", None)
+        cfg = self.plugin.plugin_config
         keyword_map = cfg.get_keyword_map() if cfg else {}
         if query in keyword_map:
             mapped_category = keyword_map[query]
@@ -484,7 +443,7 @@ class EmojiSelector:
     def check_send_probability(self) -> bool:
         """检查表情包发送概率。"""
         try:
-            emoji_chance = getattr(self.plugin, "emoji_chance", 0.4)
+            emoji_chance = self.plugin.emoji_chance
             chance = float(emoji_chance)
             if chance <= 0:
                 logger.debug("表情包自动发送概率为0，未触发图片发送")
@@ -501,12 +460,25 @@ class EmojiSelector:
             logger.error(f"解析表情包自动发送概率配置失败: {e}")
             return False
 
+    async def _encode_emoji(self, emoji_path: str) -> str | None:
+        """将表情包文件编码为 base64，失败返回 None。"""
+        if not os.path.exists(emoji_path):
+            logger.warning(f"表情包文件不存在: {emoji_path}")
+            return None
+        image_processor = self.plugin.image_processor_service
+        if not image_processor:
+            return None
+        try:
+            return await image_processor._file_to_gif_base64(emoji_path)
+        except Exception as e:
+            logger.error(f"编码表情包失败: {emoji_path}, {e}")
+            return None
+
     async def send_emoji_with_text(
         self, event: AstrMessageEvent, emoji_path: str, cleaned_text: str
     ) -> None:
         """发送表情包（异步场景下直接发送新消息）。"""
         try:
-            # 检查是否已通过 LLM 工具主动发送过表情包
             if event.get_extra("stealer_active_sent"):
                 logger.debug("[Stealer] 已主动发送过表情包，跳过自动发送")
                 return
@@ -517,17 +489,12 @@ class EmojiSelector:
             if not self._check_group_allowed(event):
                 return
 
-            image_processor = getattr(self.plugin, "image_processor_service", None)
-
-            if not image_processor:
+            b64 = await self._encode_emoji(emoji_path)
+            if not b64:
                 return
 
-            # 这里假设 _file_to_gif_base64 仍在 ImageProcessorService 中
-            # 如果它被移动了，需要相应调整
-            if hasattr(image_processor, "_file_to_gif_base64"):
-                b64 = await image_processor._file_to_gif_base64(emoji_path)
-                await event.send(MessageChain([ImageComponent.fromBase64(b64)]))
-                logger.debug(f"[Stealer] 已发送表情包: {emoji_path}")
+            await event.send(MessageChain([ImageComponent.fromBase64(b64)]))
+            logger.debug(f"[Stealer] 已发送表情包: {emoji_path}")
 
         except Exception as e:
             logger.error(f"发送表情包失败: {e}", exc_info=True)
@@ -539,40 +506,25 @@ class EmojiSelector:
         from astrbot.api.message_components import Plain
 
         try:
-            # 获取当前结果
             result = event.get_result()
-
-            # 创建新的结果对象
             new_result = event.make_result().set_result_content_type(
                 result.result_content_type
             )
 
-            # 添加除了Plain文本外的其他组件
+            # 保留非 Plain 组件
             for comp in result.chain:
                 if not isinstance(comp, Plain):
                     new_result.chain.append(comp)
 
-            # 添加清理后的文本
             if cleaned_text.strip():
                 new_result.message(cleaned_text.strip())
 
-            # 依次添加图片
-            image_processor = getattr(self.plugin, "image_processor_service", None)
-            if not image_processor:
-                return
-
+            # 依次编码并添加图片
             for path in emoji_paths:
-                try:
-                    if os.path.exists(path):
-                        if hasattr(image_processor, "_file_to_gif_base64"):
-                            b64 = await image_processor._file_to_gif_base64(path)
-                            new_result.base64_image(b64)
-                    else:
-                        logger.warning(f"显式表情包文件不存在: {path}")
-                except Exception as e:
-                    logger.error(f"加载显式表情包失败: {path}, {e}")
+                b64 = await self._encode_emoji(path)
+                if b64:
+                    new_result.base64_image(b64)
 
-            # 设置新的结果对象
             event.set_result(new_result)
         except Exception as e:
             logger.error(f"发送显式表情包失败: {e}", exc_info=True)
@@ -580,27 +532,24 @@ class EmojiSelector:
     async def try_send_emoji(
         self, event: AstrMessageEvent, emotions: list[str], cleaned_text: str
     ) -> bool:
-        """尝试发送表情包。"""
+        """尝试发送表情包，遍历 emotions 列表直到第一个匹配到的表情包。"""
         if not self._check_group_allowed(event):
             return False
-
-        # 如果本轮已经通过 LLM 工具主动发送过表情包，则跳过自动发送
 
         if event.get_extra("stealer_active_sent"):
             logger.debug("[Stealer] 检测到 stealer_active_sent=True，跳过自动表情发送")
             return False
 
-        # 1. 检查发送概率
         if not self.check_send_probability():
             return False
 
-        # 2. 智能选择表情包（传入上下文）
-        emoji_path = await self.select_emoji(emotions[0], cleaned_text)
-        if not emoji_path:
-            return False
+        # 遍历情绪列表，第一个能选到表情包的就发送
+        for emotion in emotions:
+            emoji_path = await self.select_emoji(emotion, cleaned_text)
+            if emoji_path:
+                await self.send_emoji_with_text(event, emoji_path, cleaned_text)
+                logger.debug(f"已发送表情包 (情绪={emotion})")
+                return True
 
-        # 3. 发送表情包
-        await self.send_emoji_with_text(event, emoji_path, cleaned_text)
-
-        logger.debug("已发送表情包")
-        return True
+        logger.debug("[Stealer] 所有情绪均未匹配到表情包")
+        return False

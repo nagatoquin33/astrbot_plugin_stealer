@@ -43,6 +43,7 @@ class PluginConfig(BaseModel):
     image_processing_cooldown: int = 10
     enable_natural_emotion_analysis: bool = True  # 情绪识别模式
     emotion_analysis_provider_id: str = ""  # 情绪分析专用模型
+    smart_emoji_selection: bool = True  # 智能表情包选择
 
     # === 内化常量（不再暴露给用户） ===
     DO_REPLACE: ClassVar[bool] = True  # 达到上限始终替换旧表情

@@ -11,7 +11,7 @@
 
 </div>
 
-> **v2.3.1** - 代码质量修复：异步 I/O、安全加固、内存优化、Bug 修复
+> **v2.3.4** - 代码大扫除，视觉模型 provider 修复
 
 ## 📑 目录
 
@@ -28,6 +28,7 @@
 ## 📢 简介
 
 我想仿照麦麦的表情包偷取做个娱乐性的插件的，于是就有了这个表情包小偷插件。
+
 表情包插入标签的灵感来源为meme_manager,vlm分类则是来自maimai。
 
 本插件完全开源免费，欢迎issue和pr，因为我确实能力有限。
@@ -41,7 +42,6 @@
 
 本插件设计灵活，支持自动使用当前会话的视觉模型，无需额外配置即可开始使用。
 
-webui预计以后会加个token登录之类的。
 
 
 
@@ -78,6 +78,8 @@ webui预计以后会加个token登录之类的。
 | `steal_chance` | 0.6 | 概率模式下的偷图概率 (0-1) |
 | `image_processing_cooldown` | 10 | 冷却模式下两次偷取的最小间隔 (秒) |
 | `send_emoji_as_gif` | true | 真表情包样式（GIF发送）；开启会在大图/动图/高频发送场景增加内存占用 |
+| `smart_emoji_selection` | true | 智能表情包选择（综合评分）；关闭则随机选择 |
+| `vision_provider_id` | "" | 视觉模型 Provider ID（留空自动使用框架全局图片描述模型） |
 | `group_whitelist` | [] | 群聊白名单（优先生效）；非空时：只有白名单内的群会偷/发 |
 | `group_blacklist` | [] | 群聊黑名单；白名单为空时：黑名单内的群不会偷/发 |
 | `enable_natural_emotion_analysis` | true | 启用后置轻量 LLM 语义分析模式 |

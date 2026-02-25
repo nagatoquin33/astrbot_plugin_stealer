@@ -263,6 +263,14 @@ class CacheService:
         """
         return dict(self.get_cache("index_cache"))
 
+    def get_index_cache_readonly(self) -> MappingProxyType:
+        """获取索引缓存的只读视图（零拷贝，适用于只读遍历场景）。
+
+        Returns:
+            MappingProxyType: 索引缓存的只读视图
+        """
+        return self.get_cache("index_cache")
+
     def get_cache(self, cache_name: str) -> MappingProxyType:
         """获取指定类型的缓存字典（只读视图）。
 
@@ -273,10 +281,7 @@ class CacheService:
             只读视图 MappingProxyType，如果不存在则返回空的只读视图
         """
         if cache_name in self._caches:
-            proxy = MappingProxyType(self._caches[cache_name])
-            logger.debug(f"[get_cache] {cache_name}: {len(proxy)} items in cache")
-            return proxy
-        logger.debug(f"[get_cache] {cache_name}: not found, returning empty proxy")
+            return MappingProxyType(self._caches[cache_name])
         return MappingProxyType({})
 
     async def set_cache(

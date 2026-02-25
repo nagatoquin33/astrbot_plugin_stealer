@@ -21,12 +21,7 @@ class CommandHandler:
         self.plugin = plugin_instance
 
     def _apply_config_updates(self, updates: dict) -> None:
-        updater = getattr(self.plugin, "_update_config_from_dict", None)
-        if callable(updater):
-            updater(updates)
-            return
-        for key, value in updates.items():
-            setattr(self.plugin, key, value)
+        self.plugin._update_config_from_dict(updates)
 
     async def meme_on(self, event: AstrMessageEvent):
         """开启偷表情包功能。"""
@@ -112,12 +107,12 @@ class CommandHandler:
             return
 
         if raw_action in {"show", "list", "ls", "status"}:
-            cfg = getattr(self.plugin, "plugin_config", None)
+            cfg = self.plugin.plugin_config
             if cfg is None:
                 yield event.plain_result("❌ 配置服务不可用")
                 return
-            whitelist = list(getattr(cfg, "group_whitelist", []) or [])
-            blacklist = list(getattr(cfg, "group_blacklist", []) or [])
+            whitelist = list(cfg.group_whitelist or [])
+            blacklist = list(cfg.group_blacklist or [])
             mode = "白名单优先" if whitelist else ("黑名单" if blacklist else "未启用")
             yield event.plain_result(
                 "群聊过滤状态:\n"
@@ -139,7 +134,7 @@ class CommandHandler:
             )
             return
 
-        cfg = getattr(self.plugin, "plugin_config", None)
+        cfg = self.plugin.plugin_config
         if cfg is None:
             yield event.plain_result("❌ 配置服务不可用")
             return
@@ -272,7 +267,7 @@ class CommandHandler:
     async def clear_emotion_cache(self, event: AstrMessageEvent):
         """清空情绪分析缓存。"""
         try:
-            self.plugin.smart_emotion_matcher.clear_cache()
+            await self.plugin.smart_emotion_matcher.clear_cache()
             yield event.plain_result("✅ 情绪分析缓存已清空")
         except Exception as e:
             yield event.plain_result(f"❌ 清空缓存失败: {e}")
@@ -291,11 +286,11 @@ class CommandHandler:
         )
 
         # 基础状态信息
-        steal_mode = getattr(self.plugin, "steal_mode", "probability")
+        steal_mode = self.plugin.steal_mode
         if steal_mode == "probability":
-            mode_desc = f"概率模式 (概率={getattr(self.plugin, 'steal_chance', 0.6)})"
+            mode_desc = f"概率模式 (概率={self.plugin.steal_chance})"
         else:
-            mode_desc = f"冷却模式 (冷却={getattr(self.plugin, 'image_processing_cooldown', 10)}秒)"
+            mode_desc = f"冷却模式 (冷却={self.plugin.image_processing_cooldown}秒)"
 
         status_text = "🔧 插件状态:\n"
         status_text += f"偷取: {stealing_status}\n"
@@ -903,20 +898,7 @@ class CommandHandler:
             return []
         sample_count = max(1, int(count or 1))
         picked_records = random.sample(all_records, min(sample_count, len(all_records)))
-        results = []
-        for image_path, record_dict in picked_records:
-            description = str(record_dict.get("desc", ""))
-            emotion = str(
-                record_dict.get(
-                    "emotion",
-                    record_dict.get(
-                        "category",
-                        self.plugin.categories[0] if self.plugin.categories else "开心",
-                    ),
-                )
-            )
-            results.append((image_path, description, emotion))
-        return results
+        return [self._record_to_tuple(path, rec) for path, rec in picked_records]
 
     async def get_emoji_by_emotion(self, emotion: str) -> tuple[str, str, str] | None:
         """根据情绪获取表情包。
@@ -945,19 +927,7 @@ class CommandHandler:
         if not candidates:
             return None
         picked_path, picked_record = random.choice(candidates)
-        return (
-            picked_path,
-            str(picked_record.get("desc", "")),
-            str(
-                picked_record.get(
-                    "emotion",
-                    picked_record.get(
-                        "category",
-                        self.plugin.categories[0] if self.plugin.categories else "开心",
-                    ),
-                )
-            ),
-        )
+        return self._record_to_tuple(picked_path, picked_record)
 
     async def get_emoji_by_description(
         self, description: str
@@ -985,16 +955,20 @@ class CommandHandler:
         if not candidates:
             return None
         picked_path, picked_record = random.choice(candidates)
-        return (
-            picked_path,
-            str(picked_record.get("desc", "")),
-            str(
-                picked_record.get(
-                    "emotion",
-                    picked_record.get(
-                        "category",
-                        self.plugin.categories[0] if self.plugin.categories else "开心",
-                    ),
-                )
-            ),
+        return self._record_to_tuple(picked_path, picked_record)
+
+    def _record_to_tuple(
+        self, image_path: str, record_dict: dict
+    ) -> tuple[str, str, str]:
+        """将索引记录转换为 (路径, 描述, 情绪) 元组。"""
+        description = str(record_dict.get("desc", ""))
+        emotion = str(
+            record_dict.get(
+                "emotion",
+                record_dict.get(
+                    "category",
+                    self.plugin.categories[0] if self.plugin.categories else "开心",
+                ),
+            )
         )
+        return (image_path, description, emotion)

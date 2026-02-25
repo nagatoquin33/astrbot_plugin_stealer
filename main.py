@@ -119,6 +119,7 @@ class Main(Star):
         self.send_emoji_as_gif = self.plugin_config.send_emoji_as_gif
         self.max_reg_num = self.plugin_config.max_reg_num
         self.content_filtration = self.plugin_config.content_filtration
+        self.smart_emoji_selection = self.plugin_config.smart_emoji_selection
 
         self.steal_emoji = self.plugin_config.steal_emoji
         self.categories = list(
@@ -201,7 +202,7 @@ class Main(Star):
             logger.warning(f"[Config] 扫描分类目录时出错: {e}")
 
         try:
-            index = self.cache_service.get_index_cache()
+            index = self.cache_service.get_index_cache_readonly()
             for meta in index.values():
                 if not isinstance(meta, dict):
                     continue
@@ -474,6 +475,13 @@ class Main(Star):
             # 统一同步所有配置
             self._sync_all_config()
 
+            # 将关键配置同步到子服务（_sync_all_config 只更新 main 实例属性）
+            self.image_processor_service.update_config(
+                categories=self.categories,
+                content_filtration=self.content_filtration,
+                vision_provider_id=self.vision_provider_id,
+            )
+
             # 启动独立的后台任务
             # raw目录清理任务
             self.task_scheduler.create_task(
@@ -691,11 +699,11 @@ class Main(Star):
                 await asyncio.sleep(self.RAW_CLEANUP_INTERVAL_SECONDS)
 
                 if self.steal_emoji:
-                    logger.info("开始执行raw目录清理任务")
+                    logger.debug("开始执行raw目录清理任务")
 
                     if hasattr(self, "event_handler") and self.event_handler:
                         await self.event_handler._clean_raw_directory()
-                        logger.info("raw目录清理任务完成")
+                        logger.debug("raw目录清理任务完成")
                     else:
                         logger.warning("event_handler 未初始化，跳过清理任务")
 
@@ -714,11 +722,11 @@ class Main(Star):
                 await asyncio.sleep(self.CAPACITY_CONTROL_INTERVAL_SECONDS)
 
                 if self.steal_emoji:
-                    logger.info("开始执行容量控制任务")
+                    logger.debug("开始执行容量控制任务")
 
                     # 一次性加载索引，用于无效清理和容量控制
                     image_index = await self._load_index()
-                    logger.info(f"当前索引条目数: {len(image_index)}")
+                    logger.debug(f"当前索引条目数: {len(image_index)}")
 
                     # 1) 收集无效路径
                     invalid_paths: list[str] = []
@@ -743,7 +751,8 @@ class Main(Star):
 
                         if self.cache_service:
                             await self.cache_service.update_index(cleanup_updater)
-                        logger.info(f"已清理 {removed_count} 个无效索引条目")
+                        if removed_count > 0:
+                            logger.info(f"已清理 {removed_count} 个无效索引条目")
 
                     # 2) 容量控制（使用原子更新器避免竞态条件）
                     if hasattr(self, "event_handler") and self.event_handler:
@@ -771,7 +780,7 @@ class Main(Star):
                     else:
                         logger.warning("event_handler 未初始化，跳过容量控制")
 
-                    logger.info("容量控制任务完成")
+                    logger.debug("容量控制任务完成")
 
             except asyncio.CancelledError:
                 logger.info("容量控制任务已取消")
@@ -811,7 +820,7 @@ class Main(Star):
                 return
 
             # LLM模式：启用自然语言分析时，不注入提示词
-            if getattr(self, "enable_natural_emotion_analysis", True):
+            if self.enable_natural_emotion_analysis:
                 logger.debug(
                     "[Stealer] LLM模式已启用，跳过提示词注入，将使用轻量模型分析"
                 )
@@ -935,7 +944,7 @@ class Main(Star):
                 return True
 
             # 7. 模式判断：LLM模式 vs 被动标签模式
-            is_intelligent_mode = getattr(self, "enable_natural_emotion_analysis", True)
+            is_intelligent_mode = self.enable_natural_emotion_analysis
 
             if is_intelligent_mode:
                 # LLM模式：不修改消息链，直接异步分析
@@ -1024,7 +1033,7 @@ class Main(Star):
                 return
 
             # 判断模式
-            is_intelligent_mode = getattr(self, "enable_natural_emotion_analysis", True)
+            is_intelligent_mode = self.enable_natural_emotion_analysis
 
             final_emotions = []
 
@@ -1073,24 +1082,30 @@ class Main(Star):
     def _update_result_with_cleaned_text_safe(
         self, event: AstrMessageEvent, result, cleaned_text: str
     ):
-        """安全更新结果文本，保留其他组件"""
-        # 查找并更新 Plain 组件
-        text_updated = False
-        for comp in result.chain:
-            if isinstance(comp, Plain) and hasattr(comp, "text"):
-                # 只更新包含情绪标签的 Plain 组件
-                if comp.text and comp.text.strip():
-                    # 简单替换：将组件文本设置为清理后的文本
-                    # 这样可以保留其他非文本组件（如图片、引用等）
-                    comp.text = cleaned_text
-                    text_updated = True
-                    logger.debug(f"[Stealer] 已更新 Plain 组件: {cleaned_text[:50]}...")
-                    break  # 通常只有一个主文本组件，找到后跳出
+        """安全更新结果文本，保留其他组件。
 
-        if not text_updated:
-            # 如果没有找到 Plain 组件，添加一个新的
+        策略：找到所有 Plain 组件，将清理后的文本写入第一个非空 Plain，
+        其余 Plain 清空，从而保留非文本组件（图片、引用等）的位置。
+        """
+        plain_components = [
+            comp for comp in result.chain
+            if isinstance(comp, Plain) and hasattr(comp, "text")
+        ]
+
+        if not plain_components:
             logger.debug("[Stealer] 未找到 Plain 组件，添加新的文本组件")
             result.message(cleaned_text)
+            return
+
+        # 将清理后的文本写入第一个 Plain，其余 Plain 置空
+        first_set = False
+        for comp in plain_components:
+            if not first_set:
+                comp.text = cleaned_text
+                first_set = True
+                logger.debug(f"[Stealer] 已更新 Plain 组件: {cleaned_text[:50]}...")
+            else:
+                comp.text = ""
 
     @filter.command("meme on")
     async def meme_on(self, event: AstrMessageEvent):
@@ -1244,7 +1259,7 @@ class Main(Star):
     ):
         """委托给 EmojiSelector.smart_search。"""
         if idx is None:
-            idx = self.cache_service.get_index_cache()
+            idx = self.cache_service.get_index_cache_readonly()
 
         return await self.emoji_selector.smart_search(query, limit=limit, idx=idx)
 
@@ -1290,11 +1305,11 @@ class Main(Star):
                 yield "搜索失败：当前群聊已禁用表情包功能"
                 return
 
-            if not self.cache_service.get_index_cache():
+            if not self.cache_service.get_index_cache_readonly():
                 logger.debug("索引未加载，正在加载...")
                 await self._load_index()
 
-            idx = self.cache_service.get_index_cache()
+            idx = self.cache_service.get_index_cache_readonly()
 
             # 增加搜索结果数量，给LLM更多选择
             results = await self._search_emoji_candidates(query, limit=self.MAX_SEARCH_RESULTS, idx=idx)

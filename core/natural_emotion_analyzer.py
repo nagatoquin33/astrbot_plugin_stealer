@@ -3,6 +3,7 @@
 使用小模型对LLM回复进行语义分析，识别隐含情绪
 """
 
+import asyncio
 import hashlib
 import re
 import time
@@ -24,8 +25,9 @@ class NaturalEmotionAnalyzer:
         self.categories: list[str] = plugin_instance.categories
 
         # 缓存机制
-        self.analysis_cache: dict[str, dict[str, Any]] = {}
+        self.analysis_cache: dict[str, str] = {}
         self.cache_max_size: int = self.CACHE_MAX_SIZE
+        self._cache_lock = asyncio.Lock()
 
         # 性能统计
         self.stats: dict[str, float | int] = {
@@ -41,8 +43,8 @@ class NaturalEmotionAnalyzer:
     def _build_analysis_prompt(self) -> str:
         """构建情绪分析提示词（精简版）"""
         categories_desc = {}
-        cfg = getattr(self.plugin, "plugin_config", None)
-        if cfg and hasattr(cfg, "DEFAULT_CATEGORY_INFO"):
+        cfg = self.plugin.plugin_config
+        if cfg:
             for key in self.categories:
                 info = cfg.DEFAULT_CATEGORY_INFO.get(key, {})
                 name = str(info.get("name", "")).strip()
@@ -89,10 +91,11 @@ class NaturalEmotionAnalyzer:
 
         # 检查缓存
         cache_key = self._get_cache_key(cleaned_text)
-        if cache_key in self.analysis_cache:
-            self.stats["cache_hits"] += 1
-            logger.debug(f"[情绪分析] 缓存命中: {cleaned_text[:30]}...")
-            return self.analysis_cache[cache_key]
+        async with self._cache_lock:
+            if cache_key in self.analysis_cache:
+                self.stats["cache_hits"] += 1
+                logger.debug(f"[情绪分析] 缓存命中: {cleaned_text[:30]}...")
+                return self.analysis_cache[cache_key]
 
         # 执行分析
         start_time = time.time()
@@ -106,7 +109,8 @@ class NaturalEmotionAnalyzer:
 
         # 缓存结果
         if emotion:
-            self._cache_result(cache_key, emotion)
+            async with self._cache_lock:
+                self._cache_result(cache_key, emotion)
             logger.info(
                 f"[情绪分析] {cleaned_text[:30]}... → {emotion} ({response_time:.0f}ms)"
             )
@@ -137,7 +141,7 @@ class NaturalEmotionAnalyzer:
             # 安全获取响应文本
             if not response:
                 return None
-            result_text = getattr(response, "completion_text", None)
+            result_text = response.completion_text
             if not result_text:
                 return None
 
@@ -154,17 +158,10 @@ class NaturalEmotionAnalyzer:
     async def _get_text_provider(self, event: AstrMessageEvent) -> str | None:
         """获取文本模型提供商ID"""
         # 1. 优先使用插件配置的情绪分析专用模型
-        if (
-            hasattr(self.plugin, "emotion_analysis_provider_id")
-            and self.plugin.emotion_analysis_provider_id
-        ):
+        if self.plugin.emotion_analysis_provider_id:
             return self.plugin.emotion_analysis_provider_id
 
-        # 2. 使用插件配置的文本模型
-        if hasattr(self.plugin, "text_provider_id") and self.plugin.text_provider_id:
-            return self.plugin.text_provider_id
-
-        # 3. 使用当前会话的模型
+        # 2. 使用当前会话的模型
         try:
             return await self.plugin.context.get_current_chat_provider_id(
                 event.unified_msg_origin
@@ -197,8 +194,8 @@ class NaturalEmotionAnalyzer:
         # 清理结果
         result = result_text.strip().lower()
 
-        cfg = getattr(self.plugin, "plugin_config", None)
-        if cfg and hasattr(cfg, "normalize_category_strict"):
+        cfg = self.plugin.plugin_config
+        if cfg:
             try:
                 normalized = cfg.normalize_category_strict(result)
                 logger.debug(f"[情绪分析] 解析结果: '{result}' -> '{normalized}'")
@@ -259,9 +256,10 @@ class NaturalEmotionAnalyzer:
             "cache_size": len(self.analysis_cache),
         }
 
-    def clear_cache(self):
+    async def clear_cache(self):
         """清空缓存"""
-        self.analysis_cache.clear()
+        async with self._cache_lock:
+            self.analysis_cache.clear()
         logger.info("[情绪分析] 缓存已清空")
 
 
@@ -289,9 +287,7 @@ class SmartEmotionMatcher:
             return None
 
         # 使用自然语言分析（主要方案）
-        if use_natural_analysis and getattr(
-            self.plugin, "enable_natural_emotion_analysis", True
-        ):
+        if use_natural_analysis and self.plugin.enable_natural_emotion_analysis:
             emotion = await self.natural_analyzer.analyze_emotion(event, text)
             if emotion:
                 return emotion
@@ -307,6 +303,6 @@ class SmartEmotionMatcher:
         """获取分析器统计信息"""
         return self.natural_analyzer.get_stats()
 
-    def clear_cache(self):
+    async def clear_cache(self):
         """清空分析缓存"""
-        self.natural_analyzer.clear_cache()
+        await self.natural_analyzer.clear_cache()

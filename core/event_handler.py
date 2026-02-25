@@ -45,7 +45,7 @@ class EventHandler:
         - probability 模式：每次收到图片按 steal_chance 概率决定
         - cooldown 模式：两次偷取之间至少间隔 image_processing_cooldown 秒
         """
-        steal_mode = getattr(self.plugin, "steal_mode", "probability")
+        steal_mode = self.plugin.steal_mode
 
         if steal_mode == "cooldown":
             return self._check_cooldown()
@@ -54,7 +54,7 @@ class EventHandler:
 
     def _check_cooldown(self) -> bool:
         """冷却模式：两次处理之间至少间隔 N 秒。"""
-        cooldown = getattr(self.plugin, "image_processing_cooldown", 10)
+        cooldown = self.plugin.image_processing_cooldown
         try:
             cooldown = int(cooldown)
         except Exception:
@@ -77,7 +77,7 @@ class EventHandler:
 
     def _check_probability(self) -> bool:
         """概率模式：每次按 steal_chance 概率决定是否偷取。"""
-        steal_chance = getattr(self.plugin, "steal_chance", 0.6)
+        steal_chance = self.plugin.steal_chance
         try:
             steal_chance = float(steal_chance)
         except Exception:
@@ -284,19 +284,16 @@ class EventHandler:
 
         plugin_instance = self.plugin
         try:
-            if hasattr(
-                plugin_instance, "is_meme_enabled_for_event"
-            ) and not plugin_instance.is_meme_enabled_for_event(event):
+            if not plugin_instance.is_meme_enabled_for_event(event):
                 return
         except Exception:
             return
 
         force_entry = None
-        if hasattr(plugin_instance, "get_force_capture_entry"):
-            try:
-                force_entry = plugin_instance.get_force_capture_entry(event)
-            except Exception:
-                force_entry = None
+        try:
+            force_entry = plugin_instance.get_force_capture_entry(event)
+        except Exception:
+            force_entry = None
 
         force_active = force_entry is not None
 
@@ -342,11 +339,10 @@ class EventHandler:
             except Exception as e:
                 await event.send(MessageChain([Plain(text=f"❌ 收录失败：{e}")]))
             finally:
-                if hasattr(plugin_instance, "consume_force_capture"):
-                    try:
-                        plugin_instance.consume_force_capture(event)
-                    except Exception:
-                        pass
+                try:
+                    plugin_instance.consume_force_capture(event)
+                except Exception:
+                    pass
             return
 
         # 检查是否应该处理图片（节流控制）
@@ -443,7 +439,7 @@ class EventHandler:
                     # 获取raw目录中的所有文件
                     files = list(raw_dir.iterdir())
                     if not files:
-                        logger.info(f"raw目录已为空: {raw_dir}")
+                        logger.debug(f"raw目录已为空: {raw_dir}")
                     else:
                         # 清理所有文件（因为成功分类的文件已经被立即删除了）
                         deleted_count = 0
@@ -462,14 +458,16 @@ class EventHandler:
                                     f"处理raw文件时发生错误: {file_path}, 错误: {e}"
                                 )
 
-                        logger.info(f"清理raw目录完成，共删除 {deleted_count} 个文件")
+                        if deleted_count > 0:
+                            logger.info(f"清理raw目录完成，共删除 {deleted_count} 个文件")
                         total_deleted += deleted_count
                 else:
-                    logger.info(f"raw目录不存在: {raw_dir}")
+                    logger.debug(f"raw目录不存在: {raw_dir}")
             else:
                 logger.warning("插件base_dir未设置，无法清理raw目录")
 
-            logger.info(f"清理完成，总计删除 {total_deleted} 个文件")
+            if total_deleted > 0:
+                logger.info(f"清理完成，总计删除 {total_deleted} 个文件")
             return total_deleted
         except Exception as e:
             logger.error(f"清理目录时发生错误: {e}", exc_info=True)
@@ -478,38 +476,16 @@ class EventHandler:
     async def _enforce_capacity(self, image_index: dict):
         """执行容量控制，删除最旧的图片。"""
         try:
-            max_reg = int(self.plugin.max_reg_num)
-            if max_reg <= 0:
-                logger.warning(f"容量控制上限无效: max_reg_num={max_reg}，跳过容量控制")
+            items_to_remove = self._select_items_for_removal(image_index)
+            if not items_to_remove:
                 return
-
-            if len(image_index) <= max_reg:
-                return
-
-            image_items = []
-            for file_path, image_info in image_index.items():
-                created_at = (
-                    int(image_info.get("created_at", 0))
-                    if isinstance(image_info, dict)
-                    else 0
-                )
-                image_items.append((file_path, created_at))
-
-            if not image_items:
-                return
-
-            image_items.sort(key=lambda x: x[1])
-
-            remove_count = len(image_items) - max_reg
-            remove_count = max(0, remove_count)  # 确保不为负数
-            safe_remove_count = min(remove_count, len(image_items))  # 确保不超出范围
 
             logger.info(
-                f"容量控制: 当前 {len(image_items)} 个，上限 {max_reg}，将删除 {safe_remove_count} 个最旧的"
+                f"容量控制: 当前 {len(image_index) + len(items_to_remove)} 个，"
+                f"上限 {int(self.plugin.max_reg_num)}，将删除 {len(items_to_remove)} 个最旧的"
             )
 
-            for i in range(safe_remove_count):
-                remove_path = image_items[i][0]
+            for remove_path, _ in items_to_remove:
                 try:
                     if os.path.exists(remove_path):
                         await self.plugin._safe_remove_file(remove_path)
@@ -539,7 +515,7 @@ class EventHandler:
                     del image_index[remove_path]
 
             logger.info(
-                f"容量控制完成，删除了 {remove_count} 个表情包，当前数量: {len(image_index)}"
+                f"容量控制完成，删除了 {len(items_to_remove)} 个表情包，当前数量: {len(image_index)}"
             )
         except ValueError as e:
             logger.error(f"执行容量控制时配置值错误: {e}")
@@ -549,6 +525,38 @@ class EventHandler:
             logger.error(f"执行容量控制时系统错误: {e}")
         except Exception as e:
             logger.error(f"执行容量控制时发生未预期错误: {e}", exc_info=True)
+
+    def _select_items_for_removal(
+        self, image_index: dict
+    ) -> list[tuple[str, int]]:
+        """从索引中选出需要移除的条目（按创建时间从旧到新排序后取最旧的）。
+
+        Returns:
+            需要移除的 (file_path, created_at) 列表；若无需移除则返回空列表。
+        """
+        max_reg = int(self.plugin.max_reg_num)
+        if max_reg <= 0:
+            logger.warning(f"容量控制上限无效: max_reg_num={max_reg}，跳过")
+            return []
+
+        if len(image_index) <= max_reg:
+            return []
+
+        image_items: list[tuple[str, int]] = []
+        for file_path, image_info in image_index.items():
+            created_at = (
+                int(image_info.get("created_at", 0))
+                if isinstance(image_info, dict)
+                else 0
+            )
+            image_items.append((file_path, created_at))
+
+        if not image_items:
+            return []
+
+        image_items.sort(key=lambda x: x[1])
+        remove_count = min(len(image_items) - max_reg, len(image_items))
+        return image_items[:remove_count]
 
     def _enforce_capacity_sync(self, image_index: dict) -> list[str]:
         """同步版本的容量控制，删除索引条目并返回需要删除的文件路径。
@@ -562,39 +570,16 @@ class EventHandler:
         files_to_delete = []
 
         try:
-            max_reg = int(self.plugin.max_reg_num)
-            if max_reg <= 0:
-                logger.warning(f"[容量控制-索引] 上限无效: max_reg_num={max_reg}，跳过")
+            items_to_remove = self._select_items_for_removal(image_index)
+            if not items_to_remove:
                 return files_to_delete
 
-            if len(image_index) <= max_reg:
-                return files_to_delete
+            logger.info(f"[容量控制-索引] 将删除 {len(items_to_remove)} 个最旧条目")
 
-            # 收集并按创建时间排序
-            image_items = []
-            for file_path, image_info in image_index.items():
-                created_at = (
-                    int(image_info.get("created_at", 0))
-                    if isinstance(image_info, dict)
-                    else 0
-                )
-                image_items.append((file_path, created_at))
-
-            if not image_items:
-                return files_to_delete
-
-            image_items.sort(key=lambda x: x[1])
-
-            remove_count = min(len(image_items) - max_reg, len(image_items))
-            logger.info(f"[容量控制-索引] 将删除 {remove_count} 个最旧条目")
-
-            for i in range(remove_count):
-                remove_path = image_items[i][0]
+            for remove_path, _ in items_to_remove:
                 if remove_path in image_index:
-                    # 收集文件路径供后续删除
                     files_to_delete.append(remove_path)
 
-                    # 同时收集分类目录中的副本
                     if isinstance(image_index[remove_path], dict):
                         category = image_index[remove_path].get("category", "")
                         if category and self.plugin.base_dir:

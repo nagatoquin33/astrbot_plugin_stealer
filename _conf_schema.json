@@ -105,7 +105,7 @@
   "vision_provider_id": {
     "description": "视觉模型（用于图片分类）",
     "type": "string",
-    "hint": "留空则使用当前会话模型",
+    "hint": "留空则自动使用 AstrBot 全局配置的「图片描述模型」(default_image_caption_provider_id)",
     "_special": "select_provider"
   },
 

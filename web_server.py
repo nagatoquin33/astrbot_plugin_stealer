@@ -2,7 +2,6 @@ import asyncio
 import hashlib
 import hmac
 import logging
-import os
 import shutil
 import time
 import uuid
