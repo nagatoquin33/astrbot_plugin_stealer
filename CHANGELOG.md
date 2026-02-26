@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.7] - 2026-02-26
+- 增强 FC 工具模糊匹配：搜索无结果时返回推荐分类
+- 优化智能选择性能：避免二次遍历索引，一次遍历同时收集高低分候选
+- 优化搜索过滤：分词匹配替代字符级匹配，更适合中文场景
+- 新增分词评分：解决"猫娘"搜"小猫"等中文词汇匹配问题
+- 优化情绪分析器：本地关键词预匹配跳过不必要的 LLM 调用，LLM 失败时降级用分词匹配
+- 智能选择增强：描述匹配增加分词补充，提升中文上下文匹配效果
+- 重构代码结构：`find_similar_categories` 和 `_find_best_category_match` 集中到 EmojiSelector
+
 ## [2.3.6] - 2026-02-25
 - WebUI 代码重构瘦身：拆分公共逻辑，保持接口与行为不变
 - 配置更新流程去重：保留双模式与旧版本迁移链路

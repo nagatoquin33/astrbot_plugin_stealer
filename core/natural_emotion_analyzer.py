@@ -97,7 +97,15 @@ class NaturalEmotionAnalyzer:
                 logger.debug(f"[情绪分析] 缓存命中: {cleaned_text[:30]}...")
                 return self.analysis_cache[cache_key]
 
-        # 执行分析
+        # 本地预匹配：先用分词匹配关键词映射（快速路径）
+        local_match = self._local_keyword_match(cleaned_text)
+        if local_match:
+            logger.info(f"[情绪分析] 本地匹配: {cleaned_text[:30]}... → {local_match}")
+            async with self._cache_lock:
+                self._cache_result(cache_key, local_match)
+            return local_match
+
+        # 执行 LLM 分析
         start_time = time.time()
         emotion = await self._analyze_with_llm(event, cleaned_text)
         end_time = time.time()
@@ -106,6 +114,12 @@ class NaturalEmotionAnalyzer:
         self.stats["total_analyses"] += 1
         response_time = (end_time - start_time) * 1000
         self._update_stats(response_time, emotion is not None)
+
+        # LLM 失败时降级到本地匹配
+        if not emotion:
+            emotion = self._local_keyword_match(cleaned_text, fallback=True)
+            if emotion:
+                logger.info(f"[情绪分析] LLM失败，降级匹配: {cleaned_text[:30]}... → {emotion}")
 
         # 缓存结果
         if emotion:
@@ -118,6 +132,64 @@ class NaturalEmotionAnalyzer:
             logger.warning(f"[情绪分析] 分析失败: {cleaned_text[:30]}...")
 
         return emotion
+
+    def _local_keyword_match(self, text: str, fallback: bool = False) -> str | None:
+        """本地关键词匹配（快速路径/降级方案）
+
+        Args:
+            text: 要分析的文本
+            fallback: 是否为降级模式（降级模式阈值更低）
+
+        Returns:
+            匹配的分类，无则返回 None
+        """
+        if not text:
+            return None
+
+        cfg = self.plugin.plugin_config
+        if not cfg:
+            return None
+
+        # 获取关键词映射
+        keyword_map = cfg.get_keyword_map() if hasattr(cfg, "get_keyword_map") else {}
+        if not keyword_map:
+            return None
+
+        text_lower = text.lower()
+
+        # 1. 精确匹配关键词
+        for keyword, category in keyword_map.items():
+            if keyword in text_lower and category:
+                return category
+
+        # 2. 分词匹配（降级模式下执行）
+        if fallback:
+            from core.text_similarity import _extract_words, calculate_hybrid_similarity
+
+            text_words = _extract_words(text)
+            if not text_words:
+                return None
+
+            best_match = None
+            best_score = 0.0
+            threshold = 0.3  # 降级模式阈值更低
+
+            for category in self.categories:
+                # 与分类名比较
+                score = calculate_hybrid_similarity(text, category)
+                # 与分类中文描述比较
+                info = cfg.DEFAULT_CATEGORY_INFO.get(category, {})
+                desc = info.get("desc", "") or info.get("name", "")
+                if desc:
+                    score = max(score, calculate_hybrid_similarity(text, desc))
+
+                if score > best_score and score > threshold:
+                    best_score = score
+                    best_match = category
+
+            return best_match
+
+        return None
 
     async def _analyze_with_llm(self, event: AstrMessageEvent, text: str) -> str | None:
         """使用小模型分析情绪"""

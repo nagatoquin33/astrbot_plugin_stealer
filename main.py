@@ -1276,6 +1276,10 @@ class Main(Star):
 
         return await self.emoji_selector.smart_search(query, limit=limit, idx=idx)
 
+    def _find_similar_categories(self, query: str, top_n: int = 3) -> list[str]:
+        """找到与查询词最相似的多个分类，委托给 EmojiSelector。"""
+        return self.emoji_selector.find_similar_categories(query, top_n)
+
     @filter.llm_tool(name="search_emoji")
     async def search_emoji(self, event: AstrMessageEvent, query: str):
         """搜索表情包，返回候选列表供你选择。
@@ -1324,14 +1328,22 @@ class Main(Star):
 
             idx = self.cache_service.get_index_cache_readonly()
 
-            # 增加搜索结果数量，给LLM更多选择
+            # smart_search 已内置关键词映射和模糊匹配（阈值0.4）
             results = await self._search_emoji_candidates(
                 query, limit=self.MAX_SEARCH_RESULTS, idx=idx
             )
 
+            # 如果仍然没有结果，返回推荐分类
             if not results:
-                logger.warning(f"未找到匹配的表情包: {query}")
-                yield f"搜索失败：未找到与'{query}'匹配的表情包。\n\n建议尝试：\n- 情绪词：happy, sad, angry, confused, troll\n- 描述词：大笑, 无语, 哭了, 震惊\n- 场景词：尴尬, 社死, 躺平"
+                similar = self._find_similar_categories(query, top_n=3)
+                suggestion = f"未找到与'{query}'匹配的表情包。"
+                if similar:
+                    suggestion += "\n\n您是否想找以下分类？\n- " + "\n- ".join(similar)
+                suggestion += "\n\n可用分类：" + ", ".join(self.categories[:10])
+                if len(self.categories) > 10:
+                    suggestion += f" 等共{len(self.categories)}个分类"
+                logger.warning(f"[Tool] 未找到匹配: {query}, 推荐: {similar}")
+                yield suggestion
                 return
 
             # 构建候选列表

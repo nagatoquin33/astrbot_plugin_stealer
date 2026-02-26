@@ -265,6 +265,7 @@ class EmojiSelector:
                 return None
 
             candidates = []
+            low_score_candidates = []  # 降级备用
             context_lower = context_text.lower()
             context_words = set(_extract_words(context_text))
 
@@ -282,6 +283,13 @@ class EmojiSelector:
                 # 1. 描述匹配分数 (0-1)
                 desc = str(data.get("desc", "")).lower()
                 desc_score = calculate_hybrid_similarity(context_text, desc)
+
+                # 分词匹配补充（提升中文效果）
+                if desc_score < 0.3:
+                    desc_words = _extract_words(desc)
+                    word_overlap = len(context_words & desc_words)
+                    if word_overlap > 0:
+                        desc_score = max(desc_score, min(1.0, word_overlap * 0.2))
 
                 # 2. 标签匹配分数 (0-1)
                 tags = self._parse_tags(data.get("tags", []))
@@ -301,8 +309,10 @@ class EmojiSelector:
                 # 3. 综合基础分数
                 base_score = desc_score * 0.4 + tag_score * 0.3
 
-                # 如果基础分数太低，跳过
+                # 收集低分候选作为降级备用（避免二次遍历）
                 if base_score < 0.15:
+                    if desc_score > 0.1:
+                        low_score_candidates.append((file_path, desc_score, desc_score, 0.0))
                     continue
 
                 # 4. 多样性奖励 (添加随机因子)
@@ -323,17 +333,9 @@ class EmojiSelector:
                 if final_score > 0.1:
                     candidates.append((file_path, final_score, desc_score, tag_score))
 
+            # 降级：使用低分候选
             if not candidates:
-                # 降级：放宽条件再试一次
-                for file_path, data in idx.items():
-                    if not isinstance(data, dict):
-                        continue
-                    if self._get_category_from_data(data) != category:
-                        continue
-                    desc = str(data.get("desc", ""))
-                    score = calculate_hybrid_similarity(context_text, desc)
-                    if score > 0.1:
-                        candidates.append((file_path, score, score, 0.0))
+                candidates = low_score_candidates
 
             if not candidates:
                 return None
@@ -408,7 +410,8 @@ class EmojiSelector:
 
             query_lower = query.lower()
             query_tokens = [t for t in query_lower.split() if len(t) > 1]
-            query_chars = set(query_lower) if len(query_lower) > 1 else set()
+            # 使用分词提取查询词的词汇（更适合中文）
+            query_words = _extract_words(query)
 
             MAX_STR_LENGTH = 20
             top_k = limit * 3
@@ -423,11 +426,16 @@ class EmojiSelector:
                 tags_str = ", ".join(tags)
                 category = self._get_category_from_data(data)
 
-                # 快速字符级过滤
-                if query_chars:
+                # 快速分词过滤：检查词汇重叠（比字符级更适合中文）
+                if query_words:
                     all_text = category + " " + desc + " " + " ".join(tags)
-                    if not query_chars.intersection(set(all_text)):
-                        continue
+                    all_words = _extract_words(all_text)
+                    # 至少有一个词匹配才继续
+                    if not query_words.intersection(all_words):
+                        # 兜底：字符级检查（处理单字查询等情况）
+                        query_chars = set(query_lower)
+                        if query_chars and not query_chars.intersection(set(all_text)):
+                            continue
 
                 score = self._score_entry(
                     query_lower, query_tokens, category, desc, tags, MAX_STR_LENGTH
@@ -494,6 +502,23 @@ class EmojiSelector:
                     if score >= 15:
                         return score
 
+        # 分词匹配（中文场景：如"猫娘"匹配"猫"）
+        if score < 10:
+            query_words = _extract_words(query_lower)
+            if query_words:
+                # 检查分词在描述中的匹配
+                desc_words = _extract_words(desc)
+                word_match = len(query_words & desc_words)
+                if word_match > 0:
+                    score = max(score, word_match * 4)  # 每个词匹配 +4 分
+
+                # 检查分词在标签中的匹配
+                for tag in tags:
+                    tag_words = _extract_words(tag)
+                    tag_match = len(query_words & tag_words)
+                    if tag_match > 0:
+                        score = max(score, tag_match * 5)
+
         # 模糊匹配（降级）
         if score >= 10 and query_tokens:
             for target in [category, desc] + tags[:2]:
@@ -545,18 +570,55 @@ class EmojiSelector:
                 return results
 
         # 3) 模糊匹配到分类
-        best_match = None
-        best_score = 0.0
-        for category in self.categories:
-            score = calculate_hybrid_similarity(query, category)
-            if score > best_score and score > 0.4:
-                best_score = score
-                best_match = category
-
+        best_match = self._find_best_category_match(query, threshold=0.4)
         if best_match:
             results = await self.search_images(best_match, limit=limit, idx=idx)
 
         return results
+
+    def _find_best_category_match(self, query: str, threshold: float = 0.4) -> str | None:
+        """找到与查询词最相似的分类。
+
+        Args:
+            query: 查询词
+            threshold: 相似度阈值
+
+        Returns:
+            最佳匹配的分类，无则返回 None
+        """
+        if not query or not self.categories:
+            return None
+
+        best_match = None
+        best_score = 0.0
+        for category in self.categories:
+            score = calculate_hybrid_similarity(query, category)
+            if score > best_score and score > threshold:
+                best_score = score
+                best_match = category
+
+        return best_match
+
+    def find_similar_categories(self, query: str, top_n: int = 3) -> list[str]:
+        """找到与查询词最相似的多个分类。
+
+        Args:
+            query: 查询词
+            top_n: 返回数量
+
+        Returns:
+            相似分类列表
+        """
+        if not query or not self.categories:
+            return []
+
+        scores = []
+        for category in self.categories:
+            score = calculate_hybrid_similarity(query, category)
+            scores.append((category, score))
+
+        scores.sort(key=lambda x: x[1], reverse=True)
+        return [cat for cat, _ in scores[:top_n]]
 
     def check_send_probability(self) -> bool:
         """检查表情包发送概率。"""
