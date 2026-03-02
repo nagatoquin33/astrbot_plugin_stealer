@@ -13,6 +13,8 @@ from astrbot.api.event.filter import (
     PermissionType,
     PlatformAdapterType,
 )
+from astrbot.api.event import MessageChain
+from astrbot.api.message_components import Image as ImageComponent
 from astrbot.api.message_components import Plain
 from astrbot.api.star import Context, Star
 
@@ -52,14 +54,6 @@ class Main(Star):
     IMAGE_PROCESSING_TIMEOUT_SECONDS = 60  # 图片处理超时时间
     MAX_SEARCH_RESULTS = 8  # 搜索表情包最大返回数量
 
-    # 提示词常量
-    IMAGE_FILTER_PROMPT = (
-        "根据以下审核准则判断图片是否符合: {filtration_rule}。只返回是或否。"
-    )
-    TEXT_EMOTION_PROMPT_TEMPLATE = """请基于这段文本的情绪选择一个最匹配的类别: {categories}。
-请使用&&emotion&&格式返回，例如&&happy&&、&&sad&&。
-只返回表情标签，不要添加任何其他内容。文本: {text}"""
-
     # 从外部文件加载的提示词（已迁移到ImageProcessorService）
 
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
@@ -97,14 +91,14 @@ class Main(Star):
         self._migration_done: bool = False  # 迁移只执行一次
         # 强制捕获窗口已迁移到 EventHandler
 
-    def _load_vision_provider_id(self) -> str | None:
+    def _load_vision_provider_id(self) -> str:
         """加载视觉模型提供商ID。
 
         Returns:
-            str | None: 视觉模型提供商ID，如果未配置则返回None
+            str: 视觉模型提供商ID，如果未配置则返回空字符串
         """
         provider_id = getattr(self.plugin_config, "vision_provider_id", "")
-        return str(provider_id) if provider_id else None
+        return str(provider_id).strip() if provider_id else ""
 
     def _sync_all_config(self) -> None:
         """从配置服务同步所有配置到实例属性。
@@ -289,14 +283,6 @@ class Main(Star):
 
         task.add_done_callback(_on_done)
         return task
-
-    def _get_force_capture_key(self, event: AstrMessageEvent) -> str:
-        """委托给 EventHandler。"""
-        return self.event_handler._get_force_capture_key(event)
-
-    def _get_force_capture_sender_id(self, event: AstrMessageEvent) -> str | None:
-        """委托给 EventHandler。"""
-        return self.event_handler._get_force_capture_sender_id(event)
 
     def _get_group_id(self, event: AstrMessageEvent) -> str | None:
         """委托给 PluginConfig。"""
@@ -563,10 +549,6 @@ class Main(Star):
             logger.error(f"加载索引失败: {e}", exc_info=True)
             return {}
 
-    async def _migrate_legacy_data(self) -> dict[str, Any]:
-        """委托给 CacheService。"""
-        return await self.cache_service.migrate_legacy_data(self.base_dir)
-
     async def _rebuild_index_from_files(self) -> dict[str, Any]:
         """委托给 CacheService。"""
         return await self.cache_service.rebuild_index_from_files(
@@ -664,10 +646,6 @@ class Main(Star):
         except Exception as e:
             logger.error(f"提取文本情绪失败: {e}", exc_info=True)
             return [], text
-
-    async def _pick_vision_provider(self, event: AstrMessageEvent | None) -> str | None:
-        """委托给 ImageProcessorService。"""
-        return await self.image_processor_service.pick_vision_provider(event)
 
     @filter.event_message_type(EventMessageType.ALL)
     @filter.platform_adapter_type(PlatformAdapterType.ALL)
@@ -958,10 +936,17 @@ class Main(Star):
 
             if is_intelligent_mode:
                 # LLM模式：不修改消息链，直接异步分析
+                # 提取用户原始消息作为上下文（QA 分析）
+                user_query = ""
+                try:
+                    user_query = event.get_message_str() or ""
+                except Exception:
+                    pass
                 logger.debug("[Stealer] LLM模式：保持消息链不变，异步分析语义")
                 self._safe_create_task(
                     self._async_analyze_and_send_emoji(
-                        event, text_without_explicit, []
+                        event, text_without_explicit, [],
+                        user_query=user_query,
                     ),
                     name="emoji_analyze_intelligent",
                 )
@@ -999,18 +984,6 @@ class Main(Star):
             logger.error(f"[Stealer] 处理表情包响应时发生错误: {e}", exc_info=True)
             return False
 
-    def _check_send_probability(self) -> bool:
-        """委托给 EmojiSelector。"""
-        return self.emoji_selector.check_send_probability()
-
-    async def _select_emoji(self, category: str, context_text: str = "") -> str | None:
-        """委托给 EmojiSelector。"""
-        return await self.emoji_selector.select_emoji(category, context_text)
-
-    async def _select_emoji_smart(self, category: str, context_text: str) -> str | None:
-        """委托给 EmojiSelector。"""
-        return await self.emoji_selector.select_emoji_smart(category, context_text)
-
     async def _send_explicit_emojis(
         self, event: AstrMessageEvent, emoji_paths: list[str], cleaned_text: str
     ):
@@ -1024,14 +997,16 @@ class Main(Star):
         return await self.emoji_selector.try_send_emoji(event, emotions, cleaned_text)
 
     async def _async_analyze_and_send_emoji(
-        self, event: AstrMessageEvent, text: str, emotions: list[str]
+        self, event: AstrMessageEvent, text: str, emotions: list[str],
+        *, user_query: str = "",
     ):
         """异步分析情绪并发送表情包（不阻塞主流程）。
 
         Args:
             event: 消息事件
-            text: 文本内容
+            text: LLM 回复文本内容
             emotions: 已提取的情绪列表（被动模式使用，智能模式忽略）
+            user_query: 用户原始消息（智能模式下与 text 组成 QA 上下文）
         """
         try:
             # 检查是否启用自动发送
@@ -1050,12 +1025,14 @@ class Main(Star):
             final_emotions = []
 
             if is_intelligent_mode:
-                # 智能模式：使用轻量模型分析
+                # 智能模式：使用轻量模型分析（传入用户问题作为上下文）
                 logger.debug("[Stealer] 智能模式：使用轻量模型分析情绪")
                 try:
                     analyzed_emotion = (
                         await self.smart_emotion_matcher.analyze_and_match_emotion(
-                            event, text, use_natural_analysis=True
+                            event, text,
+                            use_natural_analysis=True,
+                            user_query=user_query,
                         )
                     )
                     if analyzed_emotion:
@@ -1204,42 +1181,6 @@ class Main(Star):
         """立即执行容量控制，清理超出上限的旧表情包。"""
         async for result in self.command_handler.enforce_capacity(event):
             yield result
-
-    async def get_count(self) -> int:
-        """委托给 CommandHandler。"""
-        return await self.command_handler.get_emoji_count()
-
-    async def get_info(self) -> dict:
-        """委托给 CommandHandler。"""
-        return await self.command_handler.get_emoji_info()
-
-    async def get_emotions(self) -> list[str]:
-        """委托给 CommandHandler。"""
-        return await self.command_handler.get_available_emotions()
-
-    async def get_descriptions(self) -> list[str]:
-        """委托给 CommandHandler。"""
-        return await self.command_handler.get_all_descriptions()
-
-    async def _load_all_records(self) -> list[tuple[str, dict]]:
-        """委托给 CommandHandler。"""
-        return await self.command_handler.load_all_emoji_records()
-
-    async def get_random_paths(
-        self, count: int | None = 1
-    ) -> list[tuple[str, str, str]]:
-        """委托给 CommandHandler。"""
-        return await self.command_handler.get_random_emojis(count)
-
-    async def get_by_emotion_path(self, emotion: str) -> tuple[str, str, str] | None:
-        """委托给 CommandHandler。"""
-        return await self.command_handler.get_emoji_by_emotion(emotion)
-
-    async def get_by_description_path(
-        self, description: str
-    ) -> tuple[str, str, str] | None:
-        """委托给 CommandHandler。"""
-        return await self.command_handler.get_emoji_by_description(description)
 
     @filter.command("meme list")
     async def list_images(
@@ -1444,9 +1385,6 @@ class Main(Star):
             # 发送表情包
             logger.info(f"[Tool] 发送选中的表情包: {path} (emotion={emotion})")
             b64 = await self.image_processor_service._file_to_gif_base64(path)
-
-            from astrbot.api.event import MessageChain
-            from astrbot.api.message_components import Image as ImageComponent
 
             await event.send(MessageChain([ImageComponent.fromBase64(b64)]))
 

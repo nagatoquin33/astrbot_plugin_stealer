@@ -435,7 +435,7 @@ class PluginConfig(BaseModel):
     def get_group_id(self, event: AstrMessageEvent) -> str:
         """获取群号。"""
         try:
-            return str(event.message_obj.group_id)
+            return event.get_group_id()
         except Exception:
             return ""
 

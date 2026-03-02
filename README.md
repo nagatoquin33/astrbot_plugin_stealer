@@ -4,158 +4,188 @@
 
 <img src="https://count.getloli.com/@nagatoquin33?name=nagatoquin33&theme=rule34&padding=7&offset=0&align=top&scale=1&pixelated=1&darkmode=auto" alt="Moe Counter">
 
+**让 Bot 自动偷走群友的表情包，分类入库，聊天时看心情自动甩出来。**
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-![Python Version](https://img.shields.io/badge/Python-3.10.14%2B-blue)
+![Python Version](https://img.shields.io/badge/Python-3.10%2B-blue)
+![AstrBot](https://img.shields.io/badge/AstrBot-%E2%89%A54.10.4-green)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-lightgrey)
-[![Last Commit](https://img.shields.io/github/last-commit/nagatoquin33/astrbot_plugin_stealer)](https://github.com/nagatoquin33/astrbot_plugin_stealer/commits/main)
+[![Last Commit](https://img.shields.io/github/last-commit/nagatoquin33/astrbot_plugin_stealer)](https://github.com/nagatoquin33/astrbot_plugin_stealer/commits/master)
 
 </div>
 
-> **v2.3.4** - 代码大扫除，视觉模型 provider 修复
-
-## 📑 目录
-
-- [🌟 表情包小偷](#-表情包小偷)
-  - [📑 目录](#-目录)
-  - [📢 简介](#-简介)
-  - [🚀 功能特点](#-功能特点)
-  - [📦 安装方法](#-安装方法)
-  - [🛠️ 快速上手](#️-快速上手)
-  - [⚙️ 配置说明](#️-配置说明)
-  - [🎮 使用指令](#-使用指令)
-  - [📄 许可证](#-许可证)
+---
 
 ## 📢 简介
 
-我想仿照麦麦的表情包偷取做个娱乐性的插件的，于是就有了这个表情包小偷插件。
+灵感来自 maibot 的表情包偷取和 meme_manager 的标签注入思路。全人机代码，本人全程监工调试。
 
-表情包插入标签的灵感来源为meme_manager,vlm分类则是来自maimai。
+表情包小偷是一款基于多模态 AI 的 [AstrBot](https://github.com/Soulter/AstrBot) 娱乐插件——自动偷取聊天中的表情包，利用视觉模型进行情绪分类，对话时按概率发送一张情绪匹配的表情包，让 Bot 的回复更有人味。偷够了可以随时金盆洗手，偷取和自动发送可独立开关。
 
-本插件完全开源免费，欢迎issue和pr，因为我确实能力有限。
+本插件完全开源免费，欢迎 Issue 和 PR。
 
-全人机代码，不过本人一直在监工调试，不保证什么问题都没有，
-我尽量做到在更新前让这个插件能正常工作。
+## ✨ 核心功能
 
-表情包小偷是一款基于多模态AI的娱乐性插件，能够自动偷取聊天中的图片，进行视觉理解与情绪分类，并在发送回复前按概率追加一张匹配情绪的表情，显著提升聊天互动体验。
-
-如果偷够了可以金盆洗手，支持偷取功能单独开启或关闭
-
-本插件设计灵活，支持自动使用当前会话的视觉模型，无需额外配置即可开始使用。
-
-
-
-
-
-
-## 🌟 核心功能
-
-*   **自动收集**: 自动偷取群聊中的表情包，支持概率模式或冷却模式（过滤色图/无关图片）。
-*   **智能分类**: 利用 LLM/VLM 识别不仅是内容，更是**情绪** (happy, sad, angry...)。
-*   **情感共鸣**: 结合 Bot 当前回复的情绪，自动发送匹配的表情包。
-*   **不那么聪明的后置分析**：使用小参数量的llm进行语义分析，后置发送表情包。
-*   **库腾堡贼王——亨利的战利品 (WebUI)**: 
-    *   可视化查看、搜索、删除表情包。
-    *   支持“永不再偷”功能，永久拉黑不喜欢的表情包。
-    *   访问地址: `http://<ip>:8899/`
+| 功能 | 说明 |
+|:---|:---|
+| **自动偷图** | 监听群聊图片，按概率或冷却模式自动收集，支持内容审核过滤 |
+| **智能分类** | 利用 VLM 识别图片内容与情绪（happy、sad、angry 等 17+ 种预设分类） |
+| **情感共鸣** | 分析 Bot 回复的情绪，自动追加一张匹配的表情包 |
+| **LLM 主动选图** | 对话中 LLM 可通过工具调用搜索并发送最合适的表情包 |
+| **双模式情绪分析** | LLM 模式（后置轻量模型分析，不改回复）/ 被动标签模式（LLM 直接标注情绪） |
+| **WebUI 管理** | 可视化查看、搜索、删除、拉黑表情包，支持分类管理 |
+| **群聊过滤** | 黑白名单控制哪些群启用偷取/发送 |
 
 ## 🚀 快速开始
 
-1.  **安装**: 在 AstrBot 插件管理中安装 `astrbot_plugin_stealer`。
-2.  **确保会话已配置视觉模型** (必须): 插件会自动使用当前会话的视觉模型进行表情分类。
-3.  **开启**:
-    ```bash
-    /meme on      # 开启偷图
-    /meme auto_on # 开启自动发送
-    ```
+### 1. 安装
+
+在 AstrBot 插件管理中搜索并安装 `astrbot_plugin_stealer`。
+
+### 2. 前置条件
+
+**必须配置视觉模型**——插件依赖 VLM 对图片进行分类。可以在 AstrBot 中配置全局图片描述模型，也可以在插件配置中指定 `vision_provider_id`。
+
+### 3. 开始使用
+
+```
+/meme on        # 开启偷图
+/meme auto_on   # 开启自动发送
+```
+
+偷够了？
+
+```
+/meme off       # 关闭偷图（已收集的表情包仍可使用）
+```
+
+### 4. WebUI 管理
+
+启动后访问 `http://<你的IP>:8899/`，默认启用登录验证，密码在插件配置中查看（首次自动生成 6 位随机密码）。
 
 ## ⚙️ 配置说明
 
+所有配置项均可在 AstrBot 管理面板中修改，无需手动编辑文件。
+
+### 偷图设置
+
 | 配置项 | 默认值 | 说明 |
-| :--- | :--- | :--- |
-| `max_reg_num` | 100 | 最大存储表情数量 (超过自动清理旧图) |
-| `emoji_chance` | 0.4 | 自动回复时附带表情的概率 (0-1) |
-| `steal_mode` | probability | 偷图模式：`probability`=概率模式，`cooldown`=冷却模式 |
-| `steal_chance` | 0.6 | 概率模式下的偷图概率 (0-1) |
-| `image_processing_cooldown` | 10 | 冷却模式下两次偷取的最小间隔 (秒) |
-| `send_emoji_as_gif` | true | 真表情包样式（GIF发送）；开启会在大图/动图/高频发送场景增加内存占用 |
-| `smart_emoji_selection` | true | 智能表情包选择（综合评分）；关闭则随机选择 |
-| `vision_provider_id` | "" | 视觉模型 Provider ID（留空自动使用框架全局图片描述模型） |
-| `group_whitelist` | [] | 群聊白名单（优先生效）；非空时：只有白名单内的群会偷/发 |
-| `group_blacklist` | [] | 群聊黑名单；白名单为空时：黑名单内的群不会偷/发 |
-| `enable_natural_emotion_analysis` | true | 启用后置轻量 LLM 语义分析模式 |
-| `emotion_analysis_provider_id` | "" | 情绪分析专用模型 Provider ID（为空则使用默认模型） |
-| `webui.port` | 8899 | WebUI 端口 |
-| `webui.auth_enabled` | true | WebUI 是否启用登录验证 |
-
-## 🧠 内存占用提示
-
-以下场景会显著增加内存占用（尤其是开启 `send_emoji_as_gif` 时）：
-
-- 发送侧将非 GIF 图片转换为 GIF（需要在内存中解码与重编码，属于瞬时峰值）。
-- 表情包图片分辨率很大、或动图帧数多（峰值更高）。
-- 短时间内高频发送、且发送的“不同文件”很多（会增加短期缓存占用）。
-“真”表情包模型按需开启
-
-## 🔄 模式切换说明
-
-### LLM模式 vs 被动标签模式
-
-| 模式 | 特点 | 适用场景 |
 |:---|:---|:---|
-| **LLM模式** (默认) | ✅ 不修改LLM回复<br>✅ 后台轻量模型分析语义<br>✅ 保持对话自然流畅 | 希望保持AI回复的原始性和完整性 |
-| **被动标签模式** | ❌ LLM会插入情绪标签<br>✅ 直接获取LLM判断的情绪<br>❌ 需要清理消息链 | 需要精确控制情绪分类的场景 |
+| `steal_emoji` | `true` | 总开关 |
+| `steal_mode` | `probability` | `probability` 概率模式 / `cooldown` 冷却模式 |
+| `steal_chance` | `0.6` | 概率模式下每次偷取的概率 |
+| `image_processing_cooldown` | `10` | 冷却模式下两次偷取的最小间隔（秒） |
+| `content_filtration` | `false` | 内容审核，开启后过滤不当图片 |
 
-### ⚠️ 重要提醒
+### 发送设置
 
-**切换模式后请使用 `/reset` 命令清除AI的对话上下文**
+| 配置项 | 默认值 | 说明 |
+|:---|:---|:---|
+| `auto_send` | `true` | 自动随聊发送表情包 |
+| `emoji_chance` | `0.4` | 自动发送的概率（0.0 ~ 1.0） |
+| `send_emoji_as_gif` | `true` | 以 GIF 格式发送（更像真表情包，但高频场景内存占用略高） |
+| `smart_emoji_selection` | `true` | 智能评分选择；关闭则随机选取 |
 
-原因：
-- 被动标签模式下，LLM学会了在回复开头插入 `&&emotion&&` 标签
-- 切换到LLM模式后，LLM可能仍保留这种习惯性行为
-- 使用 `/reset` 可以清除AI的对话记忆，避免继续输出残留标签
+### 情绪识别
 
-**操作步骤：**
-```bash
-# 1. 修改配置切换模式
-# 2. 重启插件或重载配置
-# 3. 清除AI上下文
-/reset
-```
+| 配置项 | 默认值 | 说明 |
+|:---|:---|:---|
+| `enable_natural_emotion_analysis` | `true` | `true` = LLM 模式（推荐） / `false` = 被动标签模式 |
+| `emotion_analysis_provider_id` | `""` | LLM 模式使用的轻量模型，留空用默认模型 |
 
-这样能确保模式切换立即生效，避免新旧模式混淆。
+### 模型配置
 
-## 🎮 指令列表 (前缀: `/meme`)
+| 配置项 | 默认值 | 说明 |
+|:---|:---|:---|
+| `vision_provider_id` | `""` | 视觉模型，留空自动使用 AstrBot 全局图片描述模型 |
 
-| 指令 | 权限 | 说明 |
-| :--- | :--- | :--- |
-| `on` / `off` | 所有人 | 开启/关闭 表情包收集 |
-| `auto_on` / `auto_off` | 所有人 | 开启/关闭 自动发送表情 |
-| `status` | 所有人 | 查看插件运行状态和表情包统计 |
-| `list [分类] [数量]` | 所有人 | 列出已收集的表情包 |
-| `emotion_stats` | 所有人 | 查看情绪分析统计信息和当前模式 |
-| `group <wl\|bl> <add\|del\|clear\|show> [群号]` | 管理员 | 管理群聊黑白名单 |
-| `偷` | 管理员 | 开启30秒强制收录窗口（无视概率，发送的图片直接入库） |
-| `clean [force]` | 所有人 | 清理未分类的原始缓存 |
-| `capacity` | 管理员 | 立即执行容量控制，清理超出上限的旧表情包 |
-| `delete <序号\|文件名>` | 管理员 | 删除指定表情包 |
-| `rebuild_index` | 管理员 | 重建索引并恢复旧数据 |
-| `natural_analysis <on\|off>` | 管理员 | 切换情绪识别模式 |
-| `clear_emotion_cache` | 管理员 | 清空情绪分析缓存，释放内存 |
+### 群聊过滤
 
-### ⚠️ 分类删除提醒
+| 配置项 | 默认值 | 说明 |
+|:---|:---|:---|
+| `group_whitelist` | `[]` | 白名单（优先）。非空时只有名单内的群启用 |
+| `group_blacklist` | `[]` | 黑名单。白名单为空时生效 |
 
-WebUI「分类管理」中删除分类会 **同时删除该分类下所有图片**，并且无法恢复；操作前请确认无误。
+### 存储管理
 
+| 配置项 | 默认值 | 说明 |
+|:---|:---|:---|
+| `max_reg_num` | `100` | 表情包存储上限，超出自动清理最旧的 |
 
+### WebUI
 
-好用就给个star吧谢谢大伙
-有问题了群里找我或者提issue，我一般很快会看到
+| 配置项 | 默认值 | 说明 |
+|:---|:---|:---|
+| `webui.enabled` | `true` | 是否启用 WebUI |
+| `webui.host` | `0.0.0.0` | 监听地址 |
+| `webui.port` | `8899` | 监听端口 |
+| `webui.auth_enabled` | `true` | 启用登录验证 |
+| `webui.password` | `""` | 访问密码，留空自动生成 |
+| `webui.session_timeout` | `3600` | 登录会话超时（秒） |
+
+## 🔄 情绪分析模式详解
+
+| | LLM 模式（默认） | 被动标签模式 |
+|:---|:---|:---|
+| **原理** | Bot 回复后，后台用轻量模型分析语义情绪 | 注入提示词让 LLM 在回复开头插入 `&&emotion&&` 标签 |
+| **对回复的影响** | ✅ 不修改 LLM 回复 | ❌ 会在回复中插入标签（插件自动清理） |
+| **适用场景** | 日常使用，保持对话自然 | 需要精确控制情绪分类 |
+
+> ⚠️ **切换模式后务必执行 `/reset` 清除对话上下文**，否则 LLM 可能延续旧模式的输出习惯。
+
+## 🎮 指令列表
+
+所有指令以 `/meme` 为前缀。
+
+### 基础指令（所有人可用）
+
+| 指令 | 说明 |
+|:---|:---|
+| `on` / `off` | 开启 / 关闭表情包收集 |
+| `auto_on` / `auto_off` | 开启 / 关闭自动发送 |
+| `status` | 查看运行状态和表情包统计 |
+| `list [分类] [数量]` | 列出已收集的表情包 |
+| `emotion_stats` | 查看情绪分析统计和当前模式 |
+| `clean [force]` | 清理未分类的原始缓存 |
+
+### 管理指令（仅管理员）
+
+| 指令 | 说明 |
+|:---|:---|
+| `偷` | 进入 30 秒强制收录模式，期间发送的图片直接入库 |
+| `group <wl\|bl> <add\|del\|clear\|show> [群号]` | 管理群聊黑白名单 |
+| `delete <序号\|文件名>` | 删除指定表情包 |
+| `capacity` | 立即执行容量控制 |
+| `rebuild_index` | 重建索引（版本迁移或索引异常时使用） |
+| `natural_analysis <on\|off>` | 切换情绪识别模式 |
+| `clear_emotion_cache` | 清空情绪分析缓存 |
+
+### LLM 工具调用（对话中自动触发）
+
+| 工具 | 说明 |
+|:---|:---|
+| `search_emoji` | LLM 搜索匹配的表情包候选列表 |
+| `send_emoji_by_id` | LLM 从候选列表中选择并发送表情包 |
+
+## ⚠️ 注意事项
+
+- **WebUI 删除分类**会同时删除该分类下所有图片，且无法恢复，操作前请确认。
+- 开启 `send_emoji_as_gif` 时，大分辨率图片或高帧动图的 GIF 转换会产生瞬时内存峰值，低内存环境建议关闭。
+- 插件依赖视觉模型（VLM）进行分类，未配置视觉模型时偷图功能无法正常工作。
 
 ## 📄 许可证
 
-本项目基于 MIT 许可证开源。
+本项目基于 [MIT](LICENSE) 许可证开源。
 
-[![GitHub license](https://img.shields.io/github/license/nagatoquin33/astrbot_plugin_stealer)](https://github.com/nagatoquin33/astrbot_plugin_stealer/blob/main/LICENSE)
+---
+
+<div align="center">
+
+好用的话给个 ⭐ Star 吧，谢谢大伙！
+
+有问题欢迎提 [Issue](https://github.com/nagatoquin33/astrbot_plugin_stealer/issues) 或群里找我，一般很快会看到。
+
+</div>
 
 
 

@@ -39,9 +39,42 @@ class NaturalEmotionAnalyzer:
 
         # 小模型提示词模板
         self.emotion_analysis_prompt = self._build_analysis_prompt()
+        self.emotion_analysis_qa_prompt = self._build_qa_analysis_prompt()
 
     def _build_analysis_prompt(self) -> str:
-        """构建情绪分析提示词（精简版）"""
+        """构建情绪分析提示词（仅分析回复文本，无用户问题时使用）"""
+        categories_text = self._build_categories_text()
+
+        return f"""分析文本情绪，从以下分类选择最匹配的：{categories_text}
+
+示例："哈哈笑死"→happy, "太离谱了"→dumb, "算了懒得说"→sigh
+
+文本："{{text}}"
+只返回英文分类名。"""
+
+    def _build_qa_analysis_prompt(self) -> str:
+        """构建 QA 上下文情绪分析提示词（有用户问题时使用）
+
+        通过提供用户问题（Q）和 LLM 回复（A）的完整上下文，
+        让轻量模型更准确地理解回复的情绪语境。
+        """
+        categories_text = self._build_categories_text()
+
+        return f"""分析对话中回复(A)的情绪，从以下分类选择最匹配的：{categories_text}
+
+要求：结合用户问题(Q)理解回复(A)的语境和情绪，只分析A的情绪。
+
+示例：
+Q:"今天加班到几点" A:"别提了，干到十一点"→sigh
+Q:"这个好看吗" A:"也太好看了吧！"→excitement
+Q:"你怎么看" A:"太离谱了，无话可说"→dumb
+
+Q:"{{user_query}}"
+A:"{{text}}"
+只返回英文分类名。"""
+
+    def _build_categories_text(self) -> str:
+        """构建分类描述文本（供两种 prompt 共用）"""
         categories_desc = {}
         cfg = self.plugin.plugin_config
         if cfg:
@@ -54,8 +87,7 @@ class NaturalEmotionAnalyzer:
         else:
             categories_desc = {key: key for key in self.categories}
 
-        # 构建分类说明（单行格式，更紧凑）
-        categories_text = ", ".join(
+        return ", ".join(
             [
                 f"{key}({desc})"
                 for key, desc in categories_desc.items()
@@ -63,20 +95,16 @@ class NaturalEmotionAnalyzer:
             ]
         )
 
-        # 精简提示词，移除冗余说明和大部分示例
-        return f"""分析文本情绪，从以下分类选择最匹配的：{categories_text}
-
-示例："哈哈笑死"→happy, "太离谱了"→dumb, "算了懒得说"→sigh
-
-文本："{{text}}"
-只返回英文分类名。"""
-
-    async def analyze_emotion(self, event: AstrMessageEvent, text: str) -> str | None:
+    async def analyze_emotion(
+        self, event: AstrMessageEvent, text: str,
+        *, user_query: str = "",
+    ) -> str | None:
         """分析文本的自然情绪
 
         Args:
             event: 消息事件（用于获取LLM提供商）
-            text: 要分析的文本
+            text: LLM 回复文本
+            user_query: 用户原始消息，与 text 组成 QA 上下文
 
         Returns:
             情绪分类，如果分析失败返回None
@@ -89,8 +117,11 @@ class NaturalEmotionAnalyzer:
         if not cleaned_text:
             return None
 
-        # 检查缓存
-        cache_key = self._get_cache_key(cleaned_text)
+        # 清理用户消息（用于缓存 key 和 prompt）
+        cleaned_query = self._clean_text(user_query) if user_query else ""
+
+        # 检查缓存（缓存 key 同时包含 Q 和 A）
+        cache_key = self._get_cache_key(cleaned_query + "|||" + cleaned_text)
         async with self._cache_lock:
             if cache_key in self.analysis_cache:
                 self.stats["cache_hits"] += 1
@@ -105,9 +136,11 @@ class NaturalEmotionAnalyzer:
                 self._cache_result(cache_key, local_match)
             return local_match
 
-        # 执行 LLM 分析
+        # 执行 LLM 分析（传入用户问题作为上下文）
         start_time = time.time()
-        emotion = await self._analyze_with_llm(event, cleaned_text)
+        emotion = await self._analyze_with_llm(
+            event, cleaned_text, user_query=cleaned_query,
+        )
         end_time = time.time()
 
         # 更新统计
@@ -164,11 +197,7 @@ class NaturalEmotionAnalyzer:
 
         # 2. 分词匹配（降级模式下执行）
         if fallback:
-            from core.text_similarity import _extract_words, calculate_hybrid_similarity
-
-            text_words = _extract_words(text)
-            if not text_words:
-                return None
+            from .text_similarity import calculate_hybrid_similarity
 
             best_match = None
             best_score = 0.0
@@ -191,8 +220,17 @@ class NaturalEmotionAnalyzer:
 
         return None
 
-    async def _analyze_with_llm(self, event: AstrMessageEvent, text: str) -> str | None:
-        """使用小模型分析情绪"""
+    async def _analyze_with_llm(
+        self, event: AstrMessageEvent, text: str,
+        *, user_query: str = "",
+    ) -> str | None:
+        """使用小模型分析情绪
+
+        Args:
+            event: 消息事件
+            text: LLM 回复文本（已清理）
+            user_query: 用户原始消息（已清理），有值时使用 QA 模板
+        """
         try:
             # 获取文本模型提供商（优先使用配置的小模型）
             provider_id = await self._get_text_provider(event)
@@ -200,8 +238,14 @@ class NaturalEmotionAnalyzer:
                 logger.warning("[情绪分析] 未找到可用的文本模型")
                 return None
 
-            # 构建提示词
-            prompt = self.emotion_analysis_prompt.format(text=text)
+            # 构建提示词：有用户问题时使用 QA 模板，否则使用纯文本模板
+            if user_query:
+                prompt = self.emotion_analysis_qa_prompt.format(
+                    user_query=user_query, text=text,
+                )
+                logger.debug(f"[情绪分析] 使用QA模板，Q={user_query[:30]}...")
+            else:
+                prompt = self.emotion_analysis_prompt.format(text=text)
 
             # 调用LLM（限制 max_tokens 提升速度）
             logger.debug(f"[情绪分析] 调用LLM，provider_id={provider_id}")
@@ -362,14 +406,17 @@ class SmartEmotionMatcher:
         self.natural_analyzer = NaturalEmotionAnalyzer(plugin_instance)
 
     async def analyze_and_match_emotion(
-        self, event: AstrMessageEvent, text: str, use_natural_analysis: bool = True
+        self, event: AstrMessageEvent, text: str,
+        use_natural_analysis: bool = True,
+        *, user_query: str = "",
     ) -> str | None:
         """分析并匹配情绪
 
         Args:
             event: 消息事件
-            text: 要分析的文本
+            text: LLM 回复文本
             use_natural_analysis: 是否使用自然语言分析
+            user_query: 用户原始消息，与 text 组成 QA 上下文提升分析准确度
 
         Returns:
             匹配的情绪分类
@@ -379,7 +426,9 @@ class SmartEmotionMatcher:
 
         # 使用自然语言分析（主要方案）
         if use_natural_analysis and self.plugin.enable_natural_emotion_analysis:
-            emotion = await self.natural_analyzer.analyze_emotion(event, text)
+            emotion = await self.natural_analyzer.analyze_emotion(
+                event, text, user_query=user_query,
+            )
             if emotion:
                 return emotion
             else:

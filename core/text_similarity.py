@@ -1,13 +1,33 @@
 """
 文本相似度计算工具
 提供多种文本相似度算法，用于表情包智能匹配
+
+改进说明（v2）：
+- 中文 n-gram 分词：提取 bigram/trigram 保留词组语义（如 "开心" 作为整体而非 "开"+"心"）
+- 子串包含匹配：短文本包含在长文本中时给予高分
+- 多策略融合：n-gram Jaccard + 子串匹配 + 编辑距离，加权融合
+- 无额外依赖：不依赖 jieba 等第三方分词库
 """
 
 import re
 
+# ──────────────────────────────────────────────────────────────
+# 中文字符检测（编译一次，复用）
+# ──────────────────────────────────────────────────────────────
+_CJK_RE = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf]")
+_PUNCT_RE = re.compile(r"[^\w\s]")
+_EN_WORD_RE = re.compile(r"^[a-zA-Z]+$")
+
+
+# ──────────────────────────────────────────────────────────────
+# 公开 API（保持原有签名兼容）
+# ──────────────────────────────────────────────────────────────
+
 
 def calculate_simple_similarity(text1: str, text2: str) -> float:
-    """计算两个文本的简单相似度（基于词重叠率）
+    """计算两个文本的简单相似度（基于 n-gram 词重叠率）
+
+    改进：中文使用 unigram + bigram，避免单字拆分丢失语义。
 
     Args:
         text1: 第一个文本
@@ -19,22 +39,15 @@ def calculate_simple_similarity(text1: str, text2: str) -> float:
     if not text1 or not text2:
         return 0.0
 
-    # 转换为小写
-    text1 = text1.lower()
-    text2 = text2.lower()
-
-    # 提取词汇（中文按字符，英文按单词）
-    words1 = _extract_words(text1)
-    words2 = _extract_words(text2)
+    words1 = _extract_words(text1.lower())
+    words2 = _extract_words(text2.lower())
 
     if not words1 or not words2:
         return 0.0
 
-    # 计算交集和并集
     intersection = words1 & words2
     union = words1 | words2
 
-    # Jaccard相似度
     if not union:
         return 0.0
 
@@ -42,7 +55,7 @@ def calculate_simple_similarity(text1: str, text2: str) -> float:
 
 
 def calculate_levenshtein_similarity(text1: str, text2: str) -> float:
-    """计算两个文本的编辑距离相似度（类似MaiBot）
+    """计算两个文本的编辑距离相似度
 
     Args:
         text1: 第一个文本
@@ -54,24 +67,27 @@ def calculate_levenshtein_similarity(text1: str, text2: str) -> float:
     if not text1 or not text2:
         return 0.0
 
-    # 转换为小写
-    text1 = text1.lower()
-    text2 = text2.lower()
+    s1 = text1.lower()
+    s2 = text2.lower()
 
-    # 计算编辑距离
-    distance = _levenshtein_distance(text1, text2)
-
-    # 转换为相似度
-    max_len = max(len(text1), len(text2))
+    distance = _levenshtein_distance(s1, s2)
+    max_len = max(len(s1), len(s2))
     if max_len == 0:
         return 1.0
 
-    similarity = 1 - (distance / max_len)
-    return max(0.0, similarity)
+    return max(0.0, 1 - distance / max_len)
 
 
 def calculate_hybrid_similarity(text1: str, text2: str) -> float:
-    """混合相似度算法（结合词重叠和编辑距离）
+    """混合相似度算法（多策略融合，v2）
+
+    融合策略：
+    1. n-gram Jaccard（语义词组重叠）
+    2. 子串包含匹配（短文本被长文本包含时高分）
+    3. 中文字符级 Jaccard（兜底召回）
+    4. 编辑距离相似度（补充字形相近的情况）
+
+    各策略取最优组合，而非简单加权。
 
     Args:
         text1: 第一个文本
@@ -83,43 +99,213 @@ def calculate_hybrid_similarity(text1: str, text2: str) -> float:
     if not text1 or not text2:
         return 0.0
 
-    # 计算两种相似度
-    jaccard_sim = calculate_simple_similarity(text1, text2)
-    levenshtein_sim = calculate_levenshtein_similarity(text1, text2)
+    t1 = text1.lower().strip()
+    t2 = text2.lower().strip()
 
-    # 加权平均（词重叠权重更高，因为更适合中文）
-    return jaccard_sim * 0.7 + levenshtein_sim * 0.3
+    if t1 == t2:
+        return 1.0
+
+    # ---- 策略1: n-gram Jaccard ----
+    ngram_sim = calculate_simple_similarity(t1, t2)
+
+    # ---- 策略2: 子串包含匹配 ----
+    substr_sim = _substring_similarity(t1, t2)
+
+    # ---- 策略3: 中文字符级 Jaccard（仅中文字符）----
+    char_sim = _chinese_char_similarity(t1, t2)
+
+    # ---- 策略4: 编辑距离（仅在短文本时有效）----
+    edit_sim = 0.0
+    if max(len(t1), len(t2)) <= 20:
+        edit_sim = calculate_levenshtein_similarity(t1, t2)
+
+    # ---- 融合 ----
+    # 核心思路：取各策略的加权组合，但保证强信号不被弱信号拉低
+    # 如果子串完全包含，直接给高分
+    if substr_sim >= 0.9:
+        return min(1.0, max(substr_sim, ngram_sim * 0.3 + substr_sim * 0.7))
+
+    # 正常融合
+    score = (
+        ngram_sim * 0.40
+        + substr_sim * 0.25
+        + char_sim * 0.15
+        + edit_sim * 0.20
+    )
+
+    # 如果任一策略给出很高分，提升最终分数（避免被其他低分策略拉低）
+    best_single = max(ngram_sim, substr_sim, char_sim, edit_sim)
+    if best_single > score:
+        score = score * 0.6 + best_single * 0.4
+
+    return min(1.0, score)
+
+
+# ──────────────────────────────────────────────────────────────
+# 分词与特征提取
+# ──────────────────────────────────────────────────────────────
 
 
 def _extract_words(text: str) -> set[str]:
-    """从文本中提取词汇集合
+    """从文本中提取特征词汇集合（改进版）
 
-    中文按字符分割，英文按单词分割
+    中文：unigram + bigram（如 "开心快乐" → {"开", "心", "快", "乐", "开心", "心快", "快乐"}）
+    英文：完整单词
 
     Args:
-        text: 输入文本
+        text: 输入文本（应已转小写）
 
     Returns:
-        Set[str]: 词汇集合
+        set[str]: 特征词汇集合
     """
-    words = set()
+    words: set[str] = set()
 
-    # 移除标点符号
-    text = re.sub(r"[^\w\s]", " ", text)
+    # 移除标点
+    cleaned = _PUNCT_RE.sub(" ", text)
 
-    # 处理中文字符（每个字符都是一个词）
-    for char in text:
-        if re.match(r"[\u4e00-\u9fff]", char):
-            words.add(char)
+    # 提取中文字符序列，生成 unigram + bigram
+    cn_chars: list[str] = []
+    for char in cleaned:
+        if _CJK_RE.match(char):
+            cn_chars.append(char)
+        else:
+            # 遇到非中文字符，处理之前积累的中文序列
+            if cn_chars:
+                _add_chinese_ngrams(cn_chars, words)
+                cn_chars = []
+    # 处理末尾中文
+    if cn_chars:
+        _add_chinese_ngrams(cn_chars, words)
 
-    # 处理英文单词
-    tokens = text.split()
-    for token in tokens:
-        # 英文单词（长度>1）
-        if re.match(r"^[a-zA-Z]+$", token) and len(token) > 1:
-            words.add(token.lower())
+    # 提取英文单词
+    for token in cleaned.split():
+        if _EN_WORD_RE.match(token) and len(token) > 1:
+            words.add(token)
 
     return words
+
+
+def _add_chinese_ngrams(chars: list[str], words: set[str]) -> None:
+    """将中文字符序列转为 unigram + bigram 加入词集。
+
+    Args:
+        chars: 连续中文字符列表
+        words: 输出词集（原地修改）
+    """
+    n = len(chars)
+    for i in range(n):
+        # unigram（单字）
+        words.add(chars[i])
+        # bigram（双字词组）
+        if i + 1 < n:
+            words.add(chars[i] + chars[i + 1])
+
+
+# ──────────────────────────────────────────────────────────────
+# 子串包含匹配
+# ──────────────────────────────────────────────────────────────
+
+
+def _substring_similarity(text1: str, text2: str) -> float:
+    """子串包含相似度
+
+    如果较短文本是较长文本的子串，给予高分。
+    部分包含（最长公共子串）也按比例给分。
+
+    Args:
+        text1: 第一个文本
+        text2: 第二个文本
+
+    Returns:
+        float: 相似度分数 (0-1)
+    """
+    if not text1 or not text2:
+        return 0.0
+
+    short, long = (text1, text2) if len(text1) <= len(text2) else (text2, text1)
+
+    # 完全包含
+    if short in long:
+        # 按短文本占长文本的比例给分，但保底 0.7
+        ratio = len(short) / len(long)
+        return max(0.7, ratio)
+
+    # 最长公共子串
+    lcs_len = _longest_common_substring_length(short, long)
+    if lcs_len == 0:
+        return 0.0
+
+    # 按 LCS 占短文本的比例给分
+    return (lcs_len / len(short)) * 0.6
+
+
+def _longest_common_substring_length(s1: str, s2: str) -> int:
+    """计算最长公共子串长度（空间优化版）
+
+    Args:
+        s1: 较短字符串
+        s2: 较长字符串
+
+    Returns:
+        int: 最长公共子串长度
+    """
+    if not s1 or not s2:
+        return 0
+
+    # 确保 s1 是较短的
+    if len(s1) > len(s2):
+        s1, s2 = s2, s1
+
+    max_len = 0
+    prev = [0] * (len(s2) + 1)
+
+    for i in range(len(s1)):
+        curr = [0] * (len(s2) + 1)
+        for j in range(len(s2)):
+            if s1[i] == s2[j]:
+                curr[j + 1] = prev[j] + 1
+                if curr[j + 1] > max_len:
+                    max_len = curr[j + 1]
+        prev = curr
+
+    return max_len
+
+
+# ──────────────────────────────────────────────────────────────
+# 中文字符级相似度
+# ──────────────────────────────────────────────────────────────
+
+
+def _chinese_char_similarity(text1: str, text2: str) -> float:
+    """仅基于中文字符的 Jaccard 相似度（兜底策略）
+
+    在 n-gram 和子串匹配都不理想时，用单字级别兜底。
+
+    Args:
+        text1: 第一个文本
+        text2: 第二个文本
+
+    Returns:
+        float: 相似度分数 (0-1)
+    """
+    chars1 = {c for c in text1 if _CJK_RE.match(c)}
+    chars2 = {c for c in text2 if _CJK_RE.match(c)}
+
+    if not chars1 or not chars2:
+        return 0.0
+
+    intersection = chars1 & chars2
+    union = chars1 | chars2
+
+    if not union:
+        return 0.0
+
+    return len(intersection) / len(union)
+
+
+# ──────────────────────────────────────────────────────────────
+# 编辑距离
+# ──────────────────────────────────────────────────────────────
 
 
 def _levenshtein_distance(s1: str, s2: str) -> int:
@@ -138,7 +324,7 @@ def _levenshtein_distance(s1: str, s2: str) -> int:
     if not s2:
         return len(s1)
 
-    previous_row = range(len(s2) + 1)
+    previous_row = list(range(len(s2) + 1))
     for i, c1 in enumerate(s1):
         current_row = [i + 1]
         for j, c2 in enumerate(s2):

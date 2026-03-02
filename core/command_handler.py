@@ -398,36 +398,6 @@ class CommandHandler:
             logger.error(f"容量控制失败: {e}")
             yield event.plain_result(f"容量控制失败: {str(e)}")
 
-    async def migrate_legacy_data(self, event: AstrMessageEvent):
-        """手动迁移旧版本数据。"""
-        try:
-            yield event.plain_result("开始检查和迁移旧版本数据...")
-
-            # 强制重新迁移数据
-            migrated_data = await self.plugin._migrate_legacy_data()
-
-            if migrated_data:
-                yield event.plain_result(f"✅ 成功迁移 {len(migrated_data)} 条记录")
-
-                # 显示迁移的分类统计
-                category_stats = Counter(
-                    record.get("category", "未分类")
-                    for record in migrated_data.values()
-                    if isinstance(record, dict)
-                )
-
-                if category_stats:
-                    stats_text = "迁移的分类统计:\n"
-                    for category, count in sorted(category_stats.items()):
-                        stats_text += f"  {category}: {count}张\n"
-                    yield event.plain_result(stats_text)
-            else:
-                yield event.plain_result("ℹ️ 未发现需要迁移的数据")
-
-        except Exception as e:
-            logger.error(f"手动迁移失败: {e}")
-            yield event.plain_result(f"❌ 迁移失败: {str(e)}")
-
     def cleanup(self):
         """清理资源。"""
         # CommandHandler 主要是无状态的，清理插件引用即可

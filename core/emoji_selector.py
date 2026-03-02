@@ -14,17 +14,10 @@ try:
         _extract_words,
         calculate_hybrid_similarity,
     )
-    from .text_similarity import (
-        calculate_simple_similarity as calculate_similarity,
-    )
 except ImportError:
     # 如果导入失败，提供简单的降级实现
-    def calculate_similarity(s1: str, s2: str) -> float:
-        if not s1 and not s2:
-            return 1.0
-        if not s1 or not s2:
-            return 0.0
-        return 1.0 if s1 == s2 else 0.0
+    def _extract_words(text: str) -> set[str]:
+        return set(text.split())
 
     def calculate_hybrid_similarity(text1: str, text2: str) -> float:
         text1_lower = text1.lower()
@@ -52,8 +45,8 @@ class EmojiSelector:
     MAX_RECENT_USAGE = 10  # 最近使用记录最大数量
     MIN_RECENT_USAGE = 3  # 最近使用记录最小数量
 
-    # 相似度阈值常量
-    SIMILARITY_THRESHOLD = 0.65  # 模糊匹配相似度阈值
+    # 相似度阈值常量（v2 n-gram 改进后适当降低阈值以提升召回率）
+    SIMILARITY_THRESHOLD = 0.45  # 模糊匹配相似度阈值
 
     def __init__(self, plugin_instance: Any):
         self.plugin = plugin_instance
@@ -284,12 +277,16 @@ class EmojiSelector:
                 desc = str(data.get("desc", "")).lower()
                 desc_score = calculate_hybrid_similarity(context_text, desc)
 
-                # 分词匹配补充（提升中文效果）
-                if desc_score < 0.3:
+                # n-gram 分词匹配补充（利用 bigram 提升中文语义匹配）
+                if desc_score < 0.25:
                     desc_words = _extract_words(desc)
-                    word_overlap = len(context_words & desc_words)
-                    if word_overlap > 0:
-                        desc_score = max(desc_score, min(1.0, word_overlap * 0.2))
+                    overlap = context_words & desc_words
+                    # 区分 bigram 匹配（权重更高）和 unigram 匹配
+                    bigram_hits = sum(1 for w in overlap if len(w) >= 2)
+                    unigram_hits = len(overlap) - bigram_hits
+                    boost = bigram_hits * 0.25 + unigram_hits * 0.1
+                    if boost > 0:
+                        desc_score = max(desc_score, min(1.0, boost))
 
                 # 2. 标签匹配分数 (0-1)
                 tags = self._parse_tags(data.get("tags", []))
@@ -502,33 +499,39 @@ class EmojiSelector:
                     if score >= 15:
                         return score
 
-        # 分词匹配（中文场景：如"猫娘"匹配"猫"）
+        # 分词匹配（n-gram 改进：bigram 匹配权重更高，如"猫娘"中的"猫"可匹配单字）
         if score < 10:
             query_words = _extract_words(query_lower)
             if query_words:
                 # 检查分词在描述中的匹配
                 desc_words = _extract_words(desc)
-                word_match = len(query_words & desc_words)
-                if word_match > 0:
-                    score = max(score, word_match * 4)  # 每个词匹配 +4 分
+                overlap = query_words & desc_words
+                bigram_hits = sum(1 for w in overlap if len(w) >= 2)
+                unigram_hits = len(overlap) - bigram_hits
+                word_score = bigram_hits * 6 + unigram_hits * 3
+                if word_score > 0:
+                    score = max(score, word_score)
 
                 # 检查分词在标签中的匹配
                 for tag in tags:
                     tag_words = _extract_words(tag)
-                    tag_match = len(query_words & tag_words)
-                    if tag_match > 0:
-                        score = max(score, tag_match * 5)
+                    tag_overlap = query_words & tag_words
+                    tag_bigram = sum(1 for w in tag_overlap if len(w) >= 2)
+                    tag_unigram = len(tag_overlap) - tag_bigram
+                    tag_word_score = tag_bigram * 7 + tag_unigram * 3
+                    if tag_word_score > 0:
+                        score = max(score, tag_word_score)
 
-        # 模糊匹配（降级）
-        if score >= 10 and query_tokens:
+        # 模糊匹配（使用多策略融合相似度）
+        if score < 10:
             for target in [category, desc] + tags[:2]:
                 if len(target) > 1 and len(query_lower) > 1:
-                    sim = calculate_similarity(
+                    sim = calculate_hybrid_similarity(
                         query_lower[:max_str_len], target[:max_str_len]
                     )
                     if sim >= self.SIMILARITY_THRESHOLD:
                         score = max(
-                            score, int(4 + (sim - self.SIMILARITY_THRESHOLD) * 12)
+                            score, int(4 + (sim - self.SIMILARITY_THRESHOLD) * 16)
                         )
                         break
 

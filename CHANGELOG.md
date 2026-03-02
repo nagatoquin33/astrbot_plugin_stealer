@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.8] - 2026-03-02
+- 修复bug
+- 新增 QA 上下文情绪分析：将用户消息与 LLM 回复组成 Q/A 上下文，提升情绪识别准确度
+
+
 ## [2.3.7] - 2026-02-26
 - 增强 FC 工具模糊匹配：搜索无结果时返回推荐分类
 - 优化智能选择性能：避免二次遍历索引，一次遍历同时收集高低分候选

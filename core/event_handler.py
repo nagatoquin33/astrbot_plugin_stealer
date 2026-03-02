@@ -648,6 +648,16 @@ class EventHandler:
         Returns:
             str | None: 发送者ID
         """
+        # 优先使用框架官方 API
+        if hasattr(event, "get_sender_id"):
+            try:
+                sid = event.get_sender_id()
+                if sid:
+                    return str(sid)
+            except Exception:
+                pass
+
+        # 兜底：防御性遍历属性
         for attr in ("sender_id", "user_id"):
             value = getattr(event, attr, None)
             if value:
@@ -655,10 +665,11 @@ class EventHandler:
 
         message_obj = getattr(event, "message_obj", None)
         if message_obj is not None:
-            for attr in ("sender_id", "user_id"):
-                value = getattr(message_obj, attr, None)
-                if value:
-                    return str(value)
+            sender = getattr(message_obj, "sender", None)
+            if sender is not None:
+                uid = getattr(sender, "user_id", None)
+                if uid:
+                    return str(uid)
 
         return None
 

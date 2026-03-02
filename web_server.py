@@ -1,7 +1,6 @@
 import asyncio
 import hashlib
 import hmac
-import logging
 import shutil
 import time
 import uuid
@@ -11,7 +10,7 @@ from typing import Any
 
 from aiohttp import web
 
-logger = logging.getLogger("astrbot")
+from astrbot.api import logger
 
 
 class WebServer:
