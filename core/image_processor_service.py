@@ -672,10 +672,18 @@ class ImageProcessorService:
             parts = [p.strip() for p in response.strip().split("|")]
             emotion_result = parts[0] if parts else ""
             tags_str = parts[1] if len(parts) > 1 else ""
-            tags_result = [t.strip() for t in tags_str.split(",") if t.strip()]
+            tags_result = [
+                t.strip()
+                for t in tags_str.replace("，", ",").replace("、", ",").split(",")
+                if t.strip()
+            ]
             desc_result = parts[2] if len(parts) > 2 else "表情包"
             scenes_str = parts[3] if len(parts) > 3 else ""
-            scenes_result = [s.strip() for s in scenes_str.split(",") if s.strip()]
+            scenes_result = [
+                s.strip()
+                for s in scenes_str.replace("，", ",").replace("、", ",").replace("；", ",").split(",")
+                if s.strip()
+            ]
 
             # 规范化分类
             category = self._normalize_category(emotion_result)
