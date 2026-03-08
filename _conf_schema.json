@@ -110,33 +110,33 @@
   },
 
   "_group_section": {
-    "description": "=== 群聊过滤 ===",
+    "description": "=== 目标过滤 ===",
     "type": "text",
     "invisible": true
   },
   "send_target_whitelist": {
-    "description": "Send whitelist",
+    "description": "发表情白名单",
     "type": "list",
     "default": [],
-    "hint": "Use group:ID or user:QQ. When non-empty, only these targets may send emojis."
+    "hint": "格式：group:群号 或 user:QQ号。非空时仅白名单目标可触发发表情"
   },
   "send_target_blacklist": {
-    "description": "Send blacklist",
+    "description": "发表情黑名单",
     "type": "list",
     "default": [],
-    "hint": "Use group:ID or user:QQ. Active when send whitelist is empty."
+    "hint": "格式：group:群号 或 user:QQ号。白名单为空时生效，黑名单目标不触发发表情"
   },
   "steal_target_whitelist": {
-    "description": "Steal whitelist",
+    "description": "偷表情白名单",
     "type": "list",
     "default": [],
-    "hint": "Use group:ID or user:QQ. When non-empty, only these targets may be collected from."
+    "hint": "格式：group:群号 或 user:QQ号。非空时仅白名单目标可触发偷表情"
   },
   "steal_target_blacklist": {
-    "description": "Steal blacklist",
+    "description": "偷表情黑名单",
     "type": "list",
     "default": [],
-    "hint": "Use group:ID or user:QQ. Active when steal whitelist is empty."
+    "hint": "格式：group:群号 或 user:QQ号。白名单为空时生效，黑名单目标不触发偷表情"
   },
   "_storage_section": {
     "description": "=== 存储管理 ===",
