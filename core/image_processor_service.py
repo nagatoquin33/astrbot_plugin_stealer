@@ -765,9 +765,9 @@ class ImageProcessorService:
             actual_prompt = prompt
             if is_animated:
                 animated_prefix = (
-                    "[动图帧序列] 这是一张 GIF 动图的关键帧横向拼接，"
-                    "从左到右按时间顺序展示了动画过程。"
-                    "请理解这些帧是一个连贯的动画，分析整体动作和情绪变化。\n\n"
+                    "[动图帧序列] 这是一个动态图表情包，每一帧从左到右按时间顺序展示了动画过程。"
+                    "黑色背景代表透明区域。"
+                    "请理解这些帧是连贯的动画，分析整体动作和情绪变化，从互联网梗/meme的角度分析。\n\n"
                 )
                 actual_prompt = animated_prefix + prompt
 
@@ -816,45 +816,77 @@ class ImageProcessorService:
                 return img_path, False
 
             # 动图处理：提取关键帧并横向拼接
-            MAX_FRAMES = 6  # 最多提取 6 帧
-            MAX_FRAME_WIDTH = 512  # 单帧最大宽度
+            MAX_FRAMES = 12  # 最多提取 12 帧
+            TARGET_HEIGHT = 256  # 输出高度
+            SIMILARITY_THRESHOLD = 1000.0  # 相似帧过滤阈值 (MSE)
 
-            # 计算帧缩放
-            frame_width = min(width, MAX_FRAME_WIDTH)
-            scale = frame_width / width if width > MAX_FRAME_WIDTH else 1.0
-            frame_height = int(height * scale)
-
-            # 均匀采样帧索引
-            actual_frames = min(n_frames, MAX_FRAMES)
-            frame_indices = [
-                int(i * (n_frames - 1) / (actual_frames - 1))
-                for i in range(actual_frames)
-            ] if actual_frames > 1 else [0]
+            # 计算缩放比例
+            scale = TARGET_HEIGHT / height if height > TARGET_HEIGHT else 1.0
+            frame_width = int(width * scale)
+            frame_height = TARGET_HEIGHT
 
             def _extract_and_combine(fp: str) -> str:
+                import numpy as np
+                
                 frames = []
+                last_selected_np = None
+                
                 with PILImage.open(fp) as im:
-                    for idx in frame_indices:
+                    # 先提取所有帧
+                    all_frames = []
+                    for idx in range(n_frames):
                         im.seek(idx)
                         frame = im.convert("RGBA")
                         if scale < 1.0:
                             frame = frame.resize(
                                 (frame_width, frame_height), PILImage.LANCZOS
                             )
+                        all_frames.append(frame)
+                
+                # 相似帧过滤
+                for frame in all_frames:
+                    frame_np = np.array(frame, dtype=np.float32)
+                    
+                    if last_selected_np is None:
+                        # 第一帧直接加入
                         frames.append(frame)
+                        last_selected_np = frame_np
+                    else:
+                        # 计算均方误差 (MSE)
+                        mse = np.mean((frame_np - last_selected_np) ** 2)
+                        
+                        # 差异够大才选中
+                        if mse > SIMILARITY_THRESHOLD:
+                            frames.append(frame)
+                            last_selected_np = frame_np
+                
+                # 如果过滤后帧数太少，保留更多帧
+                if len(frames) < 3 and len(all_frames) >= 3:
+                    # 均匀采样
+                    step = max(1, len(all_frames) // 6)
+                    frames = [all_frames[i] for i in range(0, len(all_frames), step)][:6]
+                
+                # 限制最大帧数
+                if len(frames) > MAX_FRAMES:
+                    # 均匀抽取
+                    step = len(frames) / MAX_FRAMES
+                    frames = [frames[int(i * step)] for i in range(MAX_FRAMES)]
 
-                # 横向拼接所有帧
+                # 横向拼接所有帧，黑色背景代表透明
                 total_width = frame_width * len(frames)
-                combined = PILImage.new("RGBA", (total_width, frame_height))
+                combined = PILImage.new("RGBA", (total_width, frame_height), (0, 0, 0, 255))
 
                 for i, frame in enumerate(frames):
-                    combined.paste(frame, (i * frame_width, 0))
+                    combined.paste(frame, (i * frame_width, 0), frame)  # 使用帧的 alpha 通道
 
                 # 保存临时文件
                 import tempfile
-                temp_fd, temp_path = tempfile.mkstemp(suffix=".png")
+                temp_fd, temp_path = tempfile.mkstemp(suffix=".jpg")
                 os.close(temp_fd)
-                combined.save(temp_path, "PNG")
+                # 转为 RGB 保存为 JPEG（黑色背景）
+                combined_rgb = PILImage.new("RGB", combined.size, (0, 0, 0))
+                combined_rgb.paste(combined, mask=combined.split()[3] if combined.mode == "RGBA" else None)
+                combined_rgb.save(temp_path, "JPEG", quality=90)
 
                 return temp_path
 
