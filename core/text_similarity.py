@@ -10,6 +10,7 @@
 """
 
 import re
+from functools import lru_cache
 
 # ──────────────────────────────────────────────────────────────
 # 中文字符检测（编译一次，复用）
@@ -39,8 +40,8 @@ def calculate_simple_similarity(text1: str, text2: str) -> float:
     if not text1 or not text2:
         return 0.0
 
-    words1 = _extract_words(text1.lower())
-    words2 = _extract_words(text2.lower())
+    words1 = _extract_words(_normalize_text(text1))
+    words2 = _extract_words(_normalize_text(text2))
 
     if not words1 or not words2:
         return 0.0
@@ -67,8 +68,8 @@ def calculate_levenshtein_similarity(text1: str, text2: str) -> float:
     if not text1 or not text2:
         return 0.0
 
-    s1 = text1.lower()
-    s2 = text2.lower()
+    s1 = _normalize_text(text1)
+    s2 = _normalize_text(text2)
 
     distance = _levenshtein_distance(s1, s2)
     max_len = max(len(s1), len(s2))
@@ -99,11 +100,22 @@ def calculate_hybrid_similarity(text1: str, text2: str) -> float:
     if not text1 or not text2:
         return 0.0
 
-    t1 = text1.lower().strip()
-    t2 = text2.lower().strip()
+    t1 = _normalize_text(text1)
+    t2 = _normalize_text(text2)
 
     if t1 == t2:
         return 1.0
+
+    if t1 > t2:
+        t1, t2 = t2, t1
+
+    return _calculate_hybrid_similarity_cached(t1, t2)
+
+
+@lru_cache(maxsize=8192)
+def _calculate_hybrid_similarity_cached(t1: str, t2: str) -> float:
+    if not t1 or not t2:
+        return 0.0
 
     # ---- 策略1: n-gram Jaccard ----
     ngram_sim = calculate_simple_similarity(t1, t2)
@@ -122,7 +134,7 @@ def calculate_hybrid_similarity(text1: str, text2: str) -> float:
     # ---- 融合 ----
     # 核心思路：取各策略的加权组合，但保证强信号不被弱信号拉低
     # 如果子串完全包含，直接给高分
-    if substr_sim >= 0.9:
+    if substr_sim >= 0.7:
         return min(1.0, max(substr_sim, ngram_sim * 0.3 + substr_sim * 0.7))
 
     # 正常融合
@@ -146,7 +158,8 @@ def calculate_hybrid_similarity(text1: str, text2: str) -> float:
 # ──────────────────────────────────────────────────────────────
 
 
-def _extract_words(text: str) -> set[str]:
+@lru_cache(maxsize=8192)
+def _extract_words(text: str) -> frozenset[str]:
     """从文本中提取特征词汇集合（改进版）
 
     中文：unigram + bigram（如 "开心快乐" → {"开", "心", "快", "乐", "开心", "心快", "快乐"}）
@@ -182,7 +195,7 @@ def _extract_words(text: str) -> set[str]:
         if _EN_WORD_RE.match(token) and len(token) > 1:
             words.add(token)
 
-    return words
+    return frozenset(words)
 
 
 def _add_chinese_ngrams(chars: list[str], words: set[str]) -> None:
@@ -288,8 +301,8 @@ def _chinese_char_similarity(text1: str, text2: str) -> float:
     Returns:
         float: 相似度分数 (0-1)
     """
-    chars1 = {c for c in text1 if _CJK_RE.match(c)}
-    chars2 = {c for c in text2 if _CJK_RE.match(c)}
+    chars1 = _extract_chinese_chars(_normalize_text(text1))
+    chars2 = _extract_chinese_chars(_normalize_text(text2))
 
     if not chars1 or not chars2:
         return 0.0
@@ -319,7 +332,7 @@ def _levenshtein_distance(s1: str, s2: str) -> int:
         int: 编辑距离
     """
     if len(s1) < len(s2):
-        return _levenshtein_distance(s2, s1)
+        s1, s2 = s2, s1
 
     if not s2:
         return len(s1)
@@ -335,3 +348,13 @@ def _levenshtein_distance(s1: str, s2: str) -> int:
         previous_row = current_row
 
     return previous_row[-1]
+
+
+@lru_cache(maxsize=4096)
+def _normalize_text(text: str) -> str:
+    return str(text or "").lower().strip()
+
+
+@lru_cache(maxsize=8192)
+def _extract_chinese_chars(text: str) -> frozenset[str]:
+    return frozenset(c for c in text if _CJK_RE.match(c))

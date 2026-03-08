@@ -19,6 +19,7 @@ class CommandHandler:
             plugin_instance: StealerPlugin 实例，用于访问插件的配置和服务
         """
         self.plugin = plugin_instance
+        self._cleaned = False  # 清理标志位
 
     def _apply_config_updates(self, updates: dict) -> None:
         self.plugin._update_config_from_dict(updates)
@@ -46,143 +47,150 @@ class CommandHandler:
     async def group_filter(
         self,
         event: AstrMessageEvent,
+        scope: str = "",
         list_name: str = "",
         action: str = "",
-        group_id: str = "",
+        target: str = "",
+        target_id: str = "",
     ):
-        """管理群聊黑白名单。
+        cfg = self.plugin.plugin_config
+        if cfg is None:
+            yield event.plain_result("配置服务不可用")
+            return
 
-        用法:
-        - /meme group show
-        - /meme group wl add [群号]
-        - /meme group wl del [群号]
-        - /meme group wl clear
-        - /meme group bl add [群号]
-        - /meme group bl del [群号]
-        - /meme group bl clear
-        """
-
-        def normalize_gid(value: object) -> str:
-            s = str(value).strip()
-            return s
-
-        def get_event_group_id() -> str:
-            try:
-                gid = event.get_group_id()
-            except Exception:
-                gid = ""
-            return normalize_gid(gid)
-
-        def format_id_list(ids: list[str], *, max_items: int = 30) -> str:
-            if not ids:
+        def format_items(items: list[str], *, max_items: int = 30) -> str:
+            if not items:
                 return "（空）"
-            shown = ids[:max_items]
-            suffix = (
-                f" … 还有 {len(ids) - max_items} 个" if len(ids) > max_items else ""
-            )
+            shown = items[:max_items]
+            suffix = f" ... 还有 {len(items) - max_items} 项" if len(items) > max_items else ""
             return ", ".join(shown) + suffix
 
+        def resolve_target(raw_target: str, raw_target_id: str) -> str:
+            if raw_target and raw_target_id:
+                lowered = raw_target.lower()
+                if lowered in {"group", "g"}:
+                    return cfg.normalize_target_entry(raw_target_id, "group")
+                if lowered in {"user", "u", "qq"}:
+                    return cfg.normalize_target_entry(raw_target_id, "user")
+
+            combined = str(raw_target or raw_target_id or "").strip()
+            if combined:
+                return cfg.normalize_target_entry(combined, "group")
+
+            event_scope, event_id = cfg.get_event_target(event)
+            if event_scope and event_id:
+                return f"{event_scope}:{event_id}"
+            return ""
+
+        raw_scope = (scope or "").strip().lower()
         raw_list_name = (list_name or "").strip().lower()
         raw_action = (action or "").strip().lower()
 
-        if raw_list_name in {"show", "list", "ls", "status"} and not raw_action:
+        if raw_scope in {"show", "list", "ls", "status"} and not raw_list_name:
+            raw_action = raw_scope
+            raw_scope = ""
+        elif raw_scope in {"wl", "white", "whitelist", "bl", "black", "blacklist"} and not raw_action:
             raw_action = raw_list_name
-            raw_list_name = ""
+            raw_list_name = raw_scope
+            raw_scope = "send"
 
         if raw_action in {"", "help", "h"}:
-            yield event.plain_result(
-                "用法:\n"
+            help_text = (
+                "用法：\n"
                 "/meme group show\n"
-                "/meme group wl add [群号]\n"
-                "/meme group wl del [群号]\n"
-                "/meme group wl clear\n"
-                "/meme group bl add [群号]\n"
-                "/meme group bl del [群号]\n"
-                "/meme group bl clear\n\n"
-                "说明:\n"
-                "- whitelist( wl ) 非空时优先生效：只有在白名单内的群才会偷/发\n"
-                "- whitelist 为空时使用 blacklist( bl )：黑名单内的群不会偷/发\n"
-                "- 未提供群号时默认使用当前群号"
+                "/meme group <send|steal> show\n"
+                "/meme group <send|steal> <wl|bl> <add|del|clear> [group:ID|user:QQ]\n"
+                "/meme group <send|steal> <wl|bl> <add|del> <group|user> <ID>\n\n"
+                "说明：\n"
+                "- send 控制发表情\n"
+                "- steal 控制偷表情\n"
+                "- 白名单非空时优先生效\n"
+                "- 支持 group:123456 和 user:123456\n"
+                "- 不填目标时默认使用当前会话目标"
             )
+            yield event.plain_result(help_text)
             return
 
         if raw_action in {"show", "list", "ls", "status"}:
-            cfg = self.plugin.plugin_config
-            if cfg is None:
-                yield event.plain_result("❌ 配置服务不可用")
+            if raw_scope in {"", "all"}:
+                sections = []
+                for action_name, title in (("send", "发表情"), ("steal", "偷表情")):
+                    whitelist, blacklist = cfg._get_action_lists(action_name)
+                    mode = "白名单" if whitelist else ("黑名单" if blacklist else "未启用")
+                    sections.append(
+                        f"{title}:\n"
+                        f"- 模式：{mode}\n"
+                        f"- 白名单({len(whitelist)})：{format_items(whitelist)}\n"
+                        f"- 黑名单({len(blacklist)})：{format_items(blacklist)}"
+                    )
+                yield event.plain_result("\n\n".join(sections))
                 return
-            whitelist = list(cfg.group_whitelist or [])
-            blacklist = list(cfg.group_blacklist or [])
-            mode = "白名单优先" if whitelist else ("黑名单" if blacklist else "未启用")
+
+            if raw_scope not in {"send", "steal"}:
+                yield event.plain_result("目标类型无效，请使用 send 或 steal")
+                return
+
+            whitelist, blacklist = cfg._get_action_lists(raw_scope)
+            mode = "白名单" if whitelist else ("黑名单" if blacklist else "未启用")
+            title = "发表情" if raw_scope == "send" else "偷表情"
             yield event.plain_result(
-                "群聊过滤状态:\n"
-                f"- 模式: {mode}\n"
-                f"- 白名单({len(whitelist)}): {format_id_list(whitelist)}\n"
-                f"- 黑名单({len(blacklist)}): {format_id_list(blacklist)}"
+                f"{title}:\n"
+                f"- 模式：{mode}\n"
+                f"- 白名单({len(whitelist)})：{format_items(whitelist)}\n"
+                f"- 黑名单({len(blacklist)})：{format_items(blacklist)}"
             )
             return
 
-        if raw_list_name in {"wl", "white", "whitelist", "白", "白名单"}:
-            list_key = "group_whitelist"
+        if raw_scope not in {"send", "steal"}:
+            yield event.plain_result("目标类型无效，请使用 send 或 steal")
+            return
+
+        if raw_list_name in {"wl", "white", "whitelist"}:
+            list_key = f"{raw_scope}_target_whitelist"
             list_title = "白名单"
-        elif raw_list_name in {"bl", "black", "blacklist", "黑", "黑名单"}:
-            list_key = "group_blacklist"
+        elif raw_list_name in {"bl", "black", "blacklist"}:
+            list_key = f"{raw_scope}_target_blacklist"
             list_title = "黑名单"
         else:
-            yield event.plain_result(
-                "❌ 参数错误：请使用 wl 或 bl，或使用 /meme group help"
-            )
-            return
-
-        cfg = self.plugin.plugin_config
-        if cfg is None:
-            yield event.plain_result("❌ 配置服务不可用")
+            yield event.plain_result("名单类型无效，请使用 wl 或 bl")
             return
 
         current: list[str] = list(getattr(cfg, list_key, []) or [])
         current_set = set(current)
 
         if raw_action in {"clear", "reset"}:
-            updated = []
-            ok = bool(cfg.update_config({list_key: updated}))
-            if ok:
-                yield event.plain_result(f"✅ 已清空群聊{list_title}")
-            else:
-                yield event.plain_result(f"❌ 清空群聊{list_title}失败")
+            ok = bool(cfg.update_config({list_key: []}))
+            scope_title = "发表情" if raw_scope == "send" else "偷表情"
+            msg = f"已清空{scope_title}{list_title}" if ok else f"清空{scope_title}{list_title}失败"
+            yield event.plain_result(msg)
             return
 
-        gid = normalize_gid(group_id) if group_id else get_event_group_id()
-        if not gid:
-            yield event.plain_result("❌ 未获取到群号，请在群聊中执行或手动提供群号")
+        normalized_target = resolve_target(target, target_id)
+        if not normalized_target:
+            yield event.plain_result("缺少目标，请使用 group:群号 或 user:QQ号")
             return
 
         if raw_action in {"add", "a", "append", "+"}:
-            if gid in current_set:
-                yield event.plain_result(f"ℹ️ 群 {gid} 已在{list_title}中")
+            if normalized_target in current_set:
+                yield event.plain_result(f"{normalized_target} 已在{list_title}中")
                 return
-            updated = current + [gid]
+            updated = current + [normalized_target]
             ok = bool(cfg.update_config({list_key: updated}))
-            if ok:
-                yield event.plain_result(f"✅ 已添加群 {gid} 到{list_title}")
-            else:
-                yield event.plain_result(f"❌ 添加群 {gid} 到{list_title}失败")
+            msg = f"已将 {normalized_target} 加入{list_title}" if ok else f"加入{list_title}失败：{normalized_target}"
+            yield event.plain_result(msg)
             return
 
         if raw_action in {"del", "delete", "rm", "remove", "-"}:
-            if gid not in current_set:
-                yield event.plain_result(f"ℹ️ 群 {gid} 不在{list_title}中")
+            if normalized_target not in current_set:
+                yield event.plain_result(f"{normalized_target} 不在{list_title}中")
                 return
-            updated = [x for x in current if x != gid]
+            updated = [item for item in current if item != normalized_target]
             ok = bool(cfg.update_config({list_key: updated}))
-            if ok:
-                yield event.plain_result(f"✅ 已从{list_title}移除群 {gid}")
-            else:
-                yield event.plain_result(f"❌ 从{list_title}移除群 {gid}失败")
+            msg = f"已将 {normalized_target} 移出{list_title}" if ok else f"移出{list_title}失败：{normalized_target}"
+            yield event.plain_result(msg)
             return
 
-        yield event.plain_result(
-            "❌ 参数错误：请使用 add/del/clear/show，或 /meme group help"
-        )
+        yield event.plain_result("操作无效，请使用 add / del / clear / show")
 
     async def capture(self, event: AstrMessageEvent):
         window_seconds = 30
@@ -400,6 +408,9 @@ class CommandHandler:
 
     def cleanup(self):
         """清理资源。"""
+        if self._cleaned:
+            return
+        self._cleaned = True
         # CommandHandler 主要是无状态的，清理插件引用即可
         self.plugin = None
         logger.debug("CommandHandler 资源已清理")

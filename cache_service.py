@@ -4,7 +4,6 @@ import hashlib
 import inspect
 import json
 from pathlib import Path
-from types import MappingProxyType
 from typing import Any
 
 from astrbot.api import logger
@@ -263,26 +262,26 @@ class CacheService:
         """
         return dict(self.get_cache("index_cache"))
 
-    def get_index_cache_readonly(self) -> MappingProxyType:
-        """获取索引缓存的只读视图（零拷贝，适用于只读遍历场景）。
+    def get_index_cache_readonly(self) -> dict[str, Any]:
+        """获取索引缓存的副本（适用于只读遍历场景）。
 
         Returns:
-            MappingProxyType: 索引缓存的只读视图
+            dict[str, Any]: 索引缓存的副本
         """
         return self.get_cache("index_cache")
 
-    def get_cache(self, cache_name: str) -> MappingProxyType:
-        """获取指定类型的缓存字典（只读视图）。
+    def get_cache(self, cache_name: str) -> dict[str, Any]:
+        """获取指定类型的缓存字典（副本）。
 
         Args:
             cache_name: 缓存类型名称
 
         Returns:
-            只读视图 MappingProxyType，如果不存在则返回空的只读视图
+            dict[str, Any]: 缓存字典的副本，如果不存在则返回空字典
         """
         if cache_name in self._caches:
-            return MappingProxyType(self._caches[cache_name])
-        return MappingProxyType({})
+            return dict(self._caches[cache_name])
+        return {}
 
     async def set_cache(
         self, cache_name: str, cache_data: dict[str, Any], persist: bool = True
@@ -295,11 +294,12 @@ class CacheService:
             persist: 是否立即持久化到文件
         """
         if cache_name in self._caches:
-            old_len = len(self._caches[cache_name])
-            new_len = len(cache_data)
-            self._caches[cache_name].clear()
-            self._caches[cache_name].update(cache_data)
-            logger.debug(f"[set_cache] {cache_name}: {old_len} -> {new_len} items")
+            async with self._cache_lock:
+                old_len = len(self._caches[cache_name])
+                new_len = len(cache_data)
+                self._caches[cache_name].clear()
+                self._caches[cache_name].update(cache_data)
+                logger.debug(f"[set_cache] {cache_name}: {old_len} -> {new_len} items")
             if persist:
                 await self._save_cache_async(cache_name)
 
@@ -343,10 +343,12 @@ class CacheService:
     async def update_index(self, updater) -> dict[str, Any]:
         try:
             async with self._index_lock:
-                current = self.get_index_cache()
+                # 获取当前索引的深拷贝，确保 updater 修改不影响原始数据
+                current = copy.deepcopy(self._caches.get("index_cache", {}))
                 result = updater(current)
                 if inspect.isawaitable(result):
                     await result
+                # 只有 updater 成功执行后，才更新缓存
                 await self.set_cache("index_cache", current, persist=True)
                 return current
         except Exception as e:
@@ -402,10 +404,17 @@ class CacheService:
                             )
                             migrated_data.update(old_data)
 
-                            # 备份旧文件
+                            # 备份旧文件（带错误检查）
                             backup_path = old_path.with_suffix(".json.backup")
-                            await asyncio.to_thread(shutil.copy2, old_path, backup_path)
-                            logger.info(f"已备份旧索引文件到: {backup_path}")
+                            try:
+                                await asyncio.to_thread(shutil.copy2, old_path, backup_path)
+                                # 验证备份是否成功
+                                if backup_path.exists():
+                                    logger.info(f"已备份旧索引文件到: {backup_path}")
+                                else:
+                                    logger.warning(f"备份文件创建失败: {backup_path}")
+                            except Exception as backup_err:
+                                logger.warning(f"备份旧索引文件失败: {backup_err}，继续迁移")
 
                     except Exception as e:
                         logger.error(f"迁移文件 {old_path} 失败: {e}")

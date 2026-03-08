@@ -19,6 +19,7 @@ class EventHandler:
             plugin_instance: Main 实例，用于访问插件的配置和服务
         """
         self.plugin = plugin_instance
+        self._cleaned = False  # 清理标志位
 
         # 图片处理节流相关
         self._last_process_time: float = (
@@ -273,6 +274,10 @@ class EventHandler:
     # @platform_adapter_type(PlatformAdapterType.ALL)
     async def on_message(self, event: AstrMessageEvent):
         """消息监听：偷取消息中的图片并分类存储。"""
+        # 检查是否已清理
+        if self._cleaned or self.plugin is None:
+            return
+
         # 调试信息
         logger.debug(f"EventHandler.on_message called with event type: {type(event)}")
 
@@ -285,12 +290,6 @@ class EventHandler:
             return
 
         plugin_instance = self.plugin
-        try:
-            if not plugin_instance.is_meme_enabled_for_event(event):
-                return
-        except Exception:
-            return
-
         force_entry = None
         try:
             force_entry = plugin_instance.get_force_capture_entry(event)
@@ -298,6 +297,12 @@ class EventHandler:
             force_entry = None
 
         force_active = force_entry is not None
+
+        try:
+            if not force_active and not plugin_instance.is_steal_enabled_for_event(event):
+                return
+        except Exception:
+            return
 
         if not plugin_instance.steal_emoji and not force_active:
             return
@@ -429,6 +434,10 @@ class EventHandler:
 
     async def _clean_raw_directory(self) -> int:
         """清理raw目录中的所有原始图片文件。"""
+        # 检查是否已清理
+        if self._cleaned or self.plugin is None:
+            return 0
+
         try:
             total_deleted = 0
 
@@ -479,6 +488,10 @@ class EventHandler:
 
     async def _enforce_capacity(self, image_index: dict):
         """执行容量控制，删除最旧的图片。"""
+        # 检查是否已清理
+        if self._cleaned or self.plugin is None:
+            return
+
         try:
             items_to_remove = self._select_items_for_removal(image_index)
             if not items_to_remove:
@@ -536,7 +549,11 @@ class EventHandler:
         Returns:
             需要移除的 (file_path, created_at) 列表；若无需移除则返回空列表。
         """
-        max_reg = int(self.plugin.max_reg_num)
+        try:
+            max_reg = int(self.plugin.max_reg_num)
+        except (TypeError, ValueError):
+            max_reg = 500  # 默认值
+
         if max_reg <= 0:
             logger.warning(f"容量控制上限无效: max_reg_num={max_reg}，跳过")
             return []
@@ -731,6 +748,9 @@ class EventHandler:
 
     def cleanup(self):
         """清理资源。"""
+        if self._cleaned:
+            return
+        self._cleaned = True
         # 清理强制捕获窗口
         if hasattr(self, "_force_capture_windows"):
             self._force_capture_windows.clear()

@@ -28,8 +28,10 @@ class PluginConfig(BaseModel):
     send_emoji_as_gif: bool = True
 
     # === 群聊过滤 ===
-    group_whitelist: list[str] = []
-    group_blacklist: list[str] = []
+    steal_target_whitelist: list[str] = []
+    steal_target_blacklist: list[str] = []
+    send_target_whitelist: list[str] = []
+    send_target_blacklist: list[str] = []
 
     # === 模型配置 ===
     vision_provider_id: str = ""
@@ -439,15 +441,109 @@ class PluginConfig(BaseModel):
         except Exception:
             return ""
 
+    def get_user_id(self, event: AstrMessageEvent) -> str:
+        try:
+            user_id = event.get_sender_id()
+            if user_id:
+                return str(user_id).strip()
+        except Exception:
+            pass
+
+        for attr in ("sender_id", "user_id"):
+            try:
+                value = getattr(event, attr, None)
+            except Exception:
+                value = None
+            if value:
+                return str(value).strip()
+
+        try:
+            message_obj = getattr(event, "message_obj", None)
+            sender = getattr(message_obj, "sender", None) if message_obj else None
+            user_id = getattr(sender, "user_id", None) if sender is not None else None
+            if user_id:
+                return str(user_id).strip()
+        except Exception:
+            pass
+
+        return ""
+
+    def get_event_target(self, event: AstrMessageEvent) -> tuple[str, str]:
+        group_id = self.get_group_id(event)
+        if group_id:
+            return "group", str(group_id).strip()
+
+        user_id = self.get_user_id(event)
+        if user_id:
+            return "user", str(user_id).strip()
+
+        return "", ""
+
+    @staticmethod
+    def normalize_target_entry(value: object, default_scope: str = "group") -> str:
+        raw = str(value or "").strip()
+        if not raw:
+            return ""
+
+        lowered = raw.lower()
+        for prefix, scope in (
+            ("group:", "group"),
+            ("g:", "group"),
+            ("群:", "group"),
+            ("user:", "user"),
+            ("u:", "user"),
+            ("qq:", "user"),
+            ("好友:", "user"),
+            ("私聊:", "user"),
+        ):
+            if lowered.startswith(prefix):
+                target_id = raw[len(prefix) :].strip()
+                return f"{scope}:{target_id}" if target_id else ""
+
+        if ":" in raw:
+            scope, target_id = raw.split(":", 1)
+            scope = scope.strip().lower()
+            target_id = target_id.strip()
+            if scope in {"group", "user"} and target_id:
+                return f"{scope}:{target_id}"
+
+        return f"{default_scope}:{raw}" if raw else ""
+
+    def _get_action_lists(self, action: str) -> tuple[list[str], list[str]]:
+        normalized = str(action or "").strip().lower()
+        if normalized == "steal":
+            return (
+                list(self.steal_target_whitelist or []),
+                list(self.steal_target_blacklist or []),
+            )
+        elif normalized == "send":
+            return (
+                list(self.send_target_whitelist or []),
+                list(self.send_target_blacklist or []),
+            )
+        return [], []
+
+    def is_action_allowed(self, action: str, event: AstrMessageEvent) -> bool:
+        scope, target_id = self.get_event_target(event)
+        if not scope or not target_id:
+            return True
+        return self.is_target_allowed(action, f"{scope}:{target_id}")
+
+    def is_target_allowed(self, action: str, target_entry: str) -> bool:
+        normalized_target = self.normalize_target_entry(target_entry)
+        if not normalized_target:
+            return True
+
+        whitelist, blacklist = self._get_action_lists(action)
+        if whitelist:
+            return normalized_target in whitelist
+        if blacklist and normalized_target in blacklist:
+            return False
+        return True
+
     def is_group_allowed(self, group_id: str) -> bool:
         """检查群组是否允许。"""
         if not group_id:
             return True
 
-        if self.group_whitelist and group_id not in self.group_whitelist:
-            return False
-
-        if self.group_blacklist and group_id in self.group_blacklist:
-            return False
-
-        return True
+        return self.is_target_allowed("send", f"group:{group_id}")

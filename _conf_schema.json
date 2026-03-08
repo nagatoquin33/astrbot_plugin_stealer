@@ -114,19 +114,30 @@
     "type": "text",
     "invisible": true
   },
-  "group_whitelist": {
-    "description": "群聊白名单（优先生效）",
+  "send_target_whitelist": {
+    "description": "Send whitelist",
     "type": "list",
     "default": [],
-    "hint": "填写群号列表。白名单非空时：只有白名单内的群会偷/发"
+    "hint": "Use group:ID or user:QQ. When non-empty, only these targets may send emojis."
   },
-  "group_blacklist": {
-    "description": "群聊黑名单",
+  "send_target_blacklist": {
+    "description": "Send blacklist",
     "type": "list",
     "default": [],
-    "hint": "填写群号列表。白名单为空时：黑名单内的群不会偷/发"
+    "hint": "Use group:ID or user:QQ. Active when send whitelist is empty."
   },
-
+  "steal_target_whitelist": {
+    "description": "Steal whitelist",
+    "type": "list",
+    "default": [],
+    "hint": "Use group:ID or user:QQ. When non-empty, only these targets may be collected from."
+  },
+  "steal_target_blacklist": {
+    "description": "Steal blacklist",
+    "type": "list",
+    "default": [],
+    "hint": "Use group:ID or user:QQ. Active when steal whitelist is empty."
+  },
   "_storage_section": {
     "description": "=== 存储管理 ===",
     "type": "text",

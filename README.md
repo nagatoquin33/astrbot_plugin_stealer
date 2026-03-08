@@ -103,8 +103,10 @@
 
 | 配置项 | 默认值 | 说明 |
 |:---|:---|:---|
-| `group_whitelist` | `[]` | 白名单（优先）。非空时只有名单内的群启用 |
-| `group_blacklist` | `[]` | 黑名单。白名单为空时生效 |
+| `send_target_whitelist` | `[]` | 发表情白名单。使用 `group:群号` 或 `user:QQ号` |
+| `send_target_blacklist` | `[]` | 发表情黑名单。白名单为空时生效 |
+| `steal_target_whitelist` | `[]` | 偷表情白名单。使用 `group:群号` 或 `user:QQ号` |
+| `steal_target_blacklist` | `[]` | 偷表情黑名单。白名单为空时生效 |
 
 ### 存储管理
 
@@ -153,7 +155,8 @@
 | 指令 | 说明 |
 |:---|:---|
 | `偷` | 进入 30 秒强制收录模式，期间发送的图片直接入库 |
-| `group <wl\|bl> <add\|del\|clear\|show> [群号]` | 管理群聊黑白名单 |
+| `group show` | 查看当前偷表情/发表情名单 |
+| `group <send\|steal> <wl\|bl> <add\|del\|clear> [group:群号\|user:QQ号]` | 管理目标黑白名单 |
 | `delete <序号\|文件名>` | 删除指定表情包 |
 | `capacity` | 立即执行容量控制 |
 | `rebuild_index` | 重建索引（版本迁移或索引异常时使用） |

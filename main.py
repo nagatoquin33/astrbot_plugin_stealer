@@ -53,6 +53,8 @@ class Main(Star):
     # 超时和处理常量
     IMAGE_PROCESSING_TIMEOUT_SECONDS = 60  # 图片处理超时时间
     MAX_SEARCH_RESULTS = 8  # 搜索表情包最大返回数量
+    AUTO_EMOJI_COOLDOWN_SECONDS = 20  # 同一会话自动发表情的最短间隔
+    PASSIVE_EMOJI_SEND_DELAY_SECONDS = 0.15  # 被动标签模式下让文字先落地
 
     # 从外部文件加载的提示词（已迁移到ImageProcessorService）
 
@@ -89,6 +91,8 @@ class Main(Star):
         # 运行时属性
         self.backend_tag: str = self.BACKEND_TAG
         self._migration_done: bool = False  # 迁移只执行一次
+        self._auto_emoji_cooldowns: dict[str, float] = {}
+        self._terminated: bool = False  # 终止标志位，防止重复清理
         # 强制捕获窗口已迁移到 EventHandler
 
     def _load_vision_provider_id(self) -> str:
@@ -288,14 +292,32 @@ class Main(Star):
         """委托给 PluginConfig。"""
         return self.plugin_config.get_group_id(event)
 
-    def is_meme_enabled_for_event(self, event: AstrMessageEvent) -> bool:
-        group_id = self._get_group_id(event)
+    def get_event_target(self, event: AstrMessageEvent) -> tuple[str, str]:
+        if self.plugin_config is None:
+            return "", ""
+        try:
+            return self.plugin_config.get_event_target(event)
+        except Exception:
+            return "", ""
+
+    def is_send_enabled_for_event(self, event: AstrMessageEvent) -> bool:
         if self.plugin_config is None:
             return True
         try:
-            return bool(self.plugin_config.is_group_allowed(group_id))
+            return bool(self.plugin_config.is_action_allowed("send", event))
         except Exception:
             return True
+
+    def is_steal_enabled_for_event(self, event: AstrMessageEvent) -> bool:
+        if self.plugin_config is None:
+            return True
+        try:
+            return bool(self.plugin_config.is_action_allowed("steal", event))
+        except Exception:
+            return True
+
+    def is_meme_enabled_for_event(self, event: AstrMessageEvent) -> bool:
+        return self.is_send_enabled_for_event(event)
 
     def begin_force_capture(self, event: AstrMessageEvent, seconds: int) -> None:
         """委托给 EventHandler。"""
@@ -328,18 +350,34 @@ class Main(Star):
 
     async def _restart_webui(self) -> None:
         logger.info("检测到 WebUI 配置变更，正在重启 WebUI...")
-        if self.web_server:
-            await self.web_server.stop()
-            self.web_server = None
 
         if not self.webui_enabled:
+            # WebUI 已禁用，停止旧服务即可
+            if self.web_server:
+                await self.web_server.stop()
+                self.web_server = None
             return
 
+        # 保存旧服务引用，在新服务启动成功后再停止
+        old_server = self.web_server
+
         try:
-            self.web_server = WebServer(self, host=self.webui_host, port=self.webui_port)
-            await self.web_server.start()
+            new_server = WebServer(self, host=self.webui_host, port=self.webui_port)
+            await new_server.start()
+            # 新服务启动成功，更新引用并停止旧服务
+            self.web_server = new_server
+            if old_server:
+                try:
+                    await old_server.stop()
+                except Exception as e:
+                    logger.warning(f"停止旧 WebUI 服务时出错: {e}")
+            logger.info("WebUI 重启成功")
         except Exception as e:
-            logger.error(f"重启 WebUI 失败: {e}")
+            logger.error(f"重启 WebUI 失败: {e}", exc_info=True)
+            # 启动失败，恢复旧服务引用
+            if old_server and self.web_server != old_server:
+                self.web_server = old_server
+                logger.info("已恢复旧的 WebUI 服务")
 
     def _apply_plugin_config_updates(self, config_dict: dict) -> None:
         """将更新字典写回 PluginConfig（包含 webui 嵌套字段兼容）。"""
@@ -494,6 +532,10 @@ class Main(Star):
 
     async def terminate(self):
         """插件销毁生命周期钩子。清理任务。"""
+        # 防止重复清理
+        if self._terminated:
+            return
+        self._terminated = True
 
         # 停止WebUI
         if getattr(self, "web_server", None):
@@ -990,6 +1032,84 @@ class Main(Star):
         """委托给 EmojiSelector。"""
         await self.emoji_selector.send_explicit_emojis(event, emoji_paths, cleaned_text)
 
+    def _get_auto_emoji_session_key(self, event: AstrMessageEvent) -> str:
+        try:
+            session_id = event.get_session_id()
+            if session_id:
+                return str(session_id)
+        except Exception:
+            pass
+
+        scope, target_id = self.get_event_target(event)
+        if scope and target_id:
+            return f"{scope}:{target_id}"
+        return ""
+
+    def _should_skip_auto_emoji_by_gate(self, text: str) -> bool:
+        cleaned = str(text or "").strip()
+        if not cleaned:
+            return True
+
+        if len(cleaned) > 180:
+            return True
+
+        if cleaned.count("\n") + 1 >= 6:
+            return True
+
+        lowered = cleaned.lower()
+        if "```" in cleaned:
+            return True
+
+        skip_tokens = (
+            "import ",
+            "def ",
+            "class ",
+            "traceback",
+            "exception:",
+            "error:",
+            "warning:",
+            "pip install",
+            "http://",
+            "https://",
+            "/meme ",
+        )
+        if any(token in lowered for token in skip_tokens):
+            return True
+
+        punctuation_count = sum(cleaned.count(ch) for ch in (":", ";", "`", "/", "\\"))
+        if punctuation_count >= 10:
+            return True
+
+        return False
+
+    def _is_auto_emoji_cooldown_ready(self, event: AstrMessageEvent) -> bool:
+        session_key = self._get_auto_emoji_session_key(event)
+        if not session_key:
+            return True
+
+        now = asyncio.get_running_loop().time()
+        self._prune_auto_emoji_cooldowns(now)
+        last_sent_at = self._auto_emoji_cooldowns.get(session_key, 0.0)
+        return now - last_sent_at >= self.AUTO_EMOJI_COOLDOWN_SECONDS
+
+    def _prune_auto_emoji_cooldowns(self, now: float) -> None:
+        expire_after = self.AUTO_EMOJI_COOLDOWN_SECONDS * 3
+        expired_keys = [
+            key
+            for key, timestamp in self._auto_emoji_cooldowns.items()
+            if now - timestamp >= expire_after
+        ]
+        for key in expired_keys:
+            self._auto_emoji_cooldowns.pop(key, None)
+
+    def _mark_auto_emoji_sent(self, event: AstrMessageEvent) -> None:
+        session_key = self._get_auto_emoji_session_key(event)
+        if not session_key:
+            return
+        now = asyncio.get_running_loop().time()
+        self._prune_auto_emoji_cooldowns(now)
+        self._auto_emoji_cooldowns[session_key] = now
+
     async def _try_send_emoji(
         self, event: AstrMessageEvent, emotions: list[str], cleaned_text: str
     ) -> bool:
@@ -1017,6 +1137,14 @@ class Main(Star):
             # 检查群聊是否允许
             if not self.is_meme_enabled_for_event(event):
                 logger.debug("[Stealer] 当前群聊已禁用表情包功能")
+                return
+
+            if self._should_skip_auto_emoji_by_gate(text):
+                logger.debug("[Stealer] ????????????????")
+                return
+
+            if not self._is_auto_emoji_cooldown_ready(event):
+                logger.debug("[Stealer] ???????????????")
                 return
 
             # 判断模式
@@ -1054,8 +1182,13 @@ class Main(Star):
                 logger.debug("[Stealer] 没有可用的情绪标签，跳过发送")
                 return
 
+            if not is_intelligent_mode:
+                await asyncio.sleep(self.PASSIVE_EMOJI_SEND_DELAY_SECONDS)
+
             # 尝试发送表情包
-            await self._try_send_emoji(event, final_emotions, text)
+            sent = await self._try_send_emoji(event, final_emotions, text)
+            if sent:
+                self._mark_auto_emoji_sent(event)
 
         except Exception as e:
             logger.error(f"[Stealer] 异步发送表情包失败: {e}", exc_info=True)
@@ -1097,92 +1230,98 @@ class Main(Star):
             else:
                 comp.text = ""
 
-    @filter.command("meme on")
+    @filter.command_group("meme")
+    def meme(self):
+        pass
+
+    @meme.command("on")
     async def meme_on(self, event: AstrMessageEvent):
         """开启表情包偷取功能，自动收集群聊中的表情包。"""
         async for result in self.command_handler.meme_on(event):
             yield result
 
-    @filter.command("meme off")
+    @meme.command("off")
     async def meme_off(self, event: AstrMessageEvent):
         """关闭表情包偷取功能，停止收集新表情包。"""
         async for result in self.command_handler.meme_off(event):
             yield result
 
-    @filter.command("meme auto_on")
+    @meme.command("auto_on")
     async def auto_on(self, event: AstrMessageEvent):
         """开启自动发送表情包，聊天时根据情绪自动发送。"""
         async for result in self.command_handler.auto_on(event):
             yield result
 
-    @filter.command("meme auto_off")
+    @meme.command("auto_off")
     async def auto_off(self, event: AstrMessageEvent):
         """关闭自动发送表情包。"""
         async for result in self.command_handler.auto_off(event):
             yield result
 
     @filter.permission_type(PermissionType.ADMIN)
-    @filter.command("meme group")
+    @meme.command("group")
     async def group_filter(
         self,
         event: AstrMessageEvent,
+        scope: str = "",
         list_name: str = "",
         action: str = "",
-        group_id: str = "",
+        target: str = "",
+        target_id: str = "",
     ):
         """管理群聊黑白名单。用法: /meme group <wl|bl> <add|del|clear|show> [群号]"""
         async for result in self.command_handler.group_filter(
-            event, list_name, action, group_id
+            event, scope, list_name, action, target, target_id
         ):
             yield result
 
     @filter.permission_type(PermissionType.ADMIN)
-    @filter.command("meme 偷")
+    @meme.command("偷")
     async def capture(self, event: AstrMessageEvent):
         """进入强制接收模式，30秒内发送的图片将直接入库。"""
         async for result in self.command_handler.capture(event):
             yield result
 
     @filter.permission_type(PermissionType.ADMIN)
-    @filter.command("meme natural_analysis")
+    @meme.command("natural_analysis")
     async def toggle_natural_analysis(self, event: AstrMessageEvent, action: str = ""):
         """切换情绪识别模式。用法: /meme natural_analysis <on|off>"""
         async for result in self.command_handler.toggle_natural_analysis(event, action):
             yield result
 
-    @filter.command("meme emotion_stats")
+    @meme.command("emotion_stats")
     async def emotion_analysis_stats(self, event: AstrMessageEvent):
         """查看情绪分析统计信息和当前模式。"""
         async for result in self.command_handler.emotion_analysis_stats(event):
             yield result
 
     @filter.permission_type(PermissionType.ADMIN)
-    @filter.command("meme clear_emotion_cache")
+    @meme.command("clear_emotion_cache")
     async def clear_emotion_cache(self, event: AstrMessageEvent):
         """清空情绪分析缓存，释放内存。"""
         async for result in self.command_handler.clear_emotion_cache(event):
             yield result
 
-    @filter.command("meme status")
+    @meme.command("status")
     async def status(self, event: AstrMessageEvent):
         """查看插件运行状态和表情包统计信息。"""
         async for result in self.command_handler.status(event):
             yield result
 
-    @filter.command("meme clean", priority=-100)
+    @meme.command("clean", priority=-100)
     async def clean(self, event: AstrMessageEvent, mode: str = ""):
         """清理原始图片缓存（不影响已分类的表情包）。"""
         async for result in self.command_handler.clean(event, mode):
             yield result
 
     @filter.permission_type(PermissionType.ADMIN)
-    @filter.command("meme capacity")
+    @meme.command("capacity")
     async def enforce_capacity(self, event: AstrMessageEvent):
         """立即执行容量控制，清理超出上限的旧表情包。"""
         async for result in self.command_handler.enforce_capacity(event):
             yield result
 
-    @filter.command("meme list")
+    @meme.command("list")
     async def list_images(
         self, event: AstrMessageEvent, category: str = "", limit: str = "10"
     ):
@@ -1191,14 +1330,14 @@ class Main(Star):
             yield result
 
     @filter.permission_type(PermissionType.ADMIN)
-    @filter.command("meme delete")
+    @meme.command("delete")
     async def delete_image(self, event: AstrMessageEvent, identifier: str = ""):
         """删除指定表情包。用法: /meme delete <序号|文件名>"""
         async for result in self.command_handler.delete_image(event, identifier):
             yield result
 
     @filter.permission_type(PermissionType.ADMIN)
-    @filter.command("meme rebuild_index")
+    @meme.command("rebuild_index")
     async def rebuild_index(self, event: AstrMessageEvent):
         """重建表情包索引，用于修复索引异常或版本迁移。"""
         async for result in self.command_handler.rebuild_index(event):
@@ -1387,6 +1526,7 @@ class Main(Star):
             b64 = await self.image_processor_service._file_to_gif_base64(path)
 
             await event.send(MessageChain([ImageComponent.fromBase64(b64)]))
+            await self.emoji_selector.record_emoji_usage(path, trigger="llm_tool")
 
             # 返回详细的成功信息
             success_msg = f"发送成功。\n\n你发送的表情包：\n- 编号：{emoji_id}\n- 分类：{emotion}\n- 描述：{desc}"

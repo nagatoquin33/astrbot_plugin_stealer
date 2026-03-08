@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0] - 2026-03-08
+- 群聊过滤升级为目标过滤：偷表情与发表情分离配置，支持 `group:群号` 与 `user:QQ号`
+- 命令入口整理为 `command_group` 结构，保留 `/meme 偷`，优化名单帮助与状态输出
+- 自动发表情体验优化：新增轻量门控、会话冷却、最近使用强惩罚，减少连续重复发图
+- 被动标签模式发送顺序优化：增加轻微延迟，避免表情包先于文字发出
+- 文本相似度与选图热路径优化：增加缓存、修正短语包含评分、减少 tags/scenes 重复拆词
+- 清理旧版群聊黑白名单兼容层，统一到新目标名单配置
+- 新增 GIF 动图多帧分析：VLM 分析时自动提取关键帧横向拼接，完整理解动图内容
+- 大图发送优化：GIF 转换时自动缩放大图防止内存溢出，保持 VLM 分析可用性
+- Bug 修复：cleanup 后空引用风险、重复清理、并发字典修改、WebUI 重启失败无恢复等问题
+
 ## [2.3.9] - 2026-03-03
 - WebUI 新增白天/黑夜主题切换
 - 登录页重新设计，添加动画效果

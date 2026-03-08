@@ -2,6 +2,8 @@ import asyncio
 import os
 import random
 import re
+import time
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -63,11 +65,7 @@ class EmojiSelector:
         Returns:
             bool: True 表示允许，False 表示不允许
         """
-        config = self.plugin.plugin_config
-        if not config:
-            return True
-        group_id = config.get_group_id(event)
-        return config.is_group_allowed(group_id)
+        return self.plugin.is_send_enabled_for_event(event)
 
     def _canon_path(self, path: str) -> str:
         """规范化路径用于比较去重。"""
@@ -89,11 +87,116 @@ class EmojiSelector:
             return ""
         return str(data.get("category", "")).lower()
 
+    @staticmethod
+    @lru_cache(maxsize=4096)
+    def _collect_phrase_words(items: tuple[str, ...]) -> frozenset[str]:
+        words = set()
+        for item in items:
+            words.update(_extract_words(item))
+        return frozenset(words)
+
+    @staticmethod
+    @lru_cache(maxsize=4096)
+    def _prepare_entry_text_features(
+        category: str,
+        desc: str,
+        tags: tuple[str, ...],
+        scenes: tuple[str, ...] = (),
+    ) -> tuple[str, frozenset[str], frozenset[str], frozenset[str], str]:
+        desc_lower = str(desc or "").lower()
+        tag_words = EmojiSelector._collect_phrase_words(tags)
+        scene_words = EmojiSelector._collect_phrase_words(scenes)
+        all_text = " ".join(
+            part for part in [str(category or ""), desc_lower, " ".join(tags)] if part
+        )
+        all_words = _extract_words(all_text)
+        return desc_lower, tag_words, scene_words, all_words, all_text
+
     def _get_recent_usage(self, category: str) -> list[str]:
         return list(self._recent_usage.get(category, []))
 
     def _set_recent_usage(self, category: str, recent_usage: list[str]) -> None:
         self._recent_usage[category] = recent_usage
+
+    def _update_recent_usage(self, category: str, path: str) -> None:
+        canon_path = self._canon_path(path)
+        recent_usage = [p for p in self._get_recent_usage(category) if p != canon_path]
+        recent_usage.append(canon_path)
+        if len(recent_usage) > self.MAX_RECENT_USAGE:
+            recent_usage = recent_usage[-self.MAX_RECENT_USAGE :]
+        self._set_recent_usage(category, recent_usage)
+
+    def _calculate_recent_penalty(self, category: str, path: str) -> float:
+        canon_path = self._canon_path(path)
+        recent_usage = self._get_recent_usage(category)
+        if not recent_usage or canon_path not in recent_usage:
+            return 0.0
+
+        # 越接近列表末尾表示越新近使用，惩罚越重，避免连续发送相同表情。
+        recency_rank = len(recent_usage) - 1 - recent_usage.index(canon_path)
+        penalty_steps = [0.55, 0.38, 0.24, 0.14]
+        if recency_rank < len(penalty_steps):
+            return penalty_steps[recency_rank]
+
+        return max(0.06, 0.14 - (recency_rank - len(penalty_steps) + 1) * 0.02)
+
+    def _get_candidate_categories(self, category: str, limit: int = 3) -> list[str]:
+        normalized = self.normalize_category(category) or category.lower().strip()
+        if not normalized:
+            return []
+
+        cfg = self.plugin.plugin_config
+        info_map = getattr(cfg, "category_info", {}) if cfg else {}
+        scored: list[tuple[float, str]] = []
+
+        for current in self.categories:
+            if current == normalized:
+                scored.append((10.0, current))
+                continue
+
+            score = calculate_hybrid_similarity(normalized, current)
+            info = info_map.get(current, {}) if isinstance(info_map, dict) else {}
+            name = str(info.get("name", "") or "")
+            desc = str(info.get("desc", "") or "")
+            if name:
+                score = max(score, calculate_hybrid_similarity(normalized, name))
+            if desc:
+                score = max(score, calculate_hybrid_similarity(normalized, desc))
+            if score >= 0.18:
+                scored.append((score, current))
+
+        scored.sort(key=lambda item: item[0], reverse=True)
+        result: list[str] = []
+        for _, current in scored:
+            if current not in result:
+                result.append(current)
+            if len(result) >= max(1, limit):
+                break
+        return result or [normalized]
+
+    async def record_emoji_usage(self, emoji_path: str, trigger: str = "auto") -> None:
+        cache_service = getattr(self.plugin, "cache_service", None)
+        if not cache_service or not emoji_path:
+            return
+
+        target_path = self._canon_path(emoji_path)
+        now = int(time.time())
+
+        def _updater(current: dict) -> None:
+            for stored_path, meta in current.items():
+                if self._canon_path(stored_path) != target_path:
+                    continue
+                if not isinstance(meta, dict):
+                    continue
+
+                meta["use_count"] = int(meta.get("use_count", 0) or 0) + 1
+                meta["last_used_at"] = now
+                break
+
+        try:
+            await cache_service.update_index(_updater)
+        except Exception as e:
+            logger.debug(f"[Stealer] 更新表情使用统计失败: {e}")
 
     def normalize_category(self, category: str) -> str:
         """归一化分类名称，返回有效分类或空字符串。"""
@@ -171,18 +274,34 @@ class EmojiSelector:
         """选择表情包（智能或随机）。"""
         async with self._selection_lock:
             use_smart = self.plugin.smart_emoji_selection
+            candidate_categories = self._get_candidate_categories(category)
 
             if use_smart and context_text and len(context_text.strip()) > 5:
-                smart_path = await self._select_emoji_smart_impl(category, context_text)
+                smart_path = await self._select_emoji_smart_impl(
+                    category,
+                    context_text,
+                    candidate_categories=candidate_categories,
+                )
                 if smart_path:
                     return smart_path
 
-            return self._select_emoji_random_impl(category, use_smart=use_smart)
+            for candidate_category in candidate_categories:
+                random_path = self._select_emoji_random_impl(
+                    candidate_category, use_smart=use_smart
+                )
+                if random_path:
+                    return random_path
+
+            return None
 
     async def select_emoji_smart(self, category: str, context_text: str) -> str | None:
         """智能选择表情包（强制智能）。"""
         async with self._selection_lock:
-            return await self._select_emoji_smart_impl(category, context_text)
+            return await self._select_emoji_smart_impl(
+                category,
+                context_text,
+                candidate_categories=self._get_candidate_categories(category),
+            )
 
     def _select_emoji_random_impl(self, category: str, use_smart: bool) -> str | None:
         cfg = self.plugin.plugin_config
@@ -211,43 +330,44 @@ class EmojiSelector:
                 recent_usage = []
                 recent_set = set()
 
-            picked = random.choice(available)
-            picked_path = self._canon_path(str(picked))
+            # 尝试选择一个存在的文件（最多重试3次）
+            max_retries = min(3, len(available))
+            for _ in range(max_retries):
+                picked = random.choice(available)
+                # 检查文件是否仍然存在
+                if picked.exists():
+                    picked_path = self._canon_path(str(picked))
 
-            if picked_path in recent_set:
-                recent_usage = [p for p in recent_usage if p != picked_path]
-            recent_usage.append(picked_path)
+                    if picked_path in recent_set:
+                        recent_usage = [p for p in recent_usage if p != picked_path]
+                    recent_usage.append(picked_path)
 
-            max_recent = min(
-                self.MAX_RECENT_USAGE, max(self.MIN_RECENT_USAGE, len(files) // 2)
-            )
-            if len(recent_usage) > max_recent:
-                recent_usage = recent_usage[-max_recent:]
+                    max_recent = min(
+                        self.MAX_RECENT_USAGE, max(self.MIN_RECENT_USAGE, len(files) // 2)
+                    )
+                    if len(recent_usage) > max_recent:
+                        recent_usage = recent_usage[-max_recent:]
 
-            self._set_recent_usage(category, recent_usage)
-            return str(picked)
+                    self._set_recent_usage(category, recent_usage)
+                    return str(picked)
+                else:
+                    # 文件已不存在，从候选列表中移除
+                    available.remove(picked)
+                    if not available:
+                        break
+
+            return None
         except Exception as e:
             logger.error(f"随机选择表情包失败: {e}")
             return None
 
     async def _select_emoji_smart_impl(
-        self, category: str, context_text: str
+        self,
+        category: str,
+        context_text: str,
+        candidate_categories: list[str] | None = None,
     ) -> str | None:
-        """智能选择表情包（改进版多维度评分）
-
-        评分维度：
-        1. 描述匹配 (40%): 上下文与描述的相似度
-        2. 标签匹配 (30%): 上下文与标签的匹配度
-        3. 多样性奖励 (15%): 增加选择多样性
-        4. 历史惩罚 (15%): 避免重复发送
-
-        Args:
-            category: 情绪分类
-            context_text: 上下文文本
-
-        Returns:
-            str | None: 表情包路径
-        """
+        """?????????????????"""
         try:
             cache_service = self.plugin.cache_service
             if not cache_service:
@@ -257,130 +377,118 @@ class EmojiSelector:
             if not idx:
                 return None
 
+            allowed_categories = set(candidate_categories or [category])
             candidates = []
-            low_score_candidates = []  # 降级备用
+            low_score_candidates = []
             context_lower = context_text.lower()
-            context_words = set(_extract_words(context_text))
-
-            # 获取该分类的最近使用记录
-            recent_usage = self._get_recent_usage(category)
-            recent_set = set(recent_usage)
+            context_words = _extract_words(context_text)
 
             for file_path, data in idx.items():
                 if not isinstance(data, dict):
                     continue
 
-                if self._get_category_from_data(data) != category:
+                entry_category = self._get_category_from_data(data)
+                if entry_category not in allowed_categories:
                     continue
 
-                # 1. 描述匹配分数 (0-1)
-                desc = str(data.get("desc", "")).lower()
+                tags = self._parse_tags(data.get("tags", []))
+                scenes = self._parse_tags(data.get("scenes", []))
+                desc, tag_words, scene_words, _, _ = self._prepare_entry_text_features(
+                    entry_category, str(data.get("desc", "")), tuple(tags), tuple(scenes)
+                )
                 desc_score = calculate_hybrid_similarity(context_text, desc)
-
-                # n-gram 分词匹配补充（利用 bigram 提升中文语义匹配）
                 if desc_score < 0.25:
                     desc_words = _extract_words(desc)
                     overlap = context_words & desc_words
-                    # 区分 bigram 匹配（权重更高）和 unigram 匹配
                     bigram_hits = sum(1 for w in overlap if len(w) >= 2)
                     unigram_hits = len(overlap) - bigram_hits
                     boost = bigram_hits * 0.25 + unigram_hits * 0.1
                     if boost > 0:
                         desc_score = max(desc_score, min(1.0, boost))
 
-                # 2. 标签匹配分数 (0-1)
-                tags = self._parse_tags(data.get("tags", []))
                 tag_score = 0.0
                 if tags:
-                    # 计算标签与上下文的匹配度
-                    matched_tags = sum(1 for t in tags if t in context_lower)
+                    matched_tags = sum(1 for tag in tags if tag in context_lower)
                     tag_score = min(1.0, matched_tags / max(len(tags), 1))
-
-                    # 额外检查上下文词汇与标签的重叠
-                    tag_words = set()
-                    for t in tags:
-                        tag_words.update(_extract_words(t))
                     if context_words & tag_words:
                         tag_score = min(1.0, tag_score + 0.3)
 
-                # 3. 综合基础分数
-                base_score = desc_score * 0.4 + tag_score * 0.3
+                scene_score = 0.0
+                if scenes:
+                    matched_scenes = sum(1 for scene in scenes if scene in context_lower)
+                    scene_score = min(1.0, matched_scenes / max(len(scenes), 1))
+                    if context_words & scene_words:
+                        scene_score = min(1.0, scene_score + 0.35)
 
-                # 收集低分候选作为降级备用（避免二次遍历）
+                category_bonus = 0.12 if entry_category == category else 0.04
+                use_count_bonus = min(0.08, int(data.get("use_count", 0) or 0) * 0.01)
+                base_score = (
+                    desc_score * 0.35
+                    + tag_score * 0.25
+                    + scene_score * 0.2
+                    + category_bonus
+                    + use_count_bonus
+                )
+
                 if base_score < 0.15:
                     if desc_score > 0.1:
-                        low_score_candidates.append((file_path, desc_score, desc_score, 0.0))
+                        low_score_candidates.append(
+                            (
+                                file_path,
+                                desc_score,
+                                desc_score,
+                                0.0,
+                                0.0,
+                                entry_category,
+                            )
+                        )
                     continue
 
-                # 4. 多样性奖励 (添加随机因子)
                 diversity_bonus = random.uniform(0, 0.15)
-
-                # 5. 历史使用惩罚
                 canon_path = self._canon_path(file_path)
-                history_penalty = 0.0
-                if canon_path in recent_set:
-                    # 根据使用次数递减惩罚
-                    use_count = recent_usage.count(canon_path)
-                    history_penalty = min(0.3, use_count * 0.1)
+                history_penalty = self._calculate_recent_penalty(
+                    entry_category, canon_path
+                )
 
-                # 最终分数
-                final_score = base_score + diversity_bonus - history_penalty
-                final_score = max(0, final_score)
-
+                final_score = max(0.0, base_score + diversity_bonus - history_penalty)
                 if final_score > 0.1:
-                    candidates.append((file_path, final_score, desc_score, tag_score))
+                    candidates.append(
+                        (
+                            file_path,
+                            final_score,
+                            desc_score,
+                            tag_score,
+                            scene_score,
+                            entry_category,
+                        )
+                    )
 
-            # 降级：使用低分候选
             if not candidates:
                 candidates = low_score_candidates
 
             if not candidates:
                 return None
 
-            # 使用加权随机选择而非直接取最高分（增加多样性）
-            candidates.sort(key=lambda x: x[1], reverse=True)
-
-            # 从前3个候选中随机选择（如果有的话）
-            top_n = min(3, len(candidates))
-            if top_n > 1:
-                # 加权随机：分数越高被选中概率越大
-                top_candidates = candidates[:top_n]
-                weights = [c[1] for c in top_candidates]
+            candidates.sort(key=lambda item: item[1], reverse=True)
+            top_candidates = candidates[: min(3, len(candidates))]
+            if len(top_candidates) > 1:
+                weights = [item[1] for item in top_candidates]
                 total_weight = sum(weights)
                 if total_weight > 0:
-                    r = random.uniform(0, total_weight)
-                    cumulative = 0
-                    for i, (path, score, _, _) in enumerate(top_candidates):
-                        cumulative += score
-                        if r <= cumulative:
-                            # 更新最近使用记录
-                            picked_path = self._canon_path(path)
-                            if picked_path not in recent_set:
-                                recent_usage.append(picked_path)
-                                if len(recent_usage) > self.MAX_RECENT_USAGE:
-                                    recent_usage = recent_usage[
-                                        -self.MAX_RECENT_USAGE :
-                                    ]
-                                self._set_recent_usage(category, recent_usage)
-                            return path
+                    selected = random.choices(top_candidates, weights=weights, k=1)[0]
+                    self._update_recent_usage(selected[5], selected[0])
+                    return selected[0]
 
-            # 返回最高分的
-            result = candidates[0][0]
-            picked_path = self._canon_path(result)
-            if picked_path not in recent_set:
-                recent_usage.append(picked_path)
-                if len(recent_usage) > self.MAX_RECENT_USAGE:
-                    recent_usage = recent_usage[-self.MAX_RECENT_USAGE :]
-                self._set_recent_usage(category, recent_usage)
-
+            result = candidates[0]
+            self._update_recent_usage(result[5], result[0])
             logger.debug(
-                f"[智能选择] 分类={category}, 候选={len(candidates)}, "
-                f"选中分数={candidates[0][1]:.2f} (desc={candidates[0][2]:.2f}, tag={candidates[0][3]:.2f})"
+                f"[????] ??={category}, ??={len(candidates)}, ????={result[5]}, "
+                f"??={result[1]:.2f} (desc={result[2]:.2f}, tag={result[3]:.2f}, scene={result[4]:.2f})"
             )
-            return result
+            return result[0]
 
         except Exception as e:
-            logger.error(f"智能选择表情包失败: {e}")
+            logger.error(f"?????????: {e}")
             return None
 
     @staticmethod
@@ -418,15 +526,15 @@ class EmojiSelector:
                 if not isinstance(data, dict):
                     continue
 
-                desc = str(data.get("desc", "")).lower()
                 tags = self._parse_tags(data.get("tags", []))
                 tags_str = ", ".join(tags)
                 category = self._get_category_from_data(data)
+                desc, tag_words, _, all_words, all_text = self._prepare_entry_text_features(
+                    category, str(data.get("desc", "")), tuple(tags)
+                )
 
                 # 快速分词过滤：检查词汇重叠（比字符级更适合中文）
                 if query_words:
-                    all_text = category + " " + desc + " " + " ".join(tags)
-                    all_words = _extract_words(all_text)
                     # 至少有一个词匹配才继续
                     if not query_words.intersection(all_words):
                         # 兜底：字符级检查（处理单字查询等情况）
@@ -435,7 +543,13 @@ class EmojiSelector:
                             continue
 
                 score = self._score_entry(
-                    query_lower, query_tokens, category, desc, tags, MAX_STR_LENGTH
+                    query_lower,
+                    query_tokens,
+                    category,
+                    desc,
+                    tags,
+                    MAX_STR_LENGTH,
+                    tag_words=tag_words,
                 )
 
                 if score > 0:
@@ -462,6 +576,7 @@ class EmojiSelector:
         desc: str,
         tags: list[str],
         max_str_len: int,
+        tag_words: frozenset[str] | None = None,
     ) -> int:
         """计算单条索引条目与查询的匹配得分。"""
         # 精确匹配分类
@@ -513,14 +628,13 @@ class EmojiSelector:
                     score = max(score, word_score)
 
                 # 检查分词在标签中的匹配
-                for tag in tags:
-                    tag_words = _extract_words(tag)
-                    tag_overlap = query_words & tag_words
-                    tag_bigram = sum(1 for w in tag_overlap if len(w) >= 2)
-                    tag_unigram = len(tag_overlap) - tag_bigram
-                    tag_word_score = tag_bigram * 7 + tag_unigram * 3
-                    if tag_word_score > 0:
-                        score = max(score, tag_word_score)
+                current_tag_words = tag_words or self._collect_phrase_words(tuple(tags))
+                tag_overlap = query_words & current_tag_words
+                tag_bigram = sum(1 for w in tag_overlap if len(w) >= 2)
+                tag_unigram = len(tag_overlap) - tag_bigram
+                tag_word_score = tag_bigram * 7 + tag_unigram * 3
+                if tag_word_score > 0:
+                    score = max(score, tag_word_score)
 
         # 模糊匹配（使用多策略融合相似度）
         if score < 10:
@@ -681,6 +795,7 @@ class EmojiSelector:
                 return
 
             await event.send(MessageChain([ImageComponent.fromBase64(b64)]))
+            await self.record_emoji_usage(emoji_path, trigger="auto")
             logger.debug(f"[Stealer] 已发送表情包: {emoji_path}")
 
         except Exception as e:
@@ -707,12 +822,16 @@ class EmojiSelector:
                 new_result.message(cleaned_text.strip())
 
             # 依次编码并添加图片
+            sent_paths = []
             for path in emoji_paths:
                 b64 = await self._encode_emoji(path)
                 if b64:
                     new_result.base64_image(b64)
+                    sent_paths.append(path)
 
             event.set_result(new_result)
+            for path in sent_paths:
+                await self.record_emoji_usage(path, trigger="explicit")
         except Exception as e:
             logger.error(f"发送显式表情包失败: {e}", exc_info=True)
 

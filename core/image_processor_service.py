@@ -81,6 +81,12 @@ class ImageProcessorService:
 
         # 保留combined_analysis_prompt作为备用
         self.combined_analysis_prompt = self.emoji_classification_prompt
+        if "|scene" not in self.emoji_classification_prompt.lower():
+            self.emoji_classification_prompt += "|scene tags(optional, comma separated)"
+        if "|scene" not in self.emoji_classification_with_filter_prompt.lower():
+            self.emoji_classification_with_filter_prompt += (
+                "|scene tags(optional, comma separated)"
+            )
 
         # 配置参数（初始值从 plugin_config 读取，后续通过 update_config 更新）
         self.categories = (
@@ -308,6 +314,8 @@ class ImageProcessorService:
             "hash": hash_val,
             "category": category,
             "created_at": int(time.time()),
+            "use_count": 0,
+            "last_used_at": 0,
         }
         if tags:
             entry["tags"] = tags
@@ -660,16 +668,18 @@ class ImageProcessorService:
                 logger.warning(f"图片内容审核不通过: {file_path}")
                 return self.CATEGORY_FILTERED, [], "", self.CATEGORY_FILTERED, []
 
-            # 解析响应：情绪分类|语义标签(逗号分隔)|画面描述(一句话)
+            # 解析响应：情绪分类|语义标签(逗号分隔)|画面描述(一句话)|可选场景标签
             parts = [p.strip() for p in response.strip().split("|")]
             emotion_result = parts[0] if parts else ""
             tags_str = parts[1] if len(parts) > 1 else ""
             tags_result = [t.strip() for t in tags_str.split(",") if t.strip()]
             desc_result = parts[2] if len(parts) > 2 else "表情包"
+            scenes_str = parts[3] if len(parts) > 3 else ""
+            scenes_result = [s.strip() for s in scenes_str.split(",") if s.strip()]
 
             # 规范化分类
             category = self._normalize_category(emotion_result)
-            return category, tags_result, desc_result, category, []
+            return category, tags_result, desc_result, category, scenes_result
 
         except (FileNotFoundError, ValueError):
             # 配置错误 / 文件不存在，直接抛出不吞异常
@@ -704,7 +714,7 @@ class ImageProcessorService:
         """调用视觉模型分析图片。
 
         使用 context.llm_generate 调用指定的视觉模型 provider，
-        支持指数退避重试。
+        支持指数退避重试。对于 GIF 动图，会提取关键帧拼接后分析。
 
         Args:
             event: 消息事件（用于 provider 解析）
@@ -741,19 +751,143 @@ class ImageProcessorService:
                 "请在插件配置或 AstrBot 全局配置中设置。"
             )
 
-        # 构建图片 URL（file:// 协议）
-        file_url = f"file:///{img_path.replace(chr(92), '/')}"
+        # 处理 GIF 动图：提取多帧拼接
+        temp_file = None
+        try:
+            actual_img_path = await self._prepare_image_for_vlm(img_path)
+            if actual_img_path != img_path:
+                temp_file = actual_img_path  # 标记为临时文件，分析后删除
 
+            # 构建图片 URL（file:// 协议）
+            file_url = f"file:///{actual_img_path.replace(chr(92), '/')}"
+
+            result = await self._do_vlm_call(provider_id, prompt, file_url)
+            return result
+        finally:
+            # 清理临时文件
+            if temp_file and os.path.exists(temp_file):
+                try:
+                    os.remove(temp_file)
+                    logger.debug(f"已清理临时拼接图: {temp_file}")
+                except Exception as e:
+                    logger.warning(f"清理临时文件失败: {e}")
+
+    async def _prepare_image_for_vlm(self, img_path: str) -> str:
+        """为 VLM 分析准备图片，对动图提取多帧拼接。
+
+        Args:
+            img_path: 原始图片路径
+
+        Returns:
+            str: 准备好的图片路径（可能是临时文件）
+        """
+        # 只处理 GIF 文件
+        if not img_path.lower().endswith(".gif"):
+            return img_path
+
+        if PILImage is None:
+            return img_path
+
+        try:
+            # 检测是否为动图
+            def _check_animated(fp: str) -> tuple[bool, int, int, int]:
+                with PILImage.open(fp) as im:
+                    is_animated = bool(getattr(im, "is_animated", False))
+                    n_frames = int(getattr(im, "n_frames", 1) or 1)
+                    width, height = im.size
+                    return is_animated, n_frames, width, height
+
+            is_animated, n_frames, width, height = await asyncio.to_thread(
+                _check_animated, img_path
+            )
+
+            # 非动图或帧数太少，直接返回原路径
+            if not is_animated or n_frames <= 1:
+                return img_path
+
+            # 动图处理：提取关键帧并横向拼接
+            MAX_FRAMES = 6  # 最多提取 6 帧
+            MAX_FRAME_WIDTH = 512  # 单帧最大宽度
+
+            # 计算帧缩放
+            frame_width = min(width, MAX_FRAME_WIDTH)
+            scale = frame_width / width if width > MAX_FRAME_WIDTH else 1.0
+            frame_height = int(height * scale)
+
+            # 均匀采样帧索引
+            actual_frames = min(n_frames, MAX_FRAMES)
+            frame_indices = [
+                int(i * (n_frames - 1) / (actual_frames - 1))
+                for i in range(actual_frames)
+            ] if actual_frames > 1 else [0]
+
+            def _extract_and_combine(fp: str) -> str:
+                frames = []
+                with PILImage.open(fp) as im:
+                    for idx in frame_indices:
+                        im.seek(idx)
+                        frame = im.convert("RGBA")
+                        if scale < 1.0:
+                            frame = frame.resize(
+                                (frame_width, frame_height), PILImage.LANCZOS
+                            )
+                        frames.append(frame)
+
+                # 横向拼接所有帧
+                total_width = frame_width * len(frames)
+                combined = PILImage.new("RGBA", (total_width, frame_height))
+
+                for i, frame in enumerate(frames):
+                    combined.paste(frame, (i * frame_width, 0))
+
+                # 保存临时文件
+                import tempfile
+                temp_fd, temp_path = tempfile.mkstemp(suffix=".png")
+                os.close(temp_fd)
+                combined.save(temp_path, "PNG")
+
+                return temp_path
+
+            temp_path = await asyncio.to_thread(_extract_and_combine, img_path)
+            logger.debug(
+                f"GIF 动图拼接完成: {n_frames} 帧 -> {actual_frames} 帧, "
+                f"输出尺寸: {frame_width * actual_frames}x{frame_height}"
+            )
+            return temp_path
+
+        except Exception as e:
+            logger.warning(f"GIF 动图帧提取失败，使用原图: {e}")
+            return img_path
+
+    async def _do_vlm_call(
+        self, provider_id: str, prompt: str, file_url: str
+    ) -> str:
+        """执行 VLM 调用（带重试）。
+
+        Args:
+            provider_id: 提供商 ID
+            prompt: 提示词
+            file_url: 文件 URL
+
+        Returns:
+            str: 模型响应文本
+        """
         # 重试配置
-        max_retries = int(getattr(self.plugin, "vision_max_retries", 3))
-        retry_delay = float(getattr(self.plugin, "vision_retry_delay", 1.0))
+        try:
+            max_retries = int(getattr(self.plugin, "vision_max_retries", 3))
+        except (TypeError, ValueError):
+            max_retries = 3
+        try:
+            retry_delay = float(getattr(self.plugin, "vision_retry_delay", 1.0))
+        except (TypeError, ValueError):
+            retry_delay = 1.0
         last_error: Exception | None = None
 
         for attempt in range(max_retries):
             try:
                 logger.debug(
                     f"调用VLM (尝试 {attempt + 1}/{max_retries}), "
-                    f"provider={provider_id}, 图片={img_path}"
+                    f"provider={provider_id}, 图片={file_url}"
                 )
                 result = await self.plugin.context.llm_generate(
                     chat_provider_id=provider_id,
@@ -939,31 +1073,70 @@ class ImageProcessorService:
             if PILImage is None:
                 return await self._file_to_base64(file_path)
 
+            # GIF 转换限制常量
+            MAX_FRAMES = 30  # 最大帧数限制
+            MAX_DIMENSION = 2048  # 单边最大尺寸
+            MAX_FRAME_PIXELS = 2048 * 2048  # 单帧最大像素 (4MP)
+
             def _sync_convert_to_gif(fp: str) -> str:
                 with PILImage.open(fp) as im:
                     buf = BytesIO()
                     is_animated = bool(getattr(im, "is_animated", False))
                     n_frames = int(getattr(im, "n_frames", 1) or 1)
 
-                    if is_animated and n_frames > 1:
-                        frames = []
-                        durations = []
-                        for frame_idx in range(n_frames):
-                            im.seek(frame_idx)
-                            frame = im.convert("RGBA")
-                            frames.append(frame)
-                            durations.append(int(im.info.get("duration", 100) or 100))
-                        frames[0].save(
-                            buf,
-                            format="GIF",
-                            save_all=True,
-                            append_images=frames[1:],
-                            duration=durations,
-                            loop=0,
-                            disposal=2,
+                    # 检查图片尺寸
+                    width, height = im.size
+                    
+                    # 计算缩放比例（如果需要）
+                    scale = 1.0
+                    if width > MAX_DIMENSION or height > MAX_DIMENSION:
+                        scale = min(MAX_DIMENSION / width, MAX_DIMENSION / height)
+                        new_width = int(width * scale)
+                        new_height = int(height * scale)
+                        logger.debug(
+                            f"GIF 图片尺寸过大 ({width}x{height}), 缩放至 {new_width}x{new_height}"
                         )
                     else:
+                        new_width, new_height = width, height
+
+                    if is_animated and n_frames > 1:
+                        # 限制帧数
+                        actual_frames = min(n_frames, MAX_FRAMES)
+
+                        frames = []
+                        durations = []
+                        # 均匀采样帧（如果帧数超过限制）
+                        frame_step = max(1, n_frames // actual_frames)
+                        for frame_idx in range(0, n_frames, frame_step):
+                            if len(frames) >= MAX_FRAMES:
+                                break
+                            im.seek(frame_idx)
+                            frame = im.convert("RGBA")
+                            # 缩放帧
+                            if scale < 1.0:
+                                frame = frame.resize((new_width, new_height), PILImage.LANCZOS)
+                            frames.append(frame)
+                            durations.append(int(im.info.get("duration", 100) or 100))
+
+                        if frames:
+                            frames[0].save(
+                                buf,
+                                format="GIF",
+                                save_all=True,
+                                append_images=frames[1:],
+                                duration=durations,
+                                loop=0,
+                                disposal=2,
+                            )
+                        else:
+                            # 无有效帧，回退到原图 base64
+                            return ""
+                    else:
+                        # 静态图片
                         frame = im.convert("RGBA")
+                        # 缩放
+                        if scale < 1.0:
+                            frame = frame.resize((new_width, new_height), PILImage.LANCZOS)
                         frame.save(buf, format="GIF")
 
                     return base64.b64encode(buf.getvalue()).decode("utf-8")
@@ -972,6 +1145,9 @@ class ImageProcessorService:
             if b64:
                 self._gif_base64_cache[cache_key] = (now, b64)
                 self._evict_gif_base64_cache()
+            else:
+                # 转换失败，回退到普通 base64
+                b64 = await self._file_to_base64(file_path)
             return b64
         except Exception as e:
             logger.error(f"文件转换为GIF base64失败: {e}")
@@ -993,8 +1169,15 @@ class ImageProcessorService:
                 return True
             logger.debug(f"文件不存在，无需删除: {file_path}")
             return True
+        except FileNotFoundError:
+            # 文件可能被其他进程删除，属于正常情况
+            logger.debug(f"文件已被删除: {file_path}")
+            return True
+        except PermissionError as e:
+            logger.warning(f"删除文件权限不足: {file_path}, 错误: {e}")
+            return False
         except Exception as e:
-            logger.error(f"删除文件失败: {e}")
+            logger.error(f"删除文件失败: {file_path}, 错误: {e}")
             return False
 
     async def pick_vision_provider(self, event) -> str | None:
