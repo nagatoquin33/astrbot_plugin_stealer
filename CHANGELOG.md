@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 文本相似度与选图热路径优化：增加缓存、修正短语包含评分、减少 tags/scenes 重复拆词
 - 清理旧版群聊黑白名单兼容层，统一到新目标名单配置
 - 新增 GIF 动图多帧分析：VLM 分析时自动提取关键帧横向拼接，完整理解动图内容
+- GIF 原始文件下载：检测动图 URL 并下载原始 GIF，避免框架转换丢失动效
 - 大图发送优化：GIF 转换时自动缩放大图防止内存溢出，保持 VLM 分析可用性
 - Bug 修复：cleanup 后空引用风险、重复清理、并发字典修改、WebUI 重启失败无恢复等问题
 

@@ -1,8 +1,11 @@
 import asyncio
 import os
 import random
+import tempfile
 import time
 from typing import Any
+
+import aiohttp
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain
@@ -41,6 +44,66 @@ class EventHandler:
         if s.startswith("`") and s.endswith("`") and len(s) >= 2:
             s = s[1:-1].strip()
         return s
+
+    def _is_gif_url(self, url: str) -> bool:
+        """检查 URL 是否指向 GIF 图片。
+
+        Args:
+            url: 图片 URL
+
+        Returns:
+            bool: 是否为 GIF
+        """
+        if not url:
+            return False
+        url_lower = url.lower()
+        # 检查 URL 路径或查询参数中是否包含 .gif
+        return ".gif" in url_lower or "gif" in url_lower.split("?")[0][-5:]
+
+    async def _download_original_gif(self, img: Image) -> str | None:
+        """下载原始 GIF 文件。
+
+        Args:
+            img: 图片组件
+
+        Returns:
+            str | None: 临时文件路径，失败返回 None
+        """
+        url = self._normalize_str(getattr(img, "url", ""))
+        if not url:
+            return None
+
+        if not self._is_gif_url(url):
+            return None
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                    if resp.status != 200:
+                        logger.warning(f"下载 GIF 失败: HTTP {resp.status}")
+                        return None
+
+                    content_type = resp.headers.get("Content-Type", "")
+                    if "gif" not in content_type.lower() and not self._is_gif_url(url):
+                        logger.debug(f"响应非 GIF 类型: {content_type}")
+                        return None
+
+                    # 保存到临时文件
+                    content = await resp.read()
+                    temp_fd, temp_path = tempfile.mkstemp(suffix=".gif")
+                    try:
+                        os.write(temp_fd, content)
+                        logger.debug(f"已下载原始 GIF: {temp_path} ({len(content)} bytes)")
+                        return temp_path
+                    finally:
+                        os.close(temp_fd)
+
+        except asyncio.TimeoutError:
+            logger.warning("下载 GIF 超时")
+            return None
+        except Exception as e:
+            logger.warning(f"下载 GIF 失败: {e}")
+            return None
 
     def _should_process_image(self) -> bool:
         """根据偷图模式（概率/冷却）判断是否应该处理图片。
@@ -319,7 +382,17 @@ class EventHandler:
         if force_active:
             img = imgs[0]
             try:
-                temp_path: str = await img.convert_to_file_path()
+                # 尝试下载原始 GIF 文件（如果是动图）
+                temp_path: str | None = None
+                is_gif = self._is_gif_url(self._normalize_str(getattr(img, "url", "")))
+
+                if is_gif:
+                    logger.debug("强制捕获: 检测到 GIF 图片，尝试下载原始文件")
+                    temp_path = await self._download_original_gif(img)
+
+                if not temp_path:
+                    temp_path = await img.convert_to_file_path()
+
                 if not os.path.exists(temp_path):
                     await event.send(
                         MessageChain([Plain(text="❌ 收录失败：图片临时文件不存在")])
@@ -403,8 +476,19 @@ class EventHandler:
 
                 logger.info("检测到平台标记的表情包，开始处理")
 
-                # 转换图片到临时文件路径
-                temp_path: str = await img.convert_to_file_path()
+                # 尝试下载原始 GIF 文件（如果是动图）
+                temp_path: str | None = None
+                is_gif = self._is_gif_url(self._normalize_str(getattr(img, "url", "")))
+
+                if is_gif:
+                    logger.debug("检测到 GIF 图片，尝试下载原始文件")
+                    temp_path = await self._download_original_gif(img)
+                    if temp_path:
+                        logger.debug(f"已下载原始 GIF: {temp_path}")
+
+                # 如果不是 GIF 或下载失败，使用框架提供的路径
+                if not temp_path:
+                    temp_path = await img.convert_to_file_path()
 
                 # 临时文件由框架创建，无需安全检查
                 # 安全检查会在 process_image 中处理最终存储路径时进行
