@@ -192,6 +192,25 @@ class WebServer:
     def _split_csv_tags(tags_raw: str) -> list[str]:
         return [t.strip() for t in str(tags_raw).split(",") if t.strip()]
 
+    @staticmethod
+    def _split_scene_terms(scene_raw: Any) -> list[str]:
+        if scene_raw is None:
+            return []
+        if isinstance(scene_raw, list):
+            raw_items = scene_raw
+        else:
+            raw_items = str(scene_raw).replace("、", ",").replace("，", ",").replace("；", ",").split(",")
+
+        seen: set[str] = set()
+        scenes: list[str] = []
+        for item in raw_items:
+            text = str(item).strip()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            scenes.append(text)
+        return scenes
+
     async def _collect_removed_paths_by_hashes(self, hashes: set[str]) -> list[str]:
         removed_paths: list[str] = []
         await self.plugin.cache_service.update_index(
@@ -627,6 +646,7 @@ class WebServer:
                         "category": meta.get("category", "unknown"),
                         "tags": meta.get("tags", []),
                         "desc": meta.get("desc", ""),
+                        "scenes": self._split_scene_terms(meta.get("scenes", [])),
                         "created_at": meta.get("created_at", 0),
                     }
 
@@ -647,8 +667,9 @@ class WebServer:
                             pass
 
                     if search_query and not (
-                        any(search_query in t.lower() for t in item["tags"])
+                        any(search_query in str(t).lower() for t in item["tags"])
                         or search_query in item["desc"].lower()
+                        or any(search_query in str(scene).lower() for scene in item.get("scenes", []))
                     ):
                         continue
 
@@ -782,7 +803,7 @@ class WebServer:
         return moved_count, moved_hashes
 
     async def handle_update_image(self, request):
-        """更新图片信息 (Category, Tags, Desc)"""
+        """更新图片信息 (Category, Tags, Desc, Scenes)"""
         try:
             image_hash = request.match_info["hash"]
             data = await self._read_json_payload(request)
@@ -790,6 +811,7 @@ class WebServer:
             new_category = data.get("category")
             new_tags = data.get("tags")  # list or comma separated string
             new_desc = data.get("desc")
+            new_scenes = data.get("scenes", data.get("scene"))
 
             updated = {"ok": False, "error": ""}
 
@@ -814,6 +836,9 @@ class WebServer:
 
                 if new_desc is not None:
                     meta["desc"] = new_desc
+
+                if new_scenes is not None:
+                    meta["scenes"] = self._split_scene_terms(new_scenes)
 
                 if new_category and new_category != meta.get("category"):
                     old_path = Path(target_path)
@@ -983,6 +1008,7 @@ class WebServer:
             tags_raw = data.get("tags", "").strip()
             tags = self._split_csv_tags(tags_raw) if tags_raw else []
             desc = data.get("desc", "").strip()
+            scenes = self._split_scene_terms(data.get("scene", ""))
 
             file_ext = Path(uploaded_file.filename).suffix.lower()
             allowed_exts = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
@@ -1015,6 +1041,7 @@ class WebServer:
                         "category": category,
                         "tags": tags,
                         "desc": desc,
+                        "scenes": scenes,
                         "created_at": timestamp,
                     },
                 )
@@ -1029,6 +1056,7 @@ class WebServer:
                         "category": category,
                         "tags": tags,
                         "desc": desc,
+                        "scenes": scenes,
                         "created_at": timestamp,
                     },
                 }
@@ -1200,6 +1228,7 @@ class WebServer:
                     "category": category,
                     "tags": tags,
                     "description": desc,
+                    "scenes": scenes or [],
                 })
 
             finally:

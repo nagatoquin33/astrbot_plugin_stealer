@@ -18,7 +18,7 @@ createApp({
         const previewOpen = ref(false);
         const previewItem = ref(null);
         const isEditing = ref(false);
-        const editForm = reactive({ category: '', tags: '', desc: '' });
+        const editForm = reactive({ category: '', tags: '', scene: '', desc: '' });
 
         // Batch Mode
         const isBatchMode = ref(false);
@@ -32,8 +32,36 @@ createApp({
         const uploadFile = ref(null);
         const uploadPreviewUrl = ref(null);
         const uploadError = ref(null);
-        const uploadForm = reactive({ emotion: '', tags: '', desc: '' });
+        const uploadForm = reactive({ emotion: '', tags: '', scene: '', desc: '' });
         const availableEmotions = ref([]);
+        const analysisScenes = ref([]);
+
+
+        const parseSceneList = (rawText) => {
+            if (!rawText) return [];
+            const seen = new Set();
+            return String(rawText)
+                .split(/[，,、;；\n\t]+/)
+                .map((item) => item.trim())
+                .filter((item) => {
+                    if (!item || seen.has(item)) return false;
+                    seen.add(item);
+                    return true;
+                });
+        };
+
+        const toggleScene = (scene) => {
+            const sceneList = parseSceneList(uploadForm.scene);
+            if (sceneList.includes(scene)) {
+                uploadForm.scene = sceneList.filter((item) => item !== scene).join('、');
+                return;
+            }
+            uploadForm.scene = [...sceneList, scene].join('、');
+        };
+
+        const isSceneSelected = (scene) => parseSceneList(uploadForm.scene).includes(scene);
+
+        // Upload Helpers
 
         // Category Management
         const emotionsOpen = ref(false);
@@ -238,7 +266,8 @@ createApp({
             if (!previewItem.value) return;
             Object.assign(editForm, {
                 category: previewItem.value.category,
-                tags: previewItem.value.tags.join(', '),
+                tags: (previewItem.value.tags || []).join(', '),
+                scene: (previewItem.value.scenes || []).join('、'),
                 desc: previewItem.value.desc,
             });
             isEditing.value = true;
@@ -261,6 +290,7 @@ createApp({
                     isEditing.value = false;
                     previewItem.value.category = editForm.category;
                     previewItem.value.tags = editForm.tags.split(',').map((t) => t.trim()).filter((t) => t);
+                    previewItem.value.scenes = parseSceneList(editForm.scene);
                     previewItem.value.desc = editForm.desc;
                     fetchImages(currentPage.value);
                 } else {
@@ -379,12 +409,14 @@ createApp({
             uploadFile.value = null;
             uploadPreviewUrl.value = null;
             uploadError.value = null;
-            Object.assign(uploadForm, { emotion: '', tags: '', desc: '' });
+            Object.assign(uploadForm, { emotion: '', tags: '', scene: '', desc: '' });
+            analysisScenes.value = [];
             fetchEmotions();
         };
 
         const closeUploadModal = () => {
             uploadOpen.value = false;
+            analysisScenes.value = [];
         };
 
         const handleFileSelect = (e) => {
@@ -393,6 +425,8 @@ createApp({
                 uploadFile.value = file;
                 uploadPreviewUrl.value = URL.createObjectURL(file);
                 uploadError.value = null;
+                uploadForm.scene = '';
+                analysisScenes.value = [];
             }
         };
 
@@ -404,6 +438,7 @@ createApp({
                 formData.append('file', uploadFile.value);
                 formData.append('emotion', uploadForm.emotion);
                 formData.append('tags', uploadForm.tags);
+                formData.append('scene', uploadForm.scene);
                 formData.append('desc', uploadForm.desc);
 
                 const res = await apiFetch('api/images/upload', { method: 'POST', body: formData });
@@ -440,7 +475,7 @@ createApp({
             /**
              * 分析图片
              * @param {File} file - 图片文件
-             * @returns {Promise<{category, tags, description}>} 分析结果
+             * @returns {Promise<{category, tags, scenes, description}>} 分析结果
              */
             const analyze = async (file) => {
                 if (!file) {
@@ -516,6 +551,12 @@ createApp({
                     }
                 }
                 
+                // 填充场景
+                if (Array.isArray(data.scenes) && data.scenes.length > 0) {
+                    form.scene = parseSceneList(data.scenes.join('、')).join('、');
+                    result.fields.push('scenes');
+                }
+
                 // 填充描述（仅在空时填充）
                 if (data.description && !form.desc) {
                     form.desc = data.description;
@@ -545,6 +586,7 @@ createApp({
             
             try {
                 const data = await imageAnalyzer.analyze(uploadFile.value);
+                analysisScenes.value = Array.isArray(data.scenes) ? data.scenes : [];
                 const result = imageAnalyzer.applyToForm(data, uploadForm, availableEmotions.value);
                 
                 if (!result.filled) {
@@ -735,6 +777,9 @@ createApp({
             uploadError,
             uploadForm,
             availableEmotions,
+            analysisScenes,
+            isSceneSelected,
+            toggleScene,
             openUploadModal,
             closeUploadModal,
             handleFileSelect,

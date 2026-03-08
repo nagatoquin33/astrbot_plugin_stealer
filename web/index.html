@@ -410,6 +410,16 @@
                                     </span>
                                     <span v-if="!(previewItem?.tags || []).length" style="font-size: 0.85rem; color: var(--text-muted);">无标签</span>
                                 </div>
+
+                                <div class="stat-row">
+                                    <span class="stat-name">场景</span>
+                                </div>
+                                <div class="item-tags" style="margin-bottom: 12px;">
+                                    <span v-for="scene in (previewItem?.scenes || [])" :key="scene" class="tag scene-tag">
+                                        {{ scene }}
+                                    </span>
+                                    <span v-if="!(previewItem?.scenes || []).length" style="font-size: 0.85rem; color: var(--text-muted);">无场景</span>
+                                </div>
                                 
                                 <div class="stat-row">
                                     <span class="stat-name">添加时间</span>
@@ -438,6 +448,11 @@
                                     <textarea v-model="editForm.desc" class="codex-input" rows="3"></textarea>
                                 </div>
                                 
+                                <div style="margin-bottom: 20px;">
+                                    <label style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); display: block; margin-bottom: 8px;">场景 (顿号/逗号分隔)</label>
+                                    <input v-model="editForm.scene" type="text" class="codex-input" placeholder="例如: 庆祝、表达开心">
+                                </div>
+
                                 <div style="margin-bottom: 20px;">
                                     <label style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); display: block; margin-bottom: 8px;">标签 (逗号分隔)</label>
                                     <input v-model="editForm.tags" type="text" class="codex-input" placeholder="例如: 可爱, 搞怪, 稀有">
@@ -550,6 +565,31 @@
                             </select>
                         </div>
                         
+                        <div v-if="analysisScenes.length" class="analysis-result" style="margin-top: 16px;">
+                            <div class="analysis-result-head">
+                                <div class="analysis-result-title">识别到的场景</div>
+                                <div class="analysis-result-subtitle">点击标签可添加/移除到“场景”输入框</div>
+                            </div>
+                            <div class="item-tags" style="margin-top: 10px;">
+                                <button
+                                    v-for="scene in analysisScenes"
+                                    :key="scene"
+                                    type="button"
+                                    class="tag scene-tag scene-tag-btn"
+                                    :class="{ active: isSceneSelected(scene) }"
+                                    @click="toggleScene(scene)"
+                                >
+                                    {{ scene }}
+                                </button>
+                            </div>
+                        </div>
+
+                        <div style="margin-top: 16px;">
+                            <label style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); display: block; margin-bottom: 8px;">场景</label>
+                            <input v-model="uploadForm.scene" type="text" class="codex-input" placeholder="例如: 办公室、聊天窗口、深夜">
+                            <p style="margin: 8px 0 0; font-size: 0.8rem; color: var(--text-muted);">支持使用中文顿号、逗号或分号分隔。</p>
+                        </div>
+
                         <div style="margin-top: 16px;">
                             <label style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); display: block; margin-bottom: 8px;">标签</label>
                             <input v-model="uploadForm.tags" type="text" class="codex-input" placeholder="例如: 可爱, 搞怪">

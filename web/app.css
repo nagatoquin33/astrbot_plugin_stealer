@@ -883,6 +883,55 @@ h2 {
     color: var(--gold-dim);
 }
 
+
+.analysis-result {
+    background: linear-gradient(145deg, rgba(212, 180, 110, 0.12), rgba(212, 180, 110, 0.03));
+    border: 1px solid rgba(212, 180, 110, 0.35);
+    border-radius: 8px;
+    padding: 12px;
+}
+
+.analysis-result-head {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.analysis-result-title {
+    color: var(--gold-primary);
+    font-size: 0.8rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.analysis-result-subtitle {
+    color: var(--text-muted);
+    font-size: 0.78rem;
+}
+
+.scene-tag {
+    color: var(--gold-primary);
+    border-color: rgba(212, 180, 110, 0.45);
+}
+
+.scene-tag-btn {
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-family: inherit;
+}
+
+.scene-tag-btn:hover {
+    transform: translateY(-1px);
+    border-color: rgba(212, 180, 110, 0.65);
+}
+
+.scene-tag-btn.active {
+    background: rgba(212, 180, 110, 0.24);
+    color: #f8e3ae;
+    border-color: rgba(212, 180, 110, 0.85);
+    box-shadow: 0 0 0 1px rgba(212, 180, 110, 0.2) inset;
+}
+
 .modal-actions {
     display: flex;
     gap: 12px;
@@ -2255,4 +2304,13 @@ select.codex-input {
     .codex-header {
         padding: 12px 16px;
     }
+}
+
+[data-theme="light"] .analysis-result {
+    background: linear-gradient(145deg, rgba(212, 180, 110, 0.18), rgba(255, 255, 255, 0.75));
+    border-color: rgba(139, 105, 20, 0.35);
+}
+
+[data-theme="light"] .scene-tag-btn.active {
+    color: #6a4c00;
 }
