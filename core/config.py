@@ -12,7 +12,7 @@ from astrbot.api.star import Context, StarTools
 class WebuiConfig(BaseModel):
     enabled: bool = True
     host: str = "0.0.0.0"
-    port: int = 8899
+    port: int = 9191
     auth_enabled: bool = True
     password: str = ""
     session_timeout: int = 3600
