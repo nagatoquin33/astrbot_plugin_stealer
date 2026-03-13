@@ -21,7 +21,7 @@ class WebServer:
     SESSION_CLEANUP_INTERVAL = 300  # Session 清理间隔（秒）
     SESSION_MAX_COUNT = 1000  # 最大 Session 数量
 
-    def __init__(self, plugin: Any, host: str = "0.0.0.0", port: int = 8899):
+    def __init__(self, plugin: Any, host: str = "0.0.0.0", port: int = 9191):
         self.plugin = plugin
         self.host: str = host
         self.port: int = port

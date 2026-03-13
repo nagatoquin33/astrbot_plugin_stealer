@@ -12,7 +12,7 @@ from astrbot.api.star import Context, StarTools
 class WebuiConfig(BaseModel):
     enabled: bool = True
     host: str = "0.0.0.0"
-    port: int = 9191
+    port: int = 9191  
     auth_enabled: bool = True
     password: str = ""
     session_timeout: int = 3600
@@ -20,12 +20,12 @@ class WebuiConfig(BaseModel):
 
 class PluginConfig(BaseModel):
     # === 基础功能 ===
-    steal_emoji: bool = True
+    steal_emoji: bool = False
     steal_mode: str = "probability"  # "probability" 或 "cooldown"
-    steal_chance: float = 0.6  # 概率模式下的偷图概率
-    auto_send: bool = True
-    emoji_chance: float = 0.4
-    send_emoji_as_gif: bool = True
+    steal_chance: float = 0.3  # 概率模式下的偷图概率
+    auto_send: bool = False
+    emoji_chance: float = 0.2
+    send_emoji_as_gif: bool = False
 
     # === 群聊过滤 ===
     steal_target_whitelist: list[str] = []
@@ -35,6 +35,7 @@ class PluginConfig(BaseModel):
 
     # === 模型配置 ===
     vision_provider_id: str = ""
+    napcat_token: str = ""  # NapCat 访问令牌
 
     # === WebUI 管理界面 ===
     webui: WebuiConfig = Field(default_factory=WebuiConfig)
@@ -42,7 +43,7 @@ class PluginConfig(BaseModel):
     # === 内部常量/高级配置 ===
     max_reg_num: int = 100
     content_filtration: bool = False  # 内容审核开关
-    image_processing_cooldown: int = 10
+    image_processing_cooldown: int = 30
     enable_natural_emotion_analysis: bool = True  # 情绪识别模式
     emotion_analysis_provider_id: str = ""  # 情绪分析专用模型
     smart_emoji_selection: bool = True  # 智能表情包选择

@@ -7,30 +7,34 @@
   "steal_emoji": {
     "description": "开启表情包偷取功能",
     "type": "bool",
-    "default": true
+    "default": false,
+    "hint": "开启后会监听并保存聊天中的图片，请确保有视觉模型支持"
   },
   "steal_mode": {
     "description": "偷图模式",
     "type": "string",
     "default": "probability",
-    "options": ["probability", "cooldown"],
+    "options": [
+      "probability",
+      "cooldown"
+    ],
     "hint": "probability=概率模式：每次收到图片按概率决定是否偷取\ncooldown=冷却模式：两次偷取之间必须间隔指定秒数"
   },
   "steal_chance": {
     "description": "偷图概率（概率模式生效）",
     "type": "float",
-    "default": 0.6,
+    "default": 0.3,
     "slider": {
       "min": 0.0,
       "max": 1.0,
       "step": 0.1
     },
-    "hint": "概率模式下每次收到图片时尝试偷取的概率，0.0=从不偷取，1.0=每次都偷。建议 0.4-0.8"
+    "hint": "概率模式下每次收到图片时尝试偷取的概率，0.0=从不偷取，1.0=每次都偷。建议 0.2-0.5"
   },
   "image_processing_cooldown": {
     "description": "偷图冷却时间/秒（冷却模式生效）",
     "type": "int",
-    "default": 10,
+    "default": 30,
     "slider": {
       "min": 0,
       "max": 120,
@@ -41,9 +45,9 @@
   "content_filtration": {
     "description": "内容审核（过滤不当图片）",
     "type": "bool",
-    "default": false
+    "default": false,
+    "hint": "开启后会使用 VLM 审核图片内容，可能增加处理时间"
   },
-
   "_send_section": {
     "description": "=== 发送设置 ===",
     "type": "text",
@@ -52,33 +56,32 @@
   "auto_send": {
     "description": "自动随聊发送表情包",
     "type": "bool",
-    "default": true
+    "default": false,
+    "hint": "开启后 Bot 会在聊天中自动发送表情包，建议先测试效果"
   },
   "emoji_chance": {
     "description": "表情包发送概率",
     "type": "float",
-    "default": 0.4,
+    "default": 0.2,
     "slider": {
       "min": 0.0,
       "max": 1.0,
       "step": 0.1
     },
-    "hint": "自动发送表情包的概率，0.0=从不发送，1.0=每次都发送，建议 0.2-0.6"
+    "hint": "自动发送表情包的概率，0.0=从不发送，1.0=每次都发送，建议 0.1-0.3"
   },
   "send_emoji_as_gif": {
     "description": "真表情包样式（GIF发送）",
     "type": "bool",
-    "default": true,
+    "default": false,
     "hint": "✅ 开启：以 GIF 输出（更接近真表情包样式）\n❌ 关闭：按原文件格式发送（png/jpg/gif 等）\n\n⚠️ 开启后高频发送大图/动图场景会有较高瞬时内存占用"
   },
-
   "smart_emoji_selection": {
     "description": "智能表情包选择",
     "type": "bool",
     "default": true,
     "hint": "✅ 开启=综合评分选择（多样性+匹配度+相似度）\n❌ 关闭=随机选择（仍会避免短期重复）"
   },
-
   "_emotion_section": {
     "description": "=== 情绪识别 ===",
     "type": "text",
@@ -93,10 +96,10 @@
   "emotion_analysis_provider_id": {
     "description": "情绪分析专用模型（LLM模式）",
     "type": "string",
-    "hint": "留空则使用当前会话模型，建议使用轻量免费模型",
-    "_special": "select_provider"
+    "hint": "留空则使用当前会话模型，建议使用轻量免费模型，小参数量模型即可胜任",
+    "_special": "select_provider",
+    "default": ""
   },
-
   "_model_section": {
     "description": "=== 模型配置 ===",
     "type": "text",
@@ -108,7 +111,6 @@
     "hint": "留空则自动使用 AstrBot 全局配置的「图片描述模型」(default_image_caption_provider_id)",
     "_special": "select_provider"
   },
-
   "_group_section": {
     "description": "=== 目标过滤 ===",
     "type": "text",
@@ -154,7 +156,6 @@
     },
     "hint": "表情包存储上限，超过后自动清理旧表情包"
   },
-
   "_webui_section": {
     "description": "=== WebUI 管理界面 ===",
     "type": "text",
@@ -167,7 +168,8 @@
       "enabled": {
         "description": "启用 WebUI",
         "type": "bool",
-        "default": true
+        "default": false,
+        "hint": "⚠️ 开启后会启动 Web 服务器，如果与其他插件端口冲突请修改或关闭"
       },
       "host": {
         "description": "监听地址",
@@ -178,7 +180,7 @@
       "port": {
         "description": "监听端口",
         "type": "int",
-        "default": 8899
+        "default": 9191
       },
       "auth_enabled": {
         "description": "启用登录验证",
@@ -199,5 +201,16 @@
         "hint": "登录会话有效时长，超时需重新登录"
       }
     }
+  },
+  "_advanced_section": {
+    "description": "=== 高级配置（特殊情况使用） ===",
+    "type": "text",
+    "invisible": true
+  },
+  "napcat_token": {
+    "description": "NapCat 访问令牌",
+    "type": "string",
+    "default": "",
+    "hint": "⚠️ 仅在特殊网络环境下需要：Docker 部署 AstrBot + 本地部署 NapCat 时，如果自动获取 token 失败，可手动填写此项。留空则自动从 OneBot 适配器配置中获取"
   }
 }

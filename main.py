@@ -105,6 +105,53 @@ class Main(Star):
         provider_id = getattr(self.plugin_config, "vision_provider_id", "")
         return str(provider_id).strip() if provider_id else ""
 
+    def _load_napcat_token(self) -> str:
+        """加载 NapCat 访问令牌。
+
+        优先从用户配置获取，如果未配置则尝试从 OneBot 适配器配置中自动获取。
+
+        Returns:
+            str: NapCat 访问令牌，如果未配置则返回空字符串
+        """
+        user_token = getattr(self.plugin_config, "napcat_token", "")
+        if user_token:
+            logger.debug("使用用户手动配置的 NapCat token")
+            return str(user_token).strip()
+
+        try:
+            if hasattr(self, "context") and self.context:
+                adapter_config = getattr(self.context, "_adapter_config", None)
+                if not adapter_config:
+                    adapter_config = getattr(self.context, "adapter_config", None)
+
+                if adapter_config and isinstance(adapter_config, dict):
+                    for key, value in adapter_config.items():
+                        if "onebot" in key.lower() or "napcat" in key.lower():
+                            if isinstance(value, dict):
+                                token = value.get("token") or value.get("access_token")
+                                if token:
+                                    logger.debug(f"从适配器配置 '{key}' 中自动获取 NapCat token")
+                                    return str(token).strip()
+
+                adapters = getattr(self.context, "adapters", [])
+                for adapter in adapters:
+                    adapter_name = getattr(adapter, "name", "").lower()
+                    if "onebot" in adapter_name or "napcat" in adapter_name:
+                        token = getattr(adapter, "token", None) or getattr(adapter, "access_token", None)
+                        if not token:
+                            cfg = getattr(adapter, "config", None)
+                            if cfg:
+                                token = getattr(cfg, "token", None) or getattr(cfg, "access_token", None)
+                        if token:
+                            logger.debug(f"从适配器 '{adapter_name}' 中自动获取 NapCat token")
+                            return str(token).strip()
+        except Exception as e:
+            logger.debug(f"自动获取 NapCat token 失败：{e}")
+
+        logger.debug("未配置 NapCat token，将不使用认证")
+        return ""
+
+
     def _sync_all_config(self) -> None:
         """从配置服务同步所有配置到实例属性。
 
@@ -127,6 +174,7 @@ class Main(Star):
 
         # 同步模型相关配置
         self.vision_provider_id = self._load_vision_provider_id()
+        self.napcat_token = self._load_napcat_token()
 
         # 同步自然语言分析配置
         self.enable_natural_emotion_analysis = (
@@ -340,7 +388,7 @@ class Main(Star):
         return (
             getattr(self, "webui_enabled", True),
             getattr(self, "webui_host", "0.0.0.0"),
-            getattr(self, "webui_port", 8899),
+            getattr(self, "webui_port", 9191),
             getattr(self, "webui_password", ""),
             getattr(self, "webui_session_timeout", 3600),
         )

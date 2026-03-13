@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 import os
 import random
 import tempfile
@@ -58,9 +58,18 @@ class EventHandler:
         if not url:
             return None, False
 
+        # 准备请求头，如果配置了 NapCat token 则添加认证
+        # 优先使用 plugin.napcat_token（已自动从适配器配置加载）
+        headers = {}
+        napcat_token = getattr(self.plugin, "napcat_token", "")
+        if napcat_token:
+            headers["Authorization"] = f"Bearer {napcat_token}"
+
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                async with session.get(
+                    url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)
+                ) as resp:
                     if resp.status != 200:
                         logger.warning(f"下载图片失败: HTTP {resp.status}")
                         return None, False
@@ -839,3 +848,4 @@ class EventHandler:
         # 清理插件引用
         self.plugin = None
         logger.debug("EventHandler 资源已清理")
+
