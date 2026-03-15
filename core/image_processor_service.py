@@ -1822,7 +1822,18 @@ class ImageProcessorService:
             draw.text((pad, height - footer_h + 16), foot, fill=(90, 95, 110), font=small_font)
 
             buf = BytesIO()
-            bg.save(buf, format="PNG", optimize=True)
+            # 用 JPEG 可以显著减小体积，避免 NT 富媒体传输失败
+            try:
+                bg.save(
+                    buf,
+                    format="JPEG",
+                    quality=55,
+                    optimize=False,
+                    progressive=False,
+                    subsampling=2,
+                )
+            except Exception:
+                bg.save(buf, format="JPEG", quality=55)
             return base64.b64encode(buf.getvalue()).decode("utf-8")
 
         try:
