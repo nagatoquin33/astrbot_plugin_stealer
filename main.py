@@ -1291,8 +1291,84 @@ class Main(Star):
                 comp.text = ""
 
     @filter.command_group("meme")
-    def meme(self):
-        pass
+    async def meme(self, event: AstrMessageEvent):
+        """指令组占位符。
+
+        AstrBot 的正常消息管道不会执行指令组 handler（只用它来做过滤与帮助树），
+        但部分外部调用方（例如某些工具执行器）会直接调用该方法并传入 event。
+        这里做一次轻量转发，使 `/meme <subcmd> ...` 能被正确处理。
+        """
+        try:
+            msg = str(getattr(event, "message_str", "") or "").strip()
+        except Exception:
+            msg = ""
+
+        # 兼容：可能出现以 '/' 开头的情况
+        if msg.startswith("/"):
+            msg = msg.lstrip("/").strip()
+
+        parts = [p for p in msg.split() if p]
+        if not parts:
+            return
+
+        # 允许 message_str 既可能是 "meme list ..." 也可能是 "list ..."
+        if parts[0] == "meme":
+            parts = parts[1:]
+
+        if not parts:
+            # 不主动返回帮助树，避免与框架的帮助提示冲突
+            return
+
+        sub = parts[0]
+        args = parts[1:]
+
+        async def _yield_from(gen):
+            async for r in gen:
+                yield r
+
+        # 只做参数转发，不做额外解析逻辑，保持与原子命令一致
+        if sub == "list":
+            category = args[0] if len(args) >= 1 else ""
+            limit = args[1] if len(args) >= 2 else "10"
+            page = args[2] if len(args) >= 3 else "1"
+            async for r in _yield_from(self.list_images(event, category, limit, page)):
+                yield r
+            return
+
+        if sub == "delete":
+            identifier = args[0] if len(args) >= 1 else ""
+            async for r in _yield_from(self.delete_image(event, identifier)):
+                yield r
+            return
+
+        # 其它子命令：尽量覆盖，避免工具执行器无法调用
+        mapping_0 = {
+            "on": self.meme_on,
+            "off": self.meme_off,
+            "auto_on": self.auto_on,
+            "auto_off": self.auto_off,
+            "group": self.group_setting,
+            "偷": self.steal_image,
+            "natural_analysis": self.natural_analysis,
+            "emotion_stats": self.emotion_stats,
+            "clear_emotion_cache": self.clear_emotion_cache,
+            "status": self.status,
+            "capacity": self.enforce_capacity,
+            "rebuild_index": self.rebuild_index,
+        }
+        if sub in mapping_0:
+            async for r in _yield_from(mapping_0[sub](event)):
+                yield r
+            return
+
+        if sub == "clean":
+            mode = args[0] if len(args) >= 1 else ""
+            async for r in _yield_from(self.clean(event, mode)):
+                yield r
+            return
+
+        # 未识别的子命令：交给框架的错误提示/其它 handler
+        return
 
     @meme.command("on")
     async def meme_on(self, event: AstrMessageEvent):
