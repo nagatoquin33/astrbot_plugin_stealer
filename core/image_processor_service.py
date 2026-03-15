@@ -1660,18 +1660,26 @@ class ImageProcessorService:
       box-shadow: 0 10px 24px rgba(15, 18, 35, .06);
       width: 100%;
       box-sizing: border-box;
+      padding: 14px;
     }
-    .row {
-      display: flex;
-      gap: 16px;
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .card {
+      display: grid;
+      grid-template-columns: 104px 1fr;
+      gap: 12px;
       align-items: center;
-      padding: 14px 16px;
-      border-bottom: 1px solid var(--line);
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
     }
-    .row:last-child { border-bottom: none; }
     .thumb {
-      width: 84px;
-      height: 84px;
+      width: 104px;
+      height: 104px;
       border-radius: 12px;
       background: #f6f7fb;
       border: 1px solid var(--line);
@@ -1679,24 +1687,27 @@ class ImageProcessorService:
       align-items: center;
       justify-content: center;
       overflow: hidden;
-      flex: 0 0 auto;
     }
-    .thumb img { width: 84px; height: 84px; object-fit: contain; }
-    .meta { flex: 1 1 auto; min-width: 0; }
+    .thumb img { width: 104px; height: 104px; object-fit: contain; }
+    .meta { min-width: 0; }
     .line1 {
       display: flex;
-      align-items: baseline;
-      gap: 10px;
+      align-items: center;
+      gap: 8px;
       margin: 0 0 6px 0;
     }
     .idx {
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      font-weight: 700;
-      color: #3b3f53;
+      font-weight: 800;
+      color: #222;
+      background: #eef0f6;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 2px 6px;
       flex: 0 0 auto;
     }
     .desc {
-      font-size: 18px;
+      font-size: 16px;
       font-weight: 600;
       white-space: nowrap;
       overflow: hidden;
@@ -1726,29 +1737,31 @@ class ImageProcessorService:
     <h1 class="title">表情包列表</h1>
     <p class="subtitle">第 {{ page }}/{{ total_pages }} 页，显示 {{ total_filtered }} 张（全部 {{ total_all }} 张）{% if category %}，分类: {{ category }}{% endif %}，每页 {{ per_page }} 张</p>
     <div class="panel">
-      {% for it in items %}
-      <div class="row">
-        <div class="thumb">
-          {% if it.thumb %}
-            <img src="{{ it.thumb }}" />
-          {% else %}
-            <span class="chip">No Preview</span>
-          {% endif %}
-        </div>
-        <div class="meta">
-          <div class="line1">
-            <div class="idx">{{ "%04d"|format(it.index) }}.</div>
-            <div class="desc">{{ it.desc }}</div>
+      <div class="grid">
+        {% for it in items %}
+        <div class="card">
+          <div class="thumb">
+            {% if it.thumb %}
+              <img src="{{ it.thumb }}" />
+            {% else %}
+              <span class="chip">No Preview</span>
+            {% endif %}
           </div>
-          {% if it.category %}
-            <span class="chip">分类: {{ it.category }}</span>
-          {% endif %}
-          {% if it.source == "qq_store" %}
-            <span class="chip">QQ商城</span>
-          {% endif %}
+          <div class="meta">
+            <div class="line1">
+              <div class="idx">{{ "%04d"|format(it.index) }}</div>
+              <div class="desc">{{ it.desc }}</div>
+            </div>
+            {% if it.category %}
+              <span class="chip">分类: {{ it.category }}</span>
+            {% endif %}
+            {% if it.source == "qq_store" %}
+              <span class="chip">QQ商城</span>
+            {% endif %}
+          </div>
         </div>
+        {% endfor %}
       </div>
-      {% endfor %}
     </div>
     <div class="footer">
       <div>翻页: /meme list 2 或 /meme list happy 2 或 /meme list 20 2</div>
