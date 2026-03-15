@@ -538,6 +538,11 @@ class CommandHandler:
                 per_page=per_page,
             )
             if file_path:
+                # AstrBot 的 aiocqhttp 发送层会把 Image 强制转 base64:// 再发给 NT，
+                # 在部分 NapCat/NTQQ 环境下容易触发 1200。这里参考 qq_group_daily_analysis：
+                # 优先直接用 OneBot 的 file:// 物理路径发送。
+                if await self._try_send_onebot_image_by_path(event, file_path):
+                    return
                 yield event.make_result().file_image(file_path)
                 return
 
@@ -571,6 +576,54 @@ class CommandHandler:
 
         result_text += "\n用法: /meme list [分类] [每页数量] [页码]\n删除: /meme delete <序号>"
         yield event.plain_result(result_text)
+
+    async def _try_send_onebot_image_by_path(
+        self,
+        event: AstrMessageEvent,
+        image_path: str,
+    ) -> bool:
+        """在 aiocqhttp/OneBot 平台尝试直接用 file:// 发送图片，绕开 AstrBot 对 Image 的 base64 转换。"""
+        try:
+            if not image_path:
+                return False
+            if event.get_platform_name() != "aiocqhttp":
+                return False
+            bot = getattr(event, "bot", None)
+            if bot is None or not hasattr(bot, "call_action"):
+                return False
+
+            # 构造 OneBot 认可的 file:// 路径
+            file_str = image_path
+            if not str(image_path).startswith(("http://", "https://", "base64://", "file://")):
+                if os.path.isabs(image_path):
+                    if image_path.startswith("/"):
+                        file_str = f"file://{image_path}"
+                    else:
+                        file_str = f"file:///{image_path}"
+                else:
+                    file_str = f"file:///{os.path.abspath(image_path)}"
+
+            message = [{"type": "image", "data": {"file": file_str}}]
+            session_id = event.get_session_id()
+            if not session_id or not str(session_id).isdigit():
+                return False
+
+            if event.is_private_chat():
+                await bot.call_action(
+                    "send_private_msg",
+                    user_id=int(session_id),
+                    message=message,
+                )
+            else:
+                await bot.call_action(
+                    "send_group_msg",
+                    group_id=int(session_id),
+                    message=message,
+                )
+            return True
+        except Exception as e:
+            logger.debug(f"OneBot file:// 发送图片失败，回退到默认发送链路: {e}")
+            return False
 
     async def delete_image(self, event: AstrMessageEvent, identifier: str = ""):
         """删除指定的表情包。
