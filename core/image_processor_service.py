@@ -1341,133 +1341,6 @@ class ImageProcessorService:
         if not plugin or not hasattr(plugin, "html_render"):
             return ""
 
-        def _shrink_for_qq_send(src_path: str) -> str:
-            """QQ/NT 在某些情况下会拒绝传输过大的富媒体图片（retcode=1200）。
-
-            对渲染结果做一次“发送友好化”处理：
-            - 强制转为 JPEG（更小，兼容性更稳）
-            - 限制最大宽度/高度
-            - 如果仍过大则逐步降低质量
-            """
-            if not src_path:
-                return src_path
-            if PILImage is None:
-                return src_path
-
-            try:
-                if not os.path.exists(src_path):
-                    return src_path
-            except Exception:
-                return src_path
-
-            # 经验值：尽量把体积控制在 900KB 以内，避免 NT “rich media transfer failed”
-            max_bytes = 900 * 1024
-            max_width = 1080
-            max_height = 4096
-
-            try:
-                file_size = os.path.getsize(src_path)
-            except Exception:
-                file_size = -1
-
-            try:
-                with PILImage.open(src_path) as im:
-                    # 如果体积和分辨率都在安全范围内就不动
-                    try:
-                        w0, h0 = im.size
-                    except Exception:
-                        w0, h0 = (0, 0)
-                    size_ok = (0 <= file_size <= max_bytes) if file_size >= 0 else False
-                    dim_ok = (w0 <= max_width and h0 <= max_height) if (w0 and h0) else False
-                    if size_ok and dim_ok:
-                        return src_path
-
-                    if im.mode not in ("RGB", "L"):
-                        im = im.convert("RGB")
-
-                    w, h = im.size
-                    scale = 1.0
-                    if w > max_width:
-                        scale = min(scale, max_width / float(w))
-                    if h > max_height:
-                        scale = min(scale, max_height / float(h))
-                    if scale < 1.0:
-                        new_size = (max(1, int(w * scale)), max(1, int(h * scale)))
-                        im = im.resize(new_size, resample=(LANCZOS or PILImage.BICUBIC))
-
-                    qualities = [75, 65, 55, 45, 38, 32]
-                    tmp_path = ""
-                    try:
-                        import tempfile
-
-                        fd, tmp_path = tempfile.mkstemp(
-                            prefix="stealer_list_", suffix=".jpg"
-                        )
-                        os.close(fd)
-
-                        # 先尝试降质量；若仍过大则再逐步缩小分辨率
-                        for attempt in range(3):
-                            for q in qualities:
-                                try:
-                                    im.save(
-                                        tmp_path,
-                                        format="JPEG",
-                                        quality=int(q),
-                                        optimize=True,
-                                        progressive=True,
-                                    )
-                                except Exception:
-                                    im.save(
-                                        tmp_path,
-                                        format="JPEG",
-                                        quality=int(q),
-                                    )
-
-                                try:
-                                    if os.path.getsize(tmp_path) <= max_bytes:
-                                        break
-                                except Exception:
-                                    break
-
-                            try:
-                                if os.path.getsize(tmp_path) <= max_bytes:
-                                    break
-                            except Exception:
-                                break
-
-                            # 仍过大：按比例缩小再来一轮
-                            try:
-                                w1, h1 = im.size
-                                im = im.resize(
-                                    (max(1, int(w1 * 0.85)), max(1, int(h1 * 0.85))),
-                                    resample=(LANCZOS or PILImage.BICUBIC),
-                                )
-                            except Exception:
-                                break
-
-                        try:
-                            os.replace(tmp_path, src_path)
-                            tmp_path = ""
-                        except Exception:
-                            return tmp_path or src_path
-                    finally:
-                        try:
-                            if tmp_path and os.path.exists(tmp_path):
-                                os.remove(tmp_path)
-                        except Exception:
-                            pass
-
-                try:
-                    logger.debug(
-                        f"列表图发送瘦身完成: path={src_path}, size={os.path.getsize(src_path)}"
-                    )
-                except Exception:
-                    pass
-                return src_path
-            except Exception as e:
-                logger.debug(f"列表图发送瘦身失败，继续使用原图: {e}")
-                return src_path
-
         # 生成缩略图 data URI（优先用首帧 PNG，避免直接嵌入大 GIF）
         rendered_items: list[dict] = []
         for item in items:
@@ -1522,18 +1395,15 @@ class ImageProcessorService:
     }
     html, body {
       width: 100%;
-      height: 100%;
     }
     body {
       margin: 0;
-      width: 100vw;
       background: var(--bg);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", Arial, sans-serif;
       color: var(--text);
     }
     .wrap {
       width: 100%;
-      max-width: none;
       padding: 24px 24px 16px;
       box-sizing: border-box;
     }
@@ -1554,8 +1424,6 @@ class ImageProcessorService:
       border-radius: 14px;
       overflow: hidden;
       box-shadow: 0 10px 24px rgba(15, 18, 35, .06);
-      width: 100%;
-      box-sizing: border-box;
     }
     .row {
       display: flex;
@@ -1664,18 +1532,26 @@ class ImageProcessorService:
             "per_page": int(per_page),
         }
 
-        # 直接使用 JPEG，避免 PNG 体积过大导致 NT 富媒体传输失败
+        # 优先 PNG（文字更清晰），失败再回退 JPEG
         try:
-            out_path = await plugin.html_render(
+            return await plugin.html_render(
                 tmpl,
                 data,
                 return_url=False,
-                options={"full_page": True, "type": "jpeg", "quality": 55},
+                options={"full_page": True, "type": "png"},
             )
-            return _shrink_for_qq_send(out_path)
         except Exception as e:
-            logger.debug(f"html-to-pic(JPEG) 渲染失败，回退到本地渲染: {e}")
-            return ""
+            logger.debug(f"html-to-pic(PNG) 渲染失败，尝试 JPEG: {e}")
+            try:
+                return await plugin.html_render(
+                    tmpl,
+                    data,
+                    return_url=False,
+                    options={"full_page": True, "type": "jpeg", "quality": 70},
+                )
+            except Exception as e2:
+                logger.debug(f"html-to-pic(JPEG) 渲染失败，回退到本地渲染: {e2}")
+                return ""
 
     async def render_emoji_list_page_base64(
         self,
