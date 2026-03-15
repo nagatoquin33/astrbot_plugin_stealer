@@ -1669,18 +1669,18 @@ class ImageProcessorService:
     }
     .card {
       display: grid;
-      grid-template-columns: 104px 1fr;
-      gap: 12px;
+      grid-template-columns: 128px 1fr;
+      gap: 14px;
       align-items: center;
-      padding: 12px;
+      padding: 14px;
       border: 1px solid var(--line);
       border-radius: 12px;
       background: #fff;
     }
     .thumb {
-      width: 104px;
-      height: 104px;
-      border-radius: 12px;
+      width: 128px;
+      height: 128px;
+      border-radius: 14px;
       background: #f6f7fb;
       border: 1px solid var(--line);
       display: flex;
@@ -1688,7 +1688,7 @@ class ImageProcessorService:
       justify-content: center;
       overflow: hidden;
     }
-    .thumb img { width: 104px; height: 104px; object-fit: contain; }
+    .thumb img { width: 128px; height: 128px; object-fit: contain; }
     .meta { min-width: 0; }
     .line1 {
       display: flex;
@@ -1699,15 +1699,16 @@ class ImageProcessorService:
     .idx {
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
       font-weight: 800;
+      font-size: 14px;
       color: #222;
       background: #eef0f6;
       border: 1px solid var(--line);
       border-radius: 8px;
-      padding: 2px 6px;
+      padding: 3px 8px;
       flex: 0 0 auto;
     }
     .desc {
-      font-size: 16px;
+      font-size: 17px;
       font-weight: 600;
       white-space: nowrap;
       overflow: hidden;
