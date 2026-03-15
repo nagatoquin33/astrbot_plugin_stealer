@@ -1360,15 +1360,27 @@ class ImageProcessorService:
             except Exception:
                 return src_path
 
-            # OneBot 侧会把图片转 base64 再发给 NT，体积会膨胀约 33%。
-            # 这里把目标压得更低一些，优先稳定送达而不是极致清晰。
-            max_bytes = 350 * 1024
-            max_width = 900
-            max_height = 2800
+            # 经验值：尽量把体积控制在 900KB 以内，避免 NT “rich media transfer failed”
+            max_bytes = 900 * 1024
+            max_width = 1080
+            max_height = 4096
+
+            try:
+                file_size = os.path.getsize(src_path)
+            except Exception:
+                file_size = -1
 
             try:
                 with PILImage.open(src_path) as im:
-                    # 为了兼容性，始终重编码成“基础 JPEG”（不 progressive），并按需压缩/缩放
+                    # 如果体积和分辨率都在安全范围内就不动
+                    try:
+                        w0, h0 = im.size
+                    except Exception:
+                        w0, h0 = (0, 0)
+                    size_ok = (0 <= file_size <= max_bytes) if file_size >= 0 else False
+                    dim_ok = (w0 <= max_width and h0 <= max_height) if (w0 and h0) else False
+                    if size_ok and dim_ok:
+                        return src_path
 
                     if im.mode not in ("RGB", "L"):
                         im = im.convert("RGB")
@@ -1383,7 +1395,7 @@ class ImageProcessorService:
                         new_size = (max(1, int(w * scale)), max(1, int(h * scale)))
                         im = im.resize(new_size, resample=(LANCZOS or PILImage.BICUBIC))
 
-                    qualities = [70, 60, 50, 40, 34, 28]
+                    qualities = [75, 65, 55, 45, 38, 32]
                     tmp_path = ""
                     try:
                         import tempfile
@@ -1401,9 +1413,8 @@ class ImageProcessorService:
                                         tmp_path,
                                         format="JPEG",
                                         quality=int(q),
-                                        optimize=False,
-                                        progressive=False,
-                                        subsampling=2,
+                                        optimize=True,
+                                        progressive=True,
                                     )
                                 except Exception:
                                     im.save(
