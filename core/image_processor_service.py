@@ -729,7 +729,18 @@ class ImageProcessorService:
             return "", [], "", "", []
 
     def _normalize_category(self, raw: str) -> str:
-        """将 VLM 返回的分类文本规范化为有效分类名。"""
+        """将 VLM 返回的分类文本规范化为有效分类名。
+
+        无法识别或输出 unknown 时返回空字符串，由调用方决定如何处理。
+        """
+        # 清理输入
+        raw = (raw or "").strip().lower()
+
+        # unknown 或空值视为分类失败
+        if not raw or raw == "unknown":
+            logger.debug(f"[分类规范化] 分类失败: {raw!r}")
+            return ""
+
         if self.plugin_config:
             try:
                 normalized = self.plugin_config.normalize_category_strict(raw)
@@ -738,15 +749,8 @@ class ImageProcessorService:
             except Exception as e:
                 logger.debug(f"[分类规范化] 异常: {e}")
 
-        # 获取默认分类
-        default_categories = (
-            list(self.plugin_config.DEFAULT_CATEGORIES)
-            if self.plugin_config
-            else ["happy"]
-        )
-        fallback = self.categories[0] if self.categories else default_categories[0]
-        logger.warning(f"无法识别情绪分类: {raw!r}，使用默认分类: {fallback}")
-        return fallback
+        logger.warning(f"无法识别情绪分类: {raw!r}，跳过该图片")
+        return ""
 
     async def _call_vision_model(
         self, event: AstrMessageEvent | None, img_path: str, prompt: str

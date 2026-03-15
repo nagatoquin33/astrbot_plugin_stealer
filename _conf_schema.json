@@ -207,6 +207,18 @@
     "type": "text",
     "invisible": true
   },
+  "custom_emoji_classification_prompt": {
+    "description": "VLM 分类提示词",
+    "type": "textarea",
+    "default": "<role>\n你是中文互联网表情包分析专家，精通贴吧、B站、微博等平台的主流梗文化。\n</role>\n\n<task>\n分析表情包图片，判断它表达的情绪/场景，输出分类、标签、描述和适用场景。\n</task>\n\n<workflow>\n按顺序执行：\n1. 观察图片：主体是什么？在做什么？表情/动作如何？有文字吗？\n2. 判断情绪：这张图整体传达什么情绪/态度？\n3. 匹配分类：根据情绪选择最合适的分类\n</workflow>\n\n<available_categories>\n{emotion_list}\n</available_categories>\n\n<category_guide>\n【正面情绪】\n- happy: 大笑、开心、庆祝、满足\n- love: 心动、喜欢、宠溺、甜蜜\n- excitement: 激动、亢奋、期待\n\n【负面情绪】\n- sad: 难过、悲伤、失落、emo\n- angry: 生气、愤怒、暴躁、不满\n- cry: 哭泣、委屈、流泪、破防\n- fear: 害怕、恐惧、紧张、怂\n- disgust: 嫌弃、厌恶、反感\n\n【中性/复杂情绪】\n- shy: 害羞、不好意思、腼腆\n- surprised: 惊讶、震惊、意外\n- confused: 困惑、疑惑、迷茫、问号\n- embarrassed: 尴尬、社死、窘迫\n- tired: 困倦、疲惫、想睡\n- sigh: 无奈、叹气、摆烂、心累\n- dumb: 无语、傻眼、离谱、沉默\n\n【特殊类型】\n- troll: 阴阳怪气、嘲讽、搞怪、发癫、抽象\n- thank: 感谢、感恩、鞠躬\n\n【无法判断】\n- unknown: 纯文字图、抽象图案、无法理解\n</category_guide>\n\n<output_format>\n分类|标签1,标签2,标签3|画面描述|场景1,场景2\n</output_format>\n\n<important>\n- 分类基于图片整体氛围和情绪，不是单一元素\n- 笑脸不一定是happy，要判断是开心笑还是阴阳笑\n- 真的无法判断再输出unknown\n</important>",
+    "hint": "直接编辑提示词内容。{emotion_list} 会被替换为分类列表。清空内容可恢复默认完整版"
+  },
+  "custom_emoji_classification_with_filter_prompt": {
+    "description": "VLM 分类提示词（带审核）",
+    "type": "textarea",
+    "default": "<role>\n你是中文互联网表情包审核与分类专家。\n你的核心能力是准确判断图片内容是否合规，以及理解图片表达的真实情绪。\n</role>\n\n<critical_rules>\n⚠️ 最重要的规则：\n1. 审核优先：任何违规内容都必须拒绝\n2. 理解优先：先看图理解内容，再匹配分类\n3. 宁可误判违规，也不要放过违规内容\n4. 分类时，宁可输出 unknown 也不要强行匹配\n</critical_rules>\n\n<task>\n第一步：审核图片内容\n第二步：如果通过审核，理解图片情绪并匹配分类\n第三步：只有置信度>70%时才选择分类，否则输出 unknown\n</task>\n\n<content_filter>\n以下情况必须输出：过滤不通过\n1. 裸露、色情、性暗示内容\n2. 暴力、血腥、恐怖内容\n3. 政治敏感、违法信息\n4. 广告营销、二维码、联系方式\n</content_filter>\n\n<available_categories>\n{emotion_list}\n</available_categories>\n\n<output_format>\n审核不通过：过滤不通过\n审核通过：分类|标签1,标签2,标签3|画面描述|场景1,场景2\n</output_format>\n\n<warning>\n- 审核必须严格\n- 分类是对情绪的分类，不是对图片元素的分类\n- 只输出结果，禁止解释\n</warning>",
+    "hint": "开启内容审核时使用此提示词。清空内容可恢复默认完整版"
+  },
   "napcat_token": {
     "description": "NapCat 访问令牌",
     "type": "string",

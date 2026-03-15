@@ -48,6 +48,10 @@ class PluginConfig(BaseModel):
     emotion_analysis_provider_id: str = ""  # 情绪分析专用模型
     smart_emoji_selection: bool = True  # 智能表情包选择
 
+    # === 自定义提示词 ===
+    custom_emoji_classification_prompt: str = ""
+    custom_emoji_classification_with_filter_prompt: str = ""
+
     # === 内化常量（不再暴露给用户） ===
     DO_REPLACE: ClassVar[bool] = True  # 达到上限始终替换旧表情
     ENABLE_RAW_CLEANUP: ClassVar[bool] = True  # raw 始终自动清理
@@ -422,6 +426,42 @@ class PluginConfig(BaseModel):
     def get_keyword_map(self) -> dict[str, str]:
         """获取关键词映射表。"""
         return self.DEFAULT_CATEGORY_ALIASES
+
+    def get_prompts(self, default_prompts: dict[str, str] | None = None) -> dict[str, str]:
+        """获取提示词配置。
+
+        Args:
+            default_prompts: 默认提示词字典，用于在配置为空时回退
+
+        Returns:
+            dict: 包含两个提示词的字典
+        """
+        custom_prompt = getattr(self, "custom_emoji_classification_prompt", "")
+        custom_filter_prompt = getattr(
+            self, "custom_emoji_classification_with_filter_prompt", ""
+        )
+
+        result = {
+            "emoji_classification_prompt": "",
+            "emoji_classification_with_filter_prompt": "",
+        }
+
+        # 配置值优先
+        if custom_prompt and custom_prompt.strip():
+            result["emoji_classification_prompt"] = custom_prompt.strip()
+        elif default_prompts:
+            result["emoji_classification_prompt"] = default_prompts.get(
+                "EMOJI_CLASSIFICATION_PROMPT", ""
+            )
+
+        if custom_filter_prompt and custom_filter_prompt.strip():
+            result["emoji_classification_with_filter_prompt"] = custom_filter_prompt.strip()
+        elif default_prompts:
+            result["emoji_classification_with_filter_prompt"] = default_prompts.get(
+                "EMOJI_CLASSIFICATION_WITH_FILTER_PROMPT", ""
+            )
+
+        return result
 
     def get_category_info(self) -> list[dict[str, str]]:
         categories = self.categories or list(self.DEFAULT_CATEGORIES)

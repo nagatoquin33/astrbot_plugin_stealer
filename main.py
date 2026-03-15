@@ -218,13 +218,15 @@ class Main(Star):
     def _apply_prompts(self, prompts: dict) -> None:
         for key, value in prompts.items():
             setattr(self, key, value)
+
+        # 使用配置服务获取提示词
+        final_prompts = self.plugin_config.get_prompts(prompts)
+
         self.image_processor_service.update_config(
-            emoji_classification_prompt=prompts.get(
-                "EMOJI_CLASSIFICATION_PROMPT", None
-            ),
-            combined_analysis_prompt=prompts.get("COMBINED_ANALYSIS_PROMPT", None),
-            emoji_classification_with_filter_prompt=prompts.get(
-                "EMOJI_CLASSIFICATION_WITH_FILTER_PROMPT", None
+            emoji_classification_prompt=final_prompts.get("emoji_classification_prompt"),
+            combined_analysis_prompt=prompts.get("COMBINED_ANALYSIS_PROMPT"),
+            emoji_classification_with_filter_prompt=final_prompts.get(
+                "emoji_classification_with_filter_prompt"
             ),
         )
 
@@ -446,14 +448,23 @@ class Main(Star):
                 setattr(self.plugin_config, k, v)
 
     def _sync_image_processor_from_runtime(self) -> None:
+        # 使用配置服务获取提示词
+        final_prompts = self.plugin_config.get_prompts({
+            "EMOJI_CLASSIFICATION_PROMPT": getattr(self, "EMOJI_CLASSIFICATION_PROMPT", None),
+            "EMOJI_CLASSIFICATION_WITH_FILTER_PROMPT": getattr(
+                self, "EMOJI_CLASSIFICATION_WITH_FILTER_PROMPT", None
+            ),
+        })
+
         self.image_processor_service.update_config(
             categories=self.categories,
             content_filtration=self.content_filtration,
             vision_provider_id=self.vision_provider_id,
-            emoji_classification_prompt=getattr(
-                self, "EMOJI_CLASSIFICATION_PROMPT", None
-            ),
+            emoji_classification_prompt=final_prompts.get("emoji_classification_prompt"),
             combined_analysis_prompt=getattr(self, "COMBINED_ANALYSIS_PROMPT", None),
+            emoji_classification_with_filter_prompt=final_prompts.get(
+                "emoji_classification_with_filter_prompt"
+            ),
         )
 
     def _update_config_from_dict(self, config_dict: dict):
