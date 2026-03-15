@@ -1291,90 +1291,9 @@ class Main(Star):
                 comp.text = ""
 
     @filter.command_group("meme")
-    async def meme(self, event: AstrMessageEvent):
-        """指令组占位符。
-
-        AstrBot 的正常消息管道不会执行指令组 handler（只用它来做过滤与帮助树），
-        但部分外部调用方（例如某些工具执行器）会直接调用该方法并传入 event。
-        这里做一次轻量转发，使 `/meme <subcmd> ...` 能被正确处理。
-        """
-        # 防止工具执行器直接调用该入口时触发默认 LLM 链路
-        try:
-            event.should_call_llm(True)
-        except Exception:
-            pass
-
-        try:
-            msg = str(getattr(event, "message_str", "") or "").strip()
-        except Exception:
-            msg = ""
-
-        # 兼容：可能出现以 '/' 开头的情况
-        if msg.startswith("/"):
-            msg = msg.lstrip("/").strip()
-
-        parts = [p for p in msg.split() if p]
-        if not parts:
-            return
-
-        # 允许 message_str 既可能是 "meme list ..." 也可能是 "list ..."
-        if parts[0] == "meme":
-            parts = parts[1:]
-
-        if not parts:
-            # 不主动返回帮助树，避免与框架的帮助提示冲突
-            return
-
-        sub = parts[0]
-        args = parts[1:]
-
-        async def _yield_from(gen):
-            async for r in gen:
-                yield r
-
-        # 只做参数转发，不做额外解析逻辑，保持与原子命令一致
-        if sub == "list":
-            category = args[0] if len(args) >= 1 else ""
-            limit = args[1] if len(args) >= 2 else "10"
-            page = args[2] if len(args) >= 3 else "1"
-            async for r in _yield_from(self.list_images(event, category, limit, page)):
-                yield r
-            return
-
-        if sub == "delete":
-            identifier = args[0] if len(args) >= 1 else ""
-            async for r in _yield_from(self.delete_image(event, identifier)):
-                yield r
-            return
-
-        # 其它子命令：尽量覆盖，避免工具执行器无法调用
-        mapping_0 = {
-            "on": self.meme_on,
-            "off": self.meme_off,
-            "auto_on": self.auto_on,
-            "auto_off": self.auto_off,
-            "group": self.group_setting,
-            "偷": self.steal_image,
-            "natural_analysis": self.natural_analysis,
-            "emotion_stats": self.emotion_stats,
-            "clear_emotion_cache": self.clear_emotion_cache,
-            "status": self.status,
-            "capacity": self.enforce_capacity,
-            "rebuild_index": self.rebuild_index,
-        }
-        if sub in mapping_0:
-            async for r in _yield_from(mapping_0[sub](event)):
-                yield r
-            return
-
-        if sub == "clean":
-            mode = args[0] if len(args) >= 1 else ""
-            async for r in _yield_from(self.clean(event, mode)):
-                yield r
-            return
-
-        # 未识别的子命令：交给框架的错误提示/其它 handler
-        return
+    def meme(self):
+        """指令组占位符（按官方文档：指令组函数无需实现逻辑）。"""
+        pass
 
     def _disable_default_llm(self, event: AstrMessageEvent) -> None:
         """阻止 AstrBot 的默认 LLM 链路（命令类回复由插件负责）。"""
@@ -1383,32 +1302,43 @@ class Main(Star):
         except Exception:
             pass
 
+    async def _yield_stopped(self, agen):
+        """统一将命令返回结果 stop_event，避免继续传播到其它插件/默认 LLM 链路。"""
+        async for result in agen:
+            try:
+                if hasattr(result, "stop_event"):
+                    yield result.stop_event()
+                else:
+                    yield result
+            except Exception:
+                yield result
+
     @meme.command("on")
     async def meme_on(self, event: AstrMessageEvent):
         """开启表情包偷取功能，自动收集群聊中的表情包。"""
         self._disable_default_llm(event)
-        async for result in self.command_handler.meme_on(event):
+        async for result in self._yield_stopped(self.command_handler.meme_on(event)):
             yield result
 
     @meme.command("off")
     async def meme_off(self, event: AstrMessageEvent):
         """关闭表情包偷取功能，停止收集新表情包。"""
         self._disable_default_llm(event)
-        async for result in self.command_handler.meme_off(event):
+        async for result in self._yield_stopped(self.command_handler.meme_off(event)):
             yield result
 
     @meme.command("auto_on")
     async def auto_on(self, event: AstrMessageEvent):
         """开启自动发送表情包，聊天时根据情绪自动发送。"""
         self._disable_default_llm(event)
-        async for result in self.command_handler.auto_on(event):
+        async for result in self._yield_stopped(self.command_handler.auto_on(event)):
             yield result
 
     @meme.command("auto_off")
     async def auto_off(self, event: AstrMessageEvent):
         """关闭自动发送表情包。"""
         self._disable_default_llm(event)
-        async for result in self.command_handler.auto_off(event):
+        async for result in self._yield_stopped(self.command_handler.auto_off(event)):
             yield result
 
     @filter.permission_type(PermissionType.ADMIN)
@@ -1424,8 +1354,10 @@ class Main(Star):
     ):
         """管理群聊黑白名单。用法: /meme group <wl|bl> <add|del|clear|show> [群号]"""
         self._disable_default_llm(event)
-        async for result in self.command_handler.group_filter(
-            event, scope, list_name, action, target, target_id
+        async for result in self._yield_stopped(
+            self.command_handler.group_filter(
+                event, scope, list_name, action, target, target_id
+            )
         ):
             yield result
 
@@ -1434,7 +1366,7 @@ class Main(Star):
     async def capture(self, event: AstrMessageEvent):
         """进入强制接收模式，30秒内发送的图片将直接入库。"""
         self._disable_default_llm(event)
-        async for result in self.command_handler.capture(event):
+        async for result in self._yield_stopped(self.command_handler.capture(event)):
             yield result
 
     @filter.permission_type(PermissionType.ADMIN)
@@ -1442,14 +1374,18 @@ class Main(Star):
     async def toggle_natural_analysis(self, event: AstrMessageEvent, action: str = ""):
         """切换情绪识别模式。用法: /meme natural_analysis <on|off>"""
         self._disable_default_llm(event)
-        async for result in self.command_handler.toggle_natural_analysis(event, action):
+        async for result in self._yield_stopped(
+            self.command_handler.toggle_natural_analysis(event, action)
+        ):
             yield result
 
     @meme.command("emotion_stats")
     async def emotion_analysis_stats(self, event: AstrMessageEvent):
         """查看情绪分析统计信息和当前模式。"""
         self._disable_default_llm(event)
-        async for result in self.command_handler.emotion_analysis_stats(event):
+        async for result in self._yield_stopped(
+            self.command_handler.emotion_analysis_stats(event)
+        ):
             yield result
 
     @filter.permission_type(PermissionType.ADMIN)
@@ -1457,21 +1393,23 @@ class Main(Star):
     async def clear_emotion_cache(self, event: AstrMessageEvent):
         """清空情绪分析缓存，释放内存。"""
         self._disable_default_llm(event)
-        async for result in self.command_handler.clear_emotion_cache(event):
+        async for result in self._yield_stopped(
+            self.command_handler.clear_emotion_cache(event)
+        ):
             yield result
 
     @meme.command("status")
     async def status(self, event: AstrMessageEvent):
         """查看插件运行状态和表情包统计信息。"""
         self._disable_default_llm(event)
-        async for result in self.command_handler.status(event):
+        async for result in self._yield_stopped(self.command_handler.status(event)):
             yield result
 
     @meme.command("clean", priority=-100)
     async def clean(self, event: AstrMessageEvent, mode: str = ""):
         """清理原始图片缓存（不影响已分类的表情包）。"""
         self._disable_default_llm(event)
-        async for result in self.command_handler.clean(event, mode):
+        async for result in self._yield_stopped(self.command_handler.clean(event, mode)):
             yield result
 
     @filter.permission_type(PermissionType.ADMIN)
@@ -1479,7 +1417,9 @@ class Main(Star):
     async def enforce_capacity(self, event: AstrMessageEvent):
         """立即执行容量控制，清理超出上限的旧表情包。"""
         self._disable_default_llm(event)
-        async for result in self.command_handler.enforce_capacity(event):
+        async for result in self._yield_stopped(
+            self.command_handler.enforce_capacity(event)
+        ):
             yield result
 
     @meme.command("list")
@@ -1492,7 +1432,9 @@ class Main(Star):
     ):
         """列出已收集的表情包。用法: /meme list [分类] [数量]"""
         self._disable_default_llm(event)
-        async for result in self.command_handler.list_images(event, category, limit, page):
+        async for result in self._yield_stopped(
+            self.command_handler.list_images(event, category, limit, page)
+        ):
             yield result
 
     @filter.permission_type(PermissionType.ADMIN)
@@ -1500,7 +1442,9 @@ class Main(Star):
     async def delete_image(self, event: AstrMessageEvent, identifier: str = ""):
         """删除指定表情包。用法: /meme delete <序号|文件名>"""
         self._disable_default_llm(event)
-        async for result in self.command_handler.delete_image(event, identifier):
+        async for result in self._yield_stopped(
+            self.command_handler.delete_image(event, identifier)
+        ):
             yield result
 
     @filter.permission_type(PermissionType.ADMIN)
@@ -1508,7 +1452,9 @@ class Main(Star):
     async def rebuild_index(self, event: AstrMessageEvent):
         """重建表情包索引，用于修复索引异常或版本迁移。"""
         self._disable_default_llm(event)
-        async for result in self.command_handler.rebuild_index(event):
+        async for result in self._yield_stopped(
+            self.command_handler.rebuild_index(event)
+        ):
             yield result
 
     async def _search_emoji_candidates(
