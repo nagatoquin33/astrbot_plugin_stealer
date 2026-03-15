@@ -230,6 +230,34 @@ class Main(Star):
             ),
         )
 
+    def _ensure_default_prompts_in_config(self, prompts: dict) -> None:
+        """如果配置中的提示词字段为空，将 prompts.json 内容写入配置作为默认显示值。
+
+        这样用户在配置界面就能直接看到默认提示词内容，并在此基础上编辑。
+        """
+        updates = {}
+
+        # 检查普通分类提示词
+        current_prompt = getattr(self.plugin_config, "custom_emoji_classification_prompt", "")
+        if not current_prompt or not current_prompt.strip():
+            default_prompt = prompts.get("EMOJI_CLASSIFICATION_PROMPT", "")
+            if default_prompt:
+                updates["custom_emoji_classification_prompt"] = default_prompt
+
+        # 检查带审核的分类提示词
+        current_filter_prompt = getattr(
+            self.plugin_config, "custom_emoji_classification_with_filter_prompt", ""
+        )
+        if not current_filter_prompt or not current_filter_prompt.strip():
+            default_filter_prompt = prompts.get("EMOJI_CLASSIFICATION_WITH_FILTER_PROMPT", "")
+            if default_filter_prompt:
+                updates["custom_emoji_classification_with_filter_prompt"] = default_filter_prompt
+
+        # 如果有更新，写入配置
+        if updates:
+            self._update_config_from_dict(updates)
+            logger.info(f"已将默认提示词写入配置: {list(updates.keys())}")
+
     def _auto_merge_existing_categories(self) -> None:
         """自动合并已存在的分类目录到配置中。"""
         current = list(getattr(self.plugin_config, "DEFAULT_CATEGORIES", []) or [])
@@ -543,6 +571,9 @@ class Main(Star):
                             prompts = json.load(f)
                     logger.info(f"已加载提示词文件: {prompts_path}")
                     self._apply_prompts(prompts)
+
+                    # 如果配置为空，将 prompts.json 内容写入配置作为默认显示值
+                    self._ensure_default_prompts_in_config(prompts)
                 else:
                     logger.warning(f"提示词文件不存在: {prompts_path}")
             except Exception as e:
