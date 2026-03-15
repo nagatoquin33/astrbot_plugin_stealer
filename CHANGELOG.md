@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.3] - 2026-03-15
+- 新增 VLM 提示词配置：支持在插件配置界面直接编辑提示词
+- 分类失败处理：未识别到分类时跳过图片，不再回退到默认分类
+- 优化分类提示词：减少 troll/dumb 分类过度倾向，添加分类判断指导
+- 提示词恢复机制：清空配置后重启插件自动恢复默认提示词
+
 ## [2.4.2] - 2026-03-15
 - 修复 FC 工具 search_emoji 未展示场景的问题（兼容场景字段格式）
 - 文档更新：补充 /meme list 翻页参数与工具输出说明

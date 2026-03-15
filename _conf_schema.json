@@ -211,13 +211,13 @@
     "description": "VLM 分类提示词",
     "type": "text",
     "default": "",
-    "hint": "可直接编辑修改。{emotion_list} 会被替换为分类列表"
+    "hint": "可直接编辑修改。{emotion_list} 会被替换为分类列表。恢复默认：删除全部内容后保存，重启插件"
   },
   "custom_emoji_classification_with_filter_prompt": {
     "description": "VLM 分类提示词（带审核）",
     "type": "text",
     "default": "",
-    "hint": "可直接编辑修改。开启内容审核时使用"
+    "hint": "可直接编辑修改。开启内容审核时使用。恢复默认：删除全部内容后保存，重启插件"
   },
   "napcat_token": {
     "description": "NapCat 访问令牌",
