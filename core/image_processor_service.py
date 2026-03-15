@@ -270,6 +270,7 @@ class ImageProcessorService:
         category: str,
         hash_val: str,
         idx: dict[str, Any],
+        extra_meta: dict[str, Any] | None = None,
         tags: list[str] | None = None,
         desc: str = "",
         scenes: list[str] | None = None,
@@ -338,6 +339,12 @@ class ImageProcessorService:
             entry["desc"] = desc
         if scenes:
             entry["scenes"] = scenes
+        if extra_meta and isinstance(extra_meta, dict):
+            # Avoid overriding core fields that stealer relies on.
+            for k, v in extra_meta.items():
+                if k in {"hash", "category", "created_at", "use_count", "last_used_at"}:
+                    continue
+                entry[k] = v
         idx[cat_path] = entry
         return True, idx
 
@@ -351,6 +358,7 @@ class ImageProcessorService:
         content_filtration: bool | None = None,
         backend_tag: str | None = None,
         is_platform_emoji: bool = False,
+        extra_meta: dict[str, Any] | None = None,
     ) -> tuple[bool, dict[str, Any] | None]:
         """统一处理图片：存储、分类、过滤。
 
@@ -390,6 +398,7 @@ class ImageProcessorService:
             backend_tag,
             hash_val,
             is_platform_emoji,
+            extra_meta,
         )
 
     async def _process_image_legacy(
@@ -403,6 +412,7 @@ class ImageProcessorService:
         backend_tag: str | None,
         hash_val: str,
         is_platform_emoji: bool = False,
+        extra_meta: dict[str, Any] | None = None,
     ) -> tuple[bool, dict[str, Any] | None]:
         """处理图片：去重 → 缓存检查 → VLM 分类 → 存储索引。"""
 
@@ -423,6 +433,7 @@ class ImageProcessorService:
                 is_temp,
                 hash_val,
                 idx,
+                extra_meta=extra_meta,
                 from_cache=True,
             )
 
@@ -457,6 +468,7 @@ class ImageProcessorService:
             False,
             hash_val,
             idx,
+            extra_meta=extra_meta,
             from_cache=False,
             already_in_raw=True,
         )
@@ -557,6 +569,7 @@ class ImageProcessorService:
         is_temp: bool,
         hash_val: str,
         idx: dict,
+        extra_meta: dict[str, Any] | None = None,
         from_cache: bool = False,
         already_in_raw: bool = False,
     ) -> tuple[bool, dict[str, Any] | None]:
@@ -590,6 +603,7 @@ class ImageProcessorService:
                 category,
                 hash_val,
                 idx,
+                extra_meta=extra_meta,
                 tags=tags,
                 desc=desc,
                 scenes=scenes,
@@ -1360,6 +1374,7 @@ class ImageProcessorService:
                     "desc": str(item.get("desc", "") or "").strip()
                     or str(item.get("name", "") or ""),
                     "category": str(item.get("category", "") or ""),
+                    "source": str(item.get("source", "") or ""),
                     "thumb": thumb_uri,
                 }
             )
@@ -1488,6 +1503,9 @@ class ImageProcessorService:
           </div>
           {% if it.category %}
             <span class="chip">分类: {{ it.category }}</span>
+          {% endif %}
+          {% if it.source == "qq_store" %}
+            <span class="chip">QQ商城</span>
           {% endif %}
         </div>
       </div>
@@ -1669,6 +1687,8 @@ class ImageProcessorService:
                     draw.text((text_x + 78, y + 52), lines[1], fill=(25, 28, 35), font=body_font)
                 if cat:
                     draw.text((text_x, y + 84), f"分类: {cat}", fill=(110, 115, 130), font=small_font)
+                if str(item.get("source", "") or "") == "qq_store":
+                    draw.text((text_x + 200, y + 84), "QQ商城", fill=(110, 115, 130), font=small_font)
 
                 draw.line((pad, y + row_h - 1, width - pad, y + row_h - 1), fill=(230, 230, 238), width=1)
 

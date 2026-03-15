@@ -657,6 +657,7 @@ class Main(Star):
         is_temp: bool = False,
         idx: dict[str, Any] | None = None,
         is_platform_emoji: bool = False,
+        extra_meta: dict[str, Any] | None = None,
     ) -> tuple[bool, dict[str, Any] | None]:
         """统一处理图片的方法，包括过滤、分类、存储和索引更新
 
@@ -682,6 +683,7 @@ class Main(Star):
                     content_filtration=self.content_filtration,
                     backend_tag=self.backend_tag,
                     is_platform_emoji=is_platform_emoji,
+                    extra_meta=extra_meta,
                 ),
                 timeout=self.IMAGE_PROCESSING_TIMEOUT_SECONDS,
             )

@@ -591,6 +591,22 @@ class EventHandler:
 
                 logger.info("检测到平台标记的表情包，开始处理")
 
+                # 提取 QQ 商城表情的元信息（OneBot 上报仍为 image 段）
+                extra_meta = None
+                try:
+                    seg = raw_image_segments[i] if 0 <= i < len(raw_image_segments) else None
+                    data = seg.get("data", {}) if isinstance(seg, dict) else {}
+                    if isinstance(data, dict) and (data.get("emoji_id") or data.get("emoji_package_id")):
+                        extra_meta = {
+                            "source": "qq_store",
+                            "qq_emoji_id": str(data.get("emoji_id") or ""),
+                            "qq_emoji_package_id": str(data.get("emoji_package_id") or ""),
+                            "origin_url": self._normalize_str(data.get("url", "")),
+                            "qq_key": self._normalize_str(data.get("key", "")),
+                        }
+                except Exception:
+                    extra_meta = None
+
                 # 尝试下载原始图片文件
                 temp_path: str | None
                 temp_path, is_gif = await self._download_original_image(img)
@@ -612,7 +628,11 @@ class EventHandler:
                 # 使用统一的图片处理方法
                 # 传递平台元信息标记，用于优化处理流程
                 success, idx = await plugin_instance._process_image(
-                    event, temp_path, is_temp=True, is_platform_emoji=is_platform_emoji
+                    event,
+                    temp_path,
+                    is_temp=True,
+                    is_platform_emoji=is_platform_emoji,
+                    extra_meta=extra_meta,
                 )
                 if success and idx:
                     await plugin_instance._save_index(idx)
@@ -633,8 +653,13 @@ class EventHandler:
                 temp_path, _ = await self._download_url_to_temp(url)
                 if not temp_path or not os.path.exists(temp_path):
                     continue
+                extra_meta = {"source": "qq_store", "origin_url": self._normalize_str(url)}
                 success, idx = await plugin_instance._process_image(
-                    event, temp_path, is_temp=True, is_platform_emoji=True
+                    event,
+                    temp_path,
+                    is_temp=True,
+                    is_platform_emoji=True,
+                    extra_meta=extra_meta,
                 )
                 if success and idx:
                     await plugin_instance._save_index(idx)

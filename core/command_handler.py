@@ -468,6 +468,8 @@ class CommandHandler:
             if isinstance(img_info, dict):
                 img_category = img_info.get("category", "未分类")
                 img_desc = img_info.get("desc", "")
+                img_source = img_info.get("source", "")
+                img_pkg = img_info.get("qq_emoji_package_id", "")
 
                 # 检查文件是否存在
                 if not Path(img_path).exists():
@@ -479,6 +481,8 @@ class CommandHandler:
                         "name": Path(img_path).name,
                         "category": img_category,
                         "desc": str(img_desc or ""),
+                        "source": str(img_source or ""),
+                        "qq_emoji_package_id": str(img_pkg or ""),
                         "created_at": img_info.get("created_at", 0),
                     }
                 )
