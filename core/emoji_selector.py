@@ -527,10 +527,12 @@ class EmojiSelector:
                     continue
 
                 tags = self._parse_tags(data.get("tags", []))
+                scenes = self._parse_tags(data.get("scenes", []))
+                tags_for_score = tags + scenes
                 tags_str = ", ".join(tags)
                 category = self._get_category_from_data(data)
                 desc, tag_words, _, all_words, all_text = self._prepare_entry_text_features(
-                    category, str(data.get("desc", "")), tuple(tags)
+                    category, str(data.get("desc", "")), tuple(tags_for_score)
                 )
 
                 # 快速分词过滤：检查词汇重叠（比字符级更适合中文）
@@ -547,7 +549,7 @@ class EmojiSelector:
                     query_tokens,
                     category,
                     desc,
-                    tags,
+                    tags_for_score,
                     MAX_STR_LENGTH,
                     tag_words=tag_words,
                 )

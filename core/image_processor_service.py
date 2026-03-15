@@ -1512,7 +1512,7 @@ class ImageProcessorService:
       {% endfor %}
     </div>
     <div class="footer">
-      <div>翻页: /meme list [分类] [每页数量] [页码]</div>
+      <div>翻页: /meme list 2 或 /meme list happy 2 或 /meme list 20 2</div>
       <div>删除: /meme delete &lt;序号&gt;</div>
     </div>
   </div>
@@ -1529,17 +1529,26 @@ class ImageProcessorService:
             "per_page": int(per_page),
         }
 
+        # 优先 PNG（文字更清晰），失败再回退 JPEG
         try:
-            # t2i 默认 quality 偏低，这里调高一点，保证文字更清晰
             return await plugin.html_render(
                 tmpl,
                 data,
                 return_url=False,
-                options={"full_page": True, "type": "jpeg", "quality": 70},
+                options={"full_page": True, "type": "png"},
             )
         except Exception as e:
-            logger.debug(f"html-to-pic 渲染失败，回退到本地渲染: {e}")
-            return ""
+            logger.debug(f"html-to-pic(PNG) 渲染失败，尝试 JPEG: {e}")
+            try:
+                return await plugin.html_render(
+                    tmpl,
+                    data,
+                    return_url=False,
+                    options={"full_page": True, "type": "jpeg", "quality": 70},
+                )
+            except Exception as e2:
+                logger.debug(f"html-to-pic(JPEG) 渲染失败，回退到本地渲染: {e2}")
+                return ""
 
     async def render_emoji_list_page_base64(
         self,
@@ -1693,7 +1702,7 @@ class ImageProcessorService:
                 draw.line((pad, y + row_h - 1, width - pad, y + row_h - 1), fill=(230, 230, 238), width=1)
 
             # Footer
-            foot = "翻页: /meme list [分类] [每页数量] [页码]    删除: /meme delete <序号>"
+            foot = "翻页: /meme list 2 或 /meme list happy 2 或 /meme list 20 2    删除: /meme delete <序号>"
             draw.text((pad, height - footer_h + 16), foot, fill=(90, 95, 110), font=small_font)
 
             buf = BytesIO()

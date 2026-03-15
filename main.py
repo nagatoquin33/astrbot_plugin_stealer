@@ -51,7 +51,7 @@ class Main(Star):
 
     # 超时和处理常量
     IMAGE_PROCESSING_TIMEOUT_SECONDS = 60  # 图片处理超时时间
-    MAX_SEARCH_RESULTS = 8  # 搜索表情包最大返回数量
+    MAX_SEARCH_RESULTS = 5  # 搜索表情包最大返回数量（避免 FC 输出过长）
     AUTO_EMOJI_COOLDOWN_SECONDS = 20  # 同一会话自动发表情的最短间隔
     PASSIVE_EMOJI_SEND_DELAY_SECONDS = 0.15  # 被动标签模式下让文字先落地
 
@@ -1496,6 +1496,16 @@ class Main(Star):
 
             for i, (path, desc, emotion, tags) in enumerate(results):
                 if os.path.exists(path):
+                    meta = idx.get(path, {}) if isinstance(idx, dict) else {}
+                    raw_scenes = meta.get("scenes", []) if isinstance(meta, dict) else []
+                    if isinstance(raw_scenes, str):
+                        scenes_str = raw_scenes.strip()
+                    elif isinstance(raw_scenes, list):
+                        scenes_str = ", ".join([str(s) for s in raw_scenes if str(s).strip()])
+                    else:
+                        scenes_str = ""
+                    source = str(meta.get("source", "") or "") if isinstance(meta, dict) else ""
+
                     candidate_id = f"emoji_{i + 1}"
                     candidates.append(
                         {
@@ -1504,12 +1514,18 @@ class Main(Star):
                             "desc": desc,
                             "emotion": emotion,
                             "tags": tags,
+                            "scenes": scenes_str,
+                            "source": source,
                         }
                     )
                     # 格式化输出
                     result_lines.append(f"\n[{i + 1}] 分类：{emotion}")
                     if tags:
                         result_lines.append(f"    标签：{tags}")
+                    if scenes_str:
+                        result_lines.append(f"    场景：{scenes_str}")
+                    if source == "qq_store":
+                        result_lines.append("    来源：QQ商城")
                     result_lines.append(f"    描述：{desc}")
 
             if not candidates:

@@ -431,15 +431,25 @@ class CommandHandler:
             limit: 显示数量限制，默认10张
             show_images: 是否显示图片，默认True
         """
-        # 兼容旧用法: /meme list 20 (以前会把 20 当成分类)
+        # 参数解析目标：
+        # - /meme list            -> page=1, per_page=默认
+        # - /meme list 2          -> page=2 (默认每页数量)
+        # - /meme list happy 2    -> 分类=happy, page=2
+        # - /meme list 20 2       -> per_page=20, page=2
+        # - /meme list happy 20 2 -> 分类=happy, per_page=20, page=2
         category = str(category or "").strip()
         limit = str(limit or "").strip()
         page = str(page or "").strip()
 
+        # 仅提供一个数字：视为翻页
         if category.isdigit() and (not limit or limit == "10") and (not page or page == "1"):
-            limit, category = category, ""
+            page, category = category, ""
+            limit = "10"
+        # /meme list happy 2 -> 分类 + 页码
+        elif category and (not category.isdigit()) and limit.isdigit() and (not page or page == "1"):
+            page, limit = limit, "10"
+        # /meme list 20 2 -> 每页数量 + 页码
         elif category.isdigit() and limit.isdigit() and (not page or page == "1"):
-            # /meme list 20 2 -> limit=20,page=2
             page, limit, category = limit, category, ""
 
         # 解析每页数量
