@@ -527,6 +527,21 @@ class CommandHandler:
         display_images = filtered_images[start : start + per_page]
 
         if show_images and getattr(self.plugin, "image_processor_service", None):
+            if event.get_platform_name() == "aiocqhttp":
+                # aiocqhttp/NapCat 场景优先发 URL 图，绕开本地 file copy 的权限问题
+                url = await self.plugin.image_processor_service.render_emoji_list_page_url(
+                    items=display_images,
+                    page=page_num,
+                    total_pages=total_pages,
+                    total_filtered=total_filtered,
+                    total_all=total_all,
+                    category=category,
+                    per_page=per_page,
+                )
+                if url:
+                    yield event.image_result(url).stop_event()
+                    return
+
             # 优先使用 AstrBot 内置 html-to-pic（网络 t2i），失败再回退到本地 PIL 渲染
             file_path = await self.plugin.image_processor_service.render_emoji_list_page_file(
                 items=display_images,
@@ -538,30 +553,23 @@ class CommandHandler:
                 per_page=per_page,
             )
             if file_path:
-                if event.get_platform_name() == "aiocqhttp":
-                    # aiocqhttp 下尽量不要把图片交给 AstrBot 的 Image -> base64:// 转换链路，
-                    # 否则很容易出现 1200/timeout 并在 respond.stage 打满堆栈。
-                    if await self._try_send_onebot_image_auto(event, file_path):
-                        yield event.make_result().stop_event()
-                        return
-                else:
+                if event.get_platform_name() != "aiocqhttp":
                     yield event.make_result().file_image(file_path).stop_event()
                     return
 
-            # 非 aiocqhttp 平台：回退到 base64 渲染
-            if event.get_platform_name() != "aiocqhttp":
-                b64 = await self.plugin.image_processor_service.render_emoji_list_page_base64(
-                    items=display_images,
-                    page=page_num,
-                    total_pages=total_pages,
-                    total_filtered=total_filtered,
-                    total_all=total_all,
-                    category=category,
-                    per_page=per_page,
-                )
-                if b64:
-                    yield event.make_result().base64_image(b64).stop_event()
-                    return
+            # 回退到 base64 渲染（避免本地 file copy 权限问题）
+            b64 = await self.plugin.image_processor_service.render_emoji_list_page_base64(
+                items=display_images,
+                page=page_num,
+                total_pages=total_pages,
+                total_filtered=total_filtered,
+                total_all=total_all,
+                category=category,
+                per_page=per_page,
+            )
+            if b64:
+                yield event.make_result().base64_image(b64).stop_event()
+                return
 
         # 纯文本 fallback（或渲染失败）
         title = f"表情包列表 ({page_num}/{total_pages}) ({len(display_images)}/{total_filtered}) (总 {total_all})"
@@ -581,107 +589,6 @@ class CommandHandler:
         result_text += "\n用法: /meme list [分类] [每页数量] [页码]\n删除: /meme delete <序号>"
         yield event.plain_result(result_text).stop_event()
 
-    async def _try_send_onebot_image_auto(
-        self,
-        event: AstrMessageEvent,
-        image_path: str,
-    ) -> bool:
-        """aiocqhttp/OneBot 下尽量用 bot.call_action 直发，避免进入 respond.stage 的 Image->base64 发送链路。
-
-        策略：
-        1) file:// 物理路径发送（更快，且可绕过 base64 体积/超时问题）
-        2) 若路径发送失败，则回退 base64:// 直传
-        """
-        try:
-            if not image_path:
-                return False
-            if event.get_platform_name() != "aiocqhttp":
-                return False
-            bot = getattr(event, "bot", None)
-            if bot is None or not hasattr(bot, "call_action"):
-                return False
-
-            # 尝试修复权限：NapCat 会把源文件 copy 到自身 temp 目录，源文件不可读/目标目录不可写都会触发 EACCES
-            try:
-                os.chmod(image_path, 0o644)
-            except Exception:
-                pass
-
-            # 构造 OneBot 认可的 file:// 路径
-            file_str = image_path
-            if not str(image_path).startswith(("http://", "https://", "base64://", "file://")):
-                if os.path.isabs(image_path):
-                    if image_path.startswith("/"):
-                        file_str = f"file://{image_path}"
-                    else:
-                        file_str = f"file:///{image_path}"
-                else:
-                    file_str = f"file:///{os.path.abspath(image_path)}"
-
-            message = [{"type": "image", "data": {"file": file_str}}]
-            session_id = event.get_session_id()
-            if not session_id or not str(session_id).isdigit():
-                return False
-
-            async def _send_once() -> None:
-                if event.is_private_chat():
-                    await bot.call_action(
-                        "send_private_msg",
-                        user_id=int(session_id),
-                        message=message,
-                    )
-                else:
-                    await bot.call_action(
-                        "send_group_msg",
-                        group_id=int(session_id),
-                        message=message,
-                    )
-
-            try:
-                await _send_once()
-                return True
-            except Exception as e:
-                err = str(e)
-                # 权限错误：尝试给 NapCat temp 目录放宽权限后重试一次
-                if ("EACCES" in err or "permission denied" in err.lower()) and "/app/.config/QQ/NapCat/temp" in err:
-                    try:
-                        os.chmod("/app/.config/QQ/NapCat/temp", 0o777)
-                    except Exception:
-                        pass
-                    try:
-                        await _send_once()
-                        return True
-                    except Exception as e2:
-                        logger.debug(f"OneBot file:// 重试仍失败: {e2}")
-                        # fallthrough to base64 fallback
-                else:
-                    logger.debug(f"OneBot file:// 发送图片失败: {e}")
-
-            # file:// 失败，回退 base64:// 直传（仍然用 call_action，避免 respond.stage 堆栈）
-            try:
-                with open(image_path, "rb") as f:
-                    raw = f.read()
-                b64 = base64.b64encode(raw).decode("utf-8")
-                msg2 = [{"type": "image", "data": {"file": f"base64://{b64}"}}]
-                if event.is_private_chat():
-                    await bot.call_action(
-                        "send_private_msg",
-                        user_id=int(session_id),
-                        message=msg2,
-                    )
-                else:
-                    await bot.call_action(
-                        "send_group_msg",
-                        group_id=int(session_id),
-                        message=msg2,
-                    )
-                return True
-            except Exception as e3:
-                logger.debug(f"OneBot base64:// 直传也失败: {e3}")
-                return False
-        except Exception as e:
-            logger.debug(f"OneBot 直发图片失败: {e}")
-            return False
 
     async def delete_image(self, event: AstrMessageEvent, identifier: str = ""):
         """删除指定的表情包。

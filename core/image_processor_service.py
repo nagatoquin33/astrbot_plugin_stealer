@@ -1553,6 +1553,232 @@ class ImageProcessorService:
                 logger.debug(f"html-to-pic(JPEG) 渲染失败，回退到本地渲染: {e2}")
                 return ""
 
+    async def render_emoji_list_page_url(
+        self,
+        *,
+        items: list[dict],
+        page: int,
+        total_pages: int,
+        total_filtered: int,
+        total_all: int,
+        category: str,
+        per_page: int,
+    ) -> str:
+        """使用 AstrBot 内置 html-to-pic（网络 t2i）渲染列表，返回可公网访问的图片 URL。
+
+        用于 OneBot/NapCat 场景：直接发送 URL 可绕开跨容器 file copy 的权限问题。
+        失败返回空字符串。
+        """
+        plugin = getattr(self, "plugin", None)
+        if not plugin or not hasattr(plugin, "html_render"):
+            return ""
+
+        rendered_items: list[dict] = []
+        for item in items:
+            pth = str(item.get("path", "") or "")
+            thumb_uri = ""
+            if PILImage is not None:
+                try:
+                    with PILImage.open(pth) as im:
+                        try:
+                            if getattr(im, "is_animated", False):
+                                im.seek(0)
+                        except Exception:
+                            pass
+                        im = im.convert("RGBA")
+                        im.thumbnail((84, 84), LANCZOS or PILImage.BICUBIC)
+                        canvas = PILImage.new("RGBA", (84, 84), (255, 255, 255, 0))
+                        x = (84 - im.size[0]) // 2
+                        y = (84 - im.size[1]) // 2
+                        canvas.paste(im, (x, y), im)
+                        buf = BytesIO()
+                        canvas.save(buf, format="PNG", optimize=True)
+                        thumb_uri = "data:image/png;base64," + base64.b64encode(
+                            buf.getvalue()
+                        ).decode("utf-8")
+                except Exception:
+                    thumb_uri = ""
+
+            rendered_items.append(
+                {
+                    "index": int(item.get("index", 0) or 0),
+                    "desc": str(item.get("desc", "") or "").strip()
+                    or str(item.get("name", "") or ""),
+                    "category": str(item.get("category", "") or ""),
+                    "source": str(item.get("source", "") or ""),
+                    "thumb": thumb_uri,
+                }
+            )
+
+        tmpl = """<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      --bg: #fafafe;
+      --panel: #ffffff;
+      --line: #e7e7f0;
+      --text: #171925;
+      --muted: #6b7184;
+      --chip: #f3f4f8;
+    }
+    html, body {
+      width: 100%;
+      height: 100%;
+    }
+    body {
+      margin: 0;
+      width: 100vw;
+      background: var(--bg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", Arial, sans-serif;
+      color: var(--text);
+    }
+    .wrap {
+      width: 100%;
+      max-width: none;
+      padding: 24px 24px 16px;
+      box-sizing: border-box;
+    }
+    .title {
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: .2px;
+      margin: 0 0 10px 0;
+    }
+    .subtitle {
+      font-size: 14px;
+      color: var(--muted);
+      margin: 0 0 18px 0;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 10px 24px rgba(15, 18, 35, .06);
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .row {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+    .row:last-child { border-bottom: none; }
+    .thumb {
+      width: 84px;
+      height: 84px;
+      border-radius: 12px;
+      background: #f6f7fb;
+      border: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      flex: 0 0 auto;
+    }
+    .thumb img { width: 84px; height: 84px; object-fit: contain; }
+    .meta { flex: 1 1 auto; min-width: 0; }
+    .line1 {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      margin: 0 0 6px 0;
+    }
+    .idx {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-weight: 700;
+      color: #3b3f53;
+      flex: 0 0 auto;
+    }
+    .desc {
+      font-size: 18px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .chip {
+      display: inline-block;
+      background: var(--chip);
+      color: var(--muted);
+      border: 1px solid var(--line);
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+    }
+    .footer {
+      margin-top: 14px;
+      font-size: 13px;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1 class="title">表情包列表</h1>
+    <p class="subtitle">第 {{ page }}/{{ total_pages }} 页，显示 {{ total_filtered }} 张（全部 {{ total_all }} 张）{% if category %}，分类: {{ category }}{% endif %}，每页 {{ per_page }} 张</p>
+    <div class="panel">
+      {% for it in items %}
+      <div class="row">
+        <div class="thumb">
+          {% if it.thumb %}
+            <img src="{{ it.thumb }}" />
+          {% else %}
+            <span class="chip">No Preview</span>
+          {% endif %}
+        </div>
+        <div class="meta">
+          <div class="line1">
+            <div class="idx">{{ "%04d"|format(it.index) }}.</div>
+            <div class="desc">{{ it.desc }}</div>
+          </div>
+          {% if it.category %}
+            <span class="chip">分类: {{ it.category }}</span>
+          {% endif %}
+          {% if it.source == "qq_store" %}
+            <span class="chip">QQ商城</span>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="footer">
+      <div>翻页: /meme list 2 或 /meme list happy 2 或 /meme list 20 2</div>
+      <div>删除: /meme delete &lt;序号&gt;</div>
+    </div>
+  </div>
+</body>
+</html>"""
+
+        data = {
+            "items": rendered_items,
+            "page": int(page),
+            "total_pages": int(total_pages),
+            "total_filtered": int(total_filtered),
+            "total_all": int(total_all),
+            "category": str(category or ""),
+            "per_page": int(per_page),
+        }
+
+        try:
+            return await plugin.html_render(
+                tmpl,
+                data,
+                return_url=True,
+                options={"full_page": True, "type": "jpeg", "quality": 70},
+            )
+        except Exception as e:
+            logger.debug(f"html-to-pic(URL) 渲染失败: {e}")
+            return ""
+
     async def render_emoji_list_page_base64(
         self,
         *,
