@@ -7,13 +7,12 @@ from pathlib import Path
 from typing import Any
 
 from astrbot.api import AstrBotConfig, logger
-from astrbot.api.event import AstrMessageEvent, filter
+from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.event.filter import (
     EventMessageType,
     PermissionType,
     PlatformAdapterType,
 )
-from astrbot.api.event import MessageChain
 from astrbot.api.message_components import Image as ImageComponent
 from astrbot.api.message_components import Plain
 from astrbot.api.star import Context, Star
@@ -1382,10 +1381,14 @@ class Main(Star):
 
     @meme.command("list")
     async def list_images(
-        self, event: AstrMessageEvent, category: str = "", limit: str = "10"
+        self,
+        event: AstrMessageEvent,
+        category: str = "",
+        limit: str = "10",
+        page: str = "1",
     ):
         """列出已收集的表情包。用法: /meme list [分类] [数量]"""
-        async for result in self.command_handler.list_images(event, category, limit):
+        async for result in self.command_handler.list_images(event, category, limit, page):
             yield result
 
     @filter.permission_type(PermissionType.ADMIN)

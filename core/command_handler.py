@@ -420,6 +420,7 @@ class CommandHandler:
         event: AstrMessageEvent,
         category: str = "",
         limit: str = "10",
+        page: str = "1",
         show_images: bool = True,
     ):
         """列出表情包，支持按分类筛选。
@@ -430,12 +431,30 @@ class CommandHandler:
             limit: 显示数量限制，默认10张
             show_images: 是否显示图片，默认True
         """
+        # 兼容旧用法: /meme list 20 (以前会把 20 当成分类)
+        category = str(category or "").strip()
+        limit = str(limit or "").strip()
+        page = str(page or "").strip()
+
+        if category.isdigit() and (not limit or limit == "10") and (not page or page == "1"):
+            limit, category = category, ""
+        elif category.isdigit() and limit.isdigit() and (not page or page == "1"):
+            # /meme list 20 2 -> limit=20,page=2
+            page, limit, category = limit, category, ""
+
+        # 解析每页数量
         try:
-            max_limit = int(limit)
-            if max_limit < 1:
-                max_limit = 10
-        except ValueError:
-            max_limit = 10
+            per_page = int(limit)
+        except Exception:
+            per_page = 10
+        per_page = max(1, min(20, per_page))
+
+        # 解析页码
+        try:
+            page_num = int(page)
+        except Exception:
+            page_num = 1
+        page_num = max(1, page_num)
 
         image_index = await self.plugin._load_index()
 
@@ -443,105 +462,101 @@ class CommandHandler:
             yield event.plain_result("暂无表情包数据")
             return
 
-        # 筛选图片
-        filtered_images = []
+        # 收集所有有效图片（先不做分类过滤，保证序号与 /meme delete 的全局序号一致）
+        all_images = []
         for img_path, img_info in image_index.items():
             if isinstance(img_info, dict):
                 img_category = img_info.get("category", "未分类")
-
-                # 如果指定了分类，只显示该分类的图片
-                if category and img_category != category:
-                    continue
+                img_desc = img_info.get("desc", "")
 
                 # 检查文件是否存在
                 if not Path(img_path).exists():
                     continue
 
-                filtered_images.append(
+                all_images.append(
                     {
                         "path": img_path,
                         "name": Path(img_path).name,
                         "category": img_category,
+                        "desc": str(img_desc or ""),
                         "created_at": img_info.get("created_at", 0),
                     }
                 )
 
-        if not filtered_images:
+        if not all_images:
             if category:
                 yield event.plain_result(f"分类 '{category}' 中暂无表情包")
             else:
                 yield event.plain_result("暂无有效的表情包文件")
             return
 
-        # 按创建时间排序（最新的在前）
-        filtered_images.sort(key=lambda x: x["created_at"], reverse=True)
+        # 按创建时间排序（最新的在前），并分配全局序号（与 delete 的序号一致）
+        all_images.sort(key=lambda x: x["created_at"], reverse=True)
+        for i, img in enumerate(all_images, 1):
+            img["index"] = i
 
-        # 限制显示数量
-        display_images = filtered_images[:max_limit]
+        # 分类过滤只影响展示与分页，不影响序号
+        filtered_images = [
+            img for img in all_images if (not category or img.get("category") == category)
+        ]
+        if not filtered_images:
+            yield event.plain_result(f"分类 '{category}' 中暂无表情包")
+            return
 
-        if show_images:
-            # 显示图片模式
-            # 构建标题信息
-            title = f"📋 表情包列表 ({len(display_images)}/{len(filtered_images)})"
-            if category:
-                title += f" - 分类: {category}"
+        total_filtered = len(filtered_images)
+        total_all = len(all_images)
+        total_pages = max(1, (total_filtered + per_page - 1) // per_page)
+        if page_num > total_pages:
+            page_num = total_pages
 
-            # 先发送标题
-            yield event.plain_result(
-                title + "\n💡 使用 /meme delete <序号> 删除指定图片"
+        start = (page_num - 1) * per_page
+        display_images = filtered_images[start : start + per_page]
+
+        if show_images and getattr(self.plugin, "image_processor_service", None):
+            # 优先使用 AstrBot 内置 html-to-pic（网络 t2i），失败再回退到本地 PIL 渲染
+            file_path = await self.plugin.image_processor_service.render_emoji_list_page_file(
+                items=display_images,
+                page=page_num,
+                total_pages=total_pages,
+                total_filtered=total_filtered,
+                total_all=total_all,
+                category=category,
+                per_page=per_page,
             )
+            if file_path:
+                yield event.make_result().file_image(file_path)
+                return
 
-            # 逐个发送图片和信息
-            for i, img in enumerate(display_images, 1):
-                try:
-                    # 读取图片并转换为base64
-                    b64 = await self.plugin.image_processor_service._file_to_gif_base64(
-                        img["path"]
-                    )
+            b64 = await self.plugin.image_processor_service.render_emoji_list_page_base64(
+                items=display_images,
+                page=page_num,
+                total_pages=total_pages,
+                total_filtered=total_filtered,
+                total_all=total_all,
+                category=category,
+                per_page=per_page,
+            )
+            if b64:
+                yield event.make_result().base64_image(b64)
+                return
 
-                    # 构建图片信息
-                    info_text = f"{i:2d}. {img['name'][:20]}{'...' if len(img['name']) > 20 else ''}\n"
-                    info_text += f"分类: {img['category']}"
+        # 纯文本 fallback（或渲染失败）
+        title = f"表情包列表 ({page_num}/{total_pages}) ({len(display_images)}/{total_filtered}) (总 {total_all})"
+        if category:
+            title += f" - 分类: {category}"
 
-                    # 发送图片和信息
-                    result = event.make_result().base64_image(b64).message(info_text)
-                    yield result
+        result_text = title + "\n\n"
+        for img in display_images:
+            idx = int(img.get("index", 0) or 0)
+            desc = str(img.get("desc", "") or "").strip()
+            if not desc:
+                desc = str(img.get("name", "") or "")
+            if len(desc) > 28:
+                desc = desc[:25] + "..."
+            result_text += f"{idx:4d}. {desc}\n"
 
-                except Exception as e:
-                    # 如果图片读取失败，只发送文本信息
-                    logger.warning(f"读取图片失败 {img['path']}: {e}")
-                    info_text = f"{i:2d}. {img['name']} [图片读取失败]\n"
-                    info_text += f"分类: {img['category']}"
-                    yield event.plain_result(info_text)
-
-            if len(filtered_images) > max_limit:
-                yield event.plain_result(
-                    f"...还有 {len(filtered_images) - max_limit} 张图片"
-                )
-        else:
-            # 纯文本模式
-            # 构建标题信息
-            title = f"📋 表情包列表 ({len(display_images)}/{len(filtered_images)})"
-            if category:
-                title += f" - 分类: {category}"
-
-            result_text = title + "\n\n"
-
-            for i, img in enumerate(display_images, 1):
-                name = img["name"]
-                # 截断过长的文件名
-                if len(name) > 20:
-                    name = name[:17] + "..."
-
-                result_text += f"{i:2d}. {name}\n"
-                result_text += f"    分类: {img['category']}\n"
-
-            if len(filtered_images) > max_limit:
-                result_text += f"\n...还有 {len(filtered_images) - max_limit} 张图片"
-
-            result_text += "\n\n💡 使用 /meme delete <序号> 删除指定图片"
-
-            yield event.plain_result(result_text)
+        result_text += "\n用法: /meme list [分类] [每页数量] [页码]\n删除: /meme delete <序号>"
+        yield event.plain_result(result_text)
 
     async def delete_image(self, event: AstrMessageEvent, identifier: str = ""):
         """删除指定的表情包。

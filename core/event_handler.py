@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 import os
 import random
 import tempfile
@@ -89,12 +89,12 @@ class EventHandler:
                         ext = ".jpg"
                     else:
                         # 尝试从文件头判断
-                        if content[:6] == b'GIF89a' or content[:6] == b'GIF87a':
+                        if content[:6] == b"GIF89a" or content[:6] == b"GIF87a":
                             ext = ".gif"
                             is_gif = True
-                        elif content[:8] == b'\x89PNG\r\n\x1a\n':
+                        elif content[:8] == b"\x89PNG\r\n\x1a\n":
                             ext = ".png"
-                        elif content[:4] == b'RIFF' and content[8:12] == b'WEBP':
+                        elif content[:4] == b"RIFF" and content[8:12] == b"WEBP":
                             ext = ".webp"
                         else:
                             ext = ".jpg"
@@ -117,6 +117,96 @@ class EventHandler:
         except Exception as e:
             logger.warning(f"下载图片失败: {e}")
             return None, False
+
+    async def _download_url_to_temp(self, url: str) -> tuple[str | None, bool]:
+        """从 URL 下载文件到临时文件，返回 (temp_path, is_gif)。"""
+        url = self._normalize_str(url)
+        if not url:
+            return None, False
+
+        headers = {}
+        napcat_token = getattr(self.plugin, "napcat_token", "")
+        if napcat_token:
+            headers["Authorization"] = f"Bearer {napcat_token}"
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)
+                ) as resp:
+                    if resp.status != 200:
+                        logger.warning(f"下载图片失败: HTTP {resp.status}")
+                        return None, False
+
+                    content_type = resp.headers.get("Content-Type", "").lower()
+                    content = await resp.read()
+
+                    is_gif = "gif" in content_type or content[:6] in (b"GIF89a", b"GIF87a")
+                    if is_gif:
+                        ext = ".gif"
+                    elif "png" in content_type or content[:8] == b"\x89PNG\r\n\x1a\n":
+                        ext = ".png"
+                    elif "webp" in content_type or (content[:4] == b"RIFF" and content[8:12] == b"WEBP"):
+                        ext = ".webp"
+                    elif "jpeg" in content_type or "jpg" in content_type:
+                        ext = ".jpg"
+                    else:
+                        ext = ".jpg"
+
+                    temp_fd, temp_path = tempfile.mkstemp(suffix=ext)
+                    try:
+                        os.write(temp_fd, content)
+                        return temp_path, is_gif
+                    finally:
+                        os.close(temp_fd)
+        except asyncio.TimeoutError:
+            logger.warning("下载图片超时")
+            return None, False
+        except Exception as e:
+            logger.warning(f"下载图片失败: {e}")
+            return None, False
+
+    def _extract_store_emoji_urls(self, event: AstrMessageEvent) -> list[str]:
+        """从 OneBot raw_message 里提取 QQ 商城表情（marketface/mface）的可下载 URL。"""
+        urls: list[str] = []
+        seen: set[str] = set()
+        try:
+            raw_event = getattr(getattr(event, "message_obj", None), "raw_message", None)
+            raw_message = getattr(raw_event, "message", None)
+            if not isinstance(raw_message, list):
+                return []
+
+            for seg in raw_message:
+                if not isinstance(seg, dict):
+                    continue
+                seg_type = self._normalize_str(seg.get("type", "")).lower()
+                if seg_type not in {"marketface", "mface"}:
+                    continue
+                data = seg.get("data", {}) or {}
+                if not isinstance(data, dict):
+                    continue
+
+                # 常见字段优先
+                for key in ("url", "cdnurl", "cdn_url", "raw_url", "origin_url", "original_url", "thumb", "thumb_url"):
+                    v = data.get(key)
+                    s = self._normalize_str(v)
+                    if s.startswith("http://") or s.startswith("https://"):
+                        if s not in seen:
+                            seen.add(s)
+                            urls.append(s)
+
+                # 再兜底扫描一遍所有字符串值
+                if not urls:
+                    for v in data.values():
+                        s = self._normalize_str(v)
+                        if s.startswith("http://") or s.startswith("https://"):
+                            if s not in seen:
+                                seen.add(s)
+                                urls.append(s)
+        except Exception:
+            return urls
+
+        return urls
 
     def _should_process_image(self) -> bool:
         """根据偷图模式（概率/冷却）判断是否应该处理图片。
@@ -294,6 +384,16 @@ class EventHandler:
                         )
                         return True
 
+                    # QQ 官方商城表情包（raw data 常见字段：emoji_id / emoji_package_id / key）
+                    if matched_data.get("emoji_id") or matched_data.get("emoji_package_id"):
+                        logger.debug("检测到表情包标记: emoji_id/emoji_package_id (从原始事件)")
+                        return True
+
+                    url = self._normalize_str(matched_data.get("url", ""))
+                    if "vip.qq.com/club/item/parcel" in url or "gxh.vip.qq.com" in url:
+                        logger.debug("检测到表情包标记: QQ 商城 CDN URL (从原始事件)")
+                        return True
+
             # 方式1: 检查 Image 对象的 subType 字段
             if hasattr(img, "subType") and img.subType:
                 if is_sub_type_emoji(img.subType):
@@ -326,6 +426,10 @@ class EventHandler:
                     summary = data.get("summary", "")
                     if is_emoji_summary(summary):
                         logger.debug(f"检测到表情包标记: summary='{summary}'")
+                        return True
+
+                    if data.get("emoji_id") or data.get("emoji_package_id"):
+                        logger.debug("检测到表情包标记: emoji_id/emoji_package_id (从toDict)")
                         return True
 
                     img_type = (
@@ -384,27 +488,27 @@ class EventHandler:
             return
 
         # 收集所有图片组件
-        imgs: list[Image] = [
-            comp for comp in event.get_messages() if isinstance(comp, Image)
-        ]
+        imgs: list[Image] = [comp for comp in event.get_messages() if isinstance(comp, Image)]
+        store_urls = self._extract_store_emoji_urls(event)
 
-        # 如果没有图片，直接返回
-        if not imgs:
+        # 如果没有图片也没有商城表情，直接返回
+        if not imgs and not store_urls:
             return
 
         if force_active:
-            img = imgs[0]
             try:
-                # 尝试下载原始图片文件
-                temp_path: str | None
-                temp_path, is_gif = await self._download_original_image(img)
-                if temp_path and is_gif:
-                    logger.debug("强制捕获: 已下载原始 GIF 文件")
+                temp_path: str | None = None
+                is_gif = False
 
-                if not temp_path:
-                    temp_path = await img.convert_to_file_path()
+                if imgs:
+                    img = imgs[0]
+                    temp_path, is_gif = await self._download_original_image(img)
+                    if not temp_path:
+                        temp_path = await img.convert_to_file_path()
+                elif store_urls:
+                    temp_path, is_gif = await self._download_url_to_temp(store_urls[0])
 
-                if not os.path.exists(temp_path):
+                if not temp_path or not os.path.exists(temp_path):
                     await event.send(
                         MessageChain([Plain(text="❌ 收录失败：图片临时文件不存在")])
                     )
@@ -438,10 +542,10 @@ class EventHandler:
 
         # 检查是否应该处理图片（节流控制）
         if not self._should_process_image():
-            logger.debug(f"跳过处理 {len(imgs)} 张图片（节流控制）")
+            logger.debug(f"跳过处理 {len(imgs) + len(store_urls)} 个表情（节流控制）")
             return
 
-        logger.debug(f"开始处理 {len(imgs)} 张图片")
+        logger.debug(f"开始处理 {len(imgs)} 张图片 + {len(store_urls)} 个商城表情")
 
         raw_image_segments: list[dict] = []
         raw_image_file_map: dict[str, dict] = {}
@@ -522,6 +626,20 @@ class EventHandler:
                 logger.error(f"图片处理参数错误: {e}")
             except Exception as e:
                 logger.error(f"处理图片失败: {e}", exc_info=True)
+
+        # 处理 QQ 商城表情（marketface/mface）
+        for url in store_urls[:3]:
+            try:
+                temp_path, _ = await self._download_url_to_temp(url)
+                if not temp_path or not os.path.exists(temp_path):
+                    continue
+                success, idx = await plugin_instance._process_image(
+                    event, temp_path, is_temp=True, is_platform_emoji=True
+                )
+                if success and idx:
+                    await plugin_instance._save_index(idx)
+            except Exception as e:
+                logger.error(f"处理商城表情失败: {e}", exc_info=True)
 
     async def _clean_raw_directory(self) -> int:
         """清理raw目录中的所有原始图片文件。"""
@@ -848,4 +966,3 @@ class EventHandler:
         # 清理插件引用
         self.plugin = None
         logger.debug("EventHandler 资源已清理")
-

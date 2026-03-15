@@ -13,6 +13,8 @@ from astrbot.api.event import AstrMessageEvent
 
 try:
     from PIL import Image as PILImage
+    from PIL import ImageDraw as PILImageDraw
+    from PIL import ImageFont as PILImageFont
 
     try:
         LANCZOS = PILImage.Resampling.LANCZOS
@@ -20,6 +22,8 @@ try:
         LANCZOS = PILImage.LANCZOS
 except Exception:
     PILImage = None
+    PILImageDraw = None
+    PILImageFont = None
     LANCZOS = None
 
 try:
@@ -1137,8 +1141,6 @@ class ImageProcessorService:
             # GIF 转换限制常量
             MAX_FRAMES = 30  # 最大帧数限制
             MAX_DIMENSION = 2048  # 单边最大尺寸
-            MAX_FRAME_PIXELS = 2048 * 2048  # 单帧最大像素 (4MP)
-
             def _sync_convert_to_gif(fp: str) -> str:
                 with PILImage.open(fp) as im:
                     buf = BytesIO()
@@ -1305,3 +1307,381 @@ class ImageProcessorService:
             "或在 AstrBot 全局配置中设置 default_image_caption_provider_id。"
         )
         return None
+
+    async def render_emoji_list_page_file(
+        self,
+        *,
+        items: list[dict],
+        page: int,
+        total_pages: int,
+        total_filtered: int,
+        total_all: int,
+        category: str,
+        per_page: int,
+    ) -> str:
+        """使用 AstrBot 内置 html-to-pic（网络 t2i）渲染列表，返回本地图片文件路径。
+
+        失败返回空字符串，调用方应自行 fallback。
+        """
+        plugin = getattr(self, "plugin", None)
+        if not plugin or not hasattr(plugin, "html_render"):
+            return ""
+
+        # 生成缩略图 data URI（优先用首帧 PNG，避免直接嵌入大 GIF）
+        rendered_items: list[dict] = []
+        for item in items:
+            pth = str(item.get("path", "") or "")
+            thumb_uri = ""
+            if PILImage is not None:
+                try:
+                    with PILImage.open(pth) as im:
+                        try:
+                            if getattr(im, "is_animated", False):
+                                im.seek(0)
+                        except Exception:
+                            pass
+                        im = im.convert("RGBA")
+                        im.thumbnail((84, 84), LANCZOS or PILImage.BICUBIC)
+                        canvas = PILImage.new("RGBA", (84, 84), (255, 255, 255, 0))
+                        x = (84 - im.size[0]) // 2
+                        y = (84 - im.size[1]) // 2
+                        canvas.paste(im, (x, y), im)
+                        buf = BytesIO()
+                        canvas.save(buf, format="PNG", optimize=True)
+                        thumb_uri = "data:image/png;base64," + base64.b64encode(
+                            buf.getvalue()
+                        ).decode("utf-8")
+                except Exception:
+                    thumb_uri = ""
+
+            rendered_items.append(
+                {
+                    "index": int(item.get("index", 0) or 0),
+                    "desc": str(item.get("desc", "") or "").strip()
+                    or str(item.get("name", "") or ""),
+                    "category": str(item.get("category", "") or ""),
+                    "thumb": thumb_uri,
+                }
+            )
+
+        tmpl = """<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      --bg: #fafafe;
+      --panel: #ffffff;
+      --line: #e7e7f0;
+      --text: #171925;
+      --muted: #6b7184;
+      --chip: #f3f4f8;
+    }
+    body {
+      margin: 0;
+      background: var(--bg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", Arial, sans-serif;
+      color: var(--text);
+    }
+    .wrap {
+      width: 980px;
+      padding: 24px 24px 16px;
+      box-sizing: border-box;
+    }
+    .title {
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: .2px;
+      margin: 0 0 10px 0;
+    }
+    .subtitle {
+      font-size: 14px;
+      color: var(--muted);
+      margin: 0 0 18px 0;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 10px 24px rgba(15, 18, 35, .06);
+    }
+    .row {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+    .row:last-child { border-bottom: none; }
+    .thumb {
+      width: 84px;
+      height: 84px;
+      border-radius: 12px;
+      background: #f6f7fb;
+      border: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      flex: 0 0 auto;
+    }
+    .thumb img { width: 84px; height: 84px; object-fit: contain; }
+    .meta { flex: 1 1 auto; min-width: 0; }
+    .line1 {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      margin: 0 0 6px 0;
+    }
+    .idx {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-weight: 700;
+      color: #3b3f53;
+      flex: 0 0 auto;
+    }
+    .desc {
+      font-size: 18px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .chip {
+      display: inline-block;
+      background: var(--chip);
+      color: var(--muted);
+      border: 1px solid var(--line);
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+    }
+    .footer {
+      margin-top: 14px;
+      font-size: 13px;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1 class="title">表情包列表</h1>
+    <p class="subtitle">第 {{ page }}/{{ total_pages }} 页，显示 {{ total_filtered }} 张（全部 {{ total_all }} 张）{% if category %}，分类: {{ category }}{% endif %}，每页 {{ per_page }} 张</p>
+    <div class="panel">
+      {% for it in items %}
+      <div class="row">
+        <div class="thumb">
+          {% if it.thumb %}
+            <img src="{{ it.thumb }}" />
+          {% else %}
+            <span class="chip">No Preview</span>
+          {% endif %}
+        </div>
+        <div class="meta">
+          <div class="line1">
+            <div class="idx">{{ "%04d"|format(it.index) }}.</div>
+            <div class="desc">{{ it.desc }}</div>
+          </div>
+          {% if it.category %}
+            <span class="chip">分类: {{ it.category }}</span>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="footer">
+      <div>翻页: /meme list [分类] [每页数量] [页码]</div>
+      <div>删除: /meme delete &lt;序号&gt;</div>
+    </div>
+  </div>
+</body>
+</html>"""
+
+        data = {
+            "items": rendered_items,
+            "page": int(page),
+            "total_pages": int(total_pages),
+            "total_filtered": int(total_filtered),
+            "total_all": int(total_all),
+            "category": str(category or ""),
+            "per_page": int(per_page),
+        }
+
+        try:
+            # t2i 默认 quality 偏低，这里调高一点，保证文字更清晰
+            return await plugin.html_render(
+                tmpl,
+                data,
+                return_url=False,
+                options={"full_page": True, "type": "jpeg", "quality": 70},
+            )
+        except Exception as e:
+            logger.debug(f"html-to-pic 渲染失败，回退到本地渲染: {e}")
+            return ""
+
+    async def render_emoji_list_page_base64(
+        self,
+        *,
+        items: list[dict],
+        page: int,
+        total_pages: int,
+        total_filtered: int,
+        total_all: int,
+        category: str,
+        per_page: int,
+    ) -> str:
+        """把表情包列表渲染成一张 PNG，并返回 base64（不带 data:image/png 前缀）。
+
+        items: 每个元素需要至少包含 path/index/desc/category。
+        """
+        if PILImage is None or PILImageDraw is None or PILImageFont is None:
+            return ""
+
+        def _pick_font(size: int):
+            # 优先使用常见中文字体；若不存在则退回默认字体（可能不支持中文）。
+            candidates = [
+                "C:/Windows/Fonts/msyh.ttc",
+                "C:/Windows/Fonts/msyh.ttf",
+                "C:/Windows/Fonts/simhei.ttf",
+                "C:/Windows/Fonts/simsun.ttc",
+                "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+                "/usr/share/fonts/truetype/noto/NotoSansCJKsc-Regular.otf",
+                "/System/Library/Fonts/PingFang.ttc",
+            ]
+            for fp in candidates:
+                try:
+                    if os.path.exists(fp):
+                        return PILImageFont.truetype(fp, size=size)
+                except Exception:
+                    continue
+            try:
+                return PILImageFont.load_default()
+            except Exception:
+                return None
+
+        def _wrap_text(draw, text: str, font, max_width: int) -> list[str]:
+            text = (text or "").strip()
+            if not text:
+                return [""]
+            lines: list[str] = []
+            buf = ""
+            for ch in text:
+                nxt = buf + ch
+                w = draw.textlength(nxt, font=font) if hasattr(draw, "textlength") else draw.textbbox((0, 0), nxt, font=font)[2]
+                if w <= max_width or not buf:
+                    buf = nxt
+                    continue
+                lines.append(buf)
+                buf = ch
+                if len(lines) >= 2:
+                    break
+            if buf and len(lines) < 2:
+                lines.append(buf)
+            if len(lines) >= 2 and (len(text) > sum(len(x) for x in lines)):
+                # 末尾省略号
+                ell = "..."
+                while lines[-1] and (
+                    (draw.textlength(lines[-1] + ell, font=font) if hasattr(draw, "textlength") else draw.textbbox((0, 0), lines[-1] + ell, font=font)[2])
+                    > max_width
+                ):
+                    lines[-1] = lines[-1][:-1]
+                lines[-1] = (lines[-1] + ell) if lines[-1] else ell
+            return lines
+
+        def _load_thumb(path: str, size: int):
+            try:
+                with PILImage.open(path) as im:
+                    try:
+                        if getattr(im, "is_animated", False):
+                            im.seek(0)
+                    except Exception:
+                        pass
+                    im = im.convert("RGBA")
+                    im.thumbnail((size, size), LANCZOS or PILImage.BICUBIC)
+                    canvas = PILImage.new("RGBA", (size, size), (255, 255, 255, 0))
+                    x = (size - im.size[0]) // 2
+                    y = (size - im.size[1]) // 2
+                    canvas.paste(im, (x, y), im)
+                    return canvas
+            except Exception:
+                return None
+
+        def _sync_render() -> str:
+            width = 980
+            pad = 24
+            title_h = 84
+            footer_h = 56
+            row_h = 118
+            thumb = 88
+
+            height = title_h + footer_h + row_h * max(1, len(items))
+            bg = PILImage.new("RGB", (width, height), (250, 250, 252))
+            draw = PILImageDraw.Draw(bg)
+
+            title_font = _pick_font(30)
+            body_font = _pick_font(22)
+            small_font = _pick_font(18)
+            if title_font is None or body_font is None or small_font is None:
+                return ""
+
+            # Title
+            header = f"表情包列表  第 {page}/{total_pages} 页  显示 {total_filtered} 张(全部 {total_all} 张)"
+            if category:
+                header += f"  分类: {category}"
+            draw.text((pad, 22), header, fill=(20, 22, 30), font=title_font)
+            draw.line((pad, title_h - 10, width - pad, title_h - 10), fill=(220, 220, 230), width=2)
+
+            # Rows
+            y0 = title_h
+            text_x = pad + thumb + 18
+            text_w = width - pad - text_x
+            for idx, item in enumerate(items):
+                y = y0 + idx * row_h
+                # subtle stripe
+                if idx % 2 == 1:
+                    draw.rectangle((0, y, width, y + row_h), fill=(246, 246, 250))
+
+                n = int(item.get("index", 0) or 0)
+                desc = str(item.get("desc", "") or "").strip()
+                if not desc:
+                    desc = str(item.get("name", "") or "")
+                cat = str(item.get("category", "") or "")
+                pth = str(item.get("path", "") or "")
+
+                # Thumb
+                thumb_im = _load_thumb(pth, thumb)
+                if thumb_im is not None:
+                    bg.paste(thumb_im, (pad, y + (row_h - thumb) // 2), thumb_im)
+                else:
+                    draw.rectangle((pad, y + (row_h - thumb) // 2, pad + thumb, y + (row_h + thumb) // 2), outline=(210, 210, 225), width=2)
+                    draw.text((pad + 16, y + (row_h - 18) // 2), "N/A", fill=(140, 140, 155), font=small_font)
+
+                # Text
+                prefix = f"{n:04d}."
+                draw.text((text_x, y + 22), prefix, fill=(60, 70, 90), font=body_font)
+                lines = _wrap_text(draw, desc, body_font, max_width=text_w - 96)
+                draw.text((text_x + 78, y + 22), lines[0], fill=(25, 28, 35), font=body_font)
+                if len(lines) > 1:
+                    draw.text((text_x + 78, y + 52), lines[1], fill=(25, 28, 35), font=body_font)
+                if cat:
+                    draw.text((text_x, y + 84), f"分类: {cat}", fill=(110, 115, 130), font=small_font)
+
+                draw.line((pad, y + row_h - 1, width - pad, y + row_h - 1), fill=(230, 230, 238), width=1)
+
+            # Footer
+            foot = "翻页: /meme list [分类] [每页数量] [页码]    删除: /meme delete <序号>"
+            draw.text((pad, height - footer_h + 16), foot, fill=(90, 95, 110), font=small_font)
+
+            buf = BytesIO()
+            bg.save(buf, format="PNG", optimize=True)
+            return base64.b64encode(buf.getvalue()).decode("utf-8")
+
+        try:
+            return await asyncio.to_thread(_sync_render)
+        except Exception as e:
+            logger.debug(f"渲染表情列表失败: {e}")
+            return ""
