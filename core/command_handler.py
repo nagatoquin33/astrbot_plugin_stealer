@@ -431,6 +431,12 @@ class CommandHandler:
             limit: 显示数量限制，默认10张
             show_images: 是否显示图片，默认True
         """
+        # 命令类回复由插件负责，不触发 AstrBot 默认 LLM 链路
+        try:
+            event.should_call_llm(True)
+        except Exception:
+            pass
+
         # 参数解析目标：
         # - /meme list            -> page=1, per_page=默认
         # - /meme list 2          -> page=2 (默认每页数量)
@@ -542,9 +548,9 @@ class CommandHandler:
                 # 在部分 NapCat/NTQQ 环境下容易触发 1200。这里参考 qq_group_daily_analysis：
                 # 优先直接用 OneBot 的 file:// 物理路径发送。
                 if await self._try_send_onebot_image_by_path(event, file_path):
+                    yield event.make_result().stop_event()
                     return
-                yield event.make_result().file_image(file_path)
-                return
+                # OneBot 直发失败时，不再继续走默认发送链路（会抛 1200/timeout 并污染日志）
 
             b64 = await self.plugin.image_processor_service.render_emoji_list_page_base64(
                 items=display_images,
@@ -556,7 +562,7 @@ class CommandHandler:
                 per_page=per_page,
             )
             if b64:
-                yield event.make_result().base64_image(b64)
+                yield event.make_result().base64_image(b64).stop_event()
                 return
 
         # 纯文本 fallback（或渲染失败）
@@ -575,7 +581,7 @@ class CommandHandler:
             result_text += f"{idx:4d}. {desc}\n"
 
         result_text += "\n用法: /meme list [分类] [每页数量] [页码]\n删除: /meme delete <序号>"
-        yield event.plain_result(result_text)
+        yield event.plain_result(result_text).stop_event()
 
     async def _try_send_onebot_image_by_path(
         self,
@@ -591,6 +597,12 @@ class CommandHandler:
             bot = getattr(event, "bot", None)
             if bot is None or not hasattr(bot, "call_action"):
                 return False
+
+            # 尝试修复权限：NapCat 会把源文件 copy 到自身 temp 目录，源文件不可读/目标目录不可写都会触发 EACCES
+            try:
+                os.chmod(image_path, 0o644)
+            except Exception:
+                pass
 
             # 构造 OneBot 认可的 file:// 路径
             file_str = image_path
@@ -608,19 +620,40 @@ class CommandHandler:
             if not session_id or not str(session_id).isdigit():
                 return False
 
-            if event.is_private_chat():
-                await bot.call_action(
-                    "send_private_msg",
-                    user_id=int(session_id),
-                    message=message,
-                )
-            else:
-                await bot.call_action(
-                    "send_group_msg",
-                    group_id=int(session_id),
-                    message=message,
-                )
-            return True
+            async def _send_once() -> None:
+                if event.is_private_chat():
+                    await bot.call_action(
+                        "send_private_msg",
+                        user_id=int(session_id),
+                        message=message,
+                    )
+                else:
+                    await bot.call_action(
+                        "send_group_msg",
+                        group_id=int(session_id),
+                        message=message,
+                    )
+
+            try:
+                await _send_once()
+                return True
+            except Exception as e:
+                err = str(e)
+                # 权限错误：尝试给 NapCat temp 目录放宽权限后重试一次
+                if ("EACCES" in err or "permission denied" in err.lower()) and "/app/.config/QQ/NapCat/temp" in err:
+                    try:
+                        os.chmod("/app/.config/QQ/NapCat/temp", 0o777)
+                    except Exception:
+                        pass
+                    try:
+                        await _send_once()
+                        return True
+                    except Exception as e2:
+                        logger.debug(f"OneBot file:// 重试仍失败: {e2}")
+                        return False
+
+                logger.debug(f"OneBot file:// 发送图片失败: {e}")
+                return False
         except Exception as e:
             logger.debug(f"OneBot file:// 发送图片失败，回退到默认发送链路: {e}")
             return False
@@ -632,17 +665,22 @@ class CommandHandler:
             event: 消息事件
             identifier: 图片标识符，可以是序号、文件名或路径
         """
+        try:
+            event.should_call_llm(True)
+        except Exception:
+            pass
+
         if not identifier:
             yield event.plain_result(
                 "用法: /meme delete <序号|文件名>\n"
                 "先使用 /meme list 查看图片列表获取序号"
-            )
+            ).stop_event()
             return
 
         image_index = await self.plugin._load_index()
 
         if not image_index:
-            yield event.plain_result("暂无表情包数据")
+            yield event.plain_result("暂无表情包数据").stop_event()
             return
 
         # 获取所有有效图片
@@ -678,7 +716,7 @@ class CommandHandler:
         if not target_image:
             yield event.plain_result(
                 f"未找到图片: {identifier}\n请使用 /meme list 查看可用的图片列表"
-            )
+            ).stop_event()
             return
 
         # 执行删除操作
@@ -694,9 +732,9 @@ class CommandHandler:
                 f"✅ 已删除表情包:\n"
                 f"文件: {target_image['name']}\n"
                 f"分类: {target_image['category']}"
-            )
+            ).stop_event()
         else:
-            yield event.plain_result(f"❌ 删除失败: {target_image['name']}")
+            yield event.plain_result(f"❌ 删除失败: {target_image['name']}").stop_event()
 
     async def _delete_image_files(self, img_path: str) -> bool:
         """删除图片文件（raw目录和categories目录）。
