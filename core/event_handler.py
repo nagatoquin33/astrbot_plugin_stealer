@@ -545,24 +545,7 @@ class EventHandler:
             logger.debug(f"跳过处理 {len(imgs) + len(store_urls)} 个表情（节流控制）")
             return
 
-        store_marked_count = 0
-        try:
-            store_marked_count = sum(
-                1
-                for seg in raw_image_segments
-                if isinstance(seg, dict)
-                and isinstance(seg.get("data", {}), dict)
-                and (
-                    seg["data"].get("emoji_id")
-                    or seg["data"].get("emoji_package_id")
-                )
-            )
-        except Exception:
-            store_marked_count = 0
-
-        logger.debug(
-            f"开始处理 {len(imgs)} 张图片 + {store_marked_count} 个商城表情"
-        )
+        logger.debug(f"开始处理 {len(imgs)} 个表情")
 
         raw_image_segments: list[dict] = []
         raw_image_file_map: dict[str, dict] = {}

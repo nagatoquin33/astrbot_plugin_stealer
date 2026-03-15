@@ -1498,13 +1498,21 @@ class Main(Star):
             for i, (path, desc, emotion, tags) in enumerate(results):
                 if os.path.exists(path):
                     meta = idx.get(path, {}) if isinstance(idx, dict) else {}
-                    raw_scenes = meta.get("scenes", []) if isinstance(meta, dict) else []
+                    raw_scenes = meta.get("scenes", None) if isinstance(meta, dict) else None
+                    if not raw_scenes:
+                        raw_scenes = meta.get("scene", None) if isinstance(meta, dict) else None
+
+                    scenes_items: list[str] = []
                     if isinstance(raw_scenes, str):
-                        scenes_str = raw_scenes.strip()
+                        scenes_items = [
+                            s.strip()
+                            for s in re.split(r"[，,、;；]", raw_scenes)
+                            if s.strip()
+                        ]
                     elif isinstance(raw_scenes, list):
-                        scenes_str = ", ".join([str(s) for s in raw_scenes if str(s).strip()])
-                    else:
-                        scenes_str = ""
+                        scenes_items = [str(s).strip() for s in raw_scenes if str(s).strip()]
+
+                    scenes_str = ", ".join(scenes_items)
                     source = str(meta.get("source", "") or "") if isinstance(meta, dict) else ""
 
                     candidate_id = f"emoji_{i + 1}"
@@ -1525,6 +1533,8 @@ class Main(Star):
                         result_lines.append(f"    标签：{tags}")
                     if scenes_str:
                         result_lines.append(f"    场景：{scenes_str}")
+                    else:
+                        result_lines.append("    场景：无")
                     if source == "qq_store":
                         result_lines.append("    来源：QQ商城")
                     result_lines.append(f"    描述：{desc}")

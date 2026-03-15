@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.2] - 2026-03-15
+- 修复 FC 工具 search_emoji 未展示场景的问题（兼容场景字段格式）
+- 文档更新：补充 /meme list 翻页参数与工具输出说明
+
 ## [2.4.1] - 2026-03-10
 - 修复 GIF 识别 bug：Pillow 版本兼容性处理 (LANCZOS 常量)
 - 修复 numpy 导入问题：移至模块级别，避免 GIF 帧提取时的重复导入
