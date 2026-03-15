@@ -431,12 +431,6 @@ class CommandHandler:
             limit: 显示数量限制，默认10张
             show_images: 是否显示图片，默认True
         """
-        # 命令类回复由插件负责，不触发 AstrBot 默认 LLM 链路
-        try:
-            event.should_call_llm(True)
-        except Exception:
-            pass
-
         # 参数解析目标：
         # - /meme list            -> page=1, per_page=默认
         # - /meme list 2          -> page=2 (默认每页数量)
@@ -696,22 +690,17 @@ class CommandHandler:
             event: 消息事件
             identifier: 图片标识符，可以是序号、文件名或路径
         """
-        try:
-            event.should_call_llm(True)
-        except Exception:
-            pass
-
         if not identifier:
             yield event.plain_result(
                 "用法: /meme delete <序号|文件名>\n"
                 "先使用 /meme list 查看图片列表获取序号"
-            ).stop_event()
+            )
             return
 
         image_index = await self.plugin._load_index()
 
         if not image_index:
-            yield event.plain_result("暂无表情包数据").stop_event()
+            yield event.plain_result("暂无表情包数据")
             return
 
         # 获取所有有效图片
@@ -747,7 +736,7 @@ class CommandHandler:
         if not target_image:
             yield event.plain_result(
                 f"未找到图片: {identifier}\n请使用 /meme list 查看可用的图片列表"
-            ).stop_event()
+            )
             return
 
         # 执行删除操作
@@ -763,9 +752,9 @@ class CommandHandler:
                 f"✅ 已删除表情包:\n"
                 f"文件: {target_image['name']}\n"
                 f"分类: {target_image['category']}"
-            ).stop_event()
+            )
         else:
-            yield event.plain_result(f"❌ 删除失败: {target_image['name']}").stop_event()
+            yield event.plain_result(f"❌ 删除失败: {target_image['name']}")
 
     async def _delete_image_files(self, img_path: str) -> bool:
         """删除图片文件（raw目录和categories目录）。
