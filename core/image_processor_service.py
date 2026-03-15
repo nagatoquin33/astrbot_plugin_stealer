@@ -1393,6 +1393,9 @@ class ImageProcessorService:
       --muted: #6b7184;
       --chip: #f3f4f8;
     }
+    html, body {
+      width: 100%;
+    }
     body {
       margin: 0;
       background: var(--bg);
@@ -1400,7 +1403,7 @@ class ImageProcessorService:
       color: var(--text);
     }
     .wrap {
-      width: 980px;
+      width: 100%;
       padding: 24px 24px 16px;
       box-sizing: border-box;
     }
