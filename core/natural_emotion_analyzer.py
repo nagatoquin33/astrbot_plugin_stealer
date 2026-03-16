@@ -320,7 +320,14 @@ A:"{{text}}"
         return cleaned
 
     def _parse_emotion_result(self, result_text: str) -> str | None:
-        """解析LLM返回的情绪结果"""
+        """解析LLM返回的情绪结果
+
+        支持从带解释的文字中提取分类名，如：
+        - "happy" -> happy
+        - "这个文本表达的是 happy 情绪" -> happy
+        - "分类：sad" -> sad
+        - "我觉得是 angry" -> angry
+        """
         if not result_text:
             return None
 
@@ -328,6 +335,17 @@ A:"{{text}}"
         result = result_text.strip().lower()
 
         cfg = self.plugin.plugin_config
+
+        # 尝试从文本中提取已知的分类名
+        # 优先匹配完整的单词（避免部分匹配如 "sad" 匹配到 "sadness"）
+        for category in self.categories:
+            # 检查是否是完整单词匹配（前后是边界或标点）
+            pattern = r'(?:^|[\s:：,，.。!！?？])' + re.escape(category) + r'(?:$|[\s:：,，.。!！?？])'
+            if re.search(pattern, result, re.IGNORECASE):
+                logger.debug(f"[情绪分析] 从文本中提取分类: '{result}' -> '{category}'")
+                return category
+
+        # 尝试严格归一化（处理直接返回分类名的情况）
         if cfg:
             try:
                 normalized = cfg.normalize_category_strict(result)
@@ -342,6 +360,7 @@ A:"{{text}}"
             logger.debug(f"[情绪分析] Fallback 匹配: '{result}'")
             return result
 
+        logger.warning(f"[情绪分析] 无法从回复中解析分类: '{result_text}'")
         return None
 
     def _get_cache_key(self, text: str) -> str:

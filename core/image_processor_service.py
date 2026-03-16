@@ -732,6 +732,7 @@ class ImageProcessorService:
         """将 VLM 返回的分类文本规范化为有效分类名。
 
         无法识别或输出 unknown 时返回空字符串，由调用方决定如何处理。
+        支持处理带前缀的格式，如 "审核通过：surprised"。
         """
         # 清理输入
         raw = (raw or "").strip().lower()
@@ -740,6 +741,16 @@ class ImageProcessorService:
         if not raw or raw == "unknown":
             logger.debug(f"[分类规范化] 分类失败: {raw!r}")
             return ""
+
+        # 处理带前缀的格式，如 "审核通过：surprised" -> "surprised"
+        # 也处理 "审核不通过：过滤不通过" 这种情况
+        if "：" in raw or ":" in raw:
+            # 统一使用英文冒号处理
+            normalized_raw = raw.replace("：", ":")
+            # 提取冒号后的部分
+            if ":" in normalized_raw:
+                _, _, category_part = normalized_raw.partition(":")
+                raw = category_part.strip()
 
         if self.plugin_config:
             try:

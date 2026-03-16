@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.4] - 2026-03-16
+- 修复 VLM 分类解析：支持 "审核通过：分类名" 格式的前缀处理
+- 修复情绪分析解析：支持从带解释的文字中提取分类名
+- 文档同步：README 配置默认值与 schema 保持一致
+
 ## [2.4.3] - 2026-03-15
 - 新增 VLM 提示词配置：支持在插件配置界面直接编辑提示词
 - 分类失败处理：未识别到分类时跳过图片，不再回退到默认分类

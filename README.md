@@ -71,19 +71,19 @@
 
 | 配置项 | 默认值 | 说明 |
 |:---|:---|:---|
-| `steal_emoji` | `true` | 总开关 |
+| `steal_emoji` | `false` | 总开关 |
 | `steal_mode` | `probability` | `probability` 概率模式 / `cooldown` 冷却模式 |
-| `steal_chance` | `0.6` | 概率模式下每次偷取的概率 |
-| `image_processing_cooldown` | `10` | 冷却模式下两次偷取的最小间隔（秒） |
+| `steal_chance` | `0.3` | 概率模式下每次偷取的概率 |
+| `image_processing_cooldown` | `30` | 冷却模式下两次偷取的最小间隔（秒） |
 | `content_filtration` | `false` | 内容审核，开启后过滤不当图片 |
 
 ### 发送设置
 
 | 配置项 | 默认值 | 说明 |
 |:---|:---|:---|
-| `auto_send` | `true` | 自动随聊发送表情包 |
-| `emoji_chance` | `0.4` | 自动发送的概率（0.0 ~ 1.0） |
-| `send_emoji_as_gif` | `true` | 以 GIF 格式发送（更像真表情包，但高频场景内存占用略高） |
+| `auto_send` | `false` | 自动随聊发送表情包 |
+| `emoji_chance` | `0.2` | 自动发送的概率（0.0 ~ 1.0） |
+| `send_emoji_as_gif` | `false` | 以 GIF 格式发送（更像真表情包，但高频场景内存占用略高） |
 | `smart_emoji_selection` | `true` | 智能评分选择；关闭则随机选取 |
 
 ### 情绪识别
