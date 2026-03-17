@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.5] - 2026-03-17
+### perf
+- 提示词输出改为 JSON 结构，确保分类可被准确解析
+- 新增 JSON 响应解析器，支持从 markdown 代码块提取 JSON
+- 保留旧格式兼容层（管道符分隔），实现平滑过渡
+
 ## [2.4.4] - 2026-03-16
 - 修复 VLM 分类解析：支持 "审核通过：分类名" 格式的前缀处理
 - 修复情绪分析解析：支持从带解释的文字中提取分类名

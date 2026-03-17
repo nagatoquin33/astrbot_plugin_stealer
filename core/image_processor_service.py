@@ -77,12 +77,14 @@ class ImageProcessorService:
         # 以下仅为 prompts.json 缺失时的最小化 fallback
         _FALLBACK_PROMPT = (
             "分析表情包：从 `{emotion_list}` 中选择情绪分类。"
-            "返回格式：情绪分类|语义标签(逗号分隔)|画面描述(一句话)"
+            '返回JSON格式：{"category": "分类名", "tags": ["标签1", "标签2"], '
+            '"description": "画面描述", "scenes": ["场景1", "场景2"]}'
         )
         _FALLBACK_FILTER_PROMPT = (
-            "审核图片是否含不当内容，不当则返回'过滤不通过'。"
+            "审核图片是否含不当内容，不当则返回{\"approved\": false, \"reason\": \"审核不通过\"}。"
             "否则从 `{emotion_list}` 中选择情绪分类。"
-            "返回格式：情绪分类|语义标签(逗号分隔)|画面描述(一句话)"
+            '返回JSON格式：{"approved": true, "category": "分类名", "tags": ["标签1"], '
+            '"description": "画面描述", "scenes": ["场景1"]}'
         )
 
         self.emoji_classification_prompt = getattr(
@@ -692,34 +694,8 @@ class ImageProcessorService:
             # 调用视觉模型
             response = await self._call_vision_model(event, file_path, prompt)
 
-            # 处理审核不通过
-            if self.CATEGORY_FILTERED in response:
-                logger.warning(f"图片内容审核不通过: {file_path}")
-                return self.CATEGORY_FILTERED, [], "", self.CATEGORY_FILTERED, []
-
-            # 解析响应：情绪分类|语义标签(逗号分隔)|画面描述(一句话)|可选场景标签
-            parts = [p.strip() for p in response.strip().split("|")]
-            emotion_result = parts[0] if parts else ""
-            tags_str = parts[1] if len(parts) > 1 else ""
-            tags_result = [
-                t.strip()
-                for t in tags_str.replace("，", ",").replace("、", ",").split(",")
-                if t.strip()
-            ]
-            desc_result = parts[2] if len(parts) > 2 else "表情包"
-            scenes_str = parts[3] if len(parts) > 3 else ""
-            scenes_result = [
-                s.strip()
-                for s in scenes_str.replace("，", ",")
-                .replace("、", ",")
-                .replace("；", ",")
-                .split(",")
-                if s.strip()
-            ]
-
-            # 规范化分类
-            category = self._normalize_category(emotion_result)
-            return category, tags_result, desc_result, category, scenes_result
+            # 解析JSON响应
+            return self._parse_classification_response(response, file_path)
 
         except (FileNotFoundError, ValueError):
             # 配置错误 / 文件不存在，直接抛出不吞异常
@@ -732,7 +708,7 @@ class ImageProcessorService:
         """将 VLM 返回的分类文本规范化为有效分类名。
 
         无法识别或输出 unknown 时返回空字符串，由调用方决定如何处理。
-        支持处理带前缀的格式，如 "审核通过：surprised"。
+        支持处理带前缀的格式（如 "审核通过：surprised"），提取冒号后的内容。
         """
         # 清理输入
         raw = (raw or "").strip().lower()
@@ -762,6 +738,92 @@ class ImageProcessorService:
 
         logger.warning(f"无法识别情绪分类: {raw!r}，跳过该图片")
         return ""
+
+    def _parse_classification_response(
+        self, response: str, file_path: str
+    ) -> tuple[str, list[str], str, str, list[str]]:
+        """解析VLM返回的JSON格式分类响应。
+
+        Args:
+            response: VLM原始响应文本
+            file_path: 图片路径（用于日志）
+
+        Returns:
+            tuple: (category, tags, description, emotion, scenes)
+        """
+        import json
+
+        response = response.strip()
+
+        # 尝试提取JSON（处理VLM可能输出的额外文字）
+        json_str = response
+
+        # 如果响应包含markdown代码块，提取其中的JSON
+        if "```json" in response:
+            json_str = response.split("```json")[-1].split("```")[0].strip()
+        elif "```" in response:
+            json_str = response.split("```")[-1].split("```")[0].strip()
+
+        # 尝试解析JSON
+        try:
+            data = json.loads(json_str)
+        except json.JSONDecodeError:
+            # JSON解析失败，尝试旧格式兼容（管道符分隔）
+            logger.debug(f"JSON解析失败，尝试旧格式兼容: {response[:100]}")
+            return self._parse_legacy_format(response)
+
+        # 处理审核不通过
+        if data.get("approved") is False or data.get("reason") == "审核不通过":
+            logger.warning(f"图片内容审核不通过: {file_path}")
+            return self.CATEGORY_FILTERED, [], "", self.CATEGORY_FILTERED, []
+
+        # 提取字段
+        category = data.get("category", "")
+        tags = data.get("tags", [])
+        description = data.get("description", "表情包")
+        scenes = data.get("scenes", [])
+
+        # 规范化分类
+        normalized_category = self._normalize_category(category)
+
+        # 确保tags和scenes是列表
+        if isinstance(tags, str):
+            tags = [t.strip() for t in tags.replace("，", ",").split(",") if t.strip()]
+        if isinstance(scenes, str):
+            scenes = [s.strip() for s in scenes.replace("，", ",").split(",") if s.strip()]
+
+        return normalized_category, tags, description, normalized_category, scenes
+
+    def _parse_legacy_format(
+        self, response: str
+    ) -> tuple[str, list[str], str, str, list[str]]:
+        """兼容旧格式：管道符分隔的响应。"""
+        # 处理审核不通过
+        if self.CATEGORY_FILTERED in response or "审核不通过" in response:
+            return self.CATEGORY_FILTERED, [], "", self.CATEGORY_FILTERED, []
+
+        # 兼容旧格式：情绪分类|语义标签|画面描述|场景标签
+        parts = [p.strip() for p in response.strip().split("|")]
+        emotion_result = parts[0] if parts else ""
+        tags_str = parts[1] if len(parts) > 1 else ""
+        tags_result = [
+            t.strip()
+            for t in tags_str.replace("，", ",").replace("、", ",").split(",")
+            if t.strip()
+        ]
+        desc_result = parts[2] if len(parts) > 2 else "表情包"
+        scenes_str = parts[3] if len(parts) > 3 else ""
+        scenes_result = [
+            s.strip()
+            for s in scenes_str.replace("，", ",")
+            .replace("、", ",")
+            .replace("；", ",")
+            .split(",")
+            if s.strip()
+        ]
+
+        category = self._normalize_category(emotion_result)
+        return category, tags_result, desc_result, category, scenes_result
 
     async def _call_vision_model(
         self, event: AstrMessageEvent | None, img_path: str, prompt: str
