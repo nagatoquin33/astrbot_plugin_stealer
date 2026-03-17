@@ -176,6 +176,16 @@
 - 开启 `send_emoji_as_gif` 时，大分辨率图片或高帧动图的 GIF 转换会产生瞬时内存峰值，低内存环境建议关闭。
 - 插件依赖视觉模型（VLM）进行分类，未配置视觉模型时偷图功能无法正常工作。
 
+### 📝 提示词格式更新（v2.4.5+）
+
+从 v2.4.5 开始，VLM 分类提示词改为 **JSON 格式输出**，结构更稳定，解析更准确。
+
+**如果你之前自定义过提示词**，建议：
+1. 清空 `custom_emoji_classification_prompt` 和 `custom_emoji_classification_with_filter_prompt` 配置
+2. 重启插件，自动加载新版 JSON 格式提示词
+
+旧格式（管道符分隔）仍兼容，但 JSON 格式更可靠。
+
 ## 📄 许可证
 
 本项目基于 [MIT](LICENSE) 许可证开源。
