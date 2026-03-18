@@ -1,7 +1,9 @@
 import asyncio
 import base64
 import hashlib
+import json
 import os
+import re
 import shutil
 import time
 from io import BytesIO
@@ -40,6 +42,8 @@ class ImageProcessorService:
     CATEGORY_MIGRATION_MAP = {
         "smirk": "troll",  # 坏笑 -> 发癫
     }
+
+    _PROMPT_PLACEHOLDER = "{emotion_list}"
 
     # 分类结果常量
     CATEGORY_FILTERED = "过滤不通过"
@@ -98,12 +102,6 @@ class ImageProcessorService:
 
         # 保留combined_analysis_prompt作为备用
         self.combined_analysis_prompt = self.emoji_classification_prompt
-        if "|scene" not in self.emoji_classification_prompt.lower():
-            self.emoji_classification_prompt += "|scene tags(optional, comma separated)"
-        if "|scene" not in self.emoji_classification_with_filter_prompt.lower():
-            self.emoji_classification_with_filter_prompt += (
-                "|scene tags(optional, comma separated)"
-            )
 
         # 配置参数（初始值从 plugin_config 读取，后续通过 update_config 更新）
         self.categories = (
@@ -681,6 +679,10 @@ class ImageProcessorService:
             )
 
             prompt_categories = categories if isinstance(categories, list) else None
+            if prompt_categories is None:
+                prompt_categories = self.categories or []
+            if not prompt_categories:
+                raise ValueError("未配置可用分类，无法进行图片分类")
             emotion_list_str = self._build_emotion_list_str(prompt_categories)
 
             # 根据是否开启审核选择合适的提示词
@@ -689,7 +691,7 @@ class ImageProcessorService:
                 if should_filter
                 else self.emoji_classification_prompt
             )
-            prompt = prompt_template.format(emotion_list=emotion_list_str)
+            prompt = self._render_prompt_template(prompt_template, emotion_list_str)
 
             # 调用视觉模型
             response = await self._call_vision_model(event, file_path, prompt)
@@ -711,7 +713,7 @@ class ImageProcessorService:
         支持处理带前缀的格式（如 "审核通过：surprised"），提取冒号后的内容。
         """
         # 清理输入
-        raw = (raw or "").strip().lower()
+        raw = self._sanitize_model_scalar(raw).lower()
 
         # unknown 或空值视为分类失败
         if not raw or raw == "unknown":
@@ -742,57 +744,88 @@ class ImageProcessorService:
     def _parse_classification_response(
         self, response: str, file_path: str
     ) -> tuple[str, list[str], str, str, list[str]]:
-        """解析VLM返回的JSON格式分类响应。
-
-        Args:
-            response: VLM原始响应文本
-            file_path: 图片路径（用于日志）
-
-        Returns:
-            tuple: (category, tags, description, emotion, scenes)
-        """
-        import json
-
+        """Parse the classification payload returned by the VLM."""
         response = response.strip()
 
-        # 尝试提取JSON（处理VLM可能输出的额外文字）
-        json_str = response
-
-        # 如果响应包含markdown代码块，提取其中的JSON
-        if "```json" in response:
-            json_str = response.split("```json")[-1].split("```")[0].strip()
-        elif "```" in response:
-            json_str = response.split("```")[-1].split("```")[0].strip()
-
-        # 尝试解析JSON
-        try:
-            data = json.loads(json_str)
-        except json.JSONDecodeError:
-            # JSON解析失败，尝试旧格式兼容（管道符分隔）
-            logger.debug(f"JSON解析失败，尝试旧格式兼容: {response[:100]}")
+        data = self._extract_json_payload(response)
+        if data is None:
+            logger.debug(f"JSON parse failed, fallback to legacy format: {response[:100]}")
             return self._parse_legacy_format(response)
 
-        # 处理审核不通过
-        if data.get("approved") is False or data.get("reason") == "审核不通过":
-            logger.warning(f"图片内容审核不通过: {file_path}")
+        approved = data.get("approved")
+        reason = str(data.get("reason", ""))
+        if (
+            approved is False
+            or str(approved).strip().lower() in {"false", "0", "no", "rejected"}
+            or "\u5ba1\u6838\u4e0d\u901a\u8fc7" in reason.encode("unicode_escape").decode("ascii")
+        ):
+            logger.warning(f"Image moderation rejected: {file_path}")
             return self.CATEGORY_FILTERED, [], "", self.CATEGORY_FILTERED, []
 
-        # 提取字段
         category = data.get("category", "")
         tags = data.get("tags", [])
-        description = data.get("description", "表情包")
+        description = self._sanitize_model_scalar(data.get("description", "emoji")) or "emoji"
         scenes = data.get("scenes", [])
 
-        # 规范化分类
         normalized_category = self._normalize_category(category)
 
-        # 确保tags和scenes是列表
         if isinstance(tags, str):
-            tags = [t.strip() for t in tags.replace("，", ",").split(",") if t.strip()]
+            tags = [t.strip() for t in tags.replace(chr(65292), ",").split(",") if t.strip()]
+        elif not isinstance(tags, list):
+            tags = []
+
         if isinstance(scenes, str):
-            scenes = [s.strip() for s in scenes.replace("，", ",").split(",") if s.strip()]
+            scenes = [s.strip() for s in scenes.replace(chr(65292), ",").split(",") if s.strip()]
+        elif not isinstance(scenes, list):
+            scenes = []
 
         return normalized_category, tags, description, normalized_category, scenes
+
+    def _sanitize_model_scalar(self, value: Any) -> str:
+        """Normalize single-value model outputs before category matching."""
+        text = str(value or "").strip()
+        text = text.strip("`")
+        text = text.strip(" \t\r\n\"'")
+        text = re.sub(r"^[\[\(\{<]+|[\]\)\}>]+$", "", text)
+        text = text.rstrip("\u3002\uff01\uff0c\u3001\uff1b;\uff1a:")
+        return text.strip()
+
+    def _render_prompt_template(self, template: str, emotion_list: str) -> str:
+        """仅替换 emotion_list 占位符，保留 JSON 花括号原样输出。"""
+        if not template:
+            return emotion_list
+        return template.replace(self._PROMPT_PLACEHOLDER, emotion_list)
+
+    def _extract_json_payload(self, response: str) -> dict[str, Any] | None:
+        """从 VLM 响应中提取第一个合法 JSON 对象。"""
+        candidates: list[str] = []
+
+        fenced_blocks = re.findall(r"```(?:json)?\s*(.*?)```", response, flags=re.DOTALL)
+        candidates.extend(block.strip() for block in fenced_blocks if block.strip())
+        candidates.append(response.strip())
+
+        for candidate in candidates:
+            parsed = self._try_parse_json_candidate(candidate)
+            if parsed is not None:
+                return parsed
+
+        return None
+
+    def _try_parse_json_candidate(self, text: str) -> dict[str, Any] | None:
+        """解析候选文本中的 JSON 对象，兼容前后缀说明文字。"""
+        decoder = json.JSONDecoder()
+
+        for index, char in enumerate(text):
+            if char != "{":
+                continue
+            try:
+                parsed, _ = decoder.raw_decode(text[index:])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict):
+                return parsed
+
+        return None
 
     def _parse_legacy_format(
         self, response: str
