@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.6] - 2026-03-18
+### fix
+- 修复 VLM 分类提示词模板渲染，避免 JSON 花括号触发格式化异常
+- 修复 VLM 分类响应解析，兼容 JSON 前后缀文本、代码块和脏字段
+- 移除干扰 JSON 输出的旧版管道格式提示词尾巴
+- 分类列表为空时直接报出明确错误，便于定位配置问题
+
 ## [2.4.5] - 2026-03-17
 ### perf
 - 提示词输出改为 JSON 结构，确保分类可被准确解析

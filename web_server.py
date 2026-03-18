@@ -953,7 +953,7 @@ class WebServer:
             return self._err(str(e))
 
     async def handle_get_config(self, request):
-        return self._ok({"version": "1.0.0", "plugin_version": "2.3.6"})
+        return self._ok({"version": "1.0.0", "plugin_version": "2.4.6"})
 
     async def handle_health_check(self, request):
         return self._ok({"status": "ok", "service": "emoji-manager-webui"})
