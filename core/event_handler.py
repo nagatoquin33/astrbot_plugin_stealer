@@ -607,6 +607,17 @@ class EventHandler:
                 except Exception:
                     extra_meta = None
 
+                try:
+                    cfg = getattr(plugin_instance, "plugin_config", None)
+                    if cfg:
+                        scope, target_id = cfg.get_event_target(event)
+                        if scope and target_id:
+                            if extra_meta is None:
+                                extra_meta = {}
+                            extra_meta["origin_target"] = f"{scope}:{target_id}"
+                except Exception:
+                    pass
+
                 # 尝试下载原始图片文件
                 temp_path: str | None
                 temp_path, is_gif = await self._download_original_image(img)
@@ -654,6 +665,14 @@ class EventHandler:
                 if not temp_path or not os.path.exists(temp_path):
                     continue
                 extra_meta = {"source": "qq_store", "origin_url": self._normalize_str(url)}
+                try:
+                    cfg = getattr(plugin_instance, "plugin_config", None)
+                    if cfg:
+                        scope, target_id = cfg.get_event_target(event)
+                        if scope and target_id:
+                            extra_meta["origin_target"] = f"{scope}:{target_id}"
+                except Exception:
+                    pass
                 success, idx = await plugin_instance._process_image(
                     event,
                     temp_path,

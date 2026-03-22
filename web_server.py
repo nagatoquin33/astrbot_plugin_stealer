@@ -375,6 +375,7 @@ class WebServer:
         self.app.router.add_put("/api/images/{hash}", self.handle_update_image)
         self.app.router.add_post("/api/images/batch/delete", self.handle_batch_delete)
         self.app.router.add_post("/api/images/batch/move", self.handle_batch_move)
+        self.app.router.add_post("/api/images/batch/scope", self.handle_batch_scope)
         self.app.router.add_post("/api/images/upload", self.handle_upload_image)
         self.app.router.add_post("/api/analyze", self.handle_analyze_image)
         self.app.router.add_get("/api/stats", self.handle_get_stats)
@@ -655,6 +656,11 @@ class WebServer:
                         "tags": meta.get("tags", []),
                         "desc": meta.get("desc", ""),
                         "scenes": self._split_scene_terms(meta.get("scenes", [])),
+                        "scope_mode": self._normalize_scope_mode(
+                            meta.get("scope_mode", "public")
+                        )
+                        or "public",
+                        "origin_target": str(meta.get("origin_target", "") or ""),
                         "created_at": meta.get("created_at", 0),
                     }
 
@@ -784,6 +790,15 @@ class WebServer:
                 items.append((path_str, meta))
         return items
 
+    @staticmethod
+    def _normalize_scope_mode(scope_mode: object) -> str:
+        raw = str(scope_mode or "").strip().lower()
+        if raw in {"public", "global", "all"}:
+            return "public"
+        if raw in {"local", "private", "scoped"}:
+            return "local"
+        return ""
+
     async def _move_items_to_category(
         self, index_map: dict, items: list[tuple[str, dict]], target_category: str
     ) -> tuple[int, list[str]]:
@@ -823,6 +838,7 @@ class WebServer:
             new_tags = data.get("tags")  # list or comma separated string
             new_desc = data.get("desc")
             new_scenes = data.get("scenes", data.get("scene"))
+            new_scope_mode = self._normalize_scope_mode(data.get("scope_mode"))
 
             updated = {"ok": False, "error": ""}
 
@@ -850,6 +866,14 @@ class WebServer:
 
                 if new_scenes is not None:
                     meta["scenes"] = self._split_scene_terms(new_scenes)
+
+                if new_scope_mode:
+                    if new_scope_mode == "local" and not str(
+                        meta.get("origin_target", "") or ""
+                    ).strip():
+                        updated["error"] = "Origin target missing"
+                        return
+                    meta["scope_mode"] = new_scope_mode
 
                 if new_category and new_category != meta.get("category"):
                     old_path = Path(target_path)
@@ -918,6 +942,37 @@ class WebServer:
             logger.error(f"Batch move failed: {e}")
             return self._err(str(e))
 
+    async def handle_batch_scope(self, request):
+        """批量设置作用域"""
+        try:
+            data = await self._read_json_payload(request)
+            hashes = data.get("hashes", [])
+            scope_mode = self._normalize_scope_mode(data.get("scope_mode"))
+
+            if not hashes or not scope_mode:
+                return self._err("Missing hashes or scope_mode", 400)
+
+            result = {"updated": 0, "skipped": 0}
+            hash_set = set(hashes)
+
+            async def updater(current: dict):
+                for _, meta in self._collect_items_by_hashes(current, hash_set):
+                    if not isinstance(meta, dict):
+                        continue
+                    if scope_mode == "local" and not str(
+                        meta.get("origin_target", "") or ""
+                    ).strip():
+                        result["skipped"] += 1
+                        continue
+                    meta["scope_mode"] = scope_mode
+                    result["updated"] += 1
+
+            await self.plugin.cache_service.update_index(updater)
+            return self._ok(count=result["updated"], skipped=result["skipped"])
+        except Exception as e:
+            logger.error(f"Batch scope update failed: {e}")
+            return self._err(str(e))
+
     async def handle_get_stats(self, request):
         try:
             index = self.plugin.cache_service.get_index_cache()
@@ -953,7 +1008,7 @@ class WebServer:
             return self._err(str(e))
 
     async def handle_get_config(self, request):
-        return self._ok({"version": "1.0.0", "plugin_version": "2.4.6"})
+        return self._ok({"version": "1.0.0", "plugin_version": "2.4.7"})
 
     async def handle_health_check(self, request):
         return self._ok({"status": "ok", "service": "emoji-manager-webui"})

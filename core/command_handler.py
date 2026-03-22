@@ -1,6 +1,7 @@
 import json
 import os
 import random
+import time
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -610,35 +611,7 @@ class CommandHandler:
             yield event.plain_result("暂无表情包数据")
             return
 
-        # 获取所有有效图片
-        valid_images = []
-        for img_path, img_info in image_index.items():
-            if isinstance(img_info, dict) and Path(img_path).exists():
-                valid_images.append(
-                    {
-                        "path": img_path,
-                        "name": Path(img_path).name,
-                        "category": img_info.get("category", "未分类"),
-                        "created_at": img_info.get("created_at", 0),
-                    }
-                )
-
-        # 按创建时间排序（与list命令保持一致，最新的在前）
-        valid_images.sort(key=lambda x: x["created_at"], reverse=True)
-
-        target_image = None
-
-        # 尝试按序号查找
-        try:
-            index = int(identifier) - 1  # 转换为0基索引
-            if 0 <= index < len(valid_images):
-                target_image = valid_images[index]
-        except ValueError:
-            # 不是数字，尝试按文件名查找
-            for img in valid_images:
-                if img["name"] == identifier or img["name"].startswith(identifier):
-                    target_image = img
-                    break
+        target_image = self._find_target_image(image_index, identifier)
 
         if not target_image:
             yield event.plain_result(
@@ -662,6 +635,145 @@ class CommandHandler:
             )
         else:
             yield event.plain_result(f"❌ 删除失败: {target_image['name']}")
+
+    async def blacklist_image(self, event: AstrMessageEvent, identifier: str = ""):
+        """删除指定表情包并加入黑名单。"""
+        if not identifier:
+            yield event.plain_result(
+                "用法: /meme blacklist <序号|文件名>\n"
+                "先使用 /meme list 查看图片列表获取序号"
+            )
+            return
+
+        image_index = await self.plugin._load_index()
+
+        if not image_index:
+            yield event.plain_result("暂无表情包数据")
+            return
+
+        target_image = self._find_target_image(image_index, identifier)
+        if not target_image:
+            yield event.plain_result(
+                f"未找到图片: {identifier}\n请使用 /meme list 查看可用的图片列表"
+            )
+            return
+
+        success = await self._delete_image_files(target_image["path"])
+        if not success:
+            yield event.plain_result(f"❌ 拉黑失败: {target_image['name']}")
+            return
+
+        if target_image["path"] in image_index:
+            del image_index[target_image["path"]]
+            await self.plugin._save_index(image_index)
+
+        image_hash = str(target_image.get("hash", "") or "").strip()
+        if image_hash and getattr(self.plugin, "cache_service", None):
+            await self.plugin.cache_service.set(
+                "blacklist_cache", image_hash, int(time.time()), persist=True
+            )
+            logger.info(f"已加入黑名单: {image_hash}")
+
+        yield event.plain_result(
+            f"✅ 已拉黑表情包:\n"
+            f"文件: {target_image['name']}\n"
+            f"分类: {target_image['category']}\n"
+            f"状态: 已删除并加入黑名单"
+        )
+
+    async def set_image_scope(
+        self, event: AstrMessageEvent, identifier: str = "", scope_mode: str = ""
+    ):
+        """设置表情包作用域。"""
+        if not identifier or not scope_mode:
+            yield event.plain_result(
+                "用法: /meme scope <序号|文件名> <public|local>\n"
+                "public=公开表情包，所有群可发送\n"
+                "local=仅来源群可发送"
+            )
+            return
+
+        image_index = await self.plugin._load_index()
+        if not image_index:
+            yield event.plain_result("暂无表情包数据")
+            return
+
+        target_image = self._find_target_image(image_index, identifier)
+        if not target_image:
+            yield event.plain_result(
+                f"未找到图片: {identifier}\n请使用 /meme list 查看可用的图片列表"
+            )
+            return
+
+        normalized_mode = str(scope_mode or "").strip().lower()
+        if normalized_mode in {"public", "global", "all"}:
+            normalized_mode = "public"
+        elif normalized_mode in {"local", "private", "scoped"}:
+            normalized_mode = "local"
+        else:
+            yield event.plain_result("作用域无效，请使用 public 或 local")
+            return
+
+        meta = image_index.get(target_image["path"])
+        if not isinstance(meta, dict):
+            yield event.plain_result("该表情包索引数据异常，无法设置作用域")
+            return
+
+        if normalized_mode == "local" and not str(meta.get("origin_target", "") or "").strip():
+            yield event.plain_result("该表情包缺少来源群信息，暂时无法限制为仅来源群发送")
+            return
+
+        meta["scope_mode"] = normalized_mode
+        await self.plugin._save_index(image_index)
+
+        origin_target = str(meta.get("origin_target", "") or "").strip() or "未知"
+        scope_text = "公开" if normalized_mode == "public" else "仅来源群"
+        yield event.plain_result(
+            f"✅ 已更新表情包作用域:\n"
+            f"文件: {target_image['name']}\n"
+            f"分类: {target_image['category']}\n"
+            f"作用域: {scope_text}\n"
+            f"来源: {origin_target}"
+        )
+
+    def _collect_valid_images(self, image_index: dict) -> list[dict[str, Any]]:
+        """收集有效图片，并按 list/delete 一致的顺序返回。"""
+        valid_images: list[dict[str, Any]] = []
+        for img_path, img_info in image_index.items():
+            if isinstance(img_info, dict) and Path(img_path).exists():
+                valid_images.append(
+                    {
+                        "path": img_path,
+                        "name": Path(img_path).name,
+                        "category": img_info.get("category", "未分类"),
+                        "created_at": img_info.get("created_at", 0),
+                        "hash": img_info.get("hash", ""),
+                        "origin_target": img_info.get("origin_target", ""),
+                        "scope_mode": img_info.get("scope_mode", "public"),
+                    }
+                )
+
+        valid_images.sort(key=lambda x: x["created_at"], reverse=True)
+        return valid_images
+
+    def _find_target_image(
+        self, image_index: dict, identifier: str
+    ) -> dict[str, Any] | None:
+        """按 /meme list 的全局序号或文件名定位图片。"""
+        valid_images = self._collect_valid_images(image_index)
+
+        try:
+            index = int(identifier) - 1
+            if 0 <= index < len(valid_images):
+                return valid_images[index]
+        except ValueError:
+            pass
+
+        for img in valid_images:
+            if img["name"] == identifier or img["name"].startswith(identifier):
+                return img
+
+        return None
 
     async def _delete_image_files(self, img_path: str) -> bool:
         """删除图片文件（raw目录和categories目录）。
@@ -802,8 +914,20 @@ class CommandHandler:
                     if old_data.get("tags"):
                         new_data["tags"] = old_data["tags"]
                     # 兼容可能存在的其他字段
-                    if "source_message" in old_data:
-                        new_data["source_message"] = old_data["source_message"]
+                    for key in (
+                        "source_message",
+                        "source",
+                        "origin_target",
+                        "scope_mode",
+                        "qq_emoji_id",
+                        "qq_emoji_package_id",
+                        "origin_url",
+                        "qq_key",
+                        "scenes",
+                        "scene",
+                    ):
+                        if key in old_data:
+                            new_data[key] = old_data[key]
 
                     recovered_count += 1
 

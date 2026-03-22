@@ -1444,6 +1444,24 @@ class Main(Star):
             yield result
 
     @filter.permission_type(PermissionType.ADMIN)
+    @meme.command("blacklist")
+    async def blacklist_image(self, event: AstrMessageEvent, identifier: str = ""):
+        """拉黑指定表情包。用法: /meme blacklist <序号|文件名>"""
+        async for result in self.command_handler.blacklist_image(event, identifier):
+            yield result
+
+    @filter.permission_type(PermissionType.ADMIN)
+    @meme.command("scope")
+    async def set_image_scope(
+        self, event: AstrMessageEvent, identifier: str = "", scope_mode: str = ""
+    ):
+        """设置表情包作用域。用法: /meme scope <序号|文件名> <public|local>"""
+        async for result in self.command_handler.set_image_scope(
+            event, identifier, scope_mode
+        ):
+            yield result
+
+    @filter.permission_type(PermissionType.ADMIN)
     @meme.command("rebuild_index")
     async def rebuild_index(self, event: AstrMessageEvent):
         """重建表情包索引，用于修复索引异常或版本迁移。"""
@@ -1452,6 +1470,7 @@ class Main(Star):
 
     async def _search_emoji_candidates(
         self,
+        event: AstrMessageEvent,
         query: str,
         *,
         limit: int = 5,
@@ -1461,7 +1480,7 @@ class Main(Star):
         if idx is None:
             idx = self.cache_service.get_index_cache_readonly()
 
-        return await self.emoji_selector.smart_search(query, limit=limit, idx=idx)
+        return await self.emoji_selector.smart_search(query, limit=limit, idx=idx, event=event)
 
     def _find_similar_categories(self, query: str, top_n: int = 3) -> list[str]:
         """找到与查询词最相似的多个分类，委托给 EmojiSelector。"""
@@ -1517,7 +1536,7 @@ class Main(Star):
 
             # smart_search 已内置关键词映射和模糊匹配（阈值0.4）
             results = await self._search_emoji_candidates(
-                query, limit=self.MAX_SEARCH_RESULTS, idx=idx
+                event, query, limit=self.MAX_SEARCH_RESULTS, idx=idx
             )
 
             # 如果仍然没有结果，返回推荐分类
@@ -1652,6 +1671,10 @@ class Main(Star):
 
             if not os.path.exists(path):
                 yield f"发送失败：表情包文件已丢失。\n你选择的是：编号 {emoji_id}，分类 {emotion}，描述 {desc}\n请重新搜索并选择其他表情包。"
+                return
+
+            if not self.emoji_selector.is_path_allowed_for_event(path, event):
+                yield "发送失败：该表情包被限制为仅来源群可发送，请选择其他表情包。"
                 return
 
             # 发送表情包

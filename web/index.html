@@ -308,6 +308,9 @@
                             
                             <div class="item-info">
                                 <div class="item-category">{{ img.category }}</div>
+                                <div class="item-meta-row">
+                                    <span class="scope-pill" :class="img.scope_mode === 'local' ? 'local' : 'public'">{{ getScopeLabel(img.scope_mode) }}</span>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -391,7 +394,17 @@
                                     <span class="stat-name">分类</span>
                                     <span class="stat-value">{{ previewItem?.category }}</span>
                                 </div>
-                                
+                                <div class="stat-row">
+                                    <span class="stat-name">作用域</span>
+                                    <span class="stat-value">
+                                        <span class="scope-pill" :class="previewItem?.scope_mode === 'local' ? 'local' : 'public'">{{ getScopeLabel(previewItem?.scope_mode) }}</span>
+                                    </span>
+                                </div>
+                                <div class="stat-row">
+                                    <span class="stat-name">来源</span>
+                                    <span class="stat-value">{{ formatOriginTarget(previewItem?.origin_target) }}</span>
+                                </div>
+
                                 <div class="stat-row">
                                     <span class="stat-name">描述</span>
                                 </div>
@@ -444,6 +457,15 @@
                                 </div>
                                 
                                 <div style="margin-bottom: 20px;">
+                                    <label style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); display: block; margin-bottom: 8px;">作用域</label>
+                                    <select v-model="editForm.scope_mode" class="codex-input">
+                                        <option value="public">public / 公共</option>
+                                        <option value="local">local / 本群限定</option>
+                                    </select>
+                                    <div class="form-hint">来源：{{ formatOriginTarget(previewItem?.origin_target) }}</div>
+                                </div>
+
+                                <div style="margin-bottom: 20px;">
                                     <label style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); display: block; margin-bottom: 8px;">描述</label>
                                     <textarea v-model="editForm.desc" class="codex-input" rows="3"></textarea>
                                 </div>
@@ -474,6 +496,9 @@
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
                                 </svg>
                                 编辑
+                            </button>
+                            <button @click="toggleScope(previewItem, previewItem?.scope_mode === 'local' ? 'public' : 'local')" class="codex-btn" style="flex: 1;">
+                                {{ previewItem?.scope_mode === 'local' ? '解除限定' : '限定本群' }}
                             </button>
                             <button @click="deleteImage(previewItem)" class="codex-btn danger" style="flex: 1;">
                                 <svg style="width: 16px; height: 16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -702,6 +727,34 @@
                 </div>
             </div>
 
+            <!-- Batch Scope Modal -->
+            <div v-if="batchScopeOpen" class="modal-overlay" @click.self="closeBatchScopeModal">
+                <div class="modal-panel" style="max-width: 400px;">
+                    <div class="modal-panel-corner-bl"></div>
+                    <div class="modal-panel-corner-br"></div>
+                    
+                    <div class="modal-header">
+                        <h2>批量作用域</h2>
+                    </div>
+                    
+                    <div style="padding: 24px;">
+                        <p style="margin: 0 0 16px 0; color: var(--text-muted);">已选择 {{ selectedImages.size }} 张图片</p>
+                        
+                        <label style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); display: block; margin-bottom: 8px;">目标作用域</label>
+                        <select v-model="batchScopeMode" class="codex-input" style="margin-bottom: 20px;">
+                            <option value="public">public / 公共</option>
+                            <option value="local">local / 本群限定</option>
+                        </select>
+                        <div class="form-hint">批量设为 local 时，缺少来源群信息的图片会被自动跳过。</div>
+                        
+                        <div style="display: flex; gap: 12px; margin-top: 20px;">
+                            <button @click="closeBatchScopeModal" class="codex-btn" style="flex: 1;">取消</button>
+                            <button @click="confirmBatchScope" class="codex-btn primary" style="flex: 1;">确认设置</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Batch Action Bar -->
             <div v-if="isBatchMode && selectedImages.size > 0" class="batch-bar">
                 <span style="font-family: 'Cinzel', serif; color: var(--gold-bright); font-size: 1rem;">已选择 {{ selectedImages.size }} 张</span>
@@ -709,6 +762,7 @@
                 <button @click="selectAll" class="codex-btn" style="font-size: 0.8rem; padding: 8px 16px;">全选</button>
                 <button @click="openBatchMoveModal" class="codex-btn" style="font-size: 0.8rem; padding: 8px 16px;">移动</button>
                 <button @click="handleBatchDelete" class="codex-btn danger" style="font-size: 0.8rem; padding: 8px 16px;">删除</button>
+                <button @click="openBatchScopeModal" class="codex-btn" style="font-size: 0.8rem; padding: 8px 16px;">作用域</button>
                 <div style="width: 1px; height: 24px; background: var(--gold-dark);"></div>
                 <button @click="toggleBatchMode" class="codex-btn icon-btn" style="width: 32px; height: 32px;">
                     <svg style="width: 16px; height: 16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">

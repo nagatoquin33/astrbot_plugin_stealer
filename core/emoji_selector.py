@@ -67,6 +67,55 @@ class EmojiSelector:
         """
         return self.plugin.is_send_enabled_for_event(event)
 
+    def _get_event_target_entry(self, event: AstrMessageEvent | None) -> str:
+        if event is None:
+            return ""
+
+        cfg = getattr(self.plugin, "plugin_config", None)
+        if not cfg:
+            return ""
+
+        try:
+            scope, target_id = cfg.get_event_target(event)
+        except Exception:
+            return ""
+
+        if not scope or not target_id:
+            return ""
+        return f"{scope}:{target_id}"
+
+    def _is_entry_allowed_for_event(
+        self, data: dict | None, event: AstrMessageEvent | None
+    ) -> bool:
+        if not isinstance(data, dict) or event is None:
+            return True
+
+        scope_mode = str(data.get("scope_mode", "public") or "public").strip().lower()
+        if scope_mode not in {"local", "private", "scoped"}:
+            return True
+
+        origin_target = str(data.get("origin_target", "") or "").strip()
+        current_target = self._get_event_target_entry(event)
+        if not origin_target or not current_target:
+            return True
+        return origin_target == current_target
+
+    def is_path_allowed_for_event(
+        self, path: str, event: AstrMessageEvent | None
+    ) -> bool:
+        if not path:
+            return False
+
+        cache_service = getattr(self.plugin, "cache_service", None)
+        if not cache_service:
+            return True
+
+        try:
+            idx = cache_service.get_index_cache_readonly() or {}
+            return self._is_entry_allowed_for_event(idx.get(path), event)
+        except Exception:
+            return True
+
     def _canon_path(self, path: str) -> str:
         """规范化路径用于比较去重。"""
         try:
@@ -270,7 +319,12 @@ class EmojiSelector:
                 temp = temp.replace(match.group(0), "", 1)
         return temp, found
 
-    async def select_emoji(self, category: str, context_text: str = "") -> str | None:
+    async def select_emoji(
+        self,
+        category: str,
+        context_text: str = "",
+        event: AstrMessageEvent | None = None,
+    ) -> str | None:
         """选择表情包（智能或随机）。"""
         async with self._selection_lock:
             use_smart = self.plugin.smart_emoji_selection
@@ -281,41 +335,80 @@ class EmojiSelector:
                     category,
                     context_text,
                     candidate_categories=candidate_categories,
+                    event=event,
                 )
                 if smart_path:
                     return smart_path
 
             for candidate_category in candidate_categories:
                 random_path = self._select_emoji_random_impl(
-                    candidate_category, use_smart=use_smart
+                    candidate_category, use_smart=use_smart, event=event
                 )
                 if random_path:
                     return random_path
 
             return None
 
-    async def select_emoji_smart(self, category: str, context_text: str) -> str | None:
+    async def select_emoji_smart(
+        self,
+        category: str,
+        context_text: str,
+        event: AstrMessageEvent | None = None,
+    ) -> str | None:
         """智能选择表情包（强制智能）。"""
         async with self._selection_lock:
             return await self._select_emoji_smart_impl(
                 category,
                 context_text,
                 candidate_categories=self._get_candidate_categories(category),
+                event=event,
             )
 
-    def _select_emoji_random_impl(self, category: str, use_smart: bool) -> str | None:
-        cfg = self.plugin.plugin_config
-        categories_dir = cfg.categories_dir if cfg else None
-
-        if not categories_dir:
-            return None
-
-        cat_dir = Path(categories_dir) / category
-        if not cat_dir.exists():
-            return None
-
+    def _select_emoji_random_impl(
+        self,
+        category: str,
+        use_smart: bool,
+        event: AstrMessageEvent | None = None,
+    ) -> str | None:
         try:
-            files = [p for p in cat_dir.iterdir() if p.is_file()]
+            files: list[Path] = []
+            cache_service = getattr(self.plugin, "cache_service", None)
+            had_cache_service = bool(cache_service)
+            cache_index_available = False
+            if cache_service:
+                idx = cache_service.get_index_cache_readonly() or {}
+                cache_index_available = bool(idx)
+                for file_path, data in idx.items():
+                    if not isinstance(data, dict):
+                        continue
+                    if self._get_category_from_data(data) != category:
+                        continue
+                    if not self._is_entry_allowed_for_event(data, event):
+                        continue
+                    path_obj = Path(file_path)
+                    if path_obj.is_file():
+                        files.append(path_obj)
+
+            if not files:
+                if event is not None and had_cache_service and not cache_index_available:
+                    return None
+
+                cfg = self.plugin.plugin_config
+                categories_dir = cfg.categories_dir if cfg else None
+                if not categories_dir:
+                    return None
+
+                cat_dir = Path(categories_dir) / category
+                if not cat_dir.exists():
+                    return None
+                files = []
+                for path_obj in cat_dir.iterdir():
+                    if not path_obj.is_file():
+                        continue
+                    if not self.is_path_allowed_for_event(str(path_obj), event):
+                        continue
+                    files.append(path_obj)
+
             if not files:
                 return None
 
@@ -366,6 +459,7 @@ class EmojiSelector:
         category: str,
         context_text: str,
         candidate_categories: list[str] | None = None,
+        event: AstrMessageEvent | None = None,
     ) -> str | None:
         """?????????????????"""
         try:
@@ -389,6 +483,8 @@ class EmojiSelector:
 
                 entry_category = self._get_category_from_data(data)
                 if entry_category not in allowed_categories:
+                    continue
+                if not self._is_entry_allowed_for_event(data, event):
                     continue
 
                 tags = self._parse_tags(data.get("tags", []))
@@ -501,7 +597,11 @@ class EmojiSelector:
         return []
 
     async def search_images(
-        self, query: str, limit: int = 1, idx: dict | None = None
+        self,
+        query: str,
+        limit: int = 1,
+        idx: dict | None = None,
+        event: AstrMessageEvent | None = None,
     ) -> list[tuple[str, str, str, str]]:
         """根据查询词搜索图片（纯评分搜索，不含关键词映射）。"""
         try:
@@ -524,6 +624,8 @@ class EmojiSelector:
 
             for file_path, data in idx.items():
                 if not isinstance(data, dict):
+                    continue
+                if not self._is_entry_allowed_for_event(data, event):
                     continue
 
                 tags = self._parse_tags(data.get("tags", []))
@@ -658,6 +760,7 @@ class EmojiSelector:
         query: str,
         limit: int = 5,
         idx: dict | None = None,
+        event: AstrMessageEvent | None = None,
     ) -> list[tuple[str, str, str, str]]:
         """智能搜索表情包（带多级 fallback）。
 
@@ -675,7 +778,7 @@ class EmojiSelector:
             list[tuple[path, desc, emotion, tags]]
         """
         # 1) 直接搜索
-        results = await self.search_images(query, limit=limit, idx=idx)
+        results = await self.search_images(query, limit=limit, idx=idx, event=event)
         if results:
             return results
 
@@ -684,14 +787,16 @@ class EmojiSelector:
         keyword_map = cfg.get_keyword_map() if cfg else {}
         if query in keyword_map:
             mapped_category = keyword_map[query]
-            results = await self.search_images(mapped_category, limit=limit, idx=idx)
+            results = await self.search_images(
+                mapped_category, limit=limit, idx=idx, event=event
+            )
             if results:
                 return results
 
         # 3) 模糊匹配到分类
         best_match = self._find_best_category_match(query, threshold=0.4)
         if best_match:
-            results = await self.search_images(best_match, limit=limit, idx=idx)
+            results = await self.search_images(best_match, limit=limit, idx=idx, event=event)
 
         return results
 
@@ -853,7 +958,7 @@ class EmojiSelector:
 
         # 遍历情绪列表，第一个能选到表情包的就发送
         for emotion in emotions:
-            emoji_path = await self.select_emoji(emotion, cleaned_text)
+            emoji_path = await self.select_emoji(emotion, cleaned_text, event=event)
             if emoji_path:
                 await self.send_emoji_with_text(event, emoji_path, cleaned_text)
                 logger.debug(f"已发送表情包 (情绪={emotion})")

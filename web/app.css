@@ -572,6 +572,43 @@ h2 {
     text-overflow: ellipsis;
 }
 
+.item-meta-row {
+    display: flex;
+    justify-content: center;
+    margin-top: 6px;
+}
+
+.scope-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    letter-spacing: 0.04em;
+    border: 1px solid rgba(212, 180, 110, 0.35);
+    color: var(--gold-bright);
+    background: rgba(212, 180, 110, 0.1);
+}
+
+.scope-pill.local {
+    border-color: rgba(239, 68, 68, 0.4);
+    color: #fecaca;
+    background: rgba(239, 68, 68, 0.14);
+}
+
+.scope-pill.public {
+    border-color: rgba(34, 197, 94, 0.35);
+    color: #bbf7d0;
+    background: rgba(34, 197, 94, 0.12);
+}
+
+.form-hint {
+    margin-top: 8px;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
+
 /* ========== Pagination ========== */
 .pagination-bar {
     display: flex;

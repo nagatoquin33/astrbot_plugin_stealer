@@ -18,13 +18,15 @@ createApp({
         const previewOpen = ref(false);
         const previewItem = ref(null);
         const isEditing = ref(false);
-        const editForm = reactive({ category: '', tags: '', scene: '', desc: '' });
+        const editForm = reactive({ category: '', tags: '', scene: '', desc: '', scope_mode: 'public' });
 
         // Batch Mode
         const isBatchMode = ref(false);
         const selectedImages = ref(new Set());
         const batchMoveOpen = ref(false);
         const batchTargetCategory = ref('');
+        const batchScopeOpen = ref(false);
+        const batchScopeMode = ref('public');
 
         // Upload Modal
         const uploadOpen = ref(false);
@@ -60,6 +62,18 @@ createApp({
         };
 
         const isSceneSelected = (scene) => parseSceneList(uploadForm.scene).includes(scene);
+
+        const formatOriginTarget = (target) => {
+            const raw = String(target || '').trim();
+            if (!raw) return '未记录';
+            if (raw.startsWith('group:')) return `群 ${raw.slice(6)}`;
+            if (raw.startsWith('user:')) return `用户 ${raw.slice(5)}`;
+            return raw;
+        };
+
+        const getScopeLabel = (scopeMode) => (
+            String(scopeMode || 'public').toLowerCase() === 'local' ? '本群限定' : '公共'
+        );
 
         // Upload Helpers
 
@@ -269,6 +283,7 @@ createApp({
                 tags: (previewItem.value.tags || []).join(', '),
                 scene: (previewItem.value.scenes || []).join('、'),
                 desc: previewItem.value.desc,
+                scope_mode: previewItem.value.scope_mode || 'public',
             });
             isEditing.value = true;
         };
@@ -292,6 +307,7 @@ createApp({
                     previewItem.value.tags = editForm.tags.split(',').map((t) => t.trim()).filter((t) => t);
                     previewItem.value.scenes = parseSceneList(editForm.scene);
                     previewItem.value.desc = editForm.desc;
+                    previewItem.value.scope_mode = editForm.scope_mode || 'public';
                     fetchImages(currentPage.value);
                 } else {
                     alert(data.error || '保存失败');
@@ -377,6 +393,16 @@ createApp({
             batchMoveOpen.value = false;
         };
 
+        const openBatchScopeModal = () => {
+            if (selectedImages.value.size === 0) return;
+            batchScopeMode.value = 'public';
+            batchScopeOpen.value = true;
+        };
+
+        const closeBatchScopeModal = () => {
+            batchScopeOpen.value = false;
+        };
+
         const confirmBatchMove = async () => {
             if (!batchTargetCategory.value) return;
             try {
@@ -397,6 +423,58 @@ createApp({
                     fetchStats();
                 } else {
                     alert(data.error || '转移失败');
+                }
+            } catch (e) {
+                alert('操作失败: ' + e.message);
+            }
+        };
+
+        const confirmBatchScope = async () => {
+            if (!batchScopeMode.value) return;
+            try {
+                const res = await apiFetch('api/images/batch/scope', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        hashes: Array.from(selectedImages.value),
+                        scope_mode: batchScopeMode.value,
+                    }),
+                });
+                const data = await res.json();
+                if (data.success) {
+                    batchScopeOpen.value = false;
+                    selectedImages.value.clear();
+                    isBatchMode.value = false;
+                    await fetchImages(currentPage.value);
+                    if (Number(data.skipped || 0) > 0) {
+                        alert(`已更新 ${data.count || 0} 张，另有 ${data.skipped} 张缺少来源群信息，无法设为 local。`);
+                    }
+                } else {
+                    alert(data.error || '作用域设置失败');
+                }
+            } catch (e) {
+                alert('操作失败: ' + e.message);
+            }
+        };
+
+        const toggleScope = async (img, scopeMode) => {
+            if (!img) return;
+            try {
+                const res = await apiFetch(`api/images/${img.hash}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ scope_mode: scopeMode }),
+                });
+                const data = await res.json();
+                if (data.success) {
+                    if (previewItem.value && previewItem.value.hash === img.hash) {
+                        previewItem.value.scope_mode = scopeMode;
+                    }
+                    await fetchImages(currentPage.value);
+                } else if (data.error === 'Origin target missing') {
+                    alert('该图片缺少来源群信息，无法设置为 local。');
+                } else {
+                    alert(data.error || '作用域更新失败');
                 }
             } catch (e) {
                 alert('操作失败: ' + e.message);
@@ -761,6 +839,8 @@ createApp({
             selectedImages,
             batchMoveOpen,
             batchTargetCategory,
+            batchScopeOpen,
+            batchScopeMode,
             toggleBatchMode,
             toggleSelection,
             selectAll,
@@ -768,6 +848,9 @@ createApp({
             openBatchMoveModal,
             closeBatchMoveModal,
             confirmBatchMove,
+            openBatchScopeModal,
+            closeBatchScopeModal,
+            confirmBatchScope,
             
             // Upload
             uploadOpen,
@@ -819,9 +902,12 @@ createApp({
             fetchImages,
             debouncedSearch,
             deleteImage,
+            toggleScope,
             prevPage,
             nextPage,
             formatDate,
+            formatOriginTarget,
+            getScopeLabel,
         };
     },
 }).mount('#app');

@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.7] - 2026-03-22
+### add
+- 新增 `/meme blacklist <序号|文件名>`，支持按 `/meme list` 显示的全局序号删除表情并加入黑名单
+- 新增表情包作用域 `public/local`，收集时记录 `origin_target`，可将指定表情限制为仅来源群发送
+- WebUI 新增作用域展示与管理，支持查看来源群、单图切换 `public/local`、批量设置作用域
+- 新增 `tests/test_scope_feature.py`，覆盖来源记录、作用域切换、跨群过滤与索引重建元数据保留
+
+### fix
+- 搜索、随机选图、LLM 工具发送统一遵守表情包作用域限制，避免限定表情串群发送
+- 随机选图在索引缓存为空时改为安全失败，避免在缺少元数据时误发 `local` 表情
+- `rebuild_index` 现在会保留 `origin_target`、`scope_mode` 等扩展元数据，减少重建索引后的信息丢失
+
 ## [2.4.6] - 2026-03-18
 ### fix
 - 修复 VLM 分类提示词模板渲染，避免 JSON 花括号触发格式化异常
