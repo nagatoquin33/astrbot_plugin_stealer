@@ -106,15 +106,29 @@ class EmojiSelector:
         if not path:
             return False
 
+        if event is None:
+            return True
+
         cache_service = getattr(self.plugin, "cache_service", None)
         if not cache_service:
-            return True
+            return False
 
         try:
             idx = cache_service.get_index_cache_readonly() or {}
-            return self._is_entry_allowed_for_event(idx.get(path), event)
+            data = idx.get(path)
+            if data is None:
+                target_path = self._canon_path(path)
+                for stored_path, stored_meta in idx.items():
+                    if self._canon_path(stored_path) == target_path:
+                        data = stored_meta
+                        break
+
+            if data is None:
+                return False
+
+            return self._is_entry_allowed_for_event(data, event)
         except Exception:
-            return True
+            return False
 
     def _canon_path(self, path: str) -> str:
         """规范化路径用于比较去重。"""
@@ -390,7 +404,9 @@ class EmojiSelector:
                         files.append(path_obj)
 
             if not files:
-                if event is not None and had_cache_service and not cache_index_available:
+                # 带事件上下文时必须依赖索引元数据判断作用域，避免在索引缺项、
+                # 缓存未初始化或重建中断时通过目录兜底误发 local 表情。
+                if event is not None:
                     return None
 
                 cfg = self.plugin.plugin_config

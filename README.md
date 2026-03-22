@@ -63,6 +63,7 @@
 
 启动后访问 `http://<你的IP>:9191/`，默认启用登录验证，密码在插件配置中查看（首次自动生成 6 位随机密码）。
 
+- `blacklist` 和 `scope` 为即开即用功能，无需额外新增配置项；未设置作用域的图片默认按 `public` 处理
 - WebUI 已支持表情包作用域管理：`public` 为公共图库，`local` 仅允许在来源群发送
 - 可在列表和详情页查看 `origin_target`，并批量调整作用域
 
@@ -204,4 +205,3 @@
 有问题欢迎提 [Issue](https://github.com/nagatoquin33/astrbot_plugin_stealer/issues) 或群里找我，一般很快会看到。
 
 </div>
-
