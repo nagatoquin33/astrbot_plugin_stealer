@@ -99,9 +99,18 @@ createApp({
         const theme = ref('dark');
 
         // API Helper
+        const normalizeUrl = (url) => {
+            const raw = String(url || '').trim();
+            if (!raw) return '/';
+            if (/^(?:[a-z]+:)?\/\//i.test(raw)) return raw;
+            if (raw.startsWith('/')) return raw;
+            return `/${raw.replace(/^\.?\//, '')}`;
+        };
+
         const apiFetch = (url, options = {}) => {
+            const requestUrl = normalizeUrl(url);
             const headers = new Headers(options.headers || {});
-            return fetch(url, { ...options, headers, credentials: 'same-origin' })
+            return fetch(requestUrl, { ...options, headers, credentials: 'same-origin' })
                 .then((res) => {
                     if (res.status === 401) {
                         isAuthed.value = false;
@@ -109,7 +118,9 @@ createApp({
                     }
                     return res;
                 })
-                .catch(() => fetch(url, { ...options, headers, credentials: 'same-origin' }));
+                .catch(() =>
+                    fetch(requestUrl, { ...options, headers, credentials: 'same-origin' })
+                );
         };
 
         // Data Fetching
@@ -167,7 +178,7 @@ createApp({
             authChecking.value = true;
             loginError.value = '';
             try {
-                const res = await fetch('auth/info');
+                const res = await fetch(normalizeUrl('auth/info'));
                 const data = await res.json();
                 authRequired.value = !!(data && data.requires_auth);
                 if (data && data.session_timeout) sessionTimeout.value = Number(data.session_timeout) || 3600;
