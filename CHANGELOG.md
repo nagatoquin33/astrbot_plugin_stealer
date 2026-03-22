@@ -10,7 +10,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 新增 `/meme blacklist <序号|文件名>`，支持按 `/meme list` 显示的全局序号删除表情并加入黑名单
 - 新增表情包作用域 `public/local`，收集时记录 `origin_target`，可将指定表情限制为仅来源群发送
 - WebUI 新增作用域展示与管理，支持查看来源群、单图切换 `public/local`、批量设置作用域
-- 新增 `tests/test_scope_feature.py`，覆盖来源记录、作用域切换、跨群过滤与索引重建元数据保留
 
 ### fix
 - 搜索、随机选图、LLM 工具发送统一遵守表情包作用域限制，避免限定表情串群发送
