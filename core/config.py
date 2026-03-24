@@ -26,9 +26,9 @@ class PluginConfig(BaseModel):
     auto_send: bool = False
     emoji_chance: float = 0.2
     send_emoji_as_gif: bool = False
-    emoji_send_delay: float = 2.0
+    emoji_send_delay: float = 5.0
     emoji_send_delay_random: bool = False
-    emoji_send_delay_max: float = 4.0
+    emoji_send_delay_max: float = 8.0
 
     # === 群聊过滤 ===
     steal_target_whitelist: list[str] = []

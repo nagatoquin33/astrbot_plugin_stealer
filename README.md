@@ -88,9 +88,9 @@
 | `auto_send` | `false` | 自动随聊发送表情包 |
 | `emoji_chance` | `0.2` | 自动发送的概率（0.0 ~ 1.0） |
 | `send_emoji_as_gif` | `false` | 以 GIF 格式发送（更像真表情包，但高频场景内存占用略高） |
-| `emoji_send_delay` | `2.0` | 发送延迟（秒），避免与分段插件冲突，设为 0 立即发送 |
+| `emoji_send_delay` | `5.0` | 发送延迟（秒），避免与分段插件冲突，设为 0 立即发送 |
 | `emoji_send_delay_random` | `false` | 开启后在 [延迟] ~ [最大延迟] 之间随机等待，更自然 |
-| `emoji_send_delay_max` | `4.0` | 随机延迟最大值（秒），仅随机模式生效 |
+| `emoji_send_delay_max` | `8.0` | 随机延迟最大值（秒），仅随机模式生效 |
 | `smart_emoji_selection` | `true` | 智能评分选择；关闭则随机选取 |
 
 ### 情绪识别

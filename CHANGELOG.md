@@ -8,9 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.4.8] - 2026-03-24
 ### add
 - 新增表情包发送延迟配置，避免与分段插件冲突
-  - `emoji_send_delay`: 固定延迟时间（秒），默认 2.0
+  - `emoji_send_delay`: 固定延迟时间（秒），默认 5.0
   - `emoji_send_delay_random`: 是否开启随机延迟，默认关闭
-  - `emoji_send_delay_max`: 随机延迟最大值（秒），默认 4.0，支持滑块配置
+  - `emoji_send_delay_max`: 随机延迟最大值（秒），默认 8.0，支持滑块配置
 - 随机延迟模式下，实际延迟在 [延迟] ~ [最大延迟] 之间随机，更加自然
 
 ## [2.4.7] - 2026-03-22

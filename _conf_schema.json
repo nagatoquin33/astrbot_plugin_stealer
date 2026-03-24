@@ -79,8 +79,8 @@
   "emoji_send_delay": {
     "description": "表情包发送延迟/秒",
     "type": "float",
-    "default": 2.0,
-    "hint": "等待此时间后发送表情包，避免与分段插件冲突\n建议 1.5-3.0 秒，让分段先发完\n设为 0 则立即发送"
+    "default": 5.0,
+    "hint": "等待此时间后发送表情包，避免与分段插件冲突\n建议 5.0 秒以上，让分段先发完\n设为 0 则立即发送"
   },
   "emoji_send_delay_random": {
     "description": "随机延迟",
@@ -91,10 +91,10 @@
   "emoji_send_delay_max": {
     "description": "随机延迟最大值/秒",
     "type": "float",
-    "default": 4.0,
+    "default": 8.0,
     "slider": {
       "min": 0.0,
-      "max": 10.0,
+      "max": 15.0,
       "step": 0.5
     },
     "hint": "仅随机延迟开启时生效，实际延迟在 [延迟] ~ [最大值] 之间随机"
