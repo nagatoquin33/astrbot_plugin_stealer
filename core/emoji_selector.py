@@ -898,6 +898,60 @@ class EmojiSelector:
             logger.error(f"编码表情包失败: {emoji_path}, {e}")
             return None
 
+    async def _try_send_telegram_sticker(
+        self, event: AstrMessageEvent, emoji_path: str
+    ) -> bool:
+        """Telegram 平台优先尝试以贴纸发送，失败返回 False 供上层回退。"""
+        try:
+            platform_name = str(event.get_platform_name() or "").strip().lower()
+        except Exception:
+            platform_name = ""
+
+        if platform_name != "telegram":
+            return False
+
+        client = getattr(event, "client", None)
+        if client is None or not hasattr(client, "send_sticker"):
+            return False
+
+        if not emoji_path or not os.path.exists(emoji_path):
+            return False
+
+        chat_id = ""
+        try:
+            chat_id = str(event.get_group_id() or "").strip()
+        except Exception:
+            chat_id = ""
+        if not chat_id:
+            try:
+                chat_id = str(event.get_sender_id() or "").strip()
+            except Exception:
+                chat_id = ""
+        if not chat_id:
+            return False
+
+        message_thread_id = None
+        if "#" in chat_id:
+            chat_id, thread_part = chat_id.split("#", 1)
+            thread_part = str(thread_part or "").strip()
+            if thread_part:
+                try:
+                    message_thread_id = int(thread_part)
+                except Exception:
+                    message_thread_id = thread_part
+
+        payload = {"chat_id": chat_id, "sticker": emoji_path}
+        if message_thread_id is not None:
+            payload["message_thread_id"] = message_thread_id
+
+        try:
+            await client.send_sticker(**payload)
+            logger.debug(f"[Stealer] Telegram 已按贴纸发送: {emoji_path}")
+            return True
+        except Exception as e:
+            logger.debug(f"[Stealer] Telegram 贴纸发送失败，将回退图片发送: {e}")
+            return False
+
     async def send_emoji_with_text(
         self, event: AstrMessageEvent, emoji_path: str, cleaned_text: str
     ) -> None:
@@ -913,10 +967,14 @@ class EmojiSelector:
             if not self._check_group_allowed(event):
                 return
 
+            if await self._try_send_telegram_sticker(event, emoji_path):
+                await self.record_emoji_usage(emoji_path, trigger="auto")
+                logger.debug(f"[Stealer] 已发送 Telegram 贴纸: {emoji_path}")
+                return
+
             b64 = await self._encode_emoji(emoji_path)
             if not b64:
                 return
-
             await event.send(MessageChain([ImageComponent.fromBase64(b64)]))
             await self.record_emoji_usage(emoji_path, trigger="auto")
             logger.debug(f"[Stealer] 已发送表情包: {emoji_path}")
@@ -947,6 +1005,9 @@ class EmojiSelector:
             # 依次编码并添加图片
             sent_paths = []
             for path in emoji_paths:
+                if await self._try_send_telegram_sticker(event, path):
+                    sent_paths.append(path)
+                    continue
                 b64 = await self._encode_emoji(path)
                 if b64:
                     new_result.base64_image(b64)
