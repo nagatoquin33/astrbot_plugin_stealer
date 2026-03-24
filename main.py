@@ -53,7 +53,6 @@ class Main(Star):
     IMAGE_PROCESSING_TIMEOUT_SECONDS = 60  # 图片处理超时时间
     MAX_SEARCH_RESULTS = 5  # 搜索表情包最大返回数量（避免 FC 输出过长）
     AUTO_EMOJI_COOLDOWN_SECONDS = 20  # 同一会话自动发表情的最短间隔
-    PASSIVE_EMOJI_SEND_DELAY_SECONDS = 0.15  # 被动标签模式下让文字先落地
 
     # 从外部文件加载的提示词（已迁移到ImageProcessorService）
 
@@ -162,6 +161,9 @@ class Main(Star):
         self.steal_mode = self.plugin_config.steal_mode
         self.steal_chance = self.plugin_config.steal_chance
         self.send_emoji_as_gif = self.plugin_config.send_emoji_as_gif
+        self.emoji_send_delay = self.plugin_config.emoji_send_delay
+        self.emoji_send_delay_random = self.plugin_config.emoji_send_delay_random
+        self.emoji_send_delay_max = self.plugin_config.emoji_send_delay_max
         self.max_reg_num = self.plugin_config.max_reg_num
         self.content_filtration = self.plugin_config.content_filtration
         self.smart_emoji_selection = self.plugin_config.smart_emoji_selection
@@ -1213,6 +1215,22 @@ class Main(Star):
         """委托给 EmojiSelector。"""
         return await self.emoji_selector.try_send_emoji(event, emotions, cleaned_text)
 
+    def _get_emoji_send_delay(self) -> float:
+        """根据配置计算表情包发送延迟时间（秒）。
+
+        Returns:
+            float: 延迟秒数，0 表示无延迟
+        """
+        import random
+
+        min_delay = max(0.0, self.emoji_send_delay)
+
+        if not self.emoji_send_delay_random:
+            return min_delay
+
+        max_delay = max(min_delay, self.emoji_send_delay_max)
+        return min_delay + random.random() * (max_delay - min_delay)
+
     async def _async_analyze_and_send_emoji(
         self,
         event: AstrMessageEvent,
@@ -1284,8 +1302,10 @@ class Main(Star):
                 logger.debug("[Stealer] 没有可用的情绪标签，跳过发送")
                 return
 
-            if not is_intelligent_mode:
-                await asyncio.sleep(self.PASSIVE_EMOJI_SEND_DELAY_SECONDS)
+            # 根据配置应用延迟（避免与分段插件冲突）
+            delay_seconds = self._get_emoji_send_delay()
+            if delay_seconds > 0:
+                await asyncio.sleep(delay_seconds)
 
             # 尝试发送表情包
             sent = await self._try_send_emoji(event, final_emotions, text)

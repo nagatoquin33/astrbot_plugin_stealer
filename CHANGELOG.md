@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.8] - 2026-03-24
+### add
+- 新增表情包发送延迟配置，避免与分段插件冲突
+  - `emoji_send_delay`: 固定延迟时间（秒），默认 2.0
+  - `emoji_send_delay_random`: 是否开启随机延迟，默认关闭
+  - `emoji_send_delay_max`: 随机延迟最大值（秒），默认 4.0，支持滑块配置
+- 随机延迟模式下，实际延迟在 [延迟] ~ [最大延迟] 之间随机，更加自然
+
 ## [2.4.7] - 2026-03-22
 ### add
 - 新增 `/meme blacklist <序号|文件名>`，支持按 `/meme list` 显示的全局序号删除表情并加入黑名单

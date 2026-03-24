@@ -76,6 +76,29 @@
     "default": false,
     "hint": "✅ 开启：以 GIF 输出（更接近真表情包样式）\n❌ 关闭：按原文件格式发送（png/jpg/gif 等）\n\n⚠️ 开启后高频发送大图/动图场景会有较高瞬时内存占用"
   },
+  "emoji_send_delay": {
+    "description": "表情包发送延迟/秒",
+    "type": "float",
+    "default": 2.0,
+    "hint": "等待此时间后发送表情包，避免与分段插件冲突\n建议 1.5-3.0 秒，让分段先发完\n设为 0 则立即发送"
+  },
+  "emoji_send_delay_random": {
+    "description": "随机延迟",
+    "type": "bool",
+    "default": false,
+    "hint": "✅ 开启：在 [延迟] ~ [最大延迟] 之间随机等待，更自然\n❌ 关闭：使用固定延迟"
+  },
+  "emoji_send_delay_max": {
+    "description": "随机延迟最大值/秒",
+    "type": "float",
+    "default": 4.0,
+    "slider": {
+      "min": 0.0,
+      "max": 10.0,
+      "step": 0.5
+    },
+    "hint": "仅随机延迟开启时生效，实际延迟在 [延迟] ~ [最大值] 之间随机"
+  },
   "smart_emoji_selection": {
     "description": "智能表情包选择",
     "type": "bool",
