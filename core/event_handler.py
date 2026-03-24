@@ -45,6 +45,28 @@ class EventHandler:
             s = s[1:-1].strip()
         return s
 
+    def _get_event_platform_name(self, event: AstrMessageEvent | None = None) -> str:
+        """获取事件平台名（小写），失败时返回空字符串。"""
+        if event is None:
+            return ""
+
+        for getter in ("get_platform_name", "get_platform_id"):
+            fn = getattr(event, getter, None)
+            if callable(fn):
+                try:
+                    name = self._normalize_str(fn()).lower()
+                    if name:
+                        return name
+                except Exception:
+                    pass
+
+        return ""
+
+    def _is_telegram_event(self, event: AstrMessageEvent | None = None) -> bool:
+        """判断事件是否来自 Telegram 平台。"""
+        platform_name = self._get_event_platform_name(event)
+        return platform_name == "telegram"
+
     async def _download_original_image(self, img: Image) -> tuple[str | None, bool]:
         """下载原始图片文件。
 
@@ -304,6 +326,29 @@ class EventHandler:
                     return int(sub_type) == 1
                 except Exception:
                     return False
+
+            # Telegram 兼容：优先识别 sticker，再兜底 .webp 贴纸文件
+            if self._is_telegram_event(event):
+                try:
+                    raw_event = getattr(getattr(event, "message_obj", None), "raw_message", None)
+                    tg_message = getattr(raw_event, "message", None)
+                    tg_sticker = getattr(tg_message, "sticker", None) if tg_message else None
+                    if tg_sticker is not None:
+                        is_animated = bool(getattr(tg_sticker, "is_animated", False))
+                        is_video = bool(getattr(tg_sticker, "is_video", False))
+                        if is_animated or is_video:
+                            logger.debug("检测到 Telegram 动态贴纸，当前跳过收录")
+                            return False
+                        logger.debug("检测到 Telegram 静态贴纸")
+                        return True
+                except Exception:
+                    pass
+
+                img_file = self._normalize_str(getattr(img, "file", "")).lower()
+                img_url = self._normalize_str(getattr(img, "url", "")).lower()
+                if img_file.endswith(".webp") or img_url.endswith(".webp"):
+                    logger.debug("检测到 Telegram WebP 贴纸文件")
+                    return True
 
             # 方式0: 从原始事件中查找 sub_type (最可靠的方法)
             if (

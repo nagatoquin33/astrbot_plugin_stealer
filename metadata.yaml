@@ -7,3 +7,4 @@ repo: https://github.com/nagatoquin33/astrbot_plugin_stealer
 astrbot_version: ">=4.10.4"
 support_platforms:
   - aiocqhttp
+  - telegram
