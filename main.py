@@ -1699,13 +1699,24 @@ class Main(Star):
 
             # 发送表情包
             logger.info(f"[Tool] 发送选中的表情包: {path} (emotion={emotion})")
-            b64 = await self.image_processor_service._file_to_gif_base64(path)
+            sent_as_sticker = False
+            try:
+                sent_as_sticker = await self.emoji_selector._try_send_telegram_sticker(
+                    event, path
+                )
+            except Exception:
+                sent_as_sticker = False
 
-            await event.send(MessageChain([ImageComponent.fromBase64(b64)]))
+            if not sent_as_sticker:
+                b64 = await self.image_processor_service._file_to_gif_base64(path)
+                await event.send(MessageChain([ImageComponent.fromBase64(b64)]))
             await self.emoji_selector.record_emoji_usage(path, trigger="llm_tool")
 
             # 返回详细的成功信息
-            success_msg = f"发送成功。\n\n你发送的表情包：\n- 编号：{emoji_id}\n- 分类：{emotion}\n- 描述：{desc}"
+            mode_desc = "Telegram贴纸" if sent_as_sticker else "图片"
+            success_msg = (
+                f"发送成功（{mode_desc}）。\n\n你发送的表情包：\n- 编号：{emoji_id}\n- 分类：{emotion}\n- 描述：{desc}"
+            )
             logger.info(f"[Tool] {success_msg}")
             yield success_msg
             return
