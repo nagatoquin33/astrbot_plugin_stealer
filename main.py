@@ -50,7 +50,7 @@ class Main(Star):
     CAPACITY_CONTROL_INTERVAL_SECONDS = 60 * 60  # 60分钟
 
     # 超时和处理常量
-    IMAGE_PROCESSING_TIMEOUT_SECONDS = 60  # 图片处理超时时间
+    IMAGE_PROCESSING_TIMEOUT_SECONDS = 120  # 图片处理超时时间（GIF动图处理需要更长时间）
     MAX_SEARCH_RESULTS = 5  # 搜索表情包最大返回数量（避免 FC 输出过长）
     AUTO_EMOJI_COOLDOWN_SECONDS = 20  # 同一会话自动发表情的最短间隔
 
