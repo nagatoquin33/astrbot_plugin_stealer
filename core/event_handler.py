@@ -2,6 +2,7 @@ import asyncio
 import os
 import random
 import tempfile
+import threading
 import time
 from typing import Any
 
@@ -14,6 +15,11 @@ from astrbot.api.message_components import Image, Plain
 
 class EventHandler:
     """事件处理服务类，负责处理所有与插件相关的事件操作。"""
+
+    HTTP_TIMEOUT_SECONDS = 30
+    HTTP_CONNECTOR_LIMIT = 10
+    HTTP_CONNECTOR_LIMIT_PER_HOST = 5
+    HTTP_DNS_CACHE_SECONDS = 300
 
     def __init__(self, plugin_instance: Any):
         """初始化事件处理服务。
@@ -29,8 +35,34 @@ class EventHandler:
             0.0  # 上次处理时间（用于interval和cooldown模式）
         )
 
-        # 强制捕获窗口
+        # 强制捕获窗口（需要锁保护）
         self._force_capture_windows: dict[str, dict[str, object]] = {}
+        self._force_capture_lock = threading.RLock()  # 可重入锁，保护并发访问
+
+        # 共享 aiohttp session（复用连接池）
+        self._aiohttp_session: aiohttp.ClientSession | None = None
+
+    async def _get_aiohttp_session(self) -> aiohttp.ClientSession:
+        """获取或创建共享的 aiohttp session。"""
+        if self._aiohttp_session is None or self._aiohttp_session.closed:
+            connector = aiohttp.TCPConnector(
+                limit=self.HTTP_CONNECTOR_LIMIT,
+                limit_per_host=self.HTTP_CONNECTOR_LIMIT_PER_HOST,
+                ttl_dns_cache=self.HTTP_DNS_CACHE_SECONDS,
+                use_dns_cache=True,
+            )
+            timeout = aiohttp.ClientTimeout(total=self.HTTP_TIMEOUT_SECONDS)
+            self._aiohttp_session = aiohttp.ClientSession(
+                connector=connector,
+                timeout=timeout,
+            )
+        return self._aiohttp_session
+
+    async def close_aiohttp_session(self) -> None:
+        """关闭共享的 aiohttp session。"""
+        if self._aiohttp_session and not self._aiohttp_session.closed:
+            await self._aiohttp_session.close()
+            self._aiohttp_session = None
 
     def _normalize_str(self, value: object) -> str:
         """规范化字符串值。"""
@@ -88,10 +120,10 @@ class EventHandler:
             headers["Authorization"] = f"Bearer {napcat_token}"
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)
-                ) as resp:
+            session = await self._get_aiohttp_session()
+            async with session.get(
+                url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)
+            ) as resp:
                     if resp.status != 200:
                         logger.warning(f"下载图片失败: HTTP {resp.status}")
                         return None, False
@@ -152,10 +184,10 @@ class EventHandler:
             headers["Authorization"] = f"Bearer {napcat_token}"
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)
-                ) as resp:
+            session = await self._get_aiohttp_session()
+            async with session.get(
+                url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)
+            ) as resp:
                     if resp.status != 200:
                         logger.warning(f"下载图片失败: HTTP {resp.status}")
                         return None, False
@@ -617,6 +649,28 @@ class EventHandler:
             raw_image_segments = []
             raw_image_file_map = {}
 
+        # 预提取来源群信息（一次性计算，避免每张图重复提取）
+        origin_target_str = ""
+        try:
+            cfg = getattr(plugin_instance, "plugin_config", None)
+            if cfg:
+                scope, target_id = cfg.get_event_target(event)
+                if scope and target_id:
+                    origin_target_str = f"{scope}:{target_id}"
+        except Exception:
+            pass
+
+        # 批量处理结果，最后统一保存索引
+        merged_idx: dict[str, Any] = {}
+
+        def merge_result_idx(result_idx: object) -> None:
+            """Merge a single processing result into the batched index."""
+            if isinstance(result_idx, dict):
+                merged_idx.update(result_idx)
+
+        # 收集需要处理的图片（先检查平台表情包标记）
+        imgs_to_process: list[tuple[int, Image, dict]] = []  # (index, img, extra_meta)
+
         for i, img in enumerate(imgs):
             try:
                 # 检查图片元信息，只处理平台标记的表情包
@@ -629,14 +683,13 @@ class EventHandler:
                 )
 
                 if not is_platform_emoji:
-                    # 获取 subType 值用于调试日志
                     sub_type_value = getattr(img, "subType", "unknown")
                     logger.debug(f"跳过非表情包图片 (subType={sub_type_value})")
                     continue
 
-                logger.info("检测到平台标记的表情包，开始处理")
+                logger.info("检测到平台标记的表情包，加入处理队列")
 
-                # 提取 QQ 商城表情的元信息（OneBot 上报仍为 image 段）
+                # 提取 QQ 商城表情的元信息
                 extra_meta = None
                 try:
                     seg = raw_image_segments[i] if 0 <= i < len(raw_image_segments) else None
@@ -652,83 +705,130 @@ class EventHandler:
                 except Exception:
                     extra_meta = None
 
-                try:
-                    cfg = getattr(plugin_instance, "plugin_config", None)
-                    if cfg:
-                        scope, target_id = cfg.get_event_target(event)
-                        if scope and target_id:
-                            if extra_meta is None:
-                                extra_meta = {}
-                            extra_meta["origin_target"] = f"{scope}:{target_id}"
-                except Exception:
-                    pass
+                if origin_target_str:
+                    if extra_meta is None:
+                        extra_meta = {}
+                    extra_meta["origin_target"] = origin_target_str
 
-                # 尝试下载原始图片文件
-                temp_path: str | None
+                imgs_to_process.append((i, img, extra_meta or {}))
+
+            except Exception as e:
+                logger.error(f"收集图片信息失败: {e}")
+
+        # 并行下载所有图片
+        async def download_single_img(img: Image) -> str | None:
+            """下载单张图片，返回临时文件路径。"""
+            try:
                 temp_path, is_gif = await self._download_original_image(img)
                 if temp_path and is_gif:
                     logger.debug(f"已下载原始 GIF: {temp_path}")
-
-                # 如果下载失败，使用框架提供的路径
                 if not temp_path:
                     temp_path = await img.convert_to_file_path()
+                return temp_path
+            except Exception as e:
+                logger.error(f"下载图片失败: {e}")
+                return None
 
-                # 临时文件由框架创建，无需安全检查
-                # 安全检查会在 process_image 中处理最终存储路径时进行
+        if imgs_to_process:
+            logger.debug(f"开始并行下载 {len(imgs_to_process)} 张图片")
+            download_results = await asyncio.gather(
+                *[download_single_img(item[1]) for item in imgs_to_process],
+                return_exceptions=True
+            )
 
-                # 确保临时文件存在且可访问
-                if not os.path.exists(temp_path):
+            # 并行处理所有下载成功的图片
+            process_tasks = []
+
+            for (i, img, extra_meta), temp_path in zip(imgs_to_process, download_results):
+                if isinstance(temp_path, Exception):
+                    logger.error(f"下载图片异常: {temp_path}")
+                    continue
+                if not temp_path or not os.path.exists(temp_path):
                     logger.warning(f"临时文件不存在: {temp_path}")
                     continue
 
-                # 使用统一的图片处理方法
-                # 传递平台元信息标记，用于优化处理流程
-                success, idx = await plugin_instance._process_image(
-                    event,
-                    temp_path,
-                    is_temp=True,
-                    is_platform_emoji=is_platform_emoji,
-                    extra_meta=extra_meta,
+                process_tasks.append(
+                    plugin_instance._process_image(
+                        event,
+                        temp_path,
+                        is_temp=True,
+                        is_platform_emoji=True,
+                        extra_meta=extra_meta,
+                    )
                 )
-                if success and idx:
-                    await plugin_instance._save_index(idx)
-            except FileNotFoundError as e:
-                logger.error(f"图片文件不存在: {e}")
-            except PermissionError as e:
-                logger.error(f"图片文件权限错误: {e}")
-            except asyncio.TimeoutError as e:
-                logger.error(f"图片处理超时: {e}")
-            except ValueError as e:
-                logger.error(f"图片处理参数错误: {e}")
-            except Exception as e:
-                logger.error(f"处理图片失败: {e}", exc_info=True)
+
+            if process_tasks:
+                logger.debug(f"开始并行处理 {len(process_tasks)} 张图片")
+                process_results = await asyncio.gather(
+                    *process_tasks,
+                    return_exceptions=True
+                )
+
+                # 收集成功结果
+                for result in process_results:
+                    if isinstance(result, Exception):
+                        logger.error(f"处理图片异常: {result}")
+                        continue
+                    if not isinstance(result, tuple) or len(result) != 2:
+                        continue
+                    success, idx = result
+                    if success and idx:
+                        merge_result_idx(idx)
 
         # 处理 QQ 商城表情（marketface/mface）
-        for url in store_urls[:3]:
-            try:
-                temp_path, _ = await self._download_url_to_temp(url)
+        if store_urls:
+            logger.debug(f"开始并行下载 {min(len(store_urls), 3)} 个商城表情")
+
+            async def download_store_url(url: str) -> tuple[str | None, str]:
+                """下载商城表情 URL。"""
+                try:
+                    temp_path, _ = await self._download_url_to_temp(url)
+                    return temp_path, url
+                except Exception as e:
+                    logger.error(f"下载商城表情失败: {e}")
+                    return None, url
+
+            store_download_results = await asyncio.gather(
+                *[download_store_url(url) for url in store_urls[:3]],
+                return_exceptions=True
+            )
+
+            store_process_tasks = []
+            for result in store_download_results:
+                if isinstance(result, Exception):
+                    continue
+                temp_path, url = result
                 if not temp_path or not os.path.exists(temp_path):
                     continue
                 extra_meta = {"source": "qq_store", "origin_url": self._normalize_str(url)}
-                try:
-                    cfg = getattr(plugin_instance, "plugin_config", None)
-                    if cfg:
-                        scope, target_id = cfg.get_event_target(event)
-                        if scope and target_id:
-                            extra_meta["origin_target"] = f"{scope}:{target_id}"
-                except Exception:
-                    pass
-                success, idx = await plugin_instance._process_image(
-                    event,
-                    temp_path,
-                    is_temp=True,
-                    is_platform_emoji=True,
-                    extra_meta=extra_meta,
+                if origin_target_str:
+                    extra_meta["origin_target"] = origin_target_str
+                store_process_tasks.append(
+                    plugin_instance._process_image(
+                        event,
+                        temp_path,
+                        is_temp=True,
+                        is_platform_emoji=True,
+                        extra_meta=extra_meta,
+                    )
                 )
-                if success and idx:
-                    await plugin_instance._save_index(idx)
-            except Exception as e:
-                logger.error(f"处理商城表情失败: {e}", exc_info=True)
+
+            if store_process_tasks:
+                store_results = await asyncio.gather(
+                    *store_process_tasks,
+                    return_exceptions=True
+                )
+                for result in store_results:
+                    if isinstance(result, Exception):
+                        continue
+                    if isinstance(result, tuple) and len(result) == 2:
+                        success, idx = result
+                        if success and idx:
+                            merge_result_idx(idx)
+
+        # 批量保存索引（一条消息中的所有图片处理完后统一保存一次）
+        if merged_idx:
+            await plugin_instance._save_index(merged_idx)
 
     async def _clean_raw_directory(self) -> int:
         """清理raw目录中的所有原始图片文件。"""
@@ -998,7 +1098,8 @@ class EventHandler:
         key = self._get_force_capture_key(event)
         sender_id = self._get_force_capture_sender_id(event)
         until = time.time() + max(1, int(seconds))
-        self._force_capture_windows[key] = {"until": until, "sender_id": sender_id}
+        with self._force_capture_lock:
+            self._force_capture_windows[key] = {"until": until, "sender_id": sender_id}
 
     def get_force_capture_entry(self, event) -> dict[str, object] | None:
         """获取强制捕获条目。
@@ -1013,27 +1114,28 @@ class EventHandler:
         self._cleanup_expired_capture_windows()
 
         key = self._get_force_capture_key(event)
-        entry = self._force_capture_windows.get(key)
-        if not entry:
-            return None
-
-        try:
-            until = float(entry.get("until", 0))
-        except Exception:
-            self._force_capture_windows.pop(key, None)
-            return None
-
-        if time.time() > until:
-            self._force_capture_windows.pop(key, None)
-            return None
-
-        expected_sender_id = entry.get("sender_id")
-        if expected_sender_id:
-            current_sender_id = self._get_force_capture_sender_id(event)
-            if current_sender_id and str(current_sender_id) != str(expected_sender_id):
+        with self._force_capture_lock:
+            entry = self._force_capture_windows.get(key)
+            if not entry:
                 return None
 
-        return entry
+            try:
+                until = float(entry.get("until", 0))
+            except Exception:
+                self._force_capture_windows.pop(key, None)
+                return None
+
+            if time.time() > until:
+                self._force_capture_windows.pop(key, None)
+                return None
+
+            expected_sender_id = entry.get("sender_id")
+            if expected_sender_id:
+                current_sender_id = self._get_force_capture_sender_id(event)
+                if current_sender_id and str(current_sender_id) != str(expected_sender_id):
+                    return None
+
+            return entry
 
     def consume_force_capture(self, event) -> None:
         """消费强制捕获条目。
@@ -1042,7 +1144,12 @@ class EventHandler:
             event: 消息事件对象
         """
         key = self._get_force_capture_key(event)
-        self._force_capture_windows.pop(key, None)
+        with self._force_capture_lock:
+            self._force_capture_windows.pop(key, None)
+
+    async def cleanup_async(self) -> None:
+        """异步清理资源。"""
+        await self.close_aiohttp_session()
 
     def cleanup(self):
         """清理资源。"""

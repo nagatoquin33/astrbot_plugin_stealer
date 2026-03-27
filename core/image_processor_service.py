@@ -55,6 +55,10 @@ class ImageProcessorService:
     GIF_CACHE_MAX_SIZE_BYTES = 10 * 1024 * 1024  # GIF 缓存最大总字节数 (10MB)
     CACHE_EXPIRE_TIME = 3600  # 缓存过期时间（秒）
 
+    # 感知哈希常量
+    PHASH_SIZE = 16  # 感知哈希图片缩放尺寸（16x16 = 256 bit hash）
+    PHASH_HAMMING_THRESHOLD = 20  # 汉明距离阈值，低于此值视为重复
+
     def __init__(self, plugin_instance):
         """初始化图片处理服务。
 
@@ -76,6 +80,11 @@ class ImageProcessorService:
         self._gif_base64_cache: dict[str, tuple[float, str]] = {}
         self._gif_base64_cache_max_size = self.GIF_CACHE_MAX_SIZE
         self._gif_base64_cache_expire_time = self.CACHE_EXPIRE_TIME
+
+        # 图片处理锁，防止并发去重竞态
+        self._process_lock = asyncio.Lock()
+        # 正在处理中的哈希集合，防止同一图片被并发重复处理
+        self._processing_hashes: set[str] = set()
 
         # 提示词配置：正常运行时由 prompts.json 加载并通过 update_config 注入，
         # 以下仅为 prompts.json 缺失时的最小化 fallback
@@ -275,6 +284,7 @@ class ImageProcessorService:
         desc: str = "",
         scenes: list[str] | None = None,
         already_in_raw: bool = False,
+        phash_val: str = "",
     ) -> tuple[bool, dict[str, Any] | None]:
         """将图片存储到 raw → 复制到分类目录 → 删除 raw → 更新索引。
 
@@ -333,6 +343,8 @@ class ImageProcessorService:
             "use_count": 0,
             "last_used_at": 0,
         }
+        if phash_val:
+            entry["phash"] = phash_val
         if tags:
             entry["tags"] = tags
         if desc:
@@ -384,96 +396,91 @@ class ImageProcessorService:
             logger.warning(f"图片文件不存在: {file_path}")
             return False, None
 
-        # 计算图片哈希作为唯一标识符
-        hash_val = await self._compute_hash(file_path)
-
-        # 使用简化的处理流程
-        return await self._process_image_legacy(
-            event,
-            file_path,
-            is_temp,
-            idx,
-            categories,
-            content_filtration,
-            backend_tag,
-            hash_val,
-            is_platform_emoji,
-            extra_meta,
+        # 1. 并行计算 SHA256 和感知哈希（锁外）
+        hash_val, phash_val = await asyncio.gather(
+            self._compute_hash(file_path),
+            self._compute_phash(file_path),
         )
 
-    async def _process_image_legacy(
-        self,
-        event: AstrMessageEvent | None,
-        file_path: str,
-        is_temp: bool,
-        idx: dict[str, Any],
-        categories: list[str] | None,
-        content_filtration: bool | None,
-        backend_tag: str | None,
-        hash_val: str,
-        is_platform_emoji: bool = False,
-        extra_meta: dict[str, Any] | None = None,
-    ) -> tuple[bool, dict[str, Any] | None]:
-        """处理图片：去重 → 缓存检查 → VLM 分类 → 存储索引。"""
-
-        # ── 去重：持久化索引 / 黑名单 / 传入索引 ──
-        if await self._is_duplicate_or_blacklisted(hash_val, idx, file_path, is_temp):
+        if not hash_val:
+            logger.warning(f"无法计算图片哈希: {file_path}")
             return False, None
 
-        # ── 内存缓存命中 ──
-        cached = self._get_valid_cache(hash_val)
-        if cached is not None:
-            return await self._handle_classification_result(
-                cached["category"],
-                cached["emotion"],
-                cached.get("tags", []),
-                cached.get("desc", ""),
-                cached.get("scenes", []),
-                file_path,
-                is_temp,
-                hash_val,
-                idx,
-                extra_meta=extra_meta,
-                from_cache=True,
-            )
+        # 2. 去重检查 + 标记处理中（锁内）
+        async with self._process_lock:
+            # 检查是否已在处理中（防止并发重复）
+            if hash_val in self._processing_hashes:
+                logger.debug(f"图片正在处理中，跳过: {hash_val[:16]}")
+                return False, None
+            # 检查去重
+            if await self._is_duplicate_or_blacklisted(hash_val, idx, file_path, is_temp, phash_val):
+                return False, None
+            # 标记为处理中
+            self._processing_hashes.add(hash_val)
 
-        # ── 存入 raw 目录 ──
-        raw_path = await self._move_to_raw(file_path, hash_val, is_temp)
-
-        # ── VLM 分类 ──
         try:
+            # 3. 缓存检查（锁外）
+            cached = self._get_valid_cache(hash_val)
+            if cached is not None:
+                async with self._process_lock:
+                    return await self._handle_classification_result(
+                        cached["category"],
+                        cached["emotion"],
+                        cached.get("tags", []),
+                        cached.get("desc", ""),
+                        cached.get("scenes", []),
+                        file_path,
+                        is_temp,
+                        hash_val,
+                        idx,
+                        extra_meta=extra_meta,
+                        from_cache=True,
+                        phash_val=phash_val,
+                    )
+
+            # 4. 存入 raw 目录（锁外）
+            raw_path = await self._move_to_raw(file_path, hash_val, is_temp)
+
+            # 5. VLM 分类（锁外，耗时操作）
             category, tags, desc, emotion, scenes = await self.classify_image(
                 event=event,
                 file_path=raw_path,
                 categories=categories,
                 content_filtration=content_filtration,
             )
+
+            # 6. 缓存结果（锁外）
+            self._put_image_cache(hash_val, category, tags, desc, emotion, scenes)
+
+            # 7. 处理分类结果（锁内）
+            async with self._process_lock:
+                return await self._handle_classification_result(
+                    category,
+                    emotion,
+                    tags,
+                    desc,
+                    scenes,
+                    raw_path,
+                    False,
+                    hash_val,
+                    idx,
+                    extra_meta=extra_meta,
+                    from_cache=False,
+                    already_in_raw=True,
+                    phash_val=phash_val,
+                )
+
         except Exception as e:
-            logger.error(f"处理图片失败 [{raw_path}]: {e}")
-            if is_temp:
-                await self.plugin._safe_remove_file(raw_path)
+            logger.error(f"处理图片失败 [{file_path}]: {e}")
+            # 清理临时文件
+            if is_temp and os.path.exists(file_path):
+                await self.plugin._safe_remove_file(file_path)
             raise
+        finally:
+            # 8. 清理处理中标记（确保总是清理）
+            self._processing_hashes.discard(hash_val)
 
-        # ── 缓存结果 ──
-        self._put_image_cache(hash_val, category, tags, desc, emotion, scenes)
-
-        # ── 处理分类结果 ──
-        return await self._handle_classification_result(
-            category,
-            emotion,
-            tags,
-            desc,
-            scenes,
-            raw_path,
-            False,
-            hash_val,
-            idx,
-            extra_meta=extra_meta,
-            from_cache=False,
-            already_in_raw=True,
-        )
-
-    # ── _process_image_legacy 的辅助方法 ──
+    # ── process_image 的辅助方法 ──
 
     async def _is_duplicate_or_blacklisted(
         self,
@@ -481,8 +488,14 @@ class ImageProcessorService:
         idx: dict,
         file_path: str,
         is_temp: bool,
+        phash_val: str = "",
     ) -> bool:
-        """检查图片是否已存在于索引或黑名单中。"""
+        """检查图片是否已存在于索引或黑名单中。
+
+        双重去重策略：
+        1. SHA256 精确匹配 - 字节完全相同的文件
+        2. 感知哈希 (pHash) 视觉相似度 - 编码不同但视觉相同的图片
+        """
 
         async def _cleanup_temp():
             if is_temp and os.path.exists(file_path):
@@ -491,26 +504,61 @@ class ImageProcessorService:
         # 持久化索引
         if hasattr(self.plugin, "cache_service"):
             persistent_idx = self.plugin.cache_service.get_index_cache()
-            if any(
-                isinstance(v, dict) and v.get("hash") == hash_val
-                for v in persistent_idx.values()
-            ):
-                logger.debug(f"图片已存在于持久化索引中: {hash_val}")
-                await _cleanup_temp()
-                return True
 
+            # 1) SHA256 精确匹配
+            for v in persistent_idx.values():
+                if isinstance(v, dict) and v.get("hash") == hash_val:
+                    logger.debug(f"[去重] SHA256 精确匹配命中: {hash_val[:16]}...")
+                    await _cleanup_temp()
+                    return True
+
+            # 2) 感知哈希视觉相似度匹配
+            if phash_val:
+                for entry_path, v in persistent_idx.items():
+                    if not isinstance(v, dict):
+                        continue
+                    existing_phash = v.get("phash", "")
+                    if not existing_phash:
+                        continue
+                    distance = self._hamming_distance(phash_val, existing_phash)
+                    if distance <= self.PHASH_HAMMING_THRESHOLD:
+                        logger.info(
+                            f"[去重] 感知哈希相似度匹配命中: "
+                            f"距离={distance}, 阈值={self.PHASH_HAMMING_THRESHOLD}, "
+                            f"已有={entry_path}"
+                        )
+                        await _cleanup_temp()
+                        return True
+
+            # 3) 黑名单检查
             blacklist = self.plugin.cache_service.get_cache("blacklist_cache")
             if blacklist and hash_val in blacklist:
-                logger.debug(f"图片在黑名单中: {hash_val}")
+                logger.debug(f"[去重] 图片在黑名单中: {hash_val[:16]}...")
                 await _cleanup_temp()
                 return True
         else:
-            if any(
-                isinstance(v, dict) and v.get("hash") == hash_val for v in idx.values()
-            ):
-                logger.debug(f"图片已存在于索引中: {hash_val}")
-                await _cleanup_temp()
-                return True
+            # 无 cache_service 时回退到传入的 idx
+            for v in idx.values():
+                if isinstance(v, dict) and v.get("hash") == hash_val:
+                    logger.debug(f"[去重] SHA256 匹配命中 (idx): {hash_val[:16]}...")
+                    await _cleanup_temp()
+                    return True
+
+            if phash_val:
+                for entry_path, v in idx.items():
+                    if not isinstance(v, dict):
+                        continue
+                    existing_phash = v.get("phash", "")
+                    if not existing_phash:
+                        continue
+                    distance = self._hamming_distance(phash_val, existing_phash)
+                    if distance <= self.PHASH_HAMMING_THRESHOLD:
+                        logger.info(
+                            f"[去重] 感知哈希匹配命中 (idx): "
+                            f"距离={distance}, 已有={entry_path}"
+                        )
+                        await _cleanup_temp()
+                        return True
 
         return False
 
@@ -572,6 +620,7 @@ class ImageProcessorService:
         extra_meta: dict[str, Any] | None = None,
         from_cache: bool = False,
         already_in_raw: bool = False,
+        phash_val: str = "",
     ) -> tuple[bool, dict[str, Any] | None]:
         """根据分类结果决定存储、跳过或清理。"""
         source = "缓存" if from_cache else "VLM"
@@ -608,6 +657,7 @@ class ImageProcessorService:
                 desc=desc,
                 scenes=scenes,
                 already_in_raw=already_in_raw,
+                phash_val=phash_val,
             )
 
         # 无效分类
@@ -1162,6 +1212,77 @@ class ImageProcessorService:
             logger.error(f"计算哈希值失败: {e}")
             return ""
 
+    async def _compute_phash(self, file_path: str) -> str:
+        """计算图片的感知哈希 (pHash)，用于视觉去重。
+
+        使用 difference hash (dHash) 算法：
+        - 将图片缩放到 (PHASH_SIZE+1) x PHASH_SIZE 的灰度图
+        - 比较相邻像素的亮度差异生成哈希位
+        - 对 GIF 动图取第一帧
+
+        Args:
+            file_path: 图片文件路径
+
+        Returns:
+            str: 十六进制感知哈希字符串，失败返回空字符串
+        """
+        if PILImage is None:
+            return ""
+
+        size = self.PHASH_SIZE
+
+        def _sync_phash(fp: str) -> str:
+            try:
+                with PILImage.open(fp) as im:
+                    # GIF 动图取第一帧
+                    if getattr(im, "is_animated", False):
+                        im.seek(0)
+                    # 转灰度并缩放到 (size+1) x size
+                    gray = im.convert("L").resize((size + 1, size), PILImage.BILINEAR)
+                    pixels = list(gray.getdata())
+
+                    # dHash: 比较每行相邻像素
+                    bits = []
+                    for row in range(size):
+                        for col in range(size):
+                            idx = row * (size + 1) + col
+                            bits.append(1 if pixels[idx] > pixels[idx + 1] else 0)
+
+                    # 转换为十六进制字符串
+                    hash_int = 0
+                    for bit in bits:
+                        hash_int = (hash_int << 1) | bit
+                    hex_len = (size * size + 3) // 4  # 向上取整
+                    return format(hash_int, f"0{hex_len}x")
+            except Exception as e:
+                logger.debug(f"计算感知哈希失败: {e}")
+                return ""
+
+        try:
+            return await asyncio.to_thread(_sync_phash, file_path)
+        except Exception as e:
+            logger.debug(f"计算感知哈希失败: {e}")
+            return ""
+
+    @staticmethod
+    def _hamming_distance(hash1: str, hash2: str) -> int:
+        """计算两个十六进制哈希字符串的汉明距离。
+
+        Args:
+            hash1: 第一个十六进制哈希
+            hash2: 第二个十六进制哈希
+
+        Returns:
+            int: 汉明距离（不同位的数量），如果无法计算返回极大值
+        """
+        if not hash1 or not hash2 or len(hash1) != len(hash2):
+            return 999
+        try:
+            xor = int(hash1, 16) ^ int(hash2, 16)
+            return bin(xor).count("1")
+        except (ValueError, TypeError):
+            return 999
+
     def invalidate_cache(self, image_hash: str):
         """失效指定图片的缓存。"""
         if hasattr(self, "_image_cache"):
@@ -1332,13 +1453,24 @@ class ImageProcessorService:
             if b64:
                 self._gif_base64_cache[cache_key] = (now, b64)
                 self._evict_gif_base64_cache()
+                return b64
             else:
-                # 转换失败，回退到普通 base64
-                b64 = await self._file_to_base64(file_path)
-            return b64
+                # GIF 转换返回空，可能是动态贴纸等不支持的情况
+                logger.debug(f"GIF 转换返回空，回退到原始格式: {file_path}")
+
         except Exception as e:
-            logger.error(f"文件转换为GIF base64失败: {e}")
-            return await self._file_to_base64(file_path)
+            logger.warning(f"GIF 转换失败 ({file_path}): {e}")
+
+        # 统一回退：尝试原始 base64
+        try:
+            b64 = await self._file_to_base64(file_path)
+            if b64:
+                return b64
+            logger.warning(f"读取文件失败，返回空: {file_path}")
+        except Exception as e:
+            logger.error(f"读取文件失败 ({file_path}): {e}")
+
+        return ""  # 最终失败返回空字符串，调用方需处理
 
     async def safe_remove_file(self, file_path: str) -> bool:
         """安全删除文件。

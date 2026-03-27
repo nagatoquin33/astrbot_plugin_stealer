@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [2.4.10] - 2026-03-27
+### perf
+- VLM 分类调用并行化，锁范围优化，处理速度提升
+- 图片下载与处理并行化
+- aiohttp session 复用，减少连接开销
+
+### fix
+- 修复 `_auto_emoji_cooldowns` 内存泄漏，添加上限1000条
+- 修复 `_force_capture_windows` 竞态条件，添加 RLock 保护
+- 修复 `terminate()` 异常吞没，独立 try-except 确保各服务清理
+- 修复 `update_index` 异常后数据不一致，添加快照恢复
+- 修复 `threading` 模块未导入问题
+
 ## [2.4.9] - 2026-03-24
 ### add
 -新增支持电报telegram

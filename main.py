@@ -90,6 +90,7 @@ class Main(Star):
         self.backend_tag: str = self.BACKEND_TAG
         self._migration_done: bool = False  # 迁移只执行一次
         self._auto_emoji_cooldowns: dict[str, float] = {}
+        self._auto_emoji_cooldowns_max = 1000  # 最大条目数，防止内存泄漏
         self._auto_emoji_cooldowns_lock = asyncio.Lock()
         self._terminated: bool = False  # 终止标志位，防止重复清理
         # 强制捕获窗口已迁移到 EventHandler
@@ -313,12 +314,14 @@ class Main(Star):
         """
         errors = []
         fixed = []
+        fixed_values = {}  # 需要持久化的修复值
 
         # 验证最大表情数量
         if not isinstance(self.max_reg_num, int) or self.max_reg_num <= 0:
             errors.append("最大表情数量必须大于0的整数")
             self.max_reg_num = 100
             fixed.append("最大表情数量已重置为100")
+            fixed_values["max_reg_num"] = 100
 
         # 验证表情发送概率
         if not isinstance(self.emoji_chance, int | float) or not (
@@ -327,6 +330,7 @@ class Main(Star):
             errors.append("表情发送概率必须在0-1之间")
             self.emoji_chance = 0.4
             fixed.append("表情发送概率已重置为0.4")
+            fixed_values["emoji_chance"] = 0.4
 
         # 验证偷图模式
         if self.steal_mode not in ("probability", "cooldown"):
@@ -335,6 +339,7 @@ class Main(Star):
             )
             self.steal_mode = "probability"
             fixed.append("偷图模式已重置为 probability")
+            fixed_values["steal_mode"] = "probability"
 
         # 验证偷图概率
         if not isinstance(self.steal_chance, int | float) or not (
@@ -343,13 +348,18 @@ class Main(Star):
             errors.append("偷图概率必须在0-1之间")
             self.steal_chance = 0.6
             fixed.append("偷图概率已重置为0.6")
+            fixed_values["steal_chance"] = 0.6
 
         # 记录问题和修复
-
         if errors:
             logger.warning(f"配置验证发现问题: {'; '.join(errors)}")
         if fixed:
             logger.info(f"配置已自动修复: {'; '.join(fixed)}")
+            # 持久化修复的值到配置文件
+            try:
+                self._update_config_from_dict(fixed_values)
+            except Exception as e:
+                logger.error(f"持久化配置修复失败: {e}")
 
         return True  # 即使有问题也返回True，因为已经修复
 
@@ -637,35 +647,55 @@ class Main(Star):
             except Exception as e:
                 logger.error(f"停止WebUI失败: {e}")
 
+        logger.info("[Stealer] 开始清理插件资源...")
+
+        # 停止后台任务（每个任务独立 try-except）
         try:
-            # 注意：由于改用 LLM 钩子注入，不再需要清理人格配置
-            # LLM 钩子会在每次请求时独立注入，插件卸载后自动失效
-            logger.info("[Stealer] 使用 LLM 钩子注入，无需清理人格配置")
-
-            # 使用任务调度器停止所有后台任务
             await self.task_scheduler.cancel_task("raw_cleanup_loop")
-            await self.task_scheduler.cancel_task("capacity_control_loop")
-
-            # 清理各服务资源
-            if self.cache_service:
-                await self.cache_service.cleanup()
-
-            if self.task_scheduler:
-                await self.task_scheduler.cleanup()
-
-            if self.image_processor_service:
-                self.image_processor_service.cleanup()
-
-            if self.command_handler:
-                self.command_handler.cleanup()
-
-            if self.event_handler:
-                self.event_handler.cleanup()
-
         except Exception as e:
-            logger.error(f"终止插件失败: {e}")
+            logger.error(f"取消 raw_cleanup_loop 任务失败: {e}")
 
-        return
+        try:
+            await self.task_scheduler.cancel_task("capacity_control_loop")
+        except Exception as e:
+            logger.error(f"取消 capacity_control_loop 任务失败: {e}")
+
+        # 清理各服务资源（每个服务独立 try-except）
+        if self.cache_service:
+            try:
+                await self.cache_service.cleanup()
+            except Exception as e:
+                logger.error(f"清理缓存服务失败: {e}")
+
+        if self.task_scheduler:
+            try:
+                await self.task_scheduler.cleanup()
+            except Exception as e:
+                logger.error(f"清理任务调度器失败: {e}")
+
+        if self.image_processor_service:
+            try:
+                self.image_processor_service.cleanup()
+            except Exception as e:
+                logger.error(f"清理图片处理服务失败: {e}")
+
+        if self.command_handler:
+            try:
+                self.command_handler.cleanup()
+            except Exception as e:
+                logger.error(f"清理命令处理器失败: {e}")
+
+        if self.event_handler:
+            try:
+                await self.event_handler.cleanup_async()
+            except Exception as e:
+                logger.error(f"Async event handler cleanup failed: {e}")
+            try:
+                self.event_handler.cleanup()
+            except Exception as e:
+                logger.error(f"清理事件处理器失败: {e}")
+
+        logger.info("[Stealer] 插件资源清理完成")
 
     async def _load_index(self) -> dict[str, Any]:
         """委托给 CacheService。"""
@@ -1191,6 +1221,7 @@ class Main(Star):
         return now - last_sent_at >= self.AUTO_EMOJI_COOLDOWN_SECONDS
 
     def _prune_auto_emoji_cooldowns(self, now: float) -> None:
+        # 1. 过期清理
         expire_after = self.AUTO_EMOJI_COOLDOWN_SECONDS * 3
         expired_keys = [
             key
@@ -1199,6 +1230,17 @@ class Main(Star):
         ]
         for key in expired_keys:
             self._auto_emoji_cooldowns.pop(key, None)
+
+        # 2. 数量限制：超过上限时删除最旧的一半
+        if len(self._auto_emoji_cooldowns) > self._auto_emoji_cooldowns_max:
+            sorted_items = sorted(
+                self._auto_emoji_cooldowns.items(),
+                key=lambda x: x[1]
+            )
+            to_remove = len(self._auto_emoji_cooldowns) - self._auto_emoji_cooldowns_max // 2
+            for key, _ in sorted_items[:to_remove]:
+                self._auto_emoji_cooldowns.pop(key, None)
+            logger.debug(f"冷却记录数量超限，已清理 {to_remove} 个最旧记录")
 
     async def _mark_auto_emoji_sent(self, event: AstrMessageEvent) -> None:
         session_key = self._get_auto_emoji_session_key(event)

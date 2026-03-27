@@ -256,20 +256,23 @@ class CacheService:
             await self._save_cache_async(cache_name)
 
     def get_index_cache(self) -> dict[str, Any]:
-        """获取索引缓存的便捷方法。
+        """获取索引缓存的深拷贝（安全修改）。
 
         Returns:
-            dict[str, Any]: 索引缓存字典（可变副本）
+            dict[str, Any]: 索引缓存字典的可变副本
         """
         return dict(self.get_cache("index_cache"))
 
     def get_index_cache_readonly(self) -> dict[str, Any]:
-        """获取索引缓存的副本（适用于只读遍历场景）。
+        """获取索引缓存的只读引用（性能优化）。
+
+        注意：返回的是内部缓存的引用，调用方不应修改返回值！
+        如果需要修改，请使用 get_index_cache() 获取副本。
 
         Returns:
-            dict[str, Any]: 索引缓存的副本
+            dict[str, Any]: 索引缓存的只读引用
         """
-        return self.get_cache("index_cache")
+        return self._caches.get("index_cache", {})
 
     def get_cache(self, cache_name: str) -> dict[str, Any]:
         """获取指定类型的缓存字典（副本）。
@@ -342,22 +345,30 @@ class CacheService:
             logger.error(f"保存索引文件失败: {e}", exc_info=True)
 
     async def update_index(self, updater) -> dict[str, Any]:
-        try:
-            async with self._index_lock:
-                # 获取当前索引的深拷贝，确保 updater 修改不影响原始数据
-                current = copy.deepcopy(self._caches.get("index_cache", {}))
+        """原子更新索引，失败时恢复快照。
+
+        Args:
+            updater: 更新函数，接收当前索引，返回修改后的索引或 None（原地修改）
+
+        Returns:
+            dict[str, Any]: 更新后的索引
+        """
+        async with self._index_lock:
+            # 保存快照用于恢复
+            snapshot = copy.deepcopy(self._caches.get("index_cache", {}))
+            try:
+                current = copy.deepcopy(snapshot)
                 result = updater(current)
                 if inspect.isawaitable(result):
                     await result
                 # 只有 updater 成功执行后，才更新缓存
                 await self.set_cache("index_cache", current, persist=True)
                 return current
-        except Exception as e:
-            logger.error(f"更新索引失败: {e}", exc_info=True)
-            try:
-                return self.get_index_cache()
-            except Exception:
-                return {}
+            except Exception as e:
+                logger.error(f"更新索引失败: {e}", exc_info=True)
+                # 恢复快照
+                self._caches["index_cache"] = snapshot
+                return snapshot
 
     async def migrate_legacy_data(self, base_dir) -> dict[str, Any]:
         """迁移旧版本数据到新版本。
