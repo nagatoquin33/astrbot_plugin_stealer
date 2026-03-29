@@ -94,6 +94,7 @@ class EmojiSelector:
             self._bm25_index = BM25(documents)
             self._bm25_doc_paths = doc_paths
             self._bm25_dirty = False
+            logger.debug(f"[BM25] 索引构建完成: {len(documents)} 文档, 示例: {documents[:3]}")
 
     def _invalidate_bm25_index(self) -> None:
         self._bm25_dirty = True
@@ -232,6 +233,7 @@ class EmojiSelector:
         if len(recent_usage) > self.MAX_RECENT_USAGE:
             recent_usage = recent_usage[-self.MAX_RECENT_USAGE :]
         self._set_recent_usage(category, recent_usage)
+        logger.debug(f"[去重] 更新历史: 分类={category}, 路径={canon_path}, 新历史={recent_usage}")
 
     def _calculate_recent_penalty(self, category: str, path: str) -> float:
         canon_path = self._canon_path(path)
@@ -239,13 +241,14 @@ class EmojiSelector:
         if not recent_usage or canon_path not in recent_usage:
             return 0.0
 
-        # 越接近列表末尾表示越新近使用，惩罚越重，避免连续发送相同表情。
         recency_rank = len(recent_usage) - 1 - recent_usage.index(canon_path)
         penalty_steps = [0.55, 0.38, 0.24, 0.14]
         if recency_rank < len(penalty_steps):
-            return penalty_steps[recency_rank]
-
-        return max(0.06, 0.14 - (recency_rank - len(penalty_steps) + 1) * 0.02)
+            penalty = penalty_steps[recency_rank]
+        else:
+            penalty = max(0.06, 0.14 - (recency_rank - len(penalty_steps) + 1) * 0.02)
+        logger.debug(f"[去重] 分类={category}, 路径={canon_path}, 历史={recent_usage}, 排名={recency_rank}, 惩罚={penalty:.2f}")
+        return penalty
 
     def _get_candidate_categories(self, category: str, limit: int = 3) -> list[str]:
         normalized = self.normalize_category(category) or category.lower().strip()
@@ -585,16 +588,21 @@ class EmojiSelector:
 
                 if base_score < 0.15:
                     if desc_score > 0.1:
-                        low_score_candidates.append(
-                            (
-                                file_path,
-                                desc_score,
-                                desc_score,
-                                0.0,
-                                0.0,
-                                entry_category,
-                            )
+                        history_penalty = self._calculate_recent_penalty(
+                            entry_category, self._canon_path(file_path)
                         )
+                        adjusted_score = max(0.0, desc_score - history_penalty)
+                        if adjusted_score > 0.05:
+                            low_score_candidates.append(
+                                (
+                                    file_path,
+                                    adjusted_score,
+                                    desc_score,
+                                    0.0,
+                                    0.0,
+                                    entry_category,
+                                )
+                            )
                     continue
 
                 diversity_bonus = random.uniform(0, 0.15)
@@ -673,11 +681,16 @@ class EmojiSelector:
                 return await self._search_images_fallback(query, limit, idx, event)
 
             bm25_results = self._bm25_index.get_top_k(query_tokens, k=limit * 5)
+            logger.debug(f"[BM25] 查询='{query}', tokens={query_tokens}, top_doc_scores={bm25_results[:10]}")
 
             if not idx:
                 cache_service = getattr(self.plugin, "cache_service", None)
                 if cache_service:
                     idx = cache_service.get_index_cache_readonly() or {}
+
+            recently_used_paths: set[str] = set()
+            for cat_paths in self._recent_usage.values():
+                recently_used_paths.update(cat_paths)
 
             results: list[tuple[str, str, str, str]] = []
             seen_paths: set[str] = set()
@@ -687,6 +700,8 @@ class EmojiSelector:
                     continue
                 file_path = self._bm25_doc_paths[doc_idx]
                 if file_path in seen_paths:
+                    continue
+                if file_path in recently_used_paths:
                     continue
                 if not self._is_entry_allowed_for_event(idx.get(file_path) if idx else None, event):
                     continue
@@ -727,6 +742,10 @@ class EmojiSelector:
             if not idx:
                 return []
 
+            recently_used_paths: set[str] = set()
+            for cat_paths in self._recent_usage.values():
+                recently_used_paths.update(cat_paths)
+
             query_lower = query.lower()
             query_tokens = [t for t in query_lower.split() if len(t) > 1]
             query_words = _extract_words(query)
@@ -739,6 +758,8 @@ class EmojiSelector:
                 if not isinstance(data, dict):
                     continue
                 if not self._is_entry_allowed_for_event(data, event):
+                    continue
+                if file_path in recently_used_paths:
                     continue
 
                 tags = self._parse_tags(data.get("tags", []))
