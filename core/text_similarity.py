@@ -32,17 +32,20 @@ class BM25:
         self.doc_freqs: dict[str, int] = {}
         self.idf: dict[str, float] = {}
         self.doc_len: list[int] = []
+        self.doc_term_freqs: list[dict[str, int]] = []
         self._initialize(corpus)
 
     def _initialize(self, corpus: list[list[str]]) -> None:
         nd: dict[str, list[int]] = {}
         self.doc_len = []
+        self.doc_term_freqs = []
         for document in corpus:
             self.doc_len.append(len(document))
             frequencies: dict[str, int] = {}
             for word in document:
                 word = word.lower()
                 frequencies[word] = frequencies.get(word, 0) + 1
+            self.doc_term_freqs.append(frequencies)
             for word, freq in frequencies.items():
                 if word not in nd:
                     nd[word] = []
@@ -73,15 +76,14 @@ class BM25:
     def _calculate_score(self, query: list[str], doc_index: int) -> float:
         score = 0.0
         doc_len = self.doc_len[doc_index]
-        freq: Counter[str] = Counter()
+        doc_tf = self.doc_term_freqs[doc_index]
         query_lower = [term.lower() for term in query]
-        for term in query_lower:
-            freq[term] += 1
+        query_term_counts: Counter[str] = Counter(query_lower)
 
-        for term in query_lower:
+        for term, query_count in query_term_counts.items():
             if term not in self.doc_freqs:
                 continue
-            freq_tf = freq.get(term, 0)
+            freq_tf = doc_tf.get(term, 0)
             if freq_tf == 0:
                 continue
             idf = self.idf.get(term, 0)
@@ -96,25 +98,44 @@ def tokenize_for_bm25(text: str) -> tuple[str, ...]:
     tokens: list[str] = []
     cleaned = _PUNCT_RE.sub(" ", text.lower())
     cn_buffer: list[str] = []
+    en_buffer: list[str] = []
     for char in cleaned:
         if _CJK_RE.match(char):
+            if en_buffer:
+                word = "".join(en_buffer)
+                if word:
+                    tokens.append(word)
+                en_buffer = []
             cn_buffer.append(char)
+        elif char.isalnum():
+            en_buffer.append(char)
         else:
+            if en_buffer:
+                word = "".join(en_buffer)
+                if word:
+                    tokens.append(word)
+                en_buffer = []
             if cn_buffer:
                 n = len(cn_buffer)
                 for i in range(n):
                     tokens.append(cn_buffer[i])
                     if i + 1 < n:
                         tokens.append(cn_buffer[i] + cn_buffer[i + 1])
+                    if i + 2 < n:
+                        tokens.append(cn_buffer[i] + cn_buffer[i + 1] + cn_buffer[i + 2])
                 cn_buffer = []
-            if char.isalnum() and len(char) > 1:
-                tokens.append(char)
+    if en_buffer:
+        word = "".join(en_buffer)
+        if word:
+            tokens.append(word)
     if cn_buffer:
         n = len(cn_buffer)
         for i in range(n):
             tokens.append(cn_buffer[i])
             if i + 1 < n:
                 tokens.append(cn_buffer[i] + cn_buffer[i + 1])
+            if i + 2 < n:
+                tokens.append(cn_buffer[i] + cn_buffer[i + 1] + cn_buffer[i + 2])
     return tuple(tokens)
 
 
