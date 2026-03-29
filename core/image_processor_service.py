@@ -189,8 +189,6 @@ class ImageProcessorService:
             old_index = old_dir / "index.json"
             if old_index.exists():
                 try:
-                    import json
-
                     def _migrate_index(old_index_path, new_dir_path, old_cat, new_cat):
                         """同步迁移索引（在线程中执行）"""
                         with open(old_index_path, encoding="utf-8") as f:

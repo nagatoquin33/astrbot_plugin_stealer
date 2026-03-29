@@ -10,14 +10,16 @@ from typing import Any
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
-# 尝试导入文本相似度计算模块
 try:
     from .text_similarity import (
+        BM25,
         _extract_words,
         calculate_hybrid_similarity,
+        tokenize_for_bm25,
     )
 except ImportError:
-    # 如果导入失败，提供简单的降级实现
+    BM25 = None
+
     def _extract_words(text: str) -> set[str]:
         return set(text.split())
 
@@ -31,6 +33,9 @@ except ImportError:
         if words1 and words2:
             return len(words1 & words2) / max(len(words1), len(words2))
         return 0.0
+
+    def tokenize_for_bm25(text: str) -> tuple[str, ...]:
+        return tuple(text.lower().split())
 
 
 class EmojiSelector:
@@ -55,6 +60,45 @@ class EmojiSelector:
         self.categories: list[str] = getattr(plugin_instance, "categories", [])
         self._selection_lock = asyncio.Lock()
         self._recent_usage: dict[str, list[str]] = {}  # category -> [canon_path, ...]
+        self._bm25_index: BM25 | None = None
+        self._bm25_doc_paths: list[str] = []
+        self._bm25_dirty: bool = True
+
+    def _build_bm25_index(self, idx: dict | None = None) -> None:
+        if BM25 is None:
+            return
+        if idx is None:
+            cache_service = getattr(self.plugin, "cache_service", None)
+            if cache_service:
+                idx = cache_service.get_index_cache_readonly() or {}
+        if not idx:
+            return
+
+        documents: list[tuple[str, ...]] = []
+        doc_paths: list[str] = []
+
+        for file_path, data in idx.items():
+            if not isinstance(data, dict):
+                continue
+            tags = self._parse_tags(data.get("tags", []))
+            scenes = self._parse_tags(data.get("scenes", []))
+            desc = str(data.get("desc", "") or "")
+            category = self._get_category_from_data(data)
+            text_content = " ".join([category, desc] + tags + scenes)
+            tokens = tokenize_for_bm25(text_content)
+            if tokens:
+                documents.append(tokens)
+                doc_paths.append(file_path)
+
+        if documents:
+            self._bm25_index = BM25(documents)
+            self._bm25_doc_paths = doc_paths
+            self._bm25_dirty = False
+
+    def _invalidate_bm25_index(self) -> None:
+        self._bm25_dirty = True
+        self._bm25_index = None
+        self._bm25_doc_paths = []
 
     def _check_group_allowed(self, event: AstrMessageEvent) -> bool:
         """检查当前群组是否允许使用表情包功能。
@@ -258,6 +302,7 @@ class EmojiSelector:
 
         try:
             await cache_service.update_index(_updater)
+            self._invalidate_bm25_index()
         except Exception as e:
             logger.debug(f"[Stealer] 更新表情使用统计失败: {e}")
 
@@ -356,7 +401,7 @@ class EmojiSelector:
 
             for candidate_category in candidate_categories:
                 random_path = self._select_emoji_random_impl(
-                    candidate_category, use_smart=use_smart, event=event
+                    candidate_category, event=event
                 )
                 if random_path:
                     return random_path
@@ -381,17 +426,13 @@ class EmojiSelector:
     def _select_emoji_random_impl(
         self,
         category: str,
-        use_smart: bool,
         event: AstrMessageEvent | None = None,
     ) -> str | None:
         try:
             files: list[Path] = []
             cache_service = getattr(self.plugin, "cache_service", None)
-            had_cache_service = bool(cache_service)
-            cache_index_available = False
             if cache_service:
                 idx = cache_service.get_index_cache_readonly() or {}
-                cache_index_available = bool(idx)
                 for file_path, data in idx.items():
                     if not isinstance(data, dict):
                         continue
@@ -477,7 +518,7 @@ class EmojiSelector:
         candidate_categories: list[str] | None = None,
         event: AstrMessageEvent | None = None,
     ) -> str | None:
-        """?????????????????"""
+        """智能选择表情包实现（内部方法）。"""
         try:
             cache_service = self.plugin.cache_service
             if not cache_service:
@@ -594,13 +635,13 @@ class EmojiSelector:
             result = candidates[0]
             self._update_recent_usage(result[5], result[0])
             logger.debug(
-                f"[????] ??={category}, ??={len(candidates)}, ????={result[5]}, "
-                f"??={result[1]:.2f} (desc={result[2]:.2f}, tag={result[3]:.2f}, scene={result[4]:.2f})"
+                f"[智能选择] 分类={category}, 候选数={len(candidates)}, "
+                f"结果={result[5]}, 分数={result[1]:.2f} (desc={result[2]:.2f}, tag={result[3]:.2f}, scene={result[4]:.2f})"
             )
             return result[0]
 
         except Exception as e:
-            logger.error(f"?????????: {e}")
+            logger.error(f"智能选择失败: {e}")
             return None
 
     @staticmethod
@@ -619,7 +660,64 @@ class EmojiSelector:
         idx: dict | None = None,
         event: AstrMessageEvent | None = None,
     ) -> list[tuple[str, str, str, str]]:
-        """根据查询词搜索图片（纯评分搜索，不含关键词映射）。"""
+        """根据查询词搜索图片（BM25 检索）。"""
+        try:
+            if self._bm25_dirty or self._bm25_index is None:
+                self._build_bm25_index(idx)
+
+            if self._bm25_index is None or not self._bm25_doc_paths:
+                return await self._search_images_fallback(query, limit, idx, event)
+
+            query_tokens = tokenize_for_bm25(query)
+            if not query_tokens:
+                return await self._search_images_fallback(query, limit, idx, event)
+
+            bm25_results = self._bm25_index.get_top_k(query_tokens, k=limit * 5)
+
+            if not idx:
+                cache_service = getattr(self.plugin, "cache_service", None)
+                if cache_service:
+                    idx = cache_service.get_index_cache_readonly() or {}
+
+            results: list[tuple[str, str, str, str]] = []
+            seen_paths: set[str] = set()
+
+            for doc_idx, bm25_score in bm25_results:
+                if doc_idx >= len(self._bm25_doc_paths):
+                    continue
+                file_path = self._bm25_doc_paths[doc_idx]
+                if file_path in seen_paths:
+                    continue
+                if not self._is_entry_allowed_for_event(idx.get(file_path) if idx else None, event):
+                    continue
+                seen_paths.add(file_path)
+
+                data = idx.get(file_path, {}) if idx else {}
+                desc = str(data.get("desc", "") or "")
+                category = self._get_category_from_data(data)
+                tags = self._parse_tags(data.get("tags", []))
+                tags_str = ", ".join(tags)
+                results.append((file_path, desc, category, tags_str))
+                if len(results) >= limit:
+                    break
+
+            if results:
+                return results
+
+            return await self._search_images_fallback(query, limit, idx, event)
+
+        except Exception as e:
+            logger.error(f"BM25 搜索图片失败: {e}")
+            return await self._search_images_fallback(query, limit, idx, event)
+
+    async def _search_images_fallback(
+        self,
+        query: str,
+        limit: int = 1,
+        idx: dict | None = None,
+        event: AstrMessageEvent | None = None,
+    ) -> list[tuple[str, str, str, str]]:
+        """降级搜索：使用旧的评分算法。"""
         try:
             if idx is None:
                 cache_service = self.plugin.cache_service
@@ -631,7 +729,6 @@ class EmojiSelector:
 
             query_lower = query.lower()
             query_tokens = [t for t in query_lower.split() if len(t) > 1]
-            # 使用分词提取查询词的词汇（更适合中文）
             query_words = _extract_words(query)
 
             MAX_STR_LENGTH = 20
@@ -653,11 +750,8 @@ class EmojiSelector:
                     category, str(data.get("desc", "")), tuple(tags_for_score)
                 )
 
-                # 快速分词过滤：检查词汇重叠（比字符级更适合中文）
                 if query_words:
-                    # 至少有一个词匹配才继续
                     if not query_words.intersection(all_words):
-                        # 兜底：字符级检查（处理单字查询等情况）
                         query_chars = set(query_lower)
                         if query_chars and not query_chars.intersection(set(all_text)):
                             continue
@@ -674,7 +768,6 @@ class EmojiSelector:
 
                 if score > 0:
                     top_candidates.append((file_path, desc, category, tags_str, score))
-                    # 定期裁剪，避免候选列表过大
                     if len(top_candidates) > top_k:
                         top_candidates.sort(key=lambda x: x[4], reverse=True)
                         top_candidates = top_candidates[:top_k]
@@ -685,7 +778,7 @@ class EmojiSelector:
             ]
 
         except Exception as e:
-            logger.error(f"搜索图片失败: {e}")
+            logger.error(f"降级搜索图片失败: {e}")
             return []
 
     def _score_entry(

@@ -107,20 +107,15 @@ createApp({
             return `/${raw.replace(/^\.?\//, '')}`;
         };
 
-        const apiFetch = (url, options = {}) => {
+        const apiFetch = async (url, options = {}) => {
             const requestUrl = normalizeUrl(url);
             const headers = new Headers(options.headers || {});
-            return fetch(requestUrl, { ...options, headers, credentials: 'same-origin' })
-                .then((res) => {
-                    if (res.status === 401) {
-                        isAuthed.value = false;
-                        loginError.value = '会话已过期，请重新登录';
-                    }
-                    return res;
-                })
-                .catch(() =>
-                    fetch(requestUrl, { ...options, headers, credentials: 'same-origin' })
-                );
+            const res = await fetch(requestUrl, { ...options, headers, credentials: 'same-origin' });
+            if (res.status === 401) {
+                isAuthed.value = false;
+                loginError.value = '会话已过期，请重新登录';
+            }
+            return res;
         };
 
         // Data Fetching

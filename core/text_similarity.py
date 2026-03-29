@@ -9,15 +9,118 @@
 - 无额外依赖：不依赖 jieba 等第三方分词库
 """
 
+import math
 import re
+from collections import Counter
 from functools import lru_cache
 
-# ──────────────────────────────────────────────────────────────
-# 中文字符检测（编译一次，复用）
-# ──────────────────────────────────────────────────────────────
 _CJK_RE = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf]")
 _PUNCT_RE = re.compile(r"[^\w\s]")
 _EN_WORD_RE = re.compile(r"^[a-zA-Z]+$")
+
+K1 = 1.5
+B = 0.75
+EPSILON = 0.25
+
+
+class BM25:
+    def __init__(self, corpus: list[list[str]], k1: float = 1.5, b: float = 0.75):
+        self.k1 = k1
+        self.b = b
+        self.corpus_size = 0
+        self.avgdl = 0
+        self.doc_freqs: dict[str, int] = {}
+        self.idf: dict[str, float] = {}
+        self.doc_len: list[int] = []
+        self._initialize(corpus)
+
+    def _initialize(self, corpus: list[list[str]]) -> None:
+        nd: dict[str, list[int]] = {}
+        self.doc_len = []
+        for document in corpus:
+            self.doc_len.append(len(document))
+            frequencies: dict[str, int] = {}
+            for word in document:
+                word = word.lower()
+                frequencies[word] = frequencies.get(word, 0) + 1
+            for word, freq in frequencies.items():
+                if word not in nd:
+                    nd[word] = []
+                nd[word].append(freq)
+            self.corpus_size += 1
+
+        self.avgdl = sum(self.doc_len) / self.corpus_size if self.corpus_size else 1
+
+        for word, freq_list in nd.items():
+            df = len(freq_list)
+            self.doc_freqs[word] = df
+            self.idf[word] = math.log(
+                (self.corpus_size - df + 0.5) / (df + 0.5) + 1
+            )
+
+    def get_scores(self, query: list[str]) -> list[float]:
+        scores = [0.0] * self.corpus_size
+        for i in range(self.corpus_size):
+            scores[i] = self._calculate_score(query, i)
+        return scores
+
+    def get_top_k(self, query: list[str], k: int = 10) -> list[tuple[int, float]]:
+        scores = self.get_scores(query)
+        indexed = [(i, score) for i, score in enumerate(scores)]
+        indexed.sort(key=lambda x: x[1], reverse=True)
+        return indexed[:k]
+
+    def _calculate_score(self, query: list[str], doc_index: int) -> float:
+        score = 0.0
+        doc_len = self.doc_len[doc_index]
+        freq: Counter[str] = Counter()
+        query_lower = [term.lower() for term in query]
+        for term in query_lower:
+            freq[term] += 1
+
+        for term in query_lower:
+            if term not in self.doc_freqs:
+                continue
+            freq_tf = freq.get(term, 0)
+            if freq_tf == 0:
+                continue
+            idf = self.idf.get(term, 0)
+            numerator = freq_tf * (self.k1 + 1)
+            denominator = freq_tf + self.k1 * (1 - self.b + self.b * doc_len / self.avgdl)
+            score += idf * numerator / (denominator + EPSILON)
+        return score
+
+
+@lru_cache(maxsize=8192)
+def tokenize_for_bm25(text: str) -> tuple[str, ...]:
+    tokens: list[str] = []
+    cleaned = _PUNCT_RE.sub(" ", text.lower())
+    cn_buffer: list[str] = []
+    for char in cleaned:
+        if _CJK_RE.match(char):
+            cn_buffer.append(char)
+        else:
+            if cn_buffer:
+                n = len(cn_buffer)
+                for i in range(n):
+                    tokens.append(cn_buffer[i])
+                    if i + 1 < n:
+                        tokens.append(cn_buffer[i] + cn_buffer[i + 1])
+                cn_buffer = []
+            if char.isalnum() and len(char) > 1:
+                tokens.append(char)
+    if cn_buffer:
+        n = len(cn_buffer)
+        for i in range(n):
+            tokens.append(cn_buffer[i])
+            if i + 1 < n:
+                tokens.append(cn_buffer[i] + cn_buffer[i + 1])
+    return tuple(tokens)
+
+
+@lru_cache(maxsize=4096)
+def _normalize_text(text: str) -> str:
+    return str(text or "").lower().strip()
 
 
 # ──────────────────────────────────────────────────────────────
