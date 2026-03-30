@@ -5,125 +5,38 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>亨利的战利品 - 表情包管理</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
-    <link rel="stylesheet" href="/web/app.css">
+    <link rel="stylesheet" href="/app.css">
 </head>
 <body>
     <div id="app">
-        <!-- Login Screen -->
-        <div v-if="!isAuthed" class="login-overlay">
-            <!-- Background Decorations -->
-            <div class="login-bg-decoration">
-                <div class="floating-icon icon-1">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                    </svg>
-                </div>
-                <div class="floating-icon icon-2">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
-                    </svg>
-                </div>
-                <div class="floating-icon icon-3">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
-                    </svg>
-                </div>
-                <div class="floating-icon icon-4">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
-                    </svg>
-                </div>
-            </div>
-
-            <div class="login-panel">
-                <div class="login-panel-corner login-panel-corner-tl"></div>
-                <div class="login-panel-corner login-panel-corner-tr"></div>
-                <div class="login-panel-corner login-panel-corner-bl"></div>
-                <div class="login-panel-corner login-panel-corner-br"></div>
-                
-                <!-- Logo Section -->
+        <!-- Redirect to login if not authenticated -->
+        <div v-if="!isAuthed && !authChecking" class="login-overlay" style="position: relative;">
+            <div class="login-panel" style="max-width: 400px;">
                 <div class="login-logo">
-                    <div class="login-logo-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
-                        </svg>
-                    </div>
                     <h1 class="login-title">亨利的战利品</h1>
-                    <p class="login-subtitle">表情包管理面板</p>
+                    <p class="login-subtitle">正在跳转到登录页...</p>
                 </div>
-                
-                <div v-if="authChecking" class="login-loading">
+                <div style="text-align: center; padding: 20px;">
                     <div class="login-spinner">
                         <div class="login-spinner-ring"></div>
                         <div class="login-spinner-ring"></div>
                         <div class="login-spinner-ring"></div>
                     </div>
-                    <p class="login-loading-text">验证身份中...</p>
                 </div>
-                
-                <div v-else-if="!authRequired" class="login-success">
-                    <div class="login-success-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-                        </svg>
-                    </div>
-                    <p class="login-success-text">验证通过</p>
-                    <p class="login-success-subtext">正在进入...</p>
+            </div>
+        </div>
+        <div v-else-if="authChecking" class="login-overlay" style="position: relative;">
+            <div class="login-panel" style="max-width: 400px;">
+                <div class="login-logo">
+                    <h1 class="login-title">亨利的战利品</h1>
+                    <p class="login-subtitle">加载中...</p>
                 </div>
-                
-                <div v-else class="login-form">
-                    <div class="login-form-header">
-                        <div class="login-lock-icon">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" stroke-width="2"/>
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 11V7a5 5 0 0110 0v4"/>
-                            </svg>
-                        </div>
-                        <p class="login-form-title">请输入访问密码</p>
+                <div style="text-align: center; padding: 20px;">
+                    <div class="login-spinner">
+                        <div class="login-spinner-ring"></div>
+                        <div class="login-spinner-ring"></div>
+                        <div class="login-spinner-ring"></div>
                     </div>
-
-                    <div class="login-input-group">
-                        <div class="login-input-wrapper">
-                            <input 
-                                v-model="loginToken" 
-                                :type="showPassword ? 'text' : 'password'"
-                                placeholder="输入密码..."
-                                class="login-input"
-                                @keydown.enter="submitLogin"
-                            >
-                            <button @click="showPassword = !showPassword" class="login-input-toggle">
-                                <svg v-if="showPassword" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>
-                                </svg>
-                                <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
-                                </svg>
-                            </button>
-                        </div>
-                        <p class="login-session-info">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" style="width: 14px; height: 14px; vertical-align: middle; margin-right: 4px;">
-                                <circle cx="12" cy="12" r="10" stroke-width="2"/>
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6l4 2"/>
-                            </svg>
-                            会话有效期：{{ Math.round(sessionTimeout / 60) }} 分钟
-                        </p>
-                    </div>
-                    
-                    <div v-if="loginError" class="login-error">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" style="width: 18px; height: 18px; margin-right: 8px;">
-                            <circle cx="12" cy="12" r="10" stroke-width="2"/>
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01"/>
-                        </svg>
-                        {{ loginError }}
-                    </div>
-                    
-                    <button @click="submitLogin" class="login-submit-btn" :class="{ 'is-loading': false }">
-                        <span class="login-submit-text">进入系统</span>
-                        <svg class="login-submit-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"/>
-                        </svg>
-                    </button>
                 </div>
             </div>
         </div>
@@ -262,6 +175,13 @@
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
                                 </svg>
                                 添加
+                            </button>
+
+                            <button @click="openBatchUploadModal" class="codex-btn">
+                                <svg style="width: 16px; height: 16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                                </svg>
+                                批量导入
                             </button>
                             
                             <button v-if="authRequired" @click="logout" class="codex-btn icon-btn" title="退出">
@@ -640,6 +560,152 @@
                 </div>
             </div>
 
+            <!-- Batch Upload Modal -->
+            <div v-if="batchUploadOpen" class="modal-overlay" @click.self="closeBatchUploadModal">
+                <div class="modal-panel" style="max-width: 700px;">
+                    <div class="modal-panel-corner-bl"></div>
+                    <div class="modal-panel-corner-br"></div>
+                    
+                    <div class="modal-header">
+                        <h2>批量导入表情包</h2>
+                        <button @click="closeBatchUploadModal" class="modal-close">
+                            <svg style="width: 20px; height: 20px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                            </svg>
+                        </button>
+                    </div>
+                    
+                    <form @submit.prevent="submitBatchUpload" style="padding: 24px;">
+                        <div v-if="!batchTaskId">
+                            <div class="upload-area" @click="$refs.batchFileInput.click()" style="min-height: 150px;">
+                                <input 
+                                    ref="batchFileInput"
+                                    type="file" 
+                                    accept="image/*" 
+                                    multiple
+                                    @change="handleBatchFileSelect"
+                                    style="display: none;"
+                                >
+                                
+                                <div v-if="batchFiles.length">
+                                    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+                                        <svg style="width: 32px; height: 32px; color: var(--gold-primary);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                                        </svg>
+                                        <div>
+                                            <p style="margin: 0 0 4px 0; color: var(--gold-primary); font-family: 'Cinzel', serif;">已选择 {{ batchFiles.length }} 张图片</p>
+                                            <p style="margin: 0; color: var(--text-muted); font-size: 0.85rem;">{{ formatBatchSize() }}</p>
+                                        </div>
+                                    </div>
+                                    <div class="batch-file-list">
+                                        <div v-for="(file, idx) in batchFiles.slice(0, 8)" :key="idx" class="batch-file-item">
+                                            <img v-if="batchPreviews[idx]" :src="batchPreviews[idx]" class="batch-file-thumb">
+                                            <span class="batch-file-name">{{ file.name }}</span>
+                                        </div>
+                                        <div v-if="batchFiles.length > 8" class="batch-file-more">
+                                            还有 {{ batchFiles.length - 8 }} 张...
+                                        </div>
+                                    </div>
+                                    <button type="button" @click.stop="clearBatchFiles" class="codex-btn" style="margin-top: 12px; font-size: 0.8rem; padding: 6px 12px;">
+                                        清除选择
+                                    </button>
+                                </div>
+                                
+                                <div v-else>
+                                    <svg style="width: 48px; height: 48px; margin: 0 auto 16px auto; color: var(--gold-dim); opacity: 0.5; display: block;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                                    </svg>
+                                    <p style="margin: 0; color: var(--text-muted); font-family: 'Cinzel', serif; text-align: center;">点击或拖拽上传多张图片</p>
+                                    <p style="margin: 8px 0 0; color: var(--text-muted); font-size: 0.85rem; text-align: center;">支持 PNG, JPG, GIF, WEBP, BMP</p>
+                                </div>
+                            </div>
+                            
+                            <div style="margin-top: 20px;">
+                                <label style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); display: block; margin-bottom: 8px;">默认分类 *</label>
+                                <select v-model="batchUploadForm.emotion" class="codex-input" :disabled="batchUploadForm.autoAnalyze" required>
+                                    <option value="">请选择分类...</option>
+                                    <option v-for="emo in availableEmotions" :key="emo.key" :value="emo.key">{{ emo.name || emo.key }}</option>
+                                </select>
+                                <p style="margin: 8px 0 0; font-size: 0.8rem; color: var(--text-muted);">图片会保存到此分类（自动分析时无需选择）</p>
+                            </div>
+
+                            <div style="margin-top: 16px;">
+                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                    <input type="checkbox" v-model="batchUploadForm.autoAnalyze" class="codex-checkbox" :disabled="batchUploadForm.emotion !== ''">
+                                    <span style="font-size: 0.85rem; color: var(--text-main);">自动识别（使用AI分析每张图片并自动分类）</span>
+                                </label>
+                                <p v-if="batchUploadForm.emotion !== ''" style="margin: 4px 0 0 24px; font-size: 0.75rem; color: var(--gold-dim);">请先取消分类选择才能启用自动识别</p>
+                                <p v-if="batchUploadForm.autoAnalyze" style="margin: 8px 0 0 24px; font-size: 0.75rem; color: #f59e0b; padding: 8px; background: rgba(245, 158, 11, 0.1); border-radius: 4px;">⚠️ 自动分析会高并发调用VLM，请确认API支持并发或分批次分析</p>
+                            </div>
+                            
+                            <div v-if="batchUploadError" style="color: #ef4444; font-size: 0.875rem; border: 1px solid rgba(239, 68, 68, 0.3); background: rgba(239, 68, 68, 0.1); padding: 12px; margin-top: 16px;">
+                                {{ batchUploadError }}
+                            </div>
+                            
+                            <div style="display: flex; gap: 12px; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--gold-dark);">
+                                <button type="button" @click="closeBatchUploadModal" class="codex-btn" style="flex: 1;">取消</button>
+                                <button type="submit" :disabled="batchUploading || batchFiles.length === 0" class="codex-btn primary" style="flex: 1;">
+                                    <span v-if="batchUploading">上传中...</span>
+                                    <span v-else>开始导入 ({{ batchFiles.length }}张)</span>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div v-else style="padding: 24px;">
+                            <div style="text-align: center; margin-bottom: 24px;">
+                                <div v-if="batchTaskStatus === 'processing'" class="batch-spinner">
+                                    <svg style="width: 48px; height: 48px; animation: spin 1s linear infinite; color: var(--gold-primary);" fill="none" viewBox="0 0 24 24">
+                                        <circle style="opacity: 0.25;" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                        <path style="opacity: 0.75;" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                </div>
+                                <div v-else-if="batchTaskStatus === 'completed'" style="color: #22c55e;">
+                                    <svg style="width: 48px; height: 48px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                                    </svg>
+                                </div>
+                                <div v-else-if="batchTaskStatus === 'failed'" style="color: #ef4444;">
+                                    <svg style="width: 48px; height: 48px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                                    </svg>
+                                </div>
+                                
+                                <h3 style="margin: 16px 0 8px; font-size: 1.2rem; color: var(--text-main);">
+                                    <span v-if="batchTaskStatus === 'processing'">正在处理...</span>
+                                    <span v-else-if="batchTaskStatus === 'completed'">导入完成</span>
+                                    <span v-else-if="batchTaskStatus === 'failed'">导入失败</span>
+                                </h3>
+                                
+                                <p style="margin: 0; color: var(--text-muted); font-size: 0.9rem;">
+                                    {{ batchTaskProcessed }} / {{ batchTaskTotal }}
+                                    <span v-if="batchTaskSuccess > 0" style="color: #22c55e;"> ({{ batchTaskSuccess }} 成功)</span>
+                                    <span v-if="batchTaskFailed > 0" style="color: #ef4444;"> ({{ batchTaskFailed }} 失败)</span>
+                                </p>
+                            </div>
+                            
+                            <div v-if="batchTaskStatus === 'processing'" style="margin-bottom: 16px;">
+                                <div class="progress-bar">
+                                    <div class="progress-fill" :style="{ width: (batchTaskProcessed / batchTaskTotal * 100) + '%' }"></div>
+                                </div>
+                            </div>
+                            
+                            <div v-if="batchUploadError && batchTaskStatus === 'failed'" style="color: #ef4444; font-size: 0.875rem; text-align: center; margin-bottom: 16px;">
+                                {{ batchUploadError }}
+                            </div>
+                            
+                            <div v-if="batchTaskStatus === 'completed'" style="display: flex; gap: 12px;">
+                                <button type="button" @click="resetBatchUpload" class="codex-btn" style="flex: 1;">继续导入</button>
+                                <button type="button" @click="closeBatchUploadModal" class="codex-btn primary" style="flex: 1;">完成</button>
+                            </div>
+                            <div v-else-if="batchTaskStatus === 'failed'" style="display: flex; gap: 12px;">
+                                <button type="button" @click="resetBatchUpload" class="codex-btn" style="flex: 1;">重试</button>
+                                <button type="button" @click="closeBatchUploadModal" class="codex-btn" style="flex: 1;">关闭</button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
             <!-- Category Management Modal -->
             <div v-if="emotionsOpen" class="modal-overlay" @click.self="closeEmotionsModal">
                 <div class="modal-panel" style="max-width: 700px;">
@@ -773,6 +839,6 @@
         </template>
     </div>
 
-    <script src="/web/app.js"></script>
+    <script src="/app.js"></script>
 </body>
 </html>

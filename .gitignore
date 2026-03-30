@@ -212,3 +212,4 @@ AstrBot插件开发深度文档.md
 # Tests
 tests/
 .vscode/settings.json
+web/test/test_server.py

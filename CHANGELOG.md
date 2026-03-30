@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.11] - 2026-03-30
+### add
+- WebUI 新增批量导入功能，支持多图同时上传
+- WebUI 登录页面拆分为独立页面，便于预览
+- WebUI 批量导入支持自动分析模式，由 VLM 自动识别每张图片分类
+- 搜索算法升级，新增 BM25 混合搜索，提升搜索准确性
+
+### fix
+- WebUI 批量导入分类选择与自动分析互斥，避免状态混乱
 
 ## [2.4.10] - 2026-03-27
 ### perf

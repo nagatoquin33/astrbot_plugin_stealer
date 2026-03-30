@@ -38,6 +38,21 @@ createApp({
         const availableEmotions = ref([]);
         const analysisScenes = ref([]);
 
+        // Batch Upload Modal
+        const batchUploadOpen = ref(false);
+        const batchUploading = ref(false);
+        const batchFiles = ref([]);
+        const batchPreviews = ref([]);
+        const batchUploadError = ref(null);
+        const batchUploadForm = reactive({ emotion: '', autoAnalyze: false });
+        const batchTaskId = ref(null);
+        const batchTaskStatus = ref(null);
+        const batchTaskTotal = ref(0);
+        const batchTaskProcessed = ref(0);
+        const batchTaskSuccess = ref(0);
+        const batchTaskFailed = ref(0);
+        let batchPollInterval = null;
+
 
         const parseSceneList = (rawText) => {
             if (!rawText) return [];
@@ -201,6 +216,7 @@ createApp({
             isAuthed.value = false;
             loginToken.value = '';
             showPassword.value = false;
+            window.location.href = '/login.html';
         };
 
         const submitLogin = async () => {
@@ -501,6 +517,117 @@ createApp({
         const closeUploadModal = () => {
             uploadOpen.value = false;
             analysisScenes.value = [];
+        };
+
+        // Batch Upload Modal
+        const openBatchUploadModal = () => {
+            batchUploadOpen.value = true;
+            batchFiles.value = [];
+            batchPreviews.value = [];
+            batchUploadError.value = null;
+            batchTaskId.value = null;
+            batchTaskStatus.value = null;
+            Object.assign(batchUploadForm, { emotion: '', autoAnalyze: false });
+            fetchEmotions();
+        };
+
+        const closeBatchUploadModal = () => {
+            batchUploadOpen.value = false;
+            if (batchPollInterval) {
+                clearInterval(batchPollInterval);
+                batchPollInterval = null;
+            }
+        };
+
+        const clearBatchFiles = () => {
+            batchFiles.value = [];
+            batchPreviews.value = [];
+        };
+
+        const handleBatchFileSelect = (e) => {
+            const files = Array.from(e.target.files).filter(f => f.type.startsWith('image/'));
+            if (files.length === 0) return;
+            batchFiles.value = files;
+            batchPreviews.value = files.map(f => URL.createObjectURL(f));
+        };
+
+        const formatBatchSize = () => {
+            const total = batchFiles.value.reduce((sum, f) => sum + f.size, 0);
+            if (total < 1024) return total + ' B';
+            if (total < 1024 * 1024) return (total / 1024).toFixed(1) + ' KB';
+            return (total / (1024 * 1024)).toFixed(1) + ' MB';
+        };
+
+        const submitBatchUpload = async () => {
+            if (batchFiles.value.length === 0) return;
+            if (!batchUploadForm.emotion && !batchUploadForm.autoAnalyze) {
+                batchUploadError.value = '请选择分类或启用自动识别';
+                return;
+            }
+            batchUploading.value = true;
+            batchUploadError.value = null;
+            try {
+                const formData = new FormData();
+                for (const file of batchFiles.value) {
+                    formData.append('files', file);
+                }
+                if (batchUploadForm.emotion) {
+                    formData.append('category', batchUploadForm.emotion);
+                }
+                formData.append('auto_analyze', String(batchUploadForm.autoAnalyze));
+
+                const res = await apiFetch('api/images/batch/upload', { method: 'POST', body: formData });
+                const data = await res.json();
+                if (data.success) {
+                    batchTaskId.value = data.task_id;
+                    batchTaskTotal.value = data.total;
+                    batchTaskProcessed.value = 0;
+                    batchTaskSuccess.value = 0;
+                    batchTaskFailed.value = 0;
+                    startBatchStatusPoll();
+                } else {
+                    batchUploadError.value = data.error || '上传失败';
+                }
+            } catch (e) {
+                batchUploadError.value = '上传出错';
+            } finally {
+                batchUploading.value = false;
+            }
+        };
+
+        const startBatchStatusPoll = () => {
+            if (batchPollInterval) clearInterval(batchPollInterval);
+            batchPollInterval = setInterval(async () => {
+                if (!batchTaskId.value) return;
+                try {
+                    const res = await apiFetch(`api/batch/upload/${batchTaskId.value}`);
+                    const data = await res.json();
+                    if (data.success) {
+                        batchTaskStatus.value = data.status;
+                        batchTaskProcessed.value = data.processed;
+                        batchTaskSuccess.value = data.success;
+                        batchTaskFailed.value = data.failed;
+                        if (data.status === 'completed' || data.status === 'failed') {
+                            clearInterval(batchPollInterval);
+                            batchPollInterval = null;
+                            if (data.status === 'completed') {
+                                fetchImages(1);
+                                fetchStats();
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error('Batch status poll error:', e);
+                }
+            }, 1000);
+        };
+
+        const resetBatchUpload = () => {
+            batchTaskId.value = null;
+            batchTaskStatus.value = null;
+            batchFiles.value = [];
+            batchPreviews.value = [];
+            batchUploadError.value = null;
         };
 
         const handleFileSelect = (e) => {
@@ -877,6 +1004,26 @@ createApp({
             // Auto Analysis (独立功能)
             analyzing,
             analyzeImage,
+
+            // Batch Upload
+            batchUploadOpen,
+            batchFiles,
+            batchPreviews,
+            batchUploadError,
+            batchUploadForm,
+            batchTaskId,
+            batchTaskStatus,
+            batchTaskTotal,
+            batchTaskProcessed,
+            batchTaskSuccess,
+            batchTaskFailed,
+            openBatchUploadModal,
+            closeBatchUploadModal,
+            clearBatchFiles,
+            handleBatchFileSelect,
+            formatBatchSize,
+            submitBatchUpload,
+            resetBatchUpload,
             
             // Category
             emotionsOpen,

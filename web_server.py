@@ -44,6 +44,9 @@ class WebServer:
         self._last_session_cleanup: float = 0.0  # 上次 session 清理时间
         self._session_cleanup_interval: int = self.SESSION_CLEANUP_INTERVAL
 
+        # 批量上传任务跟踪
+        self._batch_upload_tasks: dict[str, dict] = {}
+
         self._setup_routes()
 
     # ── 响应快捷方法 ──────────────────────────────────────────
@@ -377,6 +380,8 @@ class WebServer:
         self.app.router.add_post("/api/images/batch/move", self.handle_batch_move)
         self.app.router.add_post("/api/images/batch/scope", self.handle_batch_scope)
         self.app.router.add_post("/api/images/upload", self.handle_upload_image)
+        self.app.router.add_post("/api/images/batch/upload", self.handle_batch_upload_images)
+        self.app.router.add_get("/api/batch/upload/{task_id}", self.handle_get_batch_upload_status)
         self.app.router.add_post("/api/analyze", self.handle_analyze_image)
         self.app.router.add_get("/api/stats", self.handle_get_stats)
         self.app.router.add_get("/api/config", self.handle_get_config)
@@ -390,9 +395,9 @@ class WebServer:
         self.app.router.add_post("/auth/logout", self.handle_auth_logout)
 
         # 静态文件路由
-        # 1. 前端页面 - 首页
+        # 1. 前端页面 - 首页和登录页
         self.app.router.add_get("/", self.handle_index)
-        # 某些客户端/代理在遇到 FileResponse 异常时会报 "HTTP/0.9"，提供显式入口便于排障
+        self.app.router.add_get("/login.html", self.handle_login)
         self.app.router.add_get("/index.html", self.handle_index)
 
         # 2. 静态资源
@@ -619,6 +624,32 @@ class WebServer:
             return web.Response(text=content, content_type="text/html", status=200)
         except Exception as e:
             logger.error(f"Error serving index.html: {e}")
+            return web.Response(text=f"Error: {e}", status=500)
+
+    async def handle_login(self, request):
+        """返回登录页"""
+        try:
+            login_file = self.static_dir / "login.html"
+            if not login_file.exists():
+                return web.Response(
+                    text="<h1>Login</h1><p>login.html not found</p>",
+                    content_type="text/html",
+                    status=404,
+                )
+            try:
+                content = await asyncio.to_thread(
+                    login_file.read_text, encoding="utf-8"
+                )
+            except UnicodeDecodeError:
+                content = await asyncio.to_thread(
+                    login_file.read_text, encoding="utf-8", errors="replace"
+                )
+                logger.warning(
+                    "WebUI login.html is not valid UTF-8, returned with replacement characters.",
+                )
+            return web.Response(text=content, content_type="text/html", status=200)
+        except Exception as e:
+            logger.error(f"Error serving login.html: {e}")
             return web.Response(text=f"Error: {e}", status=500)
 
     async def handle_list_images(self, request):
@@ -1133,6 +1164,190 @@ class WebServer:
         except Exception as e:
             logger.error(f"上传图片失败: {e}", exc_info=True)
             return self._err(str(e))
+
+    async def handle_batch_upload_images(self, request):
+        try:
+            reader = await request.multipart()
+            files_data = []
+            category = None
+            auto_analyze = False
+
+            while True:
+                field = await reader.next()
+                if field is None:
+                    break
+
+                if field.name == "files":
+                    filename = field.filename
+                    if not filename:
+                        continue
+                    file_ext = Path(filename).suffix.lower()
+                    allowed_exts = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+                    if file_ext not in allowed_exts:
+                        continue
+                    content = await field.read()
+                    if content:
+                        files_data.append({
+                            "filename": filename,
+                            "content": content,
+                            "hash": hashlib.sha256(content).hexdigest(),
+                            "ext": file_ext,
+                        })
+                elif field.name == "category":
+                    category = (await field.text()).strip()
+                elif field.name == "auto_analyze":
+                    auto_analyze = (await field.text()).strip().lower() == "true"
+
+            if not files_data:
+                return self._err("没有上传有效的图片文件", 400)
+
+            if not category and not auto_analyze:
+                return self._err("请选择情绪分类或启用自动识别", 400)
+
+            task_id = str(uuid.uuid4())
+            timestamp = int(datetime.now().timestamp())
+
+            self._batch_upload_tasks[task_id] = {
+                "status": "processing",
+                "total": len(files_data),
+                "processed": 0,
+                "success": 0,
+                "failed": 0,
+                "results": [],
+                "created_at": timestamp,
+            }
+
+            asyncio.create_task(
+                self._process_batch_upload(task_id, files_data, category, auto_analyze)
+            )
+
+            return self._ok({"task_id": task_id, "total": len(files_data)})
+
+        except Exception as e:
+            logger.error(f"批量上传失败: {e}", exc_info=True)
+            return self._err(str(e))
+
+    async def _process_batch_upload(
+        self, task_id: str, files_data: list[dict], category: str, auto_analyze: bool
+    ):
+        try:
+            task_info = self._batch_upload_tasks.get(task_id)
+            if not task_info:
+                return
+
+            async def process_one(file_data: dict) -> dict:
+                try:
+                    unique_filename = f"{int(datetime.now().timestamp())}_{uuid.uuid4().hex[:8]}{file_data['ext']}"
+
+                    tags = []
+                    desc = ""
+                    scenes = []
+                    final_category = category
+
+                    if auto_analyze:
+                        try:
+                            img_hash = file_data["hash"]
+                            temp_path = self.data_dir / "temp" / f"{img_hash}{file_data['ext']}"
+                            temp_path.parent.mkdir(parents=True, exist_ok=True)
+                            await asyncio.to_thread(
+                                lambda: open(temp_path, "wb").write(file_data["content"])
+                            )
+                            (
+                                result_category,
+                                result_tags,
+                                result_desc,
+                                _,
+                                result_scenes,
+                            ) = await self.plugin.image_processor_service.classify_image(
+                                event=None,
+                                file_path=str(temp_path),
+                                categories=list(self.plugin.plugin_config.categories or []),
+                                content_filtration=False,
+                            )
+                            if result_category and result_category != self.plugin.image_processor_service.CATEGORY_FILTERED:
+                                final_category = result_category
+                                tags = result_tags or []
+                                desc = result_desc or ""
+                                scenes = result_scenes or []
+                            await asyncio.to_thread(lambda: temp_path.unlink() if temp_path.exists() else None)
+                        except Exception as e:
+                            logger.warning(f"自动分析失败: {e}")
+                            raise Exception(f"自动分析失败: {e}")
+
+                    category_dir = self.plugin.plugin_config.ensure_category_dir(final_category)
+                    file_path = category_dir / unique_filename
+                    await asyncio.to_thread(
+                        lambda: open(file_path, "wb").write(file_data["content"])
+                    )
+
+                    timestamp = int(datetime.now().timestamp())
+
+                    await self.plugin.cache_service.update_index(
+                        lambda current: current.__setitem__(
+                            str(file_path),
+                            {
+                                "hash": file_data["hash"],
+                                "path": str(file_path),
+                                "category": final_category,
+                                "tags": tags,
+                                "desc": desc,
+                                "scenes": scenes,
+                                "created_at": timestamp,
+                            },
+                        )
+                    )
+
+                    url = f"/images/{file_path.relative_to(self.data_dir).as_posix()}"
+                    return {
+                        "hash": file_data["hash"],
+                        "url": url,
+                        "category": final_category,
+                        "success": True,
+                    }
+                except Exception as e:
+                    logger.error(f"处理文件 {file_data['filename']} 失败: {e}")
+                    return {
+                        "filename": file_data["filename"],
+                        "success": False,
+                        "error": str(e),
+                    }
+
+            results = await asyncio.gather(*[process_one(f) for f in files_data])
+
+            for result in results:
+                task_info["results"].append(result)
+                if result.get("success"):
+                    task_info["success"] += 1
+                else:
+                    task_info["failed"] += 1
+                task_info["processed"] += 1
+
+            task_info["status"] = "completed"
+
+        except Exception as e:
+            logger.error(f"批量上传任务 {task_id} 失败: {e}")
+            if task_id in self._batch_upload_tasks:
+                self._batch_upload_tasks[task_id]["status"] = "failed"
+                self._batch_upload_tasks[task_id]["error"] = str(e)
+
+    async def handle_get_batch_upload_status(self, request):
+        task_id = request.match_info.get("task_id", "").strip()
+        if not task_id:
+            return self._err("无效的任务ID", 400)
+
+        task_info = self._batch_upload_tasks.get(task_id)
+        if not task_info:
+            return self._err("任务不存在或已过期", 404)
+
+        return self._ok({
+            "task_id": task_id,
+            "status": task_info["status"],
+            "total": task_info["total"],
+            "processed": task_info["processed"],
+            "success": task_info["success"],
+            "failed": task_info["failed"],
+            "results": task_info.get("results", []),
+        })
 
     async def handle_get_categories(self, request):
         try:

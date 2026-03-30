@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>亨利的战利品 - 登录</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+    <link rel="stylesheet" href="/app.css">
+    <style>
+        body {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            background: var(--bg-main);
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <div class="login-overlay" style="position: relative;">
+            <div class="login-bg-decoration">
+                <div class="floating-icon icon-1">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                </div>
+                <div class="floating-icon icon-2">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                    </svg>
+                </div>
+                <div class="floating-icon icon-3">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+                    </svg>
+                </div>
+                <div class="floating-icon icon-4">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
+                    </svg>
+                </div>
+            </div>
+
+            <div class="login-panel">
+                <div class="login-panel-corner login-panel-corner-tl"></div>
+                <div class="login-panel-corner login-panel-corner-tr"></div>
+                <div class="login-panel-corner login-panel-corner-bl"></div>
+                <div class="login-panel-corner login-panel-corner-br"></div>
+
+                <div class="login-logo">
+                    <div class="login-logo-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
+                        </svg>
+                    </div>
+                    <h1 class="login-title">亨利的战利品</h1>
+                    <p class="login-subtitle">表情包管理面板</p>
+                </div>
+
+                <div v-if="authChecking" class="login-loading">
+                    <div class="login-spinner">
+                        <div class="login-spinner-ring"></div>
+                        <div class="login-spinner-ring"></div>
+                        <div class="login-spinner-ring"></div>
+                    </div>
+                    <p class="login-loading-text">验证身份中...</p>
+                </div>
+
+                <div v-else-if="!authRequired" class="login-success">
+                    <div class="login-success-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                        </svg>
+                    </div>
+                    <p class="login-success-text">验证通过</p>
+                    <p class="login-success-subtext">正在进入...</p>
+                </div>
+
+                <div v-else class="login-form">
+                    <div class="login-form-header">
+                        <div class="login-lock-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" stroke-width="2"/>
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 11V7a5 5 0 0110 0v4"/>
+                            </svg>
+                        </div>
+                        <p class="login-form-title">请输入访问密码</p>
+                    </div>
+
+                    <div class="login-input-group">
+                        <div class="login-input-wrapper">
+                            <input
+                                v-model="loginToken"
+                                :type="showPassword ? 'text' : 'password'"
+                                placeholder="输入密码..."
+                                class="login-input"
+                                @keydown.enter="submitLogin"
+                            >
+                            <button @click="showPassword = !showPassword" class="login-input-toggle">
+                                <svg v-if="showPassword" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>
+                                </svg>
+                                <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                                </svg>
+                            </button>
+                        </div>
+                        <p class="login-session-info">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" style="width: 14px; height: 14px; vertical-align: middle; margin-right: 4px;">
+                                <circle cx="12" cy="12" r="10" stroke-width="2"/>
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6l4 2"/>
+                            </svg>
+                            会话有效期：{{ Math.round(sessionTimeout / 60) }} 分钟
+                        </p>
+                    </div>
+
+                    <div v-if="loginError" class="login-error">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" style="width: 18px; height: 18px; margin-right: 8px;">
+                            <circle cx="12" cy="12" r="10" stroke-width="2"/>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01"/>
+                        </svg>
+                        {{ loginError }}
+                    </div>
+
+                    <button @click="submitLogin" class="login-submit-btn" :class="{ 'is-loading': isLoggingIn }">
+                        <span v-if="isLoggingIn" class="login-submit-text">登录中...</span>
+                        <span v-else class="login-submit-text">进入系统</span>
+                        <svg v-if="!isLoggingIn" class="login-submit-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref, onMounted } = Vue;
+
+        createApp({
+            setup() {
+                const authChecking = ref(true);
+                const authRequired = ref(true);
+                const loginToken = ref('');
+                const loginError = ref('');
+                const showPassword = ref(false);
+                const sessionTimeout = ref(3600);
+                const isLoggingIn = ref(false);
+
+                const apiFetch = async (url, options = {}) => {
+                    const headers = new Headers(options.headers || {});
+                    const res = await fetch(url, { ...options, headers, credentials: 'same-origin' });
+                    return res;
+                };
+
+                const initAuth = async () => {
+                    authChecking.value = true;
+                    loginError.value = '';
+                    try {
+                        const res = await fetch('/auth/info');
+                        const data = await res.json();
+                        authRequired.value = !!(data && data.requires_auth);
+                        if (data && data.session_timeout) sessionTimeout.value = Number(data.session_timeout) || 3600;
+
+                        if (!authRequired.value) {
+                            setTimeout(() => {
+                                window.location.href = '/';
+                            }, 500);
+                            return;
+                        }
+
+                        const health = await apiFetch('/api/health');
+                        if (health.ok) {
+                            window.location.href = '/';
+                            return;
+                        }
+                    } catch (e) {
+                        console.error(e);
+                    } finally {
+                        authChecking.value = false;
+                    }
+                };
+
+                const submitLogin = async () => {
+                    loginError.value = '';
+                    const password = (loginToken.value || '').trim();
+                    if (!password) {
+                        loginError.value = '请输入密码';
+                        return;
+                    }
+
+                    isLoggingIn.value = true;
+                    try {
+                        const res = await apiFetch('/auth/login', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ password }),
+                        });
+                        const data = await res.json().catch(() => ({}));
+                        if (!res.ok || !data.success) {
+                            loginError.value = data && data.error ? data.error : '登录失败';
+                            return;
+                        }
+                        window.location.href = '/';
+                    } catch (e) {
+                        loginError.value = '登录失败';
+                    } finally {
+                        isLoggingIn.value = false;
+                    }
+                };
+
+                onMounted(() => {
+                    initAuth();
+                });
+
+                return {
+                    authChecking,
+                    authRequired,
+                    loginToken,
+                    loginError,
+                    showPassword,
+                    sessionTimeout,
+                    isLoggingIn,
+                    submitLogin,
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
