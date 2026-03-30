@@ -334,9 +334,9 @@ class WebServer:
 
             path = request.path or "/"
             if (
-                path in ("/", "/index.html")
+                path in ("/", "/index.html", "/login.html")
                 or path.startswith("/web")
-                or path in ("/auth/info", "/auth/login", "/auth/logout", "/login.html")
+                or path in ("/auth/info", "/auth/login", "/auth/logout")
             ):
                 return await handler(request)
 
@@ -597,8 +597,43 @@ class WebServer:
         logger.info("Emoji Manager WebUI stopped")
 
     async def handle_index(self, request):
-        """重定向到登录页"""
-        raise web.HTTPFound(location="/login.html")
+        """返回首页，已登录则显示主页，未登录重定向到登录页"""
+        expected = self._get_expected_secret()
+        if not expected:
+            return await self._serve_index(request)
+
+        sid = str(request.cookies.get(self._cookie_name, "") or "").strip()
+        now = time.time()
+        exp = self._sessions.get(sid)
+        if not exp or exp < now:
+            raise web.HTTPFound(location="/login.html")
+        return await self._serve_index(request)
+
+    async def _serve_index(self, request):
+        """返回index.html内容"""
+        try:
+            index_file = self.static_dir / "index.html"
+            if not index_file.exists():
+                return web.Response(
+                    text="<h1>Emoji Manager WebUI</h1><p>index.html not found</p>",
+                    content_type="text/html",
+                    status=404,
+                )
+            try:
+                content = await asyncio.to_thread(
+                    index_file.read_text, encoding="utf-8"
+                )
+            except UnicodeDecodeError:
+                content = await asyncio.to_thread(
+                    index_file.read_text, encoding="utf-8", errors="replace"
+                )
+                logger.warning(
+                    "WebUI index.html is not valid UTF-8, returned with replacement characters.",
+                )
+            return web.Response(text=content, content_type="text/html", status=200)
+        except Exception as e:
+            logger.error(f"Error serving index.html: {e}")
+            return web.Response(text=f"Error: {e}", status=500)
 
     async def handle_login(self, request):
         """返回登录页"""

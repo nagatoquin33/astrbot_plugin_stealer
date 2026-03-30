@@ -167,14 +167,14 @@
 
                         if (!authRequired.value) {
                             setTimeout(() => {
-                                window.location.href = '/';
+                                window.location.href = '/index.html';
                             }, 500);
                             return;
                         }
 
                         const health = await apiFetch('/api/health');
                         if (health.ok) {
-                            window.location.href = '/';
+                            window.location.href = '/index.html';
                             return;
                         }
                     } catch (e) {
@@ -204,7 +204,7 @@
                             loginError.value = data && data.error ? data.error : '登录失败';
                             return;
                         }
-                        window.location.href = '/';
+                        window.location.href = '/index.html';
                     } catch (e) {
                         loginError.value = '登录失败';
                     } finally {
