@@ -597,34 +597,8 @@ class WebServer:
         logger.info("Emoji Manager WebUI stopped")
 
     async def handle_index(self, request):
-        """返回首页"""
-        try:
-            index_file = self.static_dir / "index.html"
-            if not index_file.exists():
-                return web.Response(
-                    text="<h1>Emoji Manager WebUI</h1><p>index.html not found</p>",
-                    content_type="text/html",
-                    status=404,
-                )
-            # 这里不直接使用 FileResponse：
-            # - 在部分环境/代理下，如果传输过程中异常中断，curl 可能会报 Received HTTP/0.9
-            # - 显式构造 Response 能确保状态行和头部稳定输出
-            try:
-                content = await asyncio.to_thread(
-                    index_file.read_text, encoding="utf-8"
-                )
-            except UnicodeDecodeError:
-                # 兼容被意外写入非 UTF-8 的情况（尽量仍返回合法 HTTP 响应）
-                content = await asyncio.to_thread(
-                    index_file.read_text, encoding="utf-8", errors="replace"
-                )
-                logger.warning(
-                    "WebUI index.html is not valid UTF-8, returned with replacement characters.",
-                )
-            return web.Response(text=content, content_type="text/html", status=200)
-        except Exception as e:
-            logger.error(f"Error serving index.html: {e}")
-            return web.Response(text=f"Error: {e}", status=500)
+        """重定向到登录页"""
+        raise web.HTTPFound(location="/login.html")
 
     async def handle_login(self, request):
         """返回登录页"""
