@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=EB+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@400;500;600;700&display=swap');
 
 :root {
     /* Kingdom Come: Deliverance - Codex Theme (Dark - Default) */
@@ -70,9 +70,9 @@ html {
 body {
     background-color: var(--bg-main);
     color: var(--text-main);
-    font-family: 'EB Garamond', serif;
-    font-size: 16px;
-    line-height: 1.6;
+    font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 15px;
+    line-height: 1.7;
     background-image: url("data:image/svg+xml,%3Csvg width='100' height='100' viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
     margin: 0;
     padding: 0;
@@ -314,7 +314,7 @@ h2 {
     border: 1px solid transparent;
     cursor: pointer;
     transition: all 0.2s;
-    font-family: 'EB Garamond', serif;
+    font-family: 'Noto Sans SC', sans-serif;
     user-select: none;
     -webkit-user-select: none;
 }
@@ -429,8 +429,8 @@ h2 {
     background: var(--bg-main);
     border: 1px solid var(--gold-dark);
     color: var(--text-main);
-    font-family: 'EB Garamond', serif;
-    font-size: 0.95rem;
+    font-family: 'Noto Sans SC', sans-serif;
+    font-size: 0.9rem;
     outline: none;
     transition: all 0.3s;
 }
@@ -1331,8 +1331,8 @@ h2 {
     border: 2px solid var(--gold-dark);
     color: var(--text-main);
     padding: 14px 18px;
-    font-family: 'EB Garamond', serif;
-    font-size: 1.1rem;
+    font-family: 'Noto Sans SC', sans-serif;
+    font-size: 1rem;
     outline: none;
     transition: all 0.3s;
 }
@@ -1527,8 +1527,8 @@ h2 {
     border: 1px solid var(--gold-dark);
     color: var(--text-main);
     padding: 12px 16px;
-    font-family: 'EB Garamond', serif;
-    font-size: 1rem;
+    font-family: 'Noto Sans SC', sans-serif;
+    font-size: 0.95rem;
     width: 100%;
     outline: none;
     transition: all 0.3s;

@@ -7,132 +7,431 @@
     <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
     <link rel="stylesheet" href="/web/app.css">
     <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
         body {
+            min-height: 100vh;
+            background: var(--bg-main);
+            font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            overflow: hidden;
+        }
+
+        .login-page {
+            position: relative;
+            width: 100%;
+            min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
-            min-height: 100vh;
-            margin: 0;
-            background: var(--bg-main);
+        }
+
+        /* 背景装饰层 */
+        .login-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .bg-pattern {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: 
+                radial-gradient(circle at 20% 80%, rgba(212, 175, 55, 0.03) 0%, transparent 50%),
+                radial-gradient(circle at 80% 20%, rgba(212, 175, 55, 0.03) 0%, transparent 50%),
+                radial-gradient(circle at 40% 40%, rgba(139, 115, 85, 0.02) 0%, transparent 40%);
+        }
+
+        .floating-emoji {
+            position: absolute;
+            color: var(--gold-dim);
+            opacity: 0.08;
+            animation: float 6s ease-in-out infinite;
+        }
+
+        .floating-emoji:nth-child(1) { top: 10%; left: 10%; font-size: 80px; animation-delay: 0s; }
+        .floating-emoji:nth-child(2) { top: 20%; right: 15%; font-size: 60px; animation-delay: 1s; }
+        .floating-emoji:nth-child(3) { bottom: 30%; left: 8%; font-size: 70px; animation-delay: 2s; }
+        .floating-emoji:nth-child(4) { bottom: 15%; right: 10%; font-size: 90px; animation-delay: 3s; }
+        .floating-emoji:nth-child(5) { top: 50%; left: 5%; font-size: 50px; animation-delay: 1.5s; }
+        .floating-emoji:nth-child(6) { top: 60%; right: 8%; font-size: 65px; animation-delay: 2.5s; }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0) rotate(0deg); }
+            50% { transform: translateY(-20px) rotate(5deg); }
+        }
+
+        /* 登录卡片 - 与 index 的 modal-panel 风格一致 */
+        .login-card {
+            position: relative;
+            z-index: 1;
+            width: 100%;
+            max-width: 420px;
+            margin: 20px;
+            padding: 48px 40px;
+            background: var(--bg-panel);
+            border: 2px solid var(--gold-dim);
+            box-shadow: 0 0 60px rgba(0, 0, 0, 0.8);
+        }
+
+        /* 角落装饰 - 与 index 的 modal-panel 一致 (24px) */
+        .corner {
+            position: absolute;
+            width: 24px;
+            height: 24px;
+            border: 2px solid var(--gold-dim);
+            pointer-events: none;
+        }
+        .corner-tl { top: -2px; left: -2px; border-right: none; border-bottom: none; }
+        .corner-tr { top: -2px; right: -2px; border-left: none; border-bottom: none; }
+        .corner-bl { bottom: -2px; left: -2px; border-right: none; border-top: none; }
+        .corner-br { bottom: -2px; right: -2px; border-left: none; border-top: none; }
+
+        /* Logo区域 */
+        .login-header {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+
+        .login-logo-icon {
+            width: 64px;
+            height: 64px;
+            margin: 0 auto 16px;
+            color: var(--gold-primary);
+            opacity: 0.9;
+        }
+
+        .login-title {
+            font-size: 1.75rem;
+            font-weight: 600;
+            color: var(--gold-primary);
+            letter-spacing: 0.15em;
+            margin-bottom: 8px;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .login-subtitle {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+            letter-spacing: 0.1em;
+        }
+
+        /* 表单区域 */
+        .login-form {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .input-group {
+            position: relative;
+        }
+
+        .login-input {
+            width: 100%;
+            padding: 14px 44px 14px 16px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--gold-dark);
+            color: var(--text-main);
+            font-size: 1rem;
+            font-family: inherit;
+            outline: none;
+            transition: all 0.2s;
+        }
+
+        .login-input:focus {
+            border-color: var(--gold-primary);
+            box-shadow: 0 0 0 2px rgba(212, 175, 55, 0.1);
+        }
+
+        .login-input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .password-toggle {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: color 0.2s;
+        }
+
+        .password-toggle:hover {
+            color: var(--gold-primary);
+        }
+
+        .password-toggle svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        .session-info {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 8px;
+        }
+
+        .session-info svg {
+            width: 14px;
+            height: 14px;
+        }
+
+        /* 错误提示 */
+        .error-message {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 16px;
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #ef4444;
+            font-size: 0.875rem;
+        }
+
+        .error-message svg {
+            width: 18px;
+            height: 18px;
+            flex-shrink: 0;
+        }
+
+        /* 登录按钮 */
+        .login-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            width: 100%;
+            padding: 14px 24px;
+            background: linear-gradient(135deg, var(--gold-dark) 0%, var(--gold-primary) 100%);
+            border: none;
+            color: var(--bg-main);
+            font-size: 1rem;
+            font-weight: 600;
+            font-family: inherit;
+            letter-spacing: 0.1em;
+            cursor: pointer;
+            transition: all 0.2s;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .login-btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+            transition: left 0.5s;
+        }
+
+        .login-btn:hover::before {
+            left: 100%;
+        }
+
+        .login-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(212, 175, 55, 0.3);
+        }
+
+        .login-btn:active {
+            transform: translateY(0);
+        }
+
+        .login-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .login-btn svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        /* 加载状态 */
+        .loading-state {
+            text-align: center;
+            padding: 40px 0;
+        }
+
+        .spinner {
+            width: 48px;
+            height: 48px;
+            margin: 0 auto 16px;
+            border: 3px solid var(--gold-dark);
+            border-top-color: var(--gold-primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            color: var(--text-muted);
+            font-size: 0.875rem;
+        }
+
+        /* 成功状态 */
+        .success-state {
+            text-align: center;
+            padding: 40px 0;
+        }
+
+        .success-icon {
+            width: 64px;
+            height: 64px;
+            margin: 0 auto 16px;
+            color: #22c55e;
+        }
+
+        .success-text {
+            font-size: 1.25rem;
+            color: var(--gold-primary);
+            margin-bottom: 8px;
+        }
+
+        .success-subtext {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+        }
+
+        /* 响应式 */
+        @media (max-width: 480px) {
+            .login-card {
+                margin: 16px;
+                padding: 32px 24px;
+            }
+            
+            .login-title {
+                font-size: 1.5rem;
+            }
+            
+            .floating-emoji {
+                display: none;
+            }
         }
     </style>
 </head>
 <body>
     <div id="app">
-        <div class="login-overlay" style="position: relative;">
-            <div class="login-bg-decoration">
-                <div class="floating-icon icon-1">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                    </svg>
-                </div>
-                <div class="floating-icon icon-2">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
-                    </svg>
-                </div>
-                <div class="floating-icon icon-3">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
-                    </svg>
-                </div>
-                <div class="floating-icon icon-4">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
-                    </svg>
-                </div>
+        <div class="login-page">
+            <!-- 背景装饰 -->
+            <div class="login-bg">
+                <div class="bg-pattern"></div>
+                <div class="floating-emoji">😊</div>
+                <div class="floating-emoji">😂</div>
+                <div class="floating-emoji">🤔</div>
+                <div class="floating-emoji">😎</div>
+                <div class="floating-emoji">🎭</div>
+                <div class="floating-emoji">✨</div>
             </div>
 
-            <div class="login-panel">
-                <div class="login-panel-corner login-panel-corner-tl"></div>
-                <div class="login-panel-corner login-panel-corner-tr"></div>
-                <div class="login-panel-corner login-panel-corner-bl"></div>
-                <div class="login-panel-corner login-panel-corner-br"></div>
+            <!-- 登录卡片 -->
+            <div class="login-card">
+                <div class="corner corner-tl"></div>
+                <div class="corner corner-tr"></div>
+                <div class="corner corner-bl"></div>
+                <div class="corner corner-br"></div>
 
-                <div class="login-logo">
-                    <div class="login-logo-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
+                <!-- 加载中 -->
+                <div v-if="authChecking" class="loading-state">
+                    <div class="spinner"></div>
+                    <p class="loading-text">验证身份中...</p>
+                </div>
+
+                <!-- 验证通过 -->
+                <div v-else-if="!authRequired" class="success-state">
+                    <div class="success-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
                         </svg>
                     </div>
-                    <h1 class="login-title">亨利的战利品</h1>
-                    <p class="login-subtitle">表情包管理面板</p>
+                    <p class="success-text">验证通过</p>
+                    <p class="success-subtext">正在进入...</p>
                 </div>
 
-                <div v-if="authChecking" class="login-loading">
-                    <div class="login-spinner">
-                        <div class="login-spinner-ring"></div>
-                        <div class="login-spinner-ring"></div>
-                        <div class="login-spinner-ring"></div>
-                    </div>
-                    <p class="login-loading-text">验证身份中...</p>
-                </div>
-
-                <div v-else-if="!authRequired" class="login-success">
-                    <div class="login-success-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-                        </svg>
-                    </div>
-                    <p class="login-success-text">验证通过</p>
-                    <p class="login-success-subtext">正在进入...</p>
-                </div>
-
-                <div v-else class="login-form">
-                    <div class="login-form-header">
-                        <div class="login-lock-icon">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" stroke-width="2"/>
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 11V7a5 5 0 0110 0v4"/>
+                <!-- 登录表单 -->
+                <template v-else>
+                    <div class="login-header">
+                        <div class="login-logo-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
                             </svg>
                         </div>
-                        <p class="login-form-title">请输入访问密码</p>
+                        <h1 class="login-title">亨利的战利品</h1>
+                        <p class="login-subtitle">表情包管理面板</p>
                     </div>
 
-                    <div class="login-input-group">
-                        <div class="login-input-wrapper">
+                    <div class="login-form">
+                        <div class="input-group">
                             <input
                                 v-model="loginToken"
                                 :type="showPassword ? 'text' : 'password'"
-                                placeholder="输入密码..."
+                                placeholder="请输入访问密码"
                                 class="login-input"
                                 @keydown.enter="submitLogin"
                             >
-                            <button @click="showPassword = !showPassword" class="login-input-toggle">
-                                <svg v-if="showPassword" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>
+                            <button @click="showPassword = !showPassword" class="password-toggle" type="button">
+                                <svg v-if="showPassword" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>
                                 </svg>
-                                <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                                <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
                                 </svg>
                             </button>
+                            <p class="session-info">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10"/>
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6l4 2"/>
+                                </svg>
+                                会话有效期：{{ Math.round(sessionTimeout / 60) }} 分钟
+                            </p>
                         </div>
-                        <p class="login-session-info">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" style="width: 14px; height: 14px; vertical-align: middle; margin-right: 4px;">
-                                <circle cx="12" cy="12" r="10" stroke-width="2"/>
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6l4 2"/>
+
+                        <div v-if="loginError" class="error-message">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10"/>
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01"/>
                             </svg>
-                            会话有效期：{{ Math.round(sessionTimeout / 60) }} 分钟
-                        </p>
-                    </div>
+                            {{ loginError }}
+                        </div>
 
-                    <div v-if="loginError" class="login-error">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" style="width: 18px; height: 18px; margin-right: 8px;">
-                            <circle cx="12" cy="12" r="10" stroke-width="2"/>
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01"/>
-                        </svg>
-                        {{ loginError }}
+                        <button @click="submitLogin" class="login-btn" :disabled="isLoggingIn" type="button">
+                            <span v-if="isLoggingIn">登录中...</span>
+                            <template v-else>
+                                <span>进入系统</span>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"/>
+                                </svg>
+                            </template>
+                        </button>
                     </div>
-
-                    <button @click="submitLogin" class="login-submit-btn" :class="{ 'is-loading': isLoggingIn }">
-                        <span v-if="isLoggingIn" class="login-submit-text">登录中...</span>
-                        <span v-else class="login-submit-text">进入系统</span>
-                        <svg v-if="!isLoggingIn" class="login-submit-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"/>
-                        </svg>
-                    </button>
-                </div>
+                </template>
             </div>
         </div>
     </div>
