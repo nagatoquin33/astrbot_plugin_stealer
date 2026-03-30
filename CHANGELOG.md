@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.12] - 2026-03-31
+### add
+- WebUI 字体优化：更换为思源黑体 (Noto Sans SC)，提升可读性
+- WebUI 登录页面风格统一：角落装饰、边框阴影与主页面保持一致
+
+### improved
+- WebUI 表情包网格排版优化：增加间距、悬停效果增强、分类标签更清晰
+- WebUI 工具栏布局优化：按钮按功能分组，视觉层次更清晰
+- WebUI 侧边栏样式优化：增加宽度、悬停交互、选中效果增强
+- WebUI 详情弹窗布局优化：图片预览区加大、信息面板更宽敞、标签样式优化
+
 ## [2.4.11] - 2026-03-30
 ### add
 - WebUI 新增批量导入功能，支持多图同时上传
