@@ -336,7 +336,7 @@ class WebServer:
             if (
                 path in ("/", "/index.html")
                 or path.startswith("/web")
-                or path in ("/auth/info", "/auth/login", "/auth/logout")
+                or path in ("/auth/info", "/auth/login", "/auth/logout", "/login.html")
             ):
                 return await handler(request)
 
