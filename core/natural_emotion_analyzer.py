@@ -47,6 +47,11 @@ class NaturalEmotionAnalyzer:
 
         return f"""分析文本情绪，从以下分类选择最匹配的：{categories_text}
 
+    判定规则：
+    - `troll` 仅用于明显的阴阳怪气、挑衅嘲讽、玩梗发癫语气。
+    - 普通负面、拒绝、抱怨、无奈、吐槽，不要判为 `troll`，优先在 `angry/sigh/dumb/sad/confused` 中选择。
+    - 证据不足时不要默认 `troll`。
+
 示例："哈哈笑死"→happy, "太离谱了"→dumb, "算了懒得说"→sigh
 
 文本："{{text}}"
@@ -63,6 +68,11 @@ class NaturalEmotionAnalyzer:
         return f"""分析对话中回复(A)的情绪，从以下分类选择最匹配的：{categories_text}
 
 要求：结合用户问题(Q)理解回复(A)的语境和情绪，只分析A的情绪。
+
+    判定规则：
+    - `troll` 仅用于明显的阴阳怪气、挑衅嘲讽、玩梗发癫语气。
+    - 普通负面、拒绝、抱怨、无奈、吐槽，不要判为 `troll`，优先在 `angry/sigh/dumb/sad/confused` 中选择。
+    - 证据不足时不要默认 `troll`。
 
 示例：
 Q:"今天加班到几点" A:"别提了，干到十一点"→sigh
