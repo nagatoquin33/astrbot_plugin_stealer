@@ -45,17 +45,25 @@ class NaturalEmotionAnalyzer:
         """构建情绪分析提示词（仅分析回复文本，无用户问题时使用）"""
         categories_text = self._build_categories_text()
 
-        return f"""分析文本情绪，从以下分类选择最匹配的：{categories_text}
+        return f"""你是对话情绪分类器。请从下列分类中选择一个最匹配的结果：{categories_text}
 
-    判定规则：
-    - `troll` 仅用于明显的阴阳怪气、挑衅嘲讽、玩梗发癫语气。
-    - 普通负面、拒绝、抱怨、无奈、吐槽，不要判为 `troll`，优先在 `angry/sigh/dumb/sad/confused` 中选择。
-    - 证据不足时不要默认 `troll`。
+分类规则：
+1. 只基于文本表达的语气与态度，不推测图片内容，不扩展剧情。
+2. 负面情绪优先细分：愤怒→angry，无奈/叹气→sigh，震惊到无语→dumb，悲伤→sad，不解→confused。
+3. `troll` 仅用于明显的阴阳怪气、挑衅、嘲讽、故意拱火、玩梗发癫语气。
+4. 普通吐槽、拒绝、冷淡、抱怨，不要判为 `troll`。
+5. 证据不足时选择最保守、最贴近字面语气的分类，不要为追求“有趣”而偏向 `troll`。
 
-示例："哈哈笑死"→happy, "太离谱了"→dumb, "算了懒得说"→sigh
+示例：
+- "哈哈笑死" -> happy
+- "太离谱了" -> dumb
+- "算了懒得说" -> sigh
 
 文本："{{text}}"
-只返回英文分类名。"""
+
+输出要求：
+- 只能输出一个英文分类名
+- 不能输出解释、标点、代码块或其他文字"""
 
     def _build_qa_analysis_prompt(self) -> str:
         """构建 QA 上下文情绪分析提示词（有用户问题时使用）
@@ -65,23 +73,29 @@ class NaturalEmotionAnalyzer:
         """
         categories_text = self._build_categories_text()
 
-        return f"""分析对话中回复(A)的情绪，从以下分类选择最匹配的：{categories_text}
+        return f"""你是对话情绪分类器。请根据 Q/A 语境判断 A 的情绪，并从下列分类中选择一个：{categories_text}
 
-要求：结合用户问题(Q)理解回复(A)的语境和情绪，只分析A的情绪。
+    任务边界：
+    1. 只分类 A（回复）的情绪，不分类 Q（提问）。
+    2. Q 仅用于帮助理解 A 的语气与立场。
 
-    判定规则：
-    - `troll` 仅用于明显的阴阳怪气、挑衅嘲讽、玩梗发癫语气。
-    - 普通负面、拒绝、抱怨、无奈、吐槽，不要判为 `troll`，优先在 `angry/sigh/dumb/sad/confused` 中选择。
-    - 证据不足时不要默认 `troll`。
+    分类规则：
+    1. 负面情绪优先细分：愤怒→angry，无奈/叹气→sigh，震惊到无语→dumb，悲伤→sad，不解→confused。
+    2. `troll` 仅用于明显阴阳怪气、挑衅、嘲讽、故意拱火语气。
+    3. 普通吐槽、拒绝、抱怨、冷淡，不要判为 `troll`。
+    4. 证据不足时选择最保守、最贴近字面语气的分类。
 
-示例：
-Q:"今天加班到几点" A:"别提了，干到十一点"→sigh
-Q:"这个好看吗" A:"也太好看了吧！"→excitement
-Q:"你怎么看" A:"太离谱了，无话可说"→dumb
+    示例：
+    - Q:"今天加班到几点" A:"别提了，干到十一点" -> sigh
+    - Q:"这个好看吗" A:"也太好看了吧！" -> excitement
+    - Q:"你怎么看" A:"太离谱了，无话可说" -> dumb
 
-Q:"{{user_query}}"
-A:"{{text}}"
-只返回英文分类名。"""
+    Q:"{{user_query}}"
+    A:"{{text}}"
+
+    输出要求：
+    - 只能输出一个英文分类名
+    - 不能输出解释、标点、代码块或其他文字"""
 
     def _build_categories_text(self) -> str:
         """构建分类描述文本（供两种 prompt 共用）"""
