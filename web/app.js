@@ -292,6 +292,7 @@ createApp({
 
         const handleKeydown = (e) => {
             if (!previewOpen.value) return;
+            if (isEditing.value) return; // 修复：编辑模式下禁用键盘切换，防止在输入框中使用左右方向键时导致底层预览目标被修改
             if (e.key === 'ArrowLeft') prevImage();
             if (e.key === 'ArrowRight') nextImage();
             if (e.key === 'Escape') closePreview();
@@ -350,6 +351,9 @@ createApp({
                 const res = await apiFetch(url, { method: 'DELETE' });
                 if (res.ok) {
                     closePreview();
+                    if (images.value.length === 1 && currentPage.value > 1) {
+                        currentPage.value--;
+                    }
                     fetchImages(currentPage.value);
                     fetchStats();
                 } else {
