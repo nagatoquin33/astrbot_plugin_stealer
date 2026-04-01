@@ -1187,10 +1187,11 @@ class ImageProcessorService:
     ):
         """兼容不同 AstrBot 版本对 image_urls 参数形态的处理差异。"""
         try:
+            # 优先使用列表形态，避免部分版本把字符串按字符拆分成“多张图片”。
             return await self.plugin.context.llm_generate(
                 chat_provider_id=provider_id,
                 prompt=prompt,
-                image_urls=file_url,
+                image_urls=[file_url],
             )
         except Exception as e:
             # 仅在参数形态/类型不兼容时回退，避免对无关错误重复请求。
@@ -1207,12 +1208,12 @@ class ImageProcessorService:
                 raise
 
             logger.warning(
-                f"VLM image_urls 参数形态不兼容，回退为列表模式重试一次: {e}"
+                f"VLM image_urls 参数形态不兼容，回退为字符串模式重试一次: {e}"
             )
             return await self.plugin.context.llm_generate(
                 chat_provider_id=provider_id,
                 prompt=prompt,
-                image_urls=[file_url],
+                image_urls=file_url,
             )
 
     async def _compute_hash(self, file_path: str) -> str:
