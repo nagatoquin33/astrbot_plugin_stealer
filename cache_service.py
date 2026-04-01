@@ -34,6 +34,7 @@ class CacheService:
             "image_cache": {},  # 图片分类缓存
             "text_cache": {},  # 文本情绪分类缓存
             "index_cache": {},  # 索引缓存
+            "bm25_cache": {},  # BM25索引缓存
             "desc_cache": {},  # 描述缓存
             "blacklist_cache": {},  # 黑名单缓存
         }

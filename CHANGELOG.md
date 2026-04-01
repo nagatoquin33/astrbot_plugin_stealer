@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.13] - 2026-04-02
+### perf
+- BM25 索引接入缓存持久化：新增 `bm25_cache`，支持按语料签名恢复，减少冷启动重建开销
+- 智能选图热路径优化：先按分类/作用域过滤，再做轻量词法预筛，降低全量扫描与重排成本
+- 预筛召回增强：加入 `SMART_FAST_PREFILTER_FUZZY_RESERVE`，在保性能的同时保留部分模糊候选，减少误杀
+### refactor
+- `EmojiSelector` 的 BM25 构建流程改为异步调用，统一搜索与智能选图路径的索引加载行为
+
 ## [2.4.12] - 2026-03-31
 ### add
 - WebUI 字体优化：更换为思源黑体 (Noto Sans SC)，提升可读性

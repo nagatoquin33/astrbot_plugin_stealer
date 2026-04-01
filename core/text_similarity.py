@@ -326,11 +326,11 @@ def _calculate_hybrid_similarity_cached(t1: str, t2: str) -> float:
 
     # 正常融合
     score = (
-        ngram_sim * 0.30
-        + cosine_sim * 0.25
-        + substr_sim * 0.20
+        ngram_sim * 0.32
+        + cosine_sim * 0.28
+        + substr_sim * 0.18
         + char_sim * 0.10
-        + edit_sim * 0.15
+        + edit_sim * 0.12
     )
 
     # 关键词重合增强：对中文 bigram 命中进行轻微提升，改善短语匹配稳定性。

@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import os
 import random
 import re
@@ -56,25 +57,77 @@ class EmojiSelector:
     SIMILARITY_THRESHOLD = 0.45  # 模糊匹配相似度阈值
     SMART_BM25_PREFILTER_LIMIT = 80  # 智能选择时 BM25 预召回上限
     SMART_BM25_BONUS_WEIGHT = 0.2  # BM25 分数对最终打分的加权
+    SMART_FAST_PREFILTER_TOP_K = 120  # 轻量预筛后保留的候选上限
+    SMART_FAST_PREFILTER_MIN_CANDIDATES = 48  # 候选少于该值时跳过预筛
+    SMART_FAST_PREFILTER_FUZZY_RESERVE = 24  # 预筛时保留部分模糊候选，避免误杀
 
     def __init__(self, plugin_instance: Any):
         self.plugin = plugin_instance
         self.categories: list[str] = getattr(plugin_instance, "categories", [])
         self._selection_lock = asyncio.Lock()
         self._recent_usage: dict[str, list[str]] = {}  # category -> [canon_path, ...]
-        self._bm25_index: BM25 | None = None
+        self._bm25_index: Any | None = None
         self._bm25_doc_paths: list[str] = []
         self._bm25_dirty: bool = True
+        self._bm25_signature: str = ""
 
-    def _build_bm25_index(self, idx: dict | None = None) -> None:
+    def _compute_bm25_signature(self, idx: dict[str, Any]) -> str:
+        """计算 BM25 语料签名，确保只在语料变化时重建。"""
+        hasher = hashlib.sha256()
+        for file_path in sorted(idx.keys()):
+            data = idx.get(file_path)
+            if not isinstance(data, dict):
+                continue
+            tags = self._parse_tags(data.get("tags", []))
+            scenes = self._parse_tags(data.get("scenes", []))
+            desc = str(data.get("desc", "") or "")
+            category = self._get_category_from_data(data)
+            payload = "\x1f".join(
+                [
+                    str(file_path),
+                    category,
+                    desc,
+                    "\x1e".join(tags),
+                    "\x1e".join(scenes),
+                ]
+            )
+            hasher.update(payload.encode("utf-8", errors="ignore"))
+            hasher.update(b"\x00")
+        return hasher.hexdigest()
+
+    async def _build_bm25_index(self, idx: dict | None = None) -> None:
         if BM25 is None:
             return
+        cache_service = getattr(self.plugin, "cache_service", None)
         if idx is None:
-            cache_service = getattr(self.plugin, "cache_service", None)
             if cache_service:
                 idx = cache_service.get_index_cache_readonly() or {}
         if not idx:
             return
+
+        signature = self._compute_bm25_signature(idx)
+
+        # 优先尝试从持久化缓存加载 BM25 文档语料。
+        if cache_service:
+            try:
+                cached = cache_service.get_cache("bm25_cache")
+                if isinstance(cached, dict) and cached.get("signature") == signature:
+                    cached_documents = cached.get("documents")
+                    cached_doc_paths = cached.get("doc_paths")
+                    if isinstance(cached_documents, list) and isinstance(cached_doc_paths, list):
+                        normalized_docs: list[list[str]] = []
+                        for item in cached_documents:
+                            if isinstance(item, (list, tuple)):
+                                normalized_docs.append([str(tok) for tok in item if str(tok)])
+                        if normalized_docs and len(normalized_docs) == len(cached_doc_paths):
+                            self._bm25_index = BM25(normalized_docs)
+                            self._bm25_doc_paths = [str(p) for p in cached_doc_paths]
+                            self._bm25_signature = signature
+                            self._bm25_dirty = False
+                            logger.debug(f"[BM25] 从缓存恢复索引: {len(normalized_docs)} 文档")
+                            return
+            except Exception as e:
+                logger.debug(f"[BM25] 读取缓存失败，改为重建: {e}")
 
         documents: list[tuple[str, ...]] = []
         doc_paths: list[str] = []
@@ -95,8 +148,24 @@ class EmojiSelector:
         if documents:
             self._bm25_index = BM25(documents)
             self._bm25_doc_paths = doc_paths
+            self._bm25_signature = signature
             self._bm25_dirty = False
             logger.debug(f"[BM25] 索引构建完成: {len(documents)} 文档, 示例: {documents[:3]}")
+
+            if cache_service:
+                try:
+                    await cache_service.set_cache(
+                        "bm25_cache",
+                        {
+                            "signature": signature,
+                            "documents": [list(doc) for doc in documents],
+                            "doc_paths": doc_paths,
+                            "version": 1,
+                        },
+                        persist=True,
+                    )
+                except Exception as e:
+                    logger.debug(f"[BM25] 持久化缓存失败: {e}")
 
     def _invalidate_bm25_index(self) -> None:
         self._bm25_dirty = True
@@ -307,7 +376,8 @@ class EmojiSelector:
 
         try:
             await cache_service.update_index(_updater)
-            self._invalidate_bm25_index()
+            # 这里只更新 use_count/last_used_at，不影响 BM25 文本语料，
+            # 无需失效索引，避免每次发图后重建索引。
         except Exception as e:
             logger.debug(f"[Stealer] 更新表情使用统计失败: {e}")
 
@@ -538,40 +608,15 @@ class EmojiSelector:
             low_score_candidates = []
             context_lower = context_text.lower()
             context_words = _extract_words(context_text)
+            query_tokens = tokenize_for_bm25(context_text)
+            query_token_set = set(query_tokens)
 
-            bm25_scores: dict[str, float] = {}
-            if BM25 is not None:
-                if self._bm25_dirty or self._bm25_index is None:
-                    self._build_bm25_index(idx)
-
-                query_tokens = tokenize_for_bm25(context_text)
-                if self._bm25_index is not None and query_tokens:
-                    top_k = min(
-                        len(self._bm25_doc_paths),
-                        self.SMART_BM25_PREFILTER_LIMIT,
-                    )
-                    bm25_results = self._bm25_index.get_top_k(list(query_tokens), k=top_k)
-                    if bm25_results:
-                        raw_scores = [score for _, score in bm25_results]
-                        max_score = max(raw_scores)
-                        min_score = min(raw_scores)
-                        denom = max_score - min_score
-                        for doc_idx, score in bm25_results:
-                            if 0 <= doc_idx < len(self._bm25_doc_paths):
-                                path = self._bm25_doc_paths[doc_idx]
-                                if denom > 1e-9:
-                                    norm_score = (score - min_score) / denom
-                                else:
-                                    norm_score = 1.0 if score > 0 else 0.0
-                                bm25_scores[path] = max(0.0, min(1.0, norm_score))
-
-            bm25_prefilter_enabled = bool(bm25_scores)
+            # 热路径优化：先按分类与作用域过滤，再做轻量词法预筛，
+            # 避免每次自动发送都触发全量 BM25 索引加载/查询。
+            scoped_entries: list[tuple[str, dict[str, Any], str, list[str], list[str], tuple[str, ...], float]] = []
 
             for file_path, data in idx.items():
                 if not isinstance(data, dict):
-                    continue
-
-                if bm25_prefilter_enabled and file_path not in bm25_scores:
                     continue
 
                 entry_category = self._get_category_from_data(data)
@@ -580,8 +625,66 @@ class EmojiSelector:
                 if not self._is_entry_allowed_for_event(data, event):
                     continue
 
+                desc_raw = str(data.get("desc", "") or "")
                 tags = self._parse_tags(data.get("tags", []))
                 scenes = self._parse_tags(data.get("scenes", []))
+                entry_text = " ".join([entry_category, desc_raw] + tags + scenes)
+                entry_tokens = tokenize_for_bm25(entry_text)
+
+                fast_score = 0.0
+                if query_token_set and entry_tokens:
+                    entry_token_set = set(entry_tokens)
+                    overlap = query_token_set & entry_token_set
+                    if overlap:
+                        fast_score = len(overlap) / max(1, len(query_token_set))
+
+                scoped_entries.append(
+                    (file_path, data, entry_category, tags, scenes, entry_tokens, fast_score)
+                )
+
+            if not scoped_entries:
+                return None
+
+            # 仅在候选较多时启用轻量预筛，兼顾召回与性能。
+            if (
+                len(scoped_entries) > self.SMART_FAST_PREFILTER_MIN_CANDIDATES
+                and query_token_set
+            ):
+                lexical_matches = [item for item in scoped_entries if item[6] > 0]
+                fuzzy_only_matches = [item for item in scoped_entries if item[6] <= 0]
+
+                if len(lexical_matches) > self.SMART_FAST_PREFILTER_TOP_K:
+                    lexical_matches.sort(key=lambda item: item[6], reverse=True)
+                    prefiltered_entries = lexical_matches[
+                        : self.SMART_FAST_PREFILTER_TOP_K
+                    ]
+
+                    if fuzzy_only_matches:
+                        fuzzy_only_matches.sort(
+                            key=lambda item: calculate_hybrid_similarity(
+                                context_text,
+                                " ".join(
+                                    [
+                                        item[2],
+                                        str(item[1].get("desc", "") or ""),
+                                        *item[3],
+                                        *item[4],
+                                    ]
+                                ),
+                            ),
+                            reverse=True,
+                        )
+                        prefiltered_entries.extend(
+                            fuzzy_only_matches[
+                                : self.SMART_FAST_PREFILTER_FUZZY_RESERVE
+                            ]
+                        )
+                else:
+                    prefiltered_entries = scoped_entries
+            else:
+                prefiltered_entries = scoped_entries
+
+            for file_path, data, entry_category, tags, scenes, _, fast_score in prefiltered_entries:
                 desc, tag_words, scene_words, _, _ = self._prepare_entry_text_features(
                     entry_category, str(data.get("desc", "")), tuple(tags), tuple(scenes)
                 )
@@ -611,7 +714,7 @@ class EmojiSelector:
 
                 category_bonus = 0.12 if entry_category == category else 0.04
                 use_count_bonus = min(0.08, int(data.get("use_count", 0) or 0) * 0.01)
-                bm25_bonus = bm25_scores.get(file_path, 0.0) * self.SMART_BM25_BONUS_WEIGHT
+                bm25_bonus = fast_score * self.SMART_BM25_BONUS_WEIGHT
                 base_score = (
                     desc_score * 0.35
                     + tag_score * 0.25
@@ -706,7 +809,7 @@ class EmojiSelector:
         """根据查询词搜索图片（BM25 检索）。"""
         try:
             if self._bm25_dirty or self._bm25_index is None:
-                self._build_bm25_index(idx)
+                await self._build_bm25_index(idx)
 
             if self._bm25_index is None or not self._bm25_doc_paths:
                 return await self._search_images_fallback(query, limit, idx, event)
