@@ -956,8 +956,8 @@ class ImageProcessorService:
             if actual_img_path != img_path:
                 temp_file = actual_img_path  # 标记为临时文件，分析后删除
 
-            # 构建图片 URL（file:// 协议）
-            file_url = f"file:///{actual_img_path.replace(chr(92), '/')}"
+            # 构建标准 file URI
+            file_url = Path(actual_img_path).resolve().as_uri()
 
             # 如果是动图拼接，添加专用提示词前缀
             actual_prompt = prompt
@@ -1135,10 +1135,10 @@ class ImageProcessorService:
                     f"调用VLM (尝试 {attempt + 1}/{max_retries}), "
                     f"provider={provider_id}, 图片={file_url}"
                 )
-                result = await self.plugin.context.llm_generate(
-                    chat_provider_id=provider_id,
+                result = await self._llm_generate_with_image_compat(
+                    provider_id=provider_id,
                     prompt=prompt,
-                    image_urls=[file_url],
+                    file_url=file_url,
                 )
 
                 # LLMResponse.completion_text 是 @property，自动处理 result_chain
@@ -1181,6 +1181,39 @@ class ImageProcessorService:
         raise Exception(
             f"视觉模型调用失败（已重试{max_retries}次）: {last_error}"
         ) from last_error
+
+    async def _llm_generate_with_image_compat(
+        self, provider_id: str, prompt: str, file_url: str
+    ):
+        """兼容不同 AstrBot 版本对 image_urls 参数形态的处理差异。"""
+        try:
+            return await self.plugin.context.llm_generate(
+                chat_provider_id=provider_id,
+                prompt=prompt,
+                image_urls=file_url,
+            )
+        except Exception as e:
+            # 仅在参数形态/类型不兼容时回退，避免对无关错误重复请求。
+            err = str(e).lower()
+            fallback_markers = (
+                "list object",
+                "startswith",
+                "image_urls",
+                "expected list",
+                "expected str",
+                "typeerror",
+            )
+            if not any(marker in err for marker in fallback_markers):
+                raise
+
+            logger.warning(
+                f"VLM image_urls 参数形态不兼容，回退为列表模式重试一次: {e}"
+            )
+            return await self.plugin.context.llm_generate(
+                chat_provider_id=provider_id,
+                prompt=prompt,
+                image_urls=[file_url],
+            )
 
     async def _compute_hash(self, file_path: str) -> str:
         """计算文件的SHA256哈希值。

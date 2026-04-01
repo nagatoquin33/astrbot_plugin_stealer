@@ -139,7 +139,9 @@ A:"{{text}}"
         # 执行 LLM 分析（传入用户问题作为上下文）
         start_time = time.time()
         emotion = await self._analyze_with_llm(
-            event, cleaned_text, user_query=cleaned_query,
+            event,
+            cleaned_text,
+            user_query=cleaned_query,
         )
         end_time = time.time()
 
@@ -197,8 +199,6 @@ A:"{{text}}"
 
         # 2. 分词匹配（降级模式下执行）
         if fallback:
-            from .text_similarity import calculate_hybrid_similarity
-
             best_match = None
             best_score = 0.0
             threshold = 0.3  # 降级模式阈值更低

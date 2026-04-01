@@ -687,7 +687,7 @@ class EventHandler:
                     logger.debug(f"跳过非表情包图片 (subType={sub_type_value})")
                     continue
 
-                logger.info("检测到平台标记的表情包，加入处理队列")
+                logger.info("检测到表情包，准备偷走它！")
 
                 # 提取 QQ 商城表情的元信息
                 extra_meta = None

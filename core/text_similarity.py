@@ -5,7 +5,8 @@
 改进说明（v2）：
 - 中文 n-gram 分词：提取 bigram/trigram 保留词组语义（如 "开心" 作为整体而非 "开"+"心"）
 - 子串包含匹配：短文本包含在长文本中时给予高分
-- 多策略融合：n-gram Jaccard + 子串匹配 + 编辑距离，加权融合
+- 多策略融合：n-gram Jaccard + 余弦相似 + 子串匹配 + 编辑距离，加权融合
+- 文本归一化增强：重复字压缩
 - 无额外依赖：不依赖 jieba 等第三方分词库
 """
 
@@ -17,6 +18,7 @@ from functools import lru_cache
 _CJK_RE = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf]")
 _PUNCT_RE = re.compile(r"[^\w\s]")
 _EN_WORD_RE = re.compile(r"^[a-zA-Z]+$")
+_REPEAT_CHAR_RE = re.compile(r"([\u4e00-\u9fffA-Za-z])\1{2,}")
 
 K1 = 1.5
 B = 0.75
@@ -141,7 +143,14 @@ def tokenize_for_bm25(text: str) -> tuple[str, ...]:
 
 @lru_cache(maxsize=4096)
 def _normalize_text(text: str) -> str:
-    return str(text or "").lower().strip()
+    normalized = str(text or "").lower().strip()
+    if not normalized:
+        return ""
+
+    # 压缩重复字符：例如“哈哈哈哈” -> “哈哈”。
+    normalized = _REPEAT_CHAR_RE.sub(r"\1\1", normalized)
+
+    return normalized
 
 
 # ──────────────────────────────────────────────────────────────
@@ -203,14 +212,62 @@ def calculate_levenshtein_similarity(text1: str, text2: str) -> float:
     return max(0.0, 1 - distance / max_len)
 
 
+def calculate_cosine_similarity(text1: str, text2: str) -> float:
+    """计算两个文本的余弦相似度（基于 n-gram 词频向量）。
+
+    Args:
+        text1: 第一个文本
+        text2: 第二个文本
+
+    Returns:
+        float: 相似度分数 (0-1)
+    """
+    if not text1 or not text2:
+        return 0.0
+
+    t1 = _normalize_text(text1)
+    t2 = _normalize_text(text2)
+
+    if not t1 or not t2:
+        return 0.0
+    if t1 == t2:
+        return 1.0
+
+    tokens1 = tokenize_for_bm25(t1)
+    tokens2 = tokenize_for_bm25(t2)
+
+    if not tokens1 or not tokens2:
+        return 0.0
+
+    counter1 = Counter(tokens1)
+    counter2 = Counter(tokens2)
+
+    dot = 0.0
+    for term, c1 in counter1.items():
+        c2 = counter2.get(term)
+        if c2:
+            dot += c1 * c2
+
+    if dot <= 0.0:
+        return 0.0
+
+    norm1 = math.sqrt(sum(v * v for v in counter1.values()))
+    norm2 = math.sqrt(sum(v * v for v in counter2.values()))
+    if norm1 == 0.0 or norm2 == 0.0:
+        return 0.0
+
+    return min(1.0, dot / (norm1 * norm2))
+
+
 def calculate_hybrid_similarity(text1: str, text2: str) -> float:
     """混合相似度算法（多策略融合，v2）
 
     融合策略：
     1. n-gram Jaccard（语义词组重叠）
-    2. 子串包含匹配（短文本被长文本包含时高分）
-    3. 中文字符级 Jaccard（兜底召回）
-    4. 编辑距离相似度（补充字形相近的情况）
+    2. 余弦相似（基于 n-gram 词频，增强强相关词命中）
+    3. 子串包含匹配（短文本被长文本包含时高分）
+    4. 中文字符级 Jaccard（兜底召回）
+    5. 编辑距离相似度（补充字形相近的情况）
 
     各策略取最优组合，而非简单加权。
 
@@ -244,13 +301,16 @@ def _calculate_hybrid_similarity_cached(t1: str, t2: str) -> float:
     # ---- 策略1: n-gram Jaccard ----
     ngram_sim = calculate_simple_similarity(t1, t2)
 
-    # ---- 策略2: 子串包含匹配 ----
+    # ---- 策略2: n-gram 词频余弦 ----
+    cosine_sim = calculate_cosine_similarity(t1, t2)
+
+    # ---- 策略3: 子串包含匹配 ----
     substr_sim = _substring_similarity(t1, t2)
 
-    # ---- 策略3: 中文字符级 Jaccard（仅中文字符）----
+    # ---- 策略4: 中文字符级 Jaccard（仅中文字符）----
     char_sim = _chinese_char_similarity(t1, t2)
 
-    # ---- 策略4: 编辑距离（仅在短文本时有效）----
+    # ---- 策略5: 编辑距离（仅在短文本时有效）----
     edit_sim = 0.0
     if max(len(t1), len(t2)) <= 20:
         edit_sim = calculate_levenshtein_similarity(t1, t2)
@@ -259,18 +319,32 @@ def _calculate_hybrid_similarity_cached(t1: str, t2: str) -> float:
     # 核心思路：取各策略的加权组合，但保证强信号不被弱信号拉低
     # 如果子串完全包含，直接给高分
     if substr_sim >= 0.7:
-        return min(1.0, max(substr_sim, ngram_sim * 0.3 + substr_sim * 0.7))
+        return min(
+            1.0,
+            max(substr_sim, ngram_sim * 0.2 + cosine_sim * 0.2 + substr_sim * 0.6),
+        )
 
     # 正常融合
     score = (
-        ngram_sim * 0.40
-        + substr_sim * 0.25
-        + char_sim * 0.15
-        + edit_sim * 0.20
+        ngram_sim * 0.30
+        + cosine_sim * 0.25
+        + substr_sim * 0.20
+        + char_sim * 0.10
+        + edit_sim * 0.15
     )
 
+    # 关键词重合增强：对中文 bigram 命中进行轻微提升，改善短语匹配稳定性。
+    words1 = _extract_words(t1)
+    words2 = _extract_words(t2)
+    overlap = words1 & words2
+    if overlap:
+        bigram_hits = sum(1 for w in overlap if len(w) >= 2)
+        unigram_hits = len(overlap) - bigram_hits
+        overlap_boost = min(0.12, bigram_hits * 0.04 + unigram_hits * 0.01)
+        score = min(1.0, score + overlap_boost)
+
     # 如果任一策略给出很高分，提升最终分数（避免被其他低分策略拉低）
-    best_single = max(ngram_sim, substr_sim, char_sim, edit_sim)
+    best_single = max(ngram_sim, cosine_sim, substr_sim, char_sim, edit_sim)
     if best_single > score:
         score = score * 0.6 + best_single * 0.4
 
@@ -472,12 +546,6 @@ def _levenshtein_distance(s1: str, s2: str) -> int:
         previous_row = current_row
 
     return previous_row[-1]
-
-
-@lru_cache(maxsize=4096)
-def _normalize_text(text: str) -> str:
-    return str(text or "").lower().strip()
-
 
 @lru_cache(maxsize=8192)
 def _extract_chinese_chars(text: str) -> frozenset[str]:

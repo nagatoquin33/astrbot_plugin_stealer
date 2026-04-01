@@ -54,6 +54,8 @@ class EmojiSelector:
 
     # 相似度阈值常量（v2 n-gram 改进后适当降低阈值以提升召回率）
     SIMILARITY_THRESHOLD = 0.45  # 模糊匹配相似度阈值
+    SMART_BM25_PREFILTER_LIMIT = 80  # 智能选择时 BM25 预召回上限
+    SMART_BM25_BONUS_WEIGHT = 0.2  # BM25 分数对最终打分的加权
 
     def __init__(self, plugin_instance: Any):
         self.plugin = plugin_instance
@@ -537,8 +539,39 @@ class EmojiSelector:
             context_lower = context_text.lower()
             context_words = _extract_words(context_text)
 
+            bm25_scores: dict[str, float] = {}
+            if BM25 is not None:
+                if self._bm25_dirty or self._bm25_index is None:
+                    self._build_bm25_index(idx)
+
+                query_tokens = tokenize_for_bm25(context_text)
+                if self._bm25_index is not None and query_tokens:
+                    top_k = min(
+                        len(self._bm25_doc_paths),
+                        self.SMART_BM25_PREFILTER_LIMIT,
+                    )
+                    bm25_results = self._bm25_index.get_top_k(list(query_tokens), k=top_k)
+                    if bm25_results:
+                        raw_scores = [score for _, score in bm25_results]
+                        max_score = max(raw_scores)
+                        min_score = min(raw_scores)
+                        denom = max_score - min_score
+                        for doc_idx, score in bm25_results:
+                            if 0 <= doc_idx < len(self._bm25_doc_paths):
+                                path = self._bm25_doc_paths[doc_idx]
+                                if denom > 1e-9:
+                                    norm_score = (score - min_score) / denom
+                                else:
+                                    norm_score = 1.0 if score > 0 else 0.0
+                                bm25_scores[path] = max(0.0, min(1.0, norm_score))
+
+            bm25_prefilter_enabled = bool(bm25_scores)
+
             for file_path, data in idx.items():
                 if not isinstance(data, dict):
+                    continue
+
+                if bm25_prefilter_enabled and file_path not in bm25_scores:
                     continue
 
                 entry_category = self._get_category_from_data(data)
@@ -578,12 +611,14 @@ class EmojiSelector:
 
                 category_bonus = 0.12 if entry_category == category else 0.04
                 use_count_bonus = min(0.08, int(data.get("use_count", 0) or 0) * 0.01)
+                bm25_bonus = bm25_scores.get(file_path, 0.0) * self.SMART_BM25_BONUS_WEIGHT
                 base_score = (
                     desc_score * 0.35
                     + tag_score * 0.25
                     + scene_score * 0.2
                     + category_bonus
                     + use_count_bonus
+                    + bm25_bonus
                 )
 
                 if base_score < 0.15:
