@@ -965,7 +965,8 @@ class ImageProcessorService:
                 animated_prefix = (
                     "[动图帧序列] 这是一个动态图表情包，每一帧从左到右按时间顺序展示了动画过程。"
                     "黑色背景代表透明区域。"
-                    "请理解这些帧是连贯的动画，分析整体动作和情绪变化，从互联网梗/meme的角度分析。\n\n"
+                    "请理解这些帧是连贯的动画，分析整体动作和情绪变化，从互联网梗/meme的角度分析。"
+                    "请特别识别并理解画面中的文字（字幕、弹幕、对话框、贴纸文字），不要忽略文字语义。\n\n"
                 )
                 actual_prompt = animated_prefix + prompt
 
@@ -1015,7 +1016,7 @@ class ImageProcessorService:
 
             # 动图处理：提取关键帧并横向拼接
             MAX_FRAMES = 12  # 最多提取 12 帧
-            TARGET_HEIGHT = 256  # 输出高度
+            TARGET_HEIGHT = 480  # 输出高度（提高以保留小字可读性）
             SIMILARITY_THRESHOLD = 1000.0  # 相似帧过滤阈值 (MSE)
 
             # 计算缩放比例
@@ -1082,15 +1083,10 @@ class ImageProcessorService:
                 # 保存临时文件
                 import tempfile
 
-                temp_fd, temp_path = tempfile.mkstemp(suffix=".jpg")
+                temp_fd, temp_path = tempfile.mkstemp(suffix=".png")
                 os.close(temp_fd)
-                # 转为 RGB 保存为 JPEG（黑色背景）
-                combined_rgb = PILImage.new("RGB", combined.size, (0, 0, 0))
-                if combined.mode == "RGBA":
-                    combined_rgb.paste(combined, mask=combined.split()[3])
-                else:
-                    combined_rgb.paste(combined)
-                combined_rgb.save(temp_path, "JPEG", quality=90)
+                # 使用无损 PNG，避免 JPEG 压缩导致小字发糊。
+                combined.save(temp_path, "PNG", optimize=True)
 
                 return temp_path, len(frames)
 
