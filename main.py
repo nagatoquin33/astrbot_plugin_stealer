@@ -1608,7 +1608,7 @@ class Main(Star):
         return self.emoji_selector.find_similar_categories(query, top_n)
 
     @filter.llm_tool(name="search_emoji")
-    async def search_emoji(self, event: AstrMessageEvent, query: str):
+    async def search_emoji(self, event: AstrMessageEvent, query: str = ""):
         """搜索表情包候选，并优先按你当前心情词进行匹配。
 
         Args:
@@ -1627,12 +1627,17 @@ class Main(Star):
 
     请先锁定“当前心情词”，再仔细阅读候选描述，选择最能代表你当前心情与语气的一张。
         """
+        query = str(query or "").strip()
         logger.info(f"[Tool] LLM 搜索表情包: {query}")
 
         # 标记为主动发送流程开始
         event.set_extra("stealer_active_sent", True)
 
         try:
+            if not query:
+                yield "搜索失败：缺少 query 参数。请传入你当前心情词，例如：开心、无语、尴尬、感谢。"
+                return
+
             if not self.is_meme_enabled_for_event(event):
                 yield "搜索失败：当前群聊已禁用表情包功能"
                 return
@@ -1729,7 +1734,7 @@ class Main(Star):
             yield f"搜索出错：{e}"
 
     @filter.llm_tool(name="send_emoji_by_id")
-    async def send_emoji_by_id(self, event: AstrMessageEvent, emoji_id: int):
+    async def send_emoji_by_id(self, event: AstrMessageEvent, emoji_id: int | None = None):
         """发送你选择的表情包。必须先调用 search_emoji 获取候选列表。
 
         选择原则：优先发送能代表你“当前心情词”的候选项。
@@ -1749,6 +1754,10 @@ class Main(Star):
                 return
 
             # 统一转为 int
+            if emoji_id is None:
+                yield "发送失败：缺少 emoji_id 参数。请先调用 search_emoji，再传入候选编号。"
+                return
+
             try:
                 emoji_id = int(emoji_id)
             except Exception:
