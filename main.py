@@ -1608,7 +1608,7 @@ class Main(Star):
         return self.emoji_selector.find_similar_categories(query, top_n)
 
     @filter.llm_tool(name="search_emoji")
-    async def search_emoji(self, event: AstrMessageEvent, query: str = ""):
+    async def search_emoji(self, event: AstrMessageEvent, query:str):
         """搜索表情包候选，并优先按你当前心情词进行匹配。
 
         Args:
