@@ -384,7 +384,6 @@ class WebServer:
         self.app.router.add_get("/api/batch/upload/{task_id}", self.handle_get_batch_upload_status)
         self.app.router.add_post("/api/analyze", self.handle_analyze_image)
         self.app.router.add_get("/api/stats", self.handle_get_stats)
-        self.app.router.add_get("/api/config", self.handle_get_config)
         self.app.router.add_get("/api/categories", self.handle_get_categories)
         self.app.router.add_post("/api/categories", self.handle_update_categories)
         self.app.router.add_delete("/api/categories/{key}", self.handle_delete_category)
@@ -504,7 +503,7 @@ class WebServer:
                 content_type = "application/octet-stream"
 
             # 读取文件内容
-            # 注意：对于大文件这可能会占用内存，但 web 目录下的静态资源通常较小
+            # 注意：对于大文件这可能会占用内存，但 web 目录下的静态资源通常较小，这种做法一般是可接受的
             if content_type.startswith("text/") or content_type in (
                 "application/javascript",
                 "application/json",
@@ -1047,9 +1046,6 @@ class WebServer:
             logger.error(f"Error getting stats: {e}")
             return self._err(str(e))
 
-    async def handle_get_config(self, request):
-        return self._ok({"version": "1.0.0", "plugin_version": "2.4.7"})
-
     async def handle_health_check(self, request):
         return self._ok({"status": "ok", "service": "emoji-manager-webui"})
 
@@ -1214,7 +1210,6 @@ class WebServer:
                 return self._err("请选择情绪分类或启用自动识别", 400)
 
             task_id = str(uuid.uuid4())
-            timestamp = int(datetime.now().timestamp())
 
             self._batch_upload_tasks[task_id] = {
                 "status": "processing",
@@ -1223,7 +1218,6 @@ class WebServer:
                 "success": 0,
                 "failed": 0,
                 "results": [],
-                "created_at": timestamp,
             }
 
             asyncio.create_task(
@@ -1513,7 +1507,7 @@ class WebServer:
                     category,
                     tags,
                     desc,
-                    emotion,
+                    _,
                     scenes,
                 ) = await image_processor.classify_image(
                     event=None,

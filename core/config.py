@@ -10,7 +10,7 @@ from astrbot.api.star import Context, StarTools
 
 
 class WebuiConfig(BaseModel):
-    enabled: bool = True
+    enabled: bool = False
     host: str = "0.0.0.0"
     port: int = 9191  
     auth_enabled: bool = True

@@ -412,17 +412,51 @@ class Main(Star):
 
     def begin_force_capture(self, event: AstrMessageEvent, seconds: int) -> None:
         """委托给 EventHandler。"""
-        self.event_handler.begin_force_capture(event, seconds)
+        event_handler = self._get_event_handler(
+            log_message="event_handler 未初始化，无法进入强制接收模式"
+        )
+        if event_handler is None:
+            return
+        event_handler.begin_force_capture(event, seconds)
 
     def get_force_capture_entry(
         self, event: AstrMessageEvent
     ) -> dict[str, object] | None:
         """委托给 EventHandler。"""
-        return self.event_handler.get_force_capture_entry(event)
+        event_handler = self._get_event_handler(
+            log_message="event_handler 未初始化，无法获取强制接收状态",
+            log_level="debug",
+        )
+        if event_handler is None:
+            return None
+        return event_handler.get_force_capture_entry(event)
 
     def consume_force_capture(self, event: AstrMessageEvent) -> None:
         """委托给 EventHandler。"""
-        self.event_handler.consume_force_capture(event)
+        event_handler = self._get_event_handler(
+            log_message="event_handler 未初始化，无法消费强制接收状态",
+            log_level="debug",
+        )
+        if event_handler is None:
+            return
+        event_handler.consume_force_capture(event)
+
+    def _get_event_handler(
+        self,
+        *,
+        log_message: str | None = None,
+        log_level: str = "warning",
+    ) -> EventHandler | None:
+        """获取可用的 EventHandler 实例，集中记录缺失日志。"""
+        event_handler = getattr(self, "event_handler", None)
+        if event_handler is None and log_message:
+            if log_level == "debug":
+                logger.debug(log_message)
+            elif log_level == "error":
+                logger.error(log_message)
+            else:
+                logger.warning(log_message)
+        return event_handler
 
     def _snapshot_webui_runtime(self) -> tuple[bool, str, int, str, int]:
         """获取当前 WebUI 运行态配置快照。"""
@@ -554,6 +588,15 @@ class Main(Star):
             # ── 从 __init__ 移入的IO操作 ──
             self._ensure_webui_password()
             self._validate_config()
+
+            if (
+                self._get_event_handler(
+                    log_message="[Stealer] event_handler 未初始化，插件无法启动",
+                    log_level="error",
+                )
+                is None
+            ):
+                raise RuntimeError("event_handler 未初始化")
 
             # 密码可能被自动生成，立即同步到实例属性
             self._sync_all_config()
@@ -818,14 +861,16 @@ class Main(Star):
     @filter.platform_adapter_type(PlatformAdapterType.ALL)
     async def on_message(self, event: AstrMessageEvent):
         """消息监听：偷取消息中的图片并分类存储。"""
-        # 防护检查：确保 event_handler 已初始化且可用
-        if not hasattr(self, "event_handler") or self.event_handler is None:
-            logger.debug("[Stealer] event_handler 未初始化，跳过消息处理")
+        event_handler = self._get_event_handler(
+            log_message="[Stealer] event_handler 未初始化，跳过消息处理",
+            log_level="debug",
+        )
+        if event_handler is None:
             return
 
         try:
             # 委托给 EventHandler 类处理
-            await self.event_handler.on_message(event)
+            await event_handler.on_message(event)
         except Exception as e:
             logger.error(f"[Stealer] 处理消息时发生错误: {e}", exc_info=True)
 
@@ -835,11 +880,13 @@ class Main(Star):
         try:
             if self.steal_emoji:
                 logger.info("启动时执行初始raw目录清理")
-                if hasattr(self, "event_handler") and self.event_handler:
-                    await self.event_handler._clean_raw_directory()
-                    logger.info("初始raw目录清理完成")
-                else:
-                    logger.warning("event_handler 未初始化，跳过初始清理")
+                event_handler = self._get_event_handler(
+                    log_message="event_handler 未初始化，跳过初始清理"
+                )
+                if event_handler is None:
+                    return
+                await event_handler._clean_raw_directory()
+                logger.info("初始raw目录清理完成")
         except Exception as e:
             logger.error(f"初始raw目录清理失败: {e}", exc_info=True)
 
@@ -850,11 +897,13 @@ class Main(Star):
                 if self.steal_emoji:
                     logger.debug("开始执行raw目录清理任务")
 
-                    if hasattr(self, "event_handler") and self.event_handler:
-                        await self.event_handler._clean_raw_directory()
-                        logger.debug("raw目录清理任务完成")
-                    else:
-                        logger.warning("event_handler 未初始化，跳过清理任务")
+                    event_handler = self._get_event_handler(
+                        log_message="event_handler 未初始化，跳过清理任务"
+                    )
+                    if event_handler is None:
+                        continue
+                    await event_handler._clean_raw_directory()
+                    logger.debug("raw目录清理任务完成")
 
             except asyncio.CancelledError:
                 logger.info("raw目录清理任务已取消")
@@ -904,36 +953,37 @@ class Main(Star):
                             logger.info(f"已清理 {removed_count} 个无效索引条目")
 
                     # 2) 容量控制（使用原子更新器避免竞态条件）
-                    if hasattr(self, "event_handler") and self.event_handler:
-                        removed_count = 0
-                        files_to_delete: list[str] = []
+                    event_handler = self._get_event_handler(
+                        log_message="event_handler 未初始化，跳过容量控制"
+                    )
+                    if event_handler is None:
+                        continue
 
-                        def capacity_updater(current: dict):
-                            nonlocal removed_count, files_to_delete
-                            old_count = len(current)
-                            # 直接在 current 上执行容量控制，返回要删除的文件
-                            files_to_delete = self.event_handler._enforce_capacity_sync(
-                                current
+                    removed_count = 0
+                    files_to_delete: list[str] = []
+
+                    def capacity_updater(current: dict):
+                        nonlocal removed_count, files_to_delete
+                        old_count = len(current)
+                        # 直接在 current 上执行容量控制，返回要删除的文件
+                        files_to_delete = event_handler._enforce_capacity_sync(current)
+                        removed_count = old_count - len(current)
+
+                    if self.cache_service:
+                        await self.cache_service.update_index(capacity_updater)
+                        if removed_count > 0:
+                            logger.info(
+                                f"容量控制：已删除 {removed_count} 个最旧条目"
                             )
-                            removed_count = old_count - len(current)
-
-                        if self.cache_service:
-                            await self.cache_service.update_index(capacity_updater)
-                            if removed_count > 0:
-                                logger.info(
-                                    f"容量控制：已删除 {removed_count} 个最旧条目"
-                                )
-                                # 删除实际文件
-                                for file_path in files_to_delete:
-                                    try:
-                                        if os.path.exists(file_path):
-                                            await self._safe_remove_file(file_path)
-                                    except Exception as e:
-                                        logger.warning(
-                                            f"删除文件失败: {file_path}, {e}"
-                                        )
-                    else:
-                        logger.warning("event_handler 未初始化，跳过容量控制")
+                            # 删除实际文件
+                            for file_path in files_to_delete:
+                                try:
+                                    if os.path.exists(file_path):
+                                        await self._safe_remove_file(file_path)
+                                except Exception as e:
+                                    logger.warning(
+                                        f"删除文件失败: {file_path}, {e}"
+                                    )
 
                     logger.debug("容量控制任务完成")
 
@@ -947,18 +997,22 @@ class Main(Star):
     async def _clean_raw_directory(self) -> int:
         """按时间定时清理raw目录中的原始图片"""
         # 委托给 EventHandler 类处理
-        if hasattr(self, "event_handler") and self.event_handler:
-            return await self.event_handler._clean_raw_directory()
-        logger.warning("event_handler 未初始化，无法执行raw目录清理")
-        return 0
+        event_handler = self._get_event_handler(
+            log_message="event_handler 未初始化，无法执行raw目录清理"
+        )
+        if event_handler is None:
+            return 0
+        return await event_handler._clean_raw_directory()
 
     async def _enforce_capacity(self, idx: dict):
         """执行容量控制，删除最旧的图片。"""
         # 委托给 EventHandler 类处理
-        if hasattr(self, "event_handler") and self.event_handler:
-            await self.event_handler._enforce_capacity(idx)
-        else:
-            logger.warning("event_handler 未初始化，无法执行容量控制")
+        event_handler = self._get_event_handler(
+            log_message="event_handler 未初始化，无法执行容量控制"
+        )
+        if event_handler is None:
+            return
+        await event_handler._enforce_capacity(idx)
 
     @filter.on_llm_request()
     async def _inject_emotion_instruction(self, event: AstrMessageEvent, request):
@@ -1014,7 +1068,7 @@ class Main(Star):
                 request.system_prompt = (
                     request.system_prompt or ""
                 ) + emotion_instruction
-                logger.info(
+                logger.debug(
                     f"[Stealer] 被动标签模式：已注入情绪选择指令 (categories: {len(self.categories)})"
                 )
             else:
@@ -1281,7 +1335,7 @@ class Main(Star):
         *,
         user_query: str = "",
     ):
-        """异步分析情绪并发送表情包（不阻塞主流程）。
+        """分析情绪并发送表情包
 
         Args:
             event: 消息事件
@@ -1314,7 +1368,7 @@ class Main(Star):
             final_emotions = []
 
             if is_intelligent_mode:
-                # 智能模式：使用轻量模型分析（传入用户问题作为上下文）
+                # 智能模式：使用轻量模型分析（传入完整对话作为上下文）
                 logger.debug("[Stealer] 智能模式：使用轻量模型分析情绪")
                 try:
                     analyzed_emotion = (
@@ -1399,24 +1453,28 @@ class Main(Star):
         """指令组占位符（按官方文档：指令组函数无需实现逻辑）。"""
         pass
 
+    @filter.permission_type(PermissionType.ADMIN)
     @meme.command("on")
     async def meme_on(self, event: AstrMessageEvent):
         """开启表情包偷取功能，自动收集群聊中的表情包。"""
         async for result in self.command_handler.meme_on(event):
             yield result
 
+    @filter.permission_type(PermissionType.ADMIN)
     @meme.command("off")
     async def meme_off(self, event: AstrMessageEvent):
         """关闭表情包偷取功能，停止收集新表情包。"""
         async for result in self.command_handler.meme_off(event):
             yield result
 
+    @filter.permission_type(PermissionType.ADMIN)
     @meme.command("auto_on")
     async def auto_on(self, event: AstrMessageEvent):
         """开启自动发送表情包，聊天时根据情绪自动发送。"""
         async for result in self.command_handler.auto_on(event):
             yield result
 
+    @filter.permission_type(PermissionType.ADMIN)
     @meme.command("auto_off")
     async def auto_off(self, event: AstrMessageEvent):
         """关闭自动发送表情包。"""
@@ -1473,6 +1531,7 @@ class Main(Star):
         async for result in self.command_handler.status(event):
             yield result
 
+    @filter.permission_type(PermissionType.ADMIN)
     @meme.command("clean", priority=-100)
     async def clean(self, event: AstrMessageEvent, mode: str = ""):
         """清理原始图片缓存（不影响已分类的表情包）。"""
@@ -1550,27 +1609,15 @@ class Main(Star):
 
     @filter.llm_tool(name="search_emoji")
     async def search_emoji(self, event: AstrMessageEvent, query: str):
-        """搜索表情包，返回候选列表供你选择。
+        """搜索表情包候选，并优先按你当前心情词进行匹配。
 
         Args:
-            query(string): 搜索关键词（支持情绪词、描述词、场景词）
+            query(string): 你当前心情的代表词（也支持描述词、场景词）
 
-        推荐分类词汇：
-        - confused: 困惑, 疑问, 不懂, 啥情况
-        - dumb: 无语, 尴尬, 呆住
-        - happy: 开心, 高兴, 大笑, 兴奋
-        - sad: 难过, 伤心, 哭了
-        - angry: 生气, 愤怒, 恼火
-        - surprised: 惊讶, 震惊, 卧槽
-        - troll: 嘲讽, 搞怪, 呵呵, 发癫
-        - tired: 累, 瘫倒, 躺平
-        - disgust: 嫌弃, 鄙视, 恶心
-        - thank: 感谢, 谢谢, 牛逼, 赞
-        - cry: 大哭, 泪崩
-        - shy: 害羞, 脸红
-        - love: 喜欢, 爱了, 么么哒
-        - fear: 害怕, 瑟瑟发抖
-        - embarrassed: 尴尬, 社死
+        使用建议：
+        - 先判断你此刻最能代表自己的心情词（例如：开心、无语、尴尬、感谢）
+        - 再用该心情词调用本工具搜索候选
+        - 若无结果，可换同义词再搜索（如“无语”→“dumb/尴尬”）
 
         返回值：
         返回候选表情包列表，每个包含：
@@ -1578,7 +1625,7 @@ class Main(Star):
         - 分类：表情包的情绪分类
         - 描述：表情包的详细描述（这是你选择时的重要参考）
 
-        请仔细阅读每个表情包的描述，选择最符合当前对话情境的一个。
+    请先锁定“当前心情词”，再仔细阅读候选描述，选择最能代表你当前心情与语气的一张。
         """
         logger.info(f"[Tool] LLM 搜索表情包: {query}")
 
@@ -1670,7 +1717,7 @@ class Main(Star):
             event.set_extra("stealer_emoji_candidates", candidates)
 
             result_lines.append(
-                "\n\n请根据描述选择最合适的表情包，然后调用 send_emoji_by_id(编号) 发送。"
+                "\n\n请先确定你当前最能代表自己的心情词，再根据候选描述选择最合适的表情包，最后调用 send_emoji_by_id(编号) 发送。"
             )
 
             result_text = "\n".join(result_lines)
@@ -1685,16 +1732,11 @@ class Main(Star):
     async def send_emoji_by_id(self, event: AstrMessageEvent, emoji_id: int):
         """发送你选择的表情包。必须先调用 search_emoji 获取候选列表。
 
+        选择原则：优先发送能代表你“当前心情词”的候选项。
+
         Args:
             emoji_id(number): 表情包编号（从 search_emoji 返回的列表中选择）
 
-        返回值：
-        返回你发送的表情包的完整信息，包括：
-        - 分类：表情包的情绪分类
-        - 描述：表情包的详细描述
-        - 状态：发送成功/失败
-
-        这样你就能清楚地知道自己发送了什么表情包。
         """
         logger.info(f"[Tool] LLM 选择发送表情包编号: {emoji_id}")
 

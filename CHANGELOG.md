@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.14] - 2026-04-02
+### perf
+- 优化了readme，调整了部分默认设置与工具描述
+
 ## [2.4.13] - 2026-04-02
 ### perf
 - BM25 索引接入缓存持久化：新增 `bm25_cache`，支持按语料签名恢复，减少冷启动重建开销
