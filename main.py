@@ -1608,11 +1608,11 @@ class Main(Star):
         return self.emoji_selector.find_similar_categories(query, top_n)
 
     @filter.llm_tool(name="search_emoji")
-    async def search_emoji(self, event: AstrMessageEvent, query: str | None = None):
+    async def search_emoji(self, event: AstrMessageEvent, query: str):
         """搜索表情包候选，并优先按你当前心情词进行匹配。
 
         Args:
-            query (string): 你当前心情的代表词（也支持描述词、场景词）
+            query(string): 你当前心情的代表词（也支持描述词、场景词）
 
         使用建议：
         - 先判断你此刻最能代表自己的心情词（例如：开心、无语、尴尬、感谢）
@@ -1625,7 +1625,7 @@ class Main(Star):
         - 分类：表情包的情绪分类
         - 描述：表情包的详细描述（这是你选择时的重要参考）
 
-    请先锁定“当前心情词”，再仔细阅读候选描述，选择最能代表你当前心情与语气的一张。
+        请先锁定“当前心情词”，再仔细阅读候选描述，选择最能代表你当前心情与语气的一张。
         """
         query = str(query or "").strip()
         logger.info(f"[Tool] LLM 搜索表情包: {query}")
@@ -1734,13 +1734,13 @@ class Main(Star):
             yield f"搜索出错：{e}"
 
     @filter.llm_tool(name="send_emoji_by_id")
-    async def send_emoji_by_id(self, event: AstrMessageEvent, emoji_id: int | None = None):
+    async def send_emoji_by_id(self, event: AstrMessageEvent, emoji_id: int):
         """发送你选择的表情包。必须先调用 search_emoji 获取候选列表。
 
         选择原则：优先发送能代表你“当前心情词”的候选项。
 
         Args:
-            emoji_id (number): 表情包编号（从 search_emoji 返回的列表中选择）
+            emoji_id(number): 表情包编号（从 search_emoji 返回的列表中选择）
 
         """
         logger.info(f"[Tool] LLM 选择发送表情包编号: {emoji_id}")
