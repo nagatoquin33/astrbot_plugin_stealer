@@ -932,9 +932,9 @@ class ImageProcessorService:
         if not img_path_obj.is_absolute():
             data_dir = getattr(self.plugin_config, "data_dir", None)
             img_path_obj = (
-                (Path(data_dir) / img_path).absolute()
+                (Path(data_dir) / img_path).resolve()
                 if data_dir
-                else img_path_obj.absolute()
+                else img_path_obj.resolve()
             )
         img_path = str(img_path_obj)
 
