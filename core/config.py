@@ -205,7 +205,7 @@ class PluginConfig(BaseModel):
         object.__setattr__(self, "_plugin_name", "astrbot_plugin_stealer")
 
         # 3. 初始化路径和目录
-        data_dir = StarTools.get_data_dir(self._plugin_name)
+        data_dir = Path(StarTools.get_data_dir(self._plugin_name)).resolve()
         object.__setattr__(self, "data_dir", data_dir)
         object.__setattr__(self, "categories_path", data_dir / "categories.json")
         object.__setattr__(self, "raw_dir", data_dir / "raw")

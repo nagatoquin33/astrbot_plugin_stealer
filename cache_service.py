@@ -24,7 +24,7 @@ class CacheService:
         if not cache_dir:
             from astrbot.api.star import StarTools
 
-            cache_dir = Path(StarTools.get_data_dir("astrbot_plugin_stealer")) / "cache"
+            cache_dir = Path(StarTools.get_data_dir("astrbot_plugin_stealer")).resolve() / "cache"
 
         self._cache_dir = Path(cache_dir)
         self._ensure_cache_dir()
