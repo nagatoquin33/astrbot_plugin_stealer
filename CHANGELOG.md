@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.15] - 2026-04-03
+### fix
+- 修复 `natural_emotion_analyzer.py` 缺失 `calculate_hybrid_similarity` 导入导致的 NameError
+- 修复否定词误判问题："不开心"不再错误匹配到 "happy" 分类
+
+### improved
+- 相似度算法优化：调整权重（提高编辑距离权重、降低子串权重）
+- 新增否定词检测：支持"不/没/无/非"等否定词语义反转识别
+- 代码复用：统一使用 `_has_negation_prefix` 函数，消除重复代码
+
 ## [2.4.14] - 2026-04-02
 ### perf
 - 优化了readme，调整了部分默认设置与工具描述

@@ -12,6 +12,8 @@ from typing import Any
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
+from .text_similarity import calculate_hybrid_similarity, _has_negation_prefix
+
 
 class NaturalEmotionAnalyzer:
     """自然语言情绪分析器 - 使用小模型理解LLM回复的真实情绪"""
@@ -216,13 +218,26 @@ class NaturalEmotionAnalyzer:
 
         text_lower = text.lower()
 
-        # 1. 精确匹配关键词
+        # 1. 精确匹配关键词（带否定词检测）
         for keyword, category in keyword_map.items():
             if keyword in text_lower and category:
+                # 检查关键词前是否有否定词
+                if _has_negation_prefix(text_lower, keyword):
+                    continue  # 跳过被否定的关键词
                 return category
 
         # 2. 分词匹配（降级模式下执行）
         if fallback:
+            # 检查文本中是否有否定词+关键词的组合（语义反转）
+            has_negated_emotion = any(
+                _has_negation_prefix(text_lower, keyword)
+                for keyword in keyword_map.keys()
+            )
+            
+            # 如果存在否定词反转语义，不进行降级匹配
+            if has_negated_emotion:
+                return None
+            
             best_match = None
             best_score = 0.0
             threshold = 0.3  # 降级模式阈值更低

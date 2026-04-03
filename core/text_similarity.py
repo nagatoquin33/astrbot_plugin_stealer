@@ -293,10 +293,41 @@ def calculate_hybrid_similarity(text1: str, text2: str) -> float:
     return _calculate_hybrid_similarity_cached(t1, t2)
 
 
+# 否定词集合（用于检测语义反转）
+_NEGATION_WORDS = frozenset({"不", "没", "无", "非", "别", "莫", "未", "少", "休", "勿"})
+
+
+def _has_negation_prefix(text: str, keyword: str) -> bool:
+    """检查关键词前是否有否定词（语义反转检测）
+
+    Args:
+        text: 完整文本
+        keyword: 匹配到的关键词
+
+    Returns:
+        bool: 是否存在否定前缀
+    """
+    if not keyword or len(keyword) < 2:
+        return False
+
+    # 查找关键词在文本中的位置
+    idx = text.find(keyword)
+    if idx <= 0:
+        return False
+
+    # 检查关键词前一个字符是否为否定词
+    prev_char = text[idx - 1]
+    return prev_char in _NEGATION_WORDS
+
+
 @lru_cache(maxsize=8192)
 def _calculate_hybrid_similarity_cached(t1: str, t2: str) -> float:
     if not t1 or not t2:
         return 0.0
+
+    # ---- 否定词检测：如果短词被否定，语义反转 ----
+    short, long = (t1, t2) if len(t1) <= len(t2) else (t2, t1)
+    has_negation = _has_negation_prefix(long, short)
 
     # ---- 策略1: n-gram Jaccard ----
     ngram_sim = calculate_simple_similarity(t1, t2)
@@ -310,43 +341,47 @@ def _calculate_hybrid_similarity_cached(t1: str, t2: str) -> float:
     # ---- 策略4: 中文字符级 Jaccard（仅中文字符）----
     char_sim = _chinese_char_similarity(t1, t2)
 
-    # ---- 策略5: 编辑距离（仅在短文本时有效）----
+    # ---- 策略5: 编辑距离（短文本时更重要）----
     edit_sim = 0.0
-    if max(len(t1), len(t2)) <= 20:
+    max_len = max(len(t1), len(t2))
+    if max_len <= 20:
         edit_sim = calculate_levenshtein_similarity(t1, t2)
+        # 短文本时编辑距离权重更高
+        if max_len <= 6:
+            edit_sim *= 1.2  # 超短文本进一步放大
 
-    # ---- 融合 ----
-    # 核心思路：取各策略的加权组合，但保证强信号不被弱信号拉低
-    # 如果子串完全包含，直接给高分
-    if substr_sim >= 0.7:
-        return min(
-            1.0,
-            max(substr_sim, ngram_sim * 0.2 + cosine_sim * 0.2 + substr_sim * 0.6),
-        )
-
-    # 正常融合
+    # ---- 融合（优化权重：降低子串权重，提高编辑距离权重）----
+    # 针对情绪词匹配场景优化：短词编辑距离更重要，子串容易因否定词误判
     score = (
-        ngram_sim * 0.32
-        + cosine_sim * 0.28
-        + substr_sim * 0.18
-        + char_sim * 0.10
-        + edit_sim * 0.12
+        ngram_sim * 0.28
+        + cosine_sim * 0.25
+        + substr_sim * 0.12
+        + char_sim * 0.08
+        + edit_sim * 0.27
     )
 
-    # 关键词重合增强：对中文 bigram 命中进行轻微提升，改善短语匹配稳定性。
+    # 关键词重合增强：对中文 bigram 命中进行轻微提升
     words1 = _extract_words(t1)
     words2 = _extract_words(t2)
     overlap = words1 & words2
     if overlap:
         bigram_hits = sum(1 for w in overlap if len(w) >= 2)
         unigram_hits = len(overlap) - bigram_hits
-        overlap_boost = min(0.12, bigram_hits * 0.04 + unigram_hits * 0.01)
+        overlap_boost = min(0.10, bigram_hits * 0.03 + unigram_hits * 0.01)
         score = min(1.0, score + overlap_boost)
 
-    # 如果任一策略给出很高分，提升最终分数（避免被其他低分策略拉低）
+    # 如果编辑距离给出很高分（短词精确匹配），提升权重
+    if edit_sim > 0.8 and max_len <= 6:
+        score = max(score, edit_sim * 0.9)
+
+    # 如果任一策略给出很高分，提升最终分数
     best_single = max(ngram_sim, cosine_sim, substr_sim, char_sim, edit_sim)
     if best_single > score:
-        score = score * 0.6 + best_single * 0.4
+        score = score * 0.5 + best_single * 0.5
+
+    # ---- 否定词惩罚：在最终分数上应用 ----
+    if has_negation:
+        score *= 0.25  # 否定词使语义反转，大幅降分
 
     return min(1.0, score)
 
