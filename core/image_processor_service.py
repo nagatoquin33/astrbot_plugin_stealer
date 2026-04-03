@@ -859,6 +859,19 @@ class ImageProcessorService:
 
         return None
 
+    @staticmethod
+    def _is_file_not_found_error(error: Exception) -> bool:
+        """判断异常是否为图片文件不存在（跨版本消息兼容）。"""
+        msg = str(error)
+        lowered = msg.lower()
+        return (
+            "errno 2" in lowered
+            or "no such file or directory" in lowered
+            or "file not found" in lowered
+            or "找不到" in msg
+            or "不存在" in msg
+        )
+
     def _try_parse_json_candidate(self, text: str) -> dict[str, Any] | None:
         """解析候选文本中的 JSON 对象，兼容前后缀说明文字。"""
         decoder = json.JSONDecoder()
@@ -956,7 +969,8 @@ class ImageProcessorService:
             if actual_img_path != img_path:
                 temp_file = actual_img_path  # 标记为临时文件，分析后删除
 
-            # 构建标准 file URI
+            # 先使用标准 file URI；若框架版本对 URI 解析异常，再回退到本地绝对路径。
+            resolved_img_path = str(Path(actual_img_path).resolve())
             file_url = Path(actual_img_path).resolve().as_uri()
 
             # 如果是动图拼接，添加专用提示词前缀
@@ -970,8 +984,18 @@ class ImageProcessorService:
                 )
                 actual_prompt = animated_prefix + prompt
 
-            result = await self._do_vlm_call(provider_id, actual_prompt, file_url)
-            return result
+            try:
+                return await self._do_vlm_call(provider_id, actual_prompt, file_url)
+            except Exception as e:
+                if not self._is_file_not_found_error(e):
+                    raise
+                logger.warning(
+                    "VLM 读取 file URI 失败，回退为本地绝对路径重试: "
+                    f"{resolved_img_path}"
+                )
+                return await self._do_vlm_call(
+                    provider_id, actual_prompt, resolved_img_path
+                )
         finally:
             # 清理临时文件
             if temp_file and os.path.exists(temp_file):
