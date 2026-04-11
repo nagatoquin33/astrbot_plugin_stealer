@@ -394,6 +394,7 @@ class CacheService:
                         base_dir_path / "index.json",
                         base_dir_path / "image_index.json",
                         base_dir_path / "cache" / "index.json",
+                        base_dir_path / "cache" / "index_cache.json",
                     ]
                 )
 

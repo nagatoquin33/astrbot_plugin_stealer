@@ -814,35 +814,41 @@ class Main(Star):
             dict[str, Any]: 索引数据（兼容旧接口的字典格式）
         """
         try:
+            idx: dict[str, Any] = {}
+
             # 优先从数据库加载
             db_count = self.db_service.count_total()
 
             if db_count > 0:
                 logger.debug(f"[DB] 从数据库加载 {db_count} 条索引")
-                return self.db_service.get_index_cache_readonly()
-
-            # 数据库为空，尝试迁移旧数据
-            if not self._migration_done:
+                idx = self.db_service.get_index_cache_readonly()
+            elif not self._migration_done:
+                # 数据库为空，尝试迁移旧数据
                 # 1. 尝试从旧版 JSON 文件迁移
-                old_json_path = self.cache_dir / "cache" / "index_cache.json"
+                old_json_path = self.cache_dir / "index_cache.json"
                 if old_json_path.exists():
                     migrated = await self.db_service.migrate_from_json(old_json_path)
                     if migrated > 0:
                         self._migration_done = True
                         logger.info(f"[DB] 迁移了 {migrated} 条旧记录到数据库")
-                        return self.db_service.get_index_cache_readonly()
+                        idx = self.db_service.get_index_cache_readonly()
 
                 # 2. 尝试从其他可能的旧位置迁移
-                legacy_data = await self.cache_service.migrate_legacy_data(self.base_dir)
-                if legacy_data:
-                    await self.db_service.save_index(legacy_data)
-                    self._migration_done = True
-                    logger.info("[DB] 迁移旧数据到数据库完成")
-                    return self.db_service.get_index_cache_readonly()
+                if not idx:
+                    legacy_data = await self.cache_service.migrate_legacy_data(self.base_dir)
+                    if legacy_data:
+                        await self.db_service.save_index(legacy_data)
+                        self._migration_done = True
+                        logger.info("[DB] 迁移旧数据到数据库完成")
+                        idx = self.db_service.get_index_cache_readonly()
 
                 self._migration_done = True
 
-            return {}
+            # 同步到 cache_service 内存缓存（供 WebUI 等模块使用）
+            if idx:
+                await self.cache_service.set_cache("index_cache", idx, persist=False)
+
+            return idx
 
         except Exception as e:
             logger.error(f"加载索引失败: {e}", exc_info=True)
@@ -855,6 +861,7 @@ class Main(Star):
         )
         if rebuilt:
             await self.db_service.save_index(rebuilt)
+            await self.cache_service.set_cache("index_cache", rebuilt, persist=False)
         return rebuilt
 
     async def _save_index(self, idx: dict[str, Any]):
@@ -870,21 +877,20 @@ class Main(Star):
         # 如果数据库为空或有删除操作（条目数减少），使用全量替换
         if db_count == 0 or idx_count < db_count:
             await self.db_service.save_index(idx)
-            return
+        else:
+            # 增量插入：只处理新增的条目
+            existing_paths = set(self.db_service.get_all_paths())
+            new_entries = [
+                {"path": path, **meta}
+                for path, meta in idx.items()
+                if path not in existing_paths and isinstance(meta, dict)
+            ]
+            if new_entries:
+                await self.db_service.insert_batch(new_entries)
+                logger.debug(f"[DB] 增量插入 {len(new_entries)} 条新记录")
 
-        # 增量插入：只处理新增的条目
-        existing_paths = set(self.db_service.get_all_paths())
-        new_entries = [
-            {"path": path, **meta}
-            for path, meta in idx.items()
-            if path not in existing_paths and isinstance(meta, dict)
-        ]
-        if new_entries:
-            await self.db_service.insert_batch(new_entries)
-            logger.debug(f"[DB] 增量插入 {len(new_entries)} 条新记录")
-
-        # 对于修改现有条目的场景（idx_count == db_count 但内容不同），
-        # 当前不处理，因为这类操作较少，且可通过特定 API（update_emoji）处理
+        # 同步到 cache_service 内存缓存（供 WebUI 等模块使用）
+        await self.cache_service.set_cache("index_cache", idx, persist=False)
 
     async def _process_image(
         self,

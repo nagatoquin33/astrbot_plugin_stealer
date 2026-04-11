@@ -3,6 +3,7 @@ name: Auto Release
 on:
   push:
     branches:
+      - master
       - main
     paths:
       - 'metadata.yaml'
