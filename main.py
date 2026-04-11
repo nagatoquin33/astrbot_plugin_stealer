@@ -1072,9 +1072,9 @@ class Main(Star):
                                     del current[p]
                                     removed_count += 1
 
-                        # 使用 cache_service 更新内存缓存，然后同步到数据库
+                        # 使用 cache_service 更新内存缓存（不持久化到JSON），然后同步到数据库
                         if self.cache_service:
-                            updated_idx = await self.cache_service.update_index(cleanup_updater)
+                            updated_idx = await self.cache_service.update_index(cleanup_updater, persist=False)
                             # 同步到数据库
                             await self.db_service.save_index(updated_idx)
                         if removed_count > 0:
@@ -1097,9 +1097,9 @@ class Main(Star):
                         files_to_delete = event_handler._enforce_capacity_sync(current)
                         removed_count = old_count - len(current)
 
-                    # 使用 cache_service 更新内存缓存，然后同步到数据库
+                    # 使用 cache_service 更新内存缓存（不持久化到JSON），然后同步到数据库
                     if self.cache_service:
-                        updated_idx = await self.cache_service.update_index(capacity_updater)
+                        updated_idx = await self.cache_service.update_index(capacity_updater, persist=False)
                         # 同步到数据库
                         await self.db_service.save_index(updated_idx)
                         if removed_count > 0:

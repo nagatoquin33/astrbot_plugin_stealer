@@ -33,11 +33,14 @@ class CacheService:
         self._caches: dict[str, dict[str, Any]] = {
             "image_cache": {},  # 图片分类缓存
             "text_cache": {},  # 文本情绪分类缓存
-            "index_cache": {},  # 索引缓存
+            "index_cache": {},  # 索引缓存（已迁移到数据库，不再持久化到JSON）
             "bm25_cache": {},  # BM25索引缓存
             "desc_cache": {},  # 描述缓存
             "blacklist_cache": {},  # 黑名单缓存
         }
+
+        # 不持久化到JSON文件的缓存（已迁移到数据库）
+        self._no_persist_caches: set[str] = {"index_cache"}
 
         # 加载持久化的缓存
         self._load_caches()
@@ -72,6 +75,10 @@ class CacheService:
         """
         if cache_name not in self._caches:
             logger.warning(f"缓存类型 {cache_name} 不存在，无法保存")
+            return
+
+        if cache_name in self._no_persist_caches:
+            logger.debug(f"缓存 {cache_name} 已迁移到数据库，跳过JSON持久化")
             return
 
         try:
@@ -252,8 +259,10 @@ class CacheService:
         return hash_obj.hexdigest()
 
     async def persist_all(self):
-        """将所有缓存持久化到文件。"""
+        """将所有缓存持久化到文件（跳过已迁移到数据库的缓存）。"""
         for cache_name in self._caches.keys():
+            if cache_name in self._no_persist_caches:
+                continue
             await self._save_cache_async(cache_name)
 
     def get_index_cache(self) -> dict[str, Any]:
@@ -345,11 +354,12 @@ class CacheService:
         except Exception as e:
             logger.error(f"保存索引文件失败: {e}", exc_info=True)
 
-    async def update_index(self, updater) -> dict[str, Any]:
+    async def update_index(self, updater, persist: bool = True) -> dict[str, Any]:
         """原子更新索引，失败时恢复快照。
 
         Args:
             updater: 更新函数，接收当前索引，返回修改后的索引或 None（原地修改）
+            persist: 是否持久化到文件，默认 True
 
         Returns:
             dict[str, Any]: 更新后的索引
@@ -363,7 +373,7 @@ class CacheService:
                 if inspect.isawaitable(result):
                     await result
                 # 只有 updater 成功执行后，才更新缓存
-                await self.set_cache("index_cache", current, persist=True)
+                await self.set_cache("index_cache", current, persist=persist)
                 return current
             except Exception as e:
                 logger.error(f"更新索引失败: {e}", exc_info=True)
