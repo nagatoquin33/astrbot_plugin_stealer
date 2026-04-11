@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest tests/test_emoji_selector.py -v)",
+      "Bash(python -m pytest tests/test_database_service.py -v)",
+      "Bash(pip install:*)",
+      "Bash(python -m pytest tests/test_database_service.py::TestBasicCRUD::test_insert_emoji_basic -v --tb=long)",
+      "Bash(python -m pytest tests/test_auto_emoji_flow.py tests/test_database_service.py tests/test_text_similarity.py tests/test_phash_dedup.py tests/test_scope_feature.py -v --ignore=tests/web)"
+    ]
+  }
+}

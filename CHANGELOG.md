@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.01] - 2026-04-11
+### fix
+- 修复 LLM 调用工具时多段回复导致表情包重复发送的问题
+
+### refactor
+- 新增 `_EmojiTurnState` 类封装事件状态管理，替代散落的 `event.get_extra/set_extra` 调用
+- 优化索引加载策略：优先从数据库加载，旧数据自动迁移
+
 ## [2.4.15] - 2026-04-03
 ### fix
 - 修复 `natural_emotion_analyzer.py` 缺失 `calculate_hybrid_similarity` 导入导致的 NameError

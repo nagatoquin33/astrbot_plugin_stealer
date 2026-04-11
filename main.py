@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import random
 import re
 import secrets
 from pathlib import Path
@@ -20,6 +21,7 @@ from astrbot.api.star import Context, Star
 from .cache_service import CacheService
 from .core.command_handler import CommandHandler
 from .core.config import PluginConfig
+from .core.database_service import DatabaseService
 from .core.emoji_selector import EmojiSelector
 from .core.event_handler import EventHandler
 from .core.image_processor_service import ImageProcessorService
@@ -31,6 +33,65 @@ try:
     import aiofiles  # type: ignore
 except ImportError:
     aiofiles = None
+
+
+class _EmojiTurnState:
+    """Wrap per-turn emoji state stored on the event object."""
+
+    ACTIVE_SENT_KEY = "stealer_active_sent"
+    AUTO_DECIDED_KEY = "stealer_auto_emoji_turn_decided"
+    AUTO_ALLOWED_KEY = "stealer_auto_emoji_turn_allowed"
+    AUTO_REASON_KEY = "stealer_auto_emoji_turn_reason"
+    AUTO_CLAIMED_KEY = "stealer_auto_emoji_turn_claimed"
+    AUTO_SENT_KEY = "stealer_auto_emoji_sent"
+    CANDIDATES_KEY = "stealer_emoji_candidates"
+
+    def __init__(self, event: AstrMessageEvent):
+        self.event = event
+
+    def is_active_sent(self) -> bool:
+        return bool(self.event.get_extra(self.ACTIVE_SENT_KEY, False))
+
+    def mark_active_sent(self) -> None:
+        self.event.set_extra(self.ACTIVE_SENT_KEY, True)
+
+    def is_auto_decided(self) -> bool:
+        return bool(self.event.get_extra(self.AUTO_DECIDED_KEY, False))
+
+    def get_auto_allowed(self) -> bool:
+        return bool(self.event.get_extra(self.AUTO_ALLOWED_KEY, False))
+
+    def set_auto_decision(self, *, allowed: bool, reason: str) -> None:
+        self.event.set_extra(self.AUTO_DECIDED_KEY, True)
+        self.event.set_extra(self.AUTO_ALLOWED_KEY, allowed)
+        self.event.set_extra(self.AUTO_REASON_KEY, reason)
+
+    def get_auto_reason(self) -> str:
+        return str(self.event.get_extra(self.AUTO_REASON_KEY, "unknown"))
+
+    def is_auto_claimed(self) -> bool:
+        return bool(self.event.get_extra(self.AUTO_CLAIMED_KEY, False))
+
+    def claim_auto_send(self) -> bool:
+        if self.is_auto_claimed():
+            return False
+        self.event.set_extra(self.AUTO_CLAIMED_KEY, True)
+        return True
+
+    def set_candidates(self, candidates: list[dict[str, Any]]) -> None:
+        self.event.set_extra(self.CANDIDATES_KEY, candidates)
+
+    def get_candidates(self) -> list[dict[str, Any]] | None:
+        return self.event.get_extra(self.CANDIDATES_KEY)
+
+    def is_auto_sent(self) -> bool:
+        return bool(self.event.get_extra(self.AUTO_SENT_KEY, False))
+
+    def mark_auto_sent(self) -> bool:
+        if self.is_auto_sent():
+            return False
+        self.event.set_extra(self.AUTO_SENT_KEY, True)
+        return True
 
 
 class Main(Star):
@@ -75,6 +136,7 @@ class Main(Star):
 
         # 初始化核心服务类
         self.cache_service = CacheService(self.cache_dir)
+        self.db_service = DatabaseService(self.cache_dir / "emoji.db")
         self.command_handler = CommandHandler(self)
         self.web_server = None
 
@@ -94,6 +156,9 @@ class Main(Star):
         self._auto_emoji_cooldowns_lock = asyncio.Lock()
         self._terminated: bool = False  # 终止标志位，防止重复清理
         # 强制捕获窗口已迁移到 EventHandler
+
+    def _emoji_turn_state(self, event: AstrMessageEvent) -> _EmojiTurnState:
+        return _EmojiTurnState(event)
 
     def _load_vision_provider_id(self) -> str:
         """加载视觉模型提供商ID。
@@ -285,7 +350,9 @@ class Main(Star):
             logger.warning(f"[Config] 扫描分类目录时出错: {e}")
 
         try:
-            index = self.cache_service.get_index_cache_readonly()
+            index = self.db_service.get_index_cache_readonly() if self.db_service.count_total() > 0 else {}
+            if not index:
+                index = self.cache_service.get_index_cache_readonly()
             for meta in index.values():
                 if not isinstance(meta, dict):
                     continue
@@ -741,31 +808,83 @@ class Main(Star):
         logger.info("[Stealer] 插件资源清理完成")
 
     async def _load_index(self) -> dict[str, Any]:
-        """委托给 CacheService。"""
+        """加载索引，优先从数据库加载，必要时从旧 JSON 迁移。
+
+        Returns:
+            dict[str, Any]: 索引数据（兼容旧接口的字典格式）
+        """
         try:
-            index_data = await self.cache_service.load_index()
+            # 优先从数据库加载
+            db_count = self.db_service.count_total()
 
-            if not index_data and not self._migration_done:
-                logger.debug("[_load_index] cache empty, attempting migration...")
-                index_data = await self.cache_service.migrate_legacy_data(self.base_dir)
+            if db_count > 0:
+                logger.debug(f"[DB] 从数据库加载 {db_count} 条索引")
+                return self.db_service.get_index_cache_readonly()
+
+            # 数据库为空，尝试迁移旧数据
+            if not self._migration_done:
+                # 1. 尝试从旧版 JSON 文件迁移
+                old_json_path = self.cache_dir / "cache" / "index_cache.json"
+                if old_json_path.exists():
+                    migrated = await self.db_service.migrate_from_json(old_json_path)
+                    if migrated > 0:
+                        self._migration_done = True
+                        logger.info(f"[DB] 迁移了 {migrated} 条旧记录到数据库")
+                        return self.db_service.get_index_cache_readonly()
+
+                # 2. 尝试从其他可能的旧位置迁移
+                legacy_data = await self.cache_service.migrate_legacy_data(self.base_dir)
+                if legacy_data:
+                    await self.db_service.save_index(legacy_data)
+                    self._migration_done = True
+                    logger.info("[DB] 迁移旧数据到数据库完成")
+                    return self.db_service.get_index_cache_readonly()
+
                 self._migration_done = True
-                if index_data:
-                    await self.cache_service.save_index(index_data)
 
-            return index_data
+            return {}
+
         except Exception as e:
             logger.error(f"加载索引失败: {e}", exc_info=True)
             return {}
 
     async def _rebuild_index_from_files(self) -> dict[str, Any]:
-        """委托给 CacheService。"""
-        return await self.cache_service.rebuild_index_from_files(
+        """重建索引，委托给 CacheService 后保存到数据库。"""
+        rebuilt = await self.cache_service.rebuild_index_from_files(
             self.base_dir, self.categories_dir
         )
+        if rebuilt:
+            await self.db_service.save_index(rebuilt)
+        return rebuilt
 
     async def _save_index(self, idx: dict[str, Any]):
-        """委托给 CacheService。"""
-        await self.cache_service.save_index(idx)
+        """保存索引到数据库（智能增量更新）。
+
+        根据传入索引与数据库的差异，选择最优更新策略：
+        - 全量替换：删除场景或首次初始化
+        - 增量插入：新增场景
+        """
+        db_count = self.db_service.count_total()
+        idx_count = len(idx)
+
+        # 如果数据库为空或有删除操作（条目数减少），使用全量替换
+        if db_count == 0 or idx_count < db_count:
+            await self.db_service.save_index(idx)
+            return
+
+        # 增量插入：只处理新增的条目
+        existing_paths = set(self.db_service.get_all_paths())
+        new_entries = [
+            {"path": path, **meta}
+            for path, meta in idx.items()
+            if path not in existing_paths and isinstance(meta, dict)
+        ]
+        if new_entries:
+            await self.db_service.insert_batch(new_entries)
+            logger.debug(f"[DB] 增量插入 {len(new_entries)} 条新记录")
+
+        # 对于修改现有条目的场景（idx_count == db_count 但内容不同），
+        # 当前不处理，因为这类操作较少，且可通过特定 API（update_emoji）处理
 
     async def _process_image(
         self,
@@ -947,8 +1066,11 @@ class Main(Star):
                                     del current[p]
                                     removed_count += 1
 
+                        # 使用 cache_service 更新内存缓存，然后同步到数据库
                         if self.cache_service:
-                            await self.cache_service.update_index(cleanup_updater)
+                            updated_idx = await self.cache_service.update_index(cleanup_updater)
+                            # 同步到数据库
+                            await self.db_service.save_index(updated_idx)
                         if removed_count > 0:
                             logger.info(f"已清理 {removed_count} 个无效索引条目")
 
@@ -969,8 +1091,11 @@ class Main(Star):
                         files_to_delete = event_handler._enforce_capacity_sync(current)
                         removed_count = old_count - len(current)
 
+                    # 使用 cache_service 更新内存缓存，然后同步到数据库
                     if self.cache_service:
-                        await self.cache_service.update_index(capacity_updater)
+                        updated_idx = await self.cache_service.update_index(capacity_updater)
+                        # 同步到数据库
+                        await self.db_service.save_index(updated_idx)
                         if removed_count > 0:
                             logger.info(
                                 f"容量控制：已删除 {removed_count} 个最旧条目"
@@ -1029,6 +1154,19 @@ class Main(Star):
                 return
 
             # LLM模式：启用自然语言分析时，不注入提示词
+            turn_state = self._emoji_turn_state(event)
+            if turn_state.is_active_sent():
+                logger.debug("[Stealer] 当前轮次已转入主动发表情流程，跳过情绪注入")
+                return
+
+            if turn_state.is_auto_claimed():
+                logger.debug("[Stealer] 当前轮次已完成自动发表情判定，跳过重复注入")
+                return
+
+            if not await self._resolve_auto_emoji_turn_permission(event):
+                logger.debug("[Stealer] 当前轮次未触发表情包发送条件，跳过情绪注入")
+                return
+
             if self.enable_natural_emotion_analysis:
                 logger.debug(
                     "[Stealer] LLM模式已启用，跳过提示词注入，将使用轻量模型分析"
@@ -1093,8 +1231,10 @@ class Main(Star):
 
         logger.info("[Stealer] _prepare_emoji_response 被调用")
 
+        turn_state = self._emoji_turn_state(event)
+
         # 检查是否为主动发送（工具已发送表情包）
-        if event.get_extra("stealer_active_sent"):
+        if turn_state.is_active_sent():
             # 清理回复中的标签，但不发送表情包
             result = event.get_result()
             if result:
@@ -1125,6 +1265,8 @@ class Main(Star):
                 return False
 
             # 3. 检查并处理显式的表情包标记 (来自 Tool 调用)
+            turn_allowed = await self._resolve_auto_emoji_turn_permission(event)
+
             explicit_emojis = []
 
             def tag_replacer(match):
@@ -1136,21 +1278,22 @@ class Main(Star):
 
             # 6. 处理显式表情包（同步处理）
             if has_explicit:
-                if not self.is_meme_enabled_for_event(event):
-                    _, cleaned_text = await self._extract_emotions_from_text(
-                        event, text_without_explicit
-                    )
-                    if cleaned_text != text_without_explicit:
-                        self._update_result_with_cleaned_text_safe(
-                            event, result, cleaned_text
-                        )
-                    logger.debug("[Stealer] 群聊已禁用表情包发送，跳过显式表情包发送")
-                    return cleaned_text != text_without_explicit
-                await self._send_explicit_emojis(
-                    event, explicit_emojis, text_without_explicit
+                _, cleaned_text = await self._extract_emotions_from_text(
+                    event, text_without_explicit
                 )
-                logger.info(f"[Stealer] 已发送 {len(explicit_emojis)} 张显式表情包")
+                if cleaned_text != text:
+                    self._update_result_with_cleaned_text_safe(
+                        event, result, cleaned_text
+                    )
+
+                if not self._claim_auto_emoji_turn(event):
+                    logger.debug("[Stealer] Current turn already handled explicit emoji")
+                    return cleaned_text != text
+
+                await self._send_explicit_emojis(event, explicit_emojis, cleaned_text)
+                logger.info(f"[Stealer] Sent {len(explicit_emojis)} explicit emojis")
                 return True
+
 
             # 7. 模式判断：LLM模式 vs 被动标签模式
             is_intelligent_mode = self.enable_natural_emotion_analysis
@@ -1158,6 +1301,18 @@ class Main(Star):
             if is_intelligent_mode:
                 # LLM模式：不修改消息链，直接异步分析
                 # 提取用户原始消息作为上下文（QA 分析）
+                if not turn_allowed:
+                    logger.debug("[Stealer] Current turn is not allowed to send auto emoji")
+                    return False
+
+                if self._should_skip_auto_emoji_by_gate(text_without_explicit):
+                    logger.debug("[Stealer] Skip auto emoji by content gate")
+                    return False
+
+                if not self._claim_auto_emoji_turn(event):
+                    logger.debug("[Stealer] Current turn already handled auto emoji")
+                    return False
+
                 user_query = ""
                 try:
                     user_query = event.get_message_str() or ""
@@ -1194,6 +1349,22 @@ class Main(Star):
                     logger.debug("[Stealer] 被动标签模式：已清理情绪标签")
 
                 # 异步发送表情包
+                if not turn_allowed:
+                    logger.debug("[Stealer] Current turn is not allowed to send auto emoji")
+                    return need_update
+
+                if not all_emotions:
+                    logger.debug("[Stealer] No extracted emotions, skip auto emoji")
+                    return need_update
+
+                if self._should_skip_auto_emoji_by_gate(cleaned_text):
+                    logger.debug("[Stealer] Skip auto emoji by content gate")
+                    return need_update
+
+                if not self._claim_auto_emoji_turn(event):
+                    logger.debug("[Stealer] Current turn already handled auto emoji")
+                    return need_update
+
                 self._safe_create_task(
                     self._async_analyze_and_send_emoji(
                         event, cleaned_text, all_emotions
@@ -1274,6 +1445,58 @@ class Main(Star):
             last_sent_at = self._auto_emoji_cooldowns.get(session_key, 0.0)
         return now - last_sent_at >= self.AUTO_EMOJI_COOLDOWN_SECONDS
 
+    def _normalize_auto_emoji_chance(self) -> float:
+        try:
+            chance = float(self.emoji_chance)
+        except Exception:
+            logger.warning("[Stealer] 表情包发送概率配置无效，按 0 处理")
+            return 0.0
+
+        if chance <= 0:
+            return 0.0
+        if chance >= 1:
+            return 1.0
+        return chance
+
+    async def _resolve_auto_emoji_turn_permission(
+        self, event: AstrMessageEvent
+    ) -> bool:
+        turn_state = self._emoji_turn_state(event)
+        if turn_state.is_auto_decided():
+            return turn_state.get_auto_allowed()
+
+        allowed = False
+        reason = "unknown"
+
+        if not self.auto_send:
+            reason = "auto_send_disabled"
+        elif not self.is_meme_enabled_for_event(event):
+            reason = "meme_disabled"
+        elif not await self._is_auto_emoji_cooldown_ready(event):
+            reason = "cooldown"
+        else:
+            chance = self._normalize_auto_emoji_chance()
+            if chance <= 0:
+                reason = "chance_zero"
+            elif chance >= 1.0:
+                allowed = True
+                reason = "chance_hit"
+            elif random.random() < chance:
+                allowed = True
+                reason = "chance_hit"
+            else:
+                reason = "chance_miss"
+
+        turn_state.set_auto_decision(allowed=allowed, reason=reason)
+
+        logger.debug(
+            f"[Stealer] 当前轮次自动发表情判定: allowed={allowed}, reason={reason}"
+        )
+        return allowed
+
+    def _claim_auto_emoji_turn(self, event: AstrMessageEvent) -> bool:
+        return self._emoji_turn_state(event).claim_auto_send()
+
     def _prune_auto_emoji_cooldowns(self, now: float) -> None:
         # 1. 过期清理
         expire_after = self.AUTO_EMOJI_COOLDOWN_SECONDS * 3
@@ -1306,10 +1529,20 @@ class Main(Star):
             self._auto_emoji_cooldowns[session_key] = now
 
     async def _try_send_emoji(
-        self, event: AstrMessageEvent, emotions: list[str], cleaned_text: str
+        self,
+        event: AstrMessageEvent,
+        emotions: list[str],
+        cleaned_text: str,
     ) -> bool:
-        """委托给 EmojiSelector。"""
-        return await self.emoji_selector.try_send_emoji(event, emotions, cleaned_text)
+        """委托给 EmojiSelector。
+
+        注意：概率判定由 _resolve_auto_emoji_turn_permission 在调用前完成。
+        """
+        return await self.emoji_selector.try_send_emoji(
+            event,
+            emotions,
+            cleaned_text,
+        )
 
     def _get_emoji_send_delay(self) -> float:
         """根据配置计算表情包发送延迟时间（秒）。
@@ -1344,6 +1577,13 @@ class Main(Star):
             user_query: 用户原始消息（智能模式下与 text 组成 QA 上下文）
         """
         try:
+            turn_state = self._emoji_turn_state(event)
+
+            # 双重检查：防止多段回复时重复发送表情包
+            if turn_state.is_auto_sent():
+                logger.debug("[Stealer] 当前轮次已发送过表情包，跳过重复发送")
+                return
+
             # 检查是否启用自动发送
             if not self.auto_send:
                 logger.debug("[Stealer] 自动发送已禁用，跳过表情包发送")
@@ -1354,13 +1594,17 @@ class Main(Star):
                 logger.debug("[Stealer] 当前群聊已禁用表情包功能")
                 return
 
-            if self._should_skip_auto_emoji_by_gate(text):
-                logger.debug("[Stealer] 根据内容门槛跳过自动发送")
+            if not turn_state.get_auto_allowed():
+                logger.debug("[Stealer] 当前轮次未触发表情包发送条件，跳过自动发送")
                 return
 
-            if not await self._is_auto_emoji_cooldown_ready(event):
-                logger.debug("[Stealer] 自动发送冷却中，跳过")
+            if self._should_skip_auto_emoji_by_gate(text):
+                logger.debug("[Stealer] Skip auto emoji by content gate")
                 return
+
+            # cooldown is decided before llm analysis for the whole turn
+
+
 
             # 判断模式
             is_intelligent_mode = self.enable_natural_emotion_analysis
@@ -1404,8 +1648,13 @@ class Main(Star):
                 await asyncio.sleep(delay_seconds)
 
             # 尝试发送表情包
-            sent = await self._try_send_emoji(event, final_emotions, text)
+            sent = await self._try_send_emoji(
+                event,
+                final_emotions,
+                text,
+            )
             if sent:
+                turn_state.mark_auto_sent()
                 await self._mark_auto_emoji_sent(event)
 
         except Exception as e:
@@ -1599,7 +1848,9 @@ class Main(Star):
     ):
         """委托给 EmojiSelector.smart_search。"""
         if idx is None:
-            idx = self.cache_service.get_index_cache_readonly()
+            idx = self.db_service.get_index_cache_readonly() if self.db_service.count_total() > 0 else {}
+            if not idx:
+                idx = self.cache_service.get_index_cache_readonly()
 
         return await self.emoji_selector.smart_search(query, limit=limit, idx=idx, event=event)
 
@@ -1617,7 +1868,7 @@ class Main(Star):
         使用建议：
         - 先判断你此刻最能代表自己的心情词（例如：开心、无语、尴尬、感谢）
         - 再用该心情词调用本工具搜索候选
-        - 若无结果，可换同义词再搜索（如“无语”→“dumb/尴尬”）
+        - 若无结果，可换同义词再搜索（如“无语”->"dumb/尴尬"）
 
         返回值：
         返回候选表情包列表，每个包含：
@@ -1630,8 +1881,9 @@ class Main(Star):
         query = str(query or "").strip()
         logger.info(f"[Tool] LLM 搜索表情包: {query}")
 
-        # 标记为主动发送流程开始
-        event.set_extra("stealer_active_sent", True)
+        # Mark this turn as an explicit emoji flow and suppress auto-send hooks.
+        turn_state = self._emoji_turn_state(event)
+        turn_state.mark_active_sent()
 
         try:
             if not query:
@@ -1642,18 +1894,20 @@ class Main(Star):
                 yield "搜索失败：当前群聊已禁用表情包功能"
                 return
 
-            if not self.cache_service.get_index_cache_readonly():
+            if self.db_service.count_total() > 0:
+                idx = self.db_service.get_index_cache_readonly()
+            elif self.cache_service.get_index_cache_readonly():
+                idx = self.cache_service.get_index_cache_readonly()
+            else:
                 logger.debug("索引未加载，正在加载...")
                 await self._load_index()
-
-            idx = self.cache_service.get_index_cache_readonly()
+                idx = self.db_service.get_index_cache_readonly()
 
             # smart_search 已内置关键词映射和模糊匹配（阈值0.4）
             results = await self._search_emoji_candidates(
                 event, query, limit=self.MAX_SEARCH_RESULTS, idx=idx
             )
 
-            # 如果仍然没有结果，返回推荐分类
             if not results:
                 similar = self._find_similar_categories(query, top_n=3)
                 suggestion = f"未找到与'{query}'匹配的表情包。"
@@ -1666,7 +1920,6 @@ class Main(Star):
                 yield suggestion
                 return
 
-            # 构建候选列表
             candidates = []
             result_lines = [f"找到 {len(results)} 个匹配的表情包：\n"]
 
@@ -1702,7 +1955,6 @@ class Main(Star):
                             "source": source,
                         }
                     )
-                    # 格式化输出
                     result_lines.append(f"\n[{i + 1}] 分类：{emotion}")
                     if tags:
                         result_lines.append(f"    标签：{tags}")
@@ -1718,9 +1970,7 @@ class Main(Star):
                 yield "搜索失败：找到的表情包文件均已丢失"
                 return
 
-            # 存入 event extras，供同一轮对话中的 send_emoji_by_id 使用（避免并发竞态）
-            event.set_extra("stealer_emoji_candidates", candidates)
-
+            turn_state.set_candidates(candidates)
             result_lines.append(
                 "\n\n请先确定你当前最能代表自己的心情词，再根据候选描述选择最合适的表情包，最后调用 send_emoji_by_id(编号) 发送。"
             )
@@ -1744,16 +1994,15 @@ class Main(Star):
 
         """
         logger.info(f"[Tool] LLM 选择发送表情包编号: {emoji_id}")
-
-        # 标记为主动发送
-        event.set_extra("stealer_active_sent", True)
+        # Mark this turn as an explicit emoji flow and suppress auto-send hooks.
+        turn_state = self._emoji_turn_state(event)
+        turn_state.mark_active_sent()
 
         try:
             if not self.is_meme_enabled_for_event(event):
                 yield "发送失败：当前群聊已禁用表情包功能"
                 return
 
-            # 统一转为 int
             if emoji_id is None:
                 yield "发送失败：缺少 emoji_id 参数。请先调用 search_emoji，再传入候选编号。"
                 return
@@ -1764,19 +2013,15 @@ class Main(Star):
                 yield f"发送失败：编号 {emoji_id} 无法解析为整数，请输入有效的数字编号"
                 return
 
-            # 获取候选列表（从同一轮对话的 search_emoji 存入）
-            candidates = event.get_extra("stealer_emoji_candidates")
-
+            candidates = turn_state.get_candidates()
             if not candidates:
                 yield "发送失败：没有可用的候选列表。请先调用 search_emoji 搜索表情包。"
                 return
 
-            # 验证编号范围
             if emoji_id < 1 or emoji_id > len(candidates):
                 yield f"发送失败：编号 {emoji_id} 无效。可选编号范围：1-{len(candidates)}，请重新选择。"
                 return
 
-            # 获取选中的表情包
             selected = candidates[emoji_id - 1]
             path = selected["path"]
             desc = selected["desc"]
@@ -1790,7 +2035,6 @@ class Main(Star):
                 yield "发送失败：该表情包被限制为仅来源群可发送，请选择其他表情包。"
                 return
 
-            # 发送表情包
             logger.info(f"[Tool] 发送选中的表情包: {path} (emotion={emotion})")
             sent_as_sticker = False
             try:
@@ -1805,7 +2049,6 @@ class Main(Star):
                 await event.send(MessageChain([ImageComponent.fromBase64(b64)]))
             await self.emoji_selector.record_emoji_usage(path, trigger="llm_tool")
 
-            # 返回详细的成功信息
             mode_desc = "Telegram贴纸" if sent_as_sticker else "图片"
             success_msg = (
                 f"发送成功（{mode_desc}）。\n\n你发送的表情包：\n- 编号：{emoji_id}\n- 分类：{emotion}\n- 描述：{desc}"

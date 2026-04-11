@@ -98,10 +98,17 @@ class EmojiSelector:
     async def _build_bm25_index(self, idx: dict | None = None) -> None:
         if BM25 is None:
             return
+
+        # 优先使用数据库服务
+        db_service = getattr(self.plugin, "db_service", None)
         cache_service = getattr(self.plugin, "cache_service", None)
+
         if idx is None:
-            if cache_service:
+            if db_service:
+                idx = db_service.get_index_cache_readonly() or {}
+            elif cache_service:
                 idx = cache_service.get_index_cache_readonly() or {}
+
         if not idx:
             return
 
@@ -225,6 +232,23 @@ class EmojiSelector:
         if event is None:
             return True
 
+        # 优先使用数据库服务
+        db_service = getattr(self.plugin, "db_service", None)
+        if db_service:
+            data = db_service.get_emoji(path)
+            if data is None:
+                # 尝试规范化路径匹配
+                target_path = self._canon_path(path)
+                all_paths = db_service.get_all_paths()
+                for stored_path in all_paths:
+                    if self._canon_path(stored_path) == target_path:
+                        data = db_service.get_emoji(stored_path)
+                        break
+            if data is None:
+                return False
+            return self._is_entry_allowed_for_event(data, event)
+
+        # 兼容旧版 CacheService
         cache_service = getattr(self.plugin, "cache_service", None)
         if not cache_service:
             return False
@@ -247,11 +271,8 @@ class EmojiSelector:
             return False
 
     def _canon_path(self, path: str) -> str:
-        """规范化路径用于比较去重。"""
-        try:
-            return os.path.normcase(os.path.abspath(os.path.normpath(path)))
-        except Exception:
-            return str(path or "")
+        """规范化路径用于比较去重（仅大小写规范化，不转换斜杠）。"""
+        return os.path.normcase(str(path or "")).replace("\\", "/")
 
     def _get_category_from_data(self, data: dict | None) -> str:
         """从数据字典中获取小写的分类名。
@@ -299,26 +320,27 @@ class EmojiSelector:
 
     def _update_recent_usage(self, category: str, path: str) -> None:
         canon_path = self._canon_path(path)
-        recent_usage = [p for p in self._get_recent_usage(category) if p != canon_path]
-        recent_usage.append(canon_path)
+        recent_usage = [p for p in self._get_recent_usage(category) if self._canon_path(p) != canon_path]
+        recent_usage.append(path)
         if len(recent_usage) > self.MAX_RECENT_USAGE:
             recent_usage = recent_usage[-self.MAX_RECENT_USAGE :]
         self._set_recent_usage(category, recent_usage)
-        logger.debug(f"[去重] 更新历史: 分类={category}, 路径={canon_path}, 新历史={recent_usage}")
+        logger.debug(f"[去重] 更新历史: 分类={category}, 路径={path}, 新历史={recent_usage}")
 
     def _calculate_recent_penalty(self, category: str, path: str) -> float:
         canon_path = self._canon_path(path)
         recent_usage = self._get_recent_usage(category)
-        if not recent_usage or canon_path not in recent_usage:
+        recent_paths_canon = [self._canon_path(p) for p in recent_usage]
+        if not recent_usage or canon_path not in recent_paths_canon:
             return 0.0
 
-        recency_rank = len(recent_usage) - 1 - recent_usage.index(canon_path)
+        recency_rank = len(recent_usage) - 1 - recent_paths_canon.index(canon_path)
         penalty_steps = [0.55, 0.38, 0.24, 0.14]
         if recency_rank < len(penalty_steps):
             penalty = penalty_steps[recency_rank]
         else:
             penalty = max(0.06, 0.14 - (recency_rank - len(penalty_steps) + 1) * 0.02)
-        logger.debug(f"[去重] 分类={category}, 路径={canon_path}, 历史={recent_usage}, 排名={recency_rank}, 惩罚={penalty:.2f}")
+        logger.debug(f"[去重] 分类={category}, 路径={path}, 历史={recent_usage}, 排名={recency_rank}, 惩罚={penalty:.2f}")
         return penalty
 
     def _get_candidate_categories(self, category: str, limit: int = 3) -> list[str]:
@@ -356,30 +378,41 @@ class EmojiSelector:
         return result or [normalized]
 
     async def record_emoji_usage(self, emoji_path: str, trigger: str = "auto") -> None:
-        cache_service = getattr(self.plugin, "cache_service", None)
-        if not cache_service or not emoji_path:
+        """记录表情包使用次数。
+
+        优先使用数据库服务进行增量更新，fallback 到 cache_service。
+        """
+        if not emoji_path:
             return
 
-        target_path = self._canon_path(emoji_path)
-        now = int(time.time())
+        db_service = getattr(self.plugin, "db_service", None)
+        cache_service = getattr(self.plugin, "cache_service", None)
 
-        def _updater(current: dict) -> None:
-            for stored_path, meta in current.items():
-                if self._canon_path(stored_path) != target_path:
-                    continue
-                if not isinstance(meta, dict):
-                    continue
+        if db_service:
+            # 使用数据库增量更新
+            target_path = self._canon_path(emoji_path)
+            # 尝试直接更新
+            db_service.increment_usage_sync(target_path)
+        elif cache_service:
+            # fallback 到旧版 cache_service
+            target_path = self._canon_path(emoji_path)
+            now = int(time.time())
 
-                meta["use_count"] = int(meta.get("use_count", 0) or 0) + 1
-                meta["last_used_at"] = now
-                break
+            def _updater(current: dict) -> None:
+                for stored_path, meta in current.items():
+                    if self._canon_path(stored_path) != target_path:
+                        continue
+                    if not isinstance(meta, dict):
+                        continue
 
-        try:
-            await cache_service.update_index(_updater)
-            # 这里只更新 use_count/last_used_at，不影响 BM25 文本语料，
-            # 无需失效索引，避免每次发图后重建索引。
-        except Exception as e:
-            logger.debug(f"[Stealer] 更新表情使用统计失败: {e}")
+                    meta["use_count"] = int(meta.get("use_count", 0) or 0) + 1
+                    meta["last_used_at"] = now
+                    break
+
+            try:
+                await cache_service.update_index(_updater)
+            except Exception as e:
+                logger.debug(f"[Stealer] 更新表情使用统计失败: {e}")
 
     def normalize_category(self, category: str) -> str:
         """归一化分类名称，返回有效分类或空字符串。"""
@@ -505,10 +538,17 @@ class EmojiSelector:
     ) -> str | None:
         try:
             files: list[Path] = []
+            db_service = getattr(self.plugin, "db_service", None)
             cache_service = getattr(self.plugin, "cache_service", None)
-            if cache_service:
+
+            if db_service:
+                idx = db_service.get_index_cache_readonly() or {}
+            elif cache_service:
                 idx = cache_service.get_index_cache_readonly() or {}
-                for file_path, data in idx.items():
+            else:
+                idx = {}
+
+            for file_path, data in idx.items():
                     if not isinstance(data, dict):
                         continue
                     if self._get_category_from_data(data) != category:
@@ -595,11 +635,16 @@ class EmojiSelector:
     ) -> str | None:
         """智能选择表情包实现（内部方法）。"""
         try:
-            cache_service = self.plugin.cache_service
-            if not cache_service:
+            db_service = getattr(self.plugin, "db_service", None)
+            cache_service = getattr(self.plugin, "cache_service", None)
+
+            if db_service:
+                idx = db_service.get_index_cache_readonly() or {}
+            elif cache_service:
+                idx = cache_service.get_index_cache_readonly() or {}
+            else:
                 return None
 
-            idx = cache_service.get_index_cache_readonly()
             if not idx:
                 return None
 
@@ -822,8 +867,11 @@ class EmojiSelector:
             logger.debug(f"[BM25] 查询='{query}', tokens={query_tokens}, top_doc_scores={bm25_results[:10]}")
 
             if not idx:
+                db_service = getattr(self.plugin, "db_service", None)
                 cache_service = getattr(self.plugin, "cache_service", None)
-                if cache_service:
+                if db_service:
+                    idx = db_service.get_index_cache_readonly() or {}
+                elif cache_service:
                     idx = cache_service.get_index_cache_readonly() or {}
 
             recently_used_paths: set[str] = set()
@@ -873,9 +921,12 @@ class EmojiSelector:
         """降级搜索：使用旧的评分算法。"""
         try:
             if idx is None:
-                cache_service = self.plugin.cache_service
-                if cache_service:
-                    idx = cache_service.get_index_cache_readonly()
+                db_service = getattr(self.plugin, "db_service", None)
+                cache_service = getattr(self.plugin, "cache_service", None)
+                if db_service:
+                    idx = db_service.get_index_cache_readonly() or {}
+                elif cache_service:
+                    idx = cache_service.get_index_cache_readonly() or {}
 
             if not idx:
                 return []
@@ -1112,26 +1163,6 @@ class EmojiSelector:
         scores.sort(key=lambda x: x[1], reverse=True)
         return [cat for cat, _ in scores[:top_n]]
 
-    def check_send_probability(self) -> bool:
-        """检查表情包发送概率。"""
-        try:
-            emoji_chance = self.plugin.emoji_chance
-            chance = float(emoji_chance)
-            if chance <= 0:
-                logger.debug("表情包自动发送概率为0，未触发图片发送")
-                return False
-            if chance > 1:
-                chance = 1.0
-            if random.random() >= chance:
-                logger.debug(f"表情包自动发送概率检查未通过 ({chance}), 未触发图片发送")
-                return False
-
-            logger.debug("表情包自动发送概率检查通过")
-            return True
-        except Exception as e:
-            logger.error(f"解析表情包自动发送概率配置失败: {e}")
-            return False
-
     async def _encode_emoji(self, emoji_path: str) -> str | None:
         """将表情包文件编码为 base64，失败返回 None。"""
         if not emoji_path or not isinstance(emoji_path, str):
@@ -1209,7 +1240,7 @@ class EmojiSelector:
     ) -> None:
         """发送表情包（异步场景下直接发送新消息）。"""
         try:
-            if event.get_extra("stealer_active_sent"):
+            if self.plugin._emoji_turn_state(event).is_active_sent():
                 logger.debug("[Stealer] 已主动发送过表情包，跳过自动发送")
                 return
 
@@ -1272,17 +1303,21 @@ class EmojiSelector:
             logger.error(f"发送显式表情包失败: {e}", exc_info=True)
 
     async def try_send_emoji(
-        self, event: AstrMessageEvent, emotions: list[str], cleaned_text: str
+        self,
+        event: AstrMessageEvent,
+        emotions: list[str],
+        cleaned_text: str,
     ) -> bool:
-        """尝试发送表情包，遍历 emotions 列表直到第一个匹配到的表情包。"""
+        """尝试发送表情包，遍历 emotions 列表直到第一个匹配到的表情包。
+
+        注意：概率判定由 Main 在调用前通过 _resolve_auto_emoji_turn_permission 完成，
+        本方法只负责选图和发图。
+        """
         if not self._check_group_allowed(event):
             return False
 
-        if event.get_extra("stealer_active_sent"):
-            logger.debug("[Stealer] 检测到 stealer_active_sent=True，跳过自动表情发送")
-            return False
-
-        if not self.check_send_probability():
+        if self.plugin._emoji_turn_state(event).is_active_sent():
+            logger.debug("[Stealer] 检测到已发送，跳过表情发送")
             return False
 
         # 遍历情绪列表，第一个能选到表情包的就发送
