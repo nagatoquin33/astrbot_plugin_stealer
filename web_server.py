@@ -683,7 +683,7 @@ class WebServer:
             include_meta = request.query.get("meta", "0") in ("1", "true", "yes")
 
             # 优先使用数据库分页查询
-            db_service = getattr(self.plugin, "db_service", None)
+            db_service = self._get_db_service()
             get_emojis_paginated = (
                 getattr(db_service, "get_emojis_paginated", None) if db_service else None
             )
@@ -866,6 +866,10 @@ class WebServer:
                     )
         categories_list.sort(key=lambda x: x["count"], reverse=True)
         return categories_list
+
+    def _get_db_service(self):
+        """Return the optional database service when available."""
+        return getattr(self.plugin, "db_service", None)
 
     async def handle_delete_image(self, request):
         """删除图片"""
@@ -1121,11 +1125,21 @@ class WebServer:
             if hasattr(self.plugin, "plugin_config"):
                 categories_count = len(self.plugin.plugin_config.categories)
 
+            db_service = self._get_db_service()
+            total_count = len(index)
+            get_stats = getattr(db_service, "get_stats", None) if db_service else None
+            if db_service and callable(get_stats):
+                try:
+                    db_stats = get_stats()
+                    total_count = int(db_stats.get("total_emojis", total_count) or 0)
+                except Exception as db_error:
+                    logger.warning(f"Falling back to cache stats: {db_error}")
+
             # 前端期望的数据结构是 { stats: { total, categories, today } }
             return self._ok(
                 {
                     "stats": {
-                        "total": len(index),
+                        "total": total_count,
                         "categories": categories_count,
                         "today": today_count,
                     }
