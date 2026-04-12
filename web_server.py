@@ -1,5 +1,4 @@
 import asyncio
-import hashlib
 import hmac
 import shutil
 import time
@@ -227,7 +226,18 @@ class WebServer:
         await self.plugin.cache_service.update_index(
             lambda current: self._remove_by_hashes(current, hashes, removed_paths)
         )
+        # 同步到数据库
+        await self._sync_index_to_db()
         return removed_paths
+
+    async def _sync_index_to_db(self) -> None:
+        """将 cache_service 的索引同步到数据库。"""
+        try:
+            idx = self.plugin.cache_service.get_index_cache_readonly()
+            if idx:
+                await self.plugin.db_service.save_index(idx)
+        except Exception as e:
+            logger.error(f"同步索引到数据库失败: {e}")
 
     def _invalidate_hashes(self, hashes: list[str]) -> None:
         if not hashes or not hasattr(self.plugin, "image_processor_service"):
@@ -254,6 +264,8 @@ class WebServer:
             )
 
         await self.plugin.cache_service.update_index(updater)
+        # 同步到数据库
+        await self._sync_index_to_db()
         return moved_count, moved_hashes
 
     async def _error_middleware(self, app: web.Application, handler):
@@ -670,12 +682,80 @@ class WebServer:
             sort_order = request.query.get("sort", "newest")
             include_meta = request.query.get("meta", "0") in ("1", "true", "yes")
 
-            # 获取所有图片数据
-            # 优先从 ImageProcessorService 的缓存或索引中获取
-            # index 结构: path -> {hash, category, tags, desc, ...}
-            # 但我们需要列表形式
+            # 优先使用数据库分页查询
+            db_service = getattr(self.plugin, "db_service", None)
+            get_emojis_paginated = (
+                getattr(db_service, "get_emojis_paginated", None) if db_service else None
+            )
+            if (
+                db_service
+                and callable(get_emojis_paginated)
+                and db_service.count_total() > 0
+            ):
+                # 使用数据库分页查询
+                raw_images, total, category_counts = get_emojis_paginated(
+                    page=page,
+                    page_size=page_size,
+                    category=category_filter,
+                    sort_order=sort_order,
+                    search_query=search_query if search_query else None,
+                )
 
-            # 从 cache_service 获取持久化索引
+                # 转换为前端需要的格式
+                images: list[dict[str, Any]] = []
+                for item in raw_images:
+                    try:
+                        abs_path = Path(item["path"])
+                        rel_path = abs_path.relative_to(self.data_dir)
+                        image_item = {
+                            "hash": item.get("hash", ""),
+                            "url": f"/images/{rel_path.as_posix()}",
+                            "category": item.get("category", "unknown"),
+                            "tags": item.get("tags", []),
+                            "desc": item.get("desc", ""),
+                            "scenes": self._split_scene_terms(item.get("scenes", [])),
+                            "scope_mode": self._normalize_scope_mode(
+                                item.get("scope_mode", "public")
+                            )
+                            or "public",
+                            "origin_target": str(item.get("origin_target", "") or ""),
+                            "created_at": item.get("created_at", 0),
+                        }
+
+                        if include_meta and abs_path.exists():
+                            try:
+                                stat = await asyncio.to_thread(abs_path.stat)
+                                image_item.update(
+                                    {
+                                        "rel_path": rel_path.as_posix(),
+                                        "filename": abs_path.name,
+                                        "size_bytes": stat.st_size,
+                                        "mtime": int(stat.st_mtime),
+                                    }
+                                )
+                                if not image_item.get("created_at"):
+                                    image_item["created_at"] = int(stat.st_mtime)
+                            except Exception:
+                                pass
+
+                        images.append(image_item)
+                    except ValueError:
+                        continue
+
+                # 构建分类列表
+                categories_list = self._build_categories_list(category_counts)
+
+                return self._ok(
+                    {
+                        "total": total,
+                        "page": page,
+                        "size": page_size,
+                        "images": images,
+                        "categories": categories_list,
+                    }
+                )
+
+            # Fallback: 使用内存遍历（兼容旧版本或数据库为空时）
             index = self.plugin.cache_service.get_index_cache()
 
             images: list[dict[str, Any]] = []
@@ -749,25 +829,7 @@ class WebServer:
             end = start + page_size
             paged_images = images[start:end]
 
-            categories_list = []
-            if hasattr(self.plugin, "plugin_config"):
-                base_categories = self.plugin.plugin_config.get_category_info()
-                for cat_info in base_categories:
-                    key = cat_info["key"]
-                    categories_list.append(
-                        {
-                            "key": key,
-                            "name": cat_info["name"],
-                            "count": category_counts.get(key, 0),
-                        }
-                    )
-                known_keys = {c["key"] for c in categories_list}
-                for cat_key, count in category_counts.items():
-                    if cat_key not in known_keys:
-                        categories_list.append(
-                            {"key": cat_key, "name": cat_key, "count": count}
-                        )
-            categories_list.sort(key=lambda x: x["count"], reverse=True)
+            categories_list = self._build_categories_list(category_counts)
 
             return self._ok(
                 {
@@ -781,6 +843,29 @@ class WebServer:
         except Exception as e:
             logger.error(f"Error listing images: {e}")
             return self._err(str(e))
+
+    def _build_categories_list(self, category_counts: dict[str, int]) -> list[dict]:
+        """构建分类列表，合并配置分类和动态分类。"""
+        categories_list: list[dict] = []
+        if hasattr(self.plugin, "plugin_config"):
+            base_categories = self.plugin.plugin_config.get_category_info()
+            for cat_info in base_categories:
+                key = cat_info["key"]
+                categories_list.append(
+                    {
+                        "key": key,
+                        "name": cat_info["name"],
+                        "count": category_counts.get(key, 0),
+                    }
+                )
+            known_keys = {c["key"] for c in categories_list}
+            for cat_key, count in category_counts.items():
+                if cat_key not in known_keys:
+                    categories_list.append(
+                        {"key": cat_key, "name": cat_key, "count": count}
+                    )
+        categories_list.sort(key=lambda x: x["count"], reverse=True)
+        return categories_list
 
     async def handle_delete_image(self, request):
         """删除图片"""
@@ -931,6 +1016,8 @@ class WebServer:
                 updated["ok"] = True
 
             await self.plugin.cache_service.update_index(updater)
+            # 同步到数据库
+            await self._sync_index_to_db()
             if not updated["ok"]:
                 return self._err(updated["error"] or "Update failed", 404)
             return self._ok()
@@ -1007,6 +1094,8 @@ class WebServer:
                     result["updated"] += 1
 
             await self.plugin.cache_service.update_index(updater)
+            # 同步到数据库
+            await self._sync_index_to_db()
             return self._ok(count=result["updated"], skipped=result["skipped"])
         except Exception as e:
             logger.error(f"Batch scope update failed: {e}")
@@ -1122,7 +1211,7 @@ class WebServer:
                 )
 
             file_content = await asyncio.to_thread(uploaded_file.file.read)
-            file_hash = hashlib.sha256(file_content).hexdigest()
+            file_hash = self.plugin.cache_service.compute_hash(file_content)
 
             timestamp = int(datetime.now().timestamp())
             unique_filename = f"{timestamp}_{uuid.uuid4().hex[:8]}{file_ext}"
@@ -1150,6 +1239,8 @@ class WebServer:
                     },
                 )
             )
+            # 同步到数据库
+            await self._sync_index_to_db()
             url = f"/images/{file_path.relative_to(self.data_dir).as_posix()}"
 
             return self._ok(
@@ -1195,7 +1286,7 @@ class WebServer:
                         files_data.append({
                             "filename": filename,
                             "content": content,
-                            "hash": hashlib.sha256(content).hexdigest(),
+                            "hash": self.plugin.cache_service.compute_hash(content),
                             "ext": file_ext,
                         })
                 elif field.name == "category":
@@ -1317,6 +1408,9 @@ class WebServer:
 
             results = await asyncio.gather(*[process_one(f) for f in files_data])
 
+            # 批量处理后同步到数据库
+            await self._sync_index_to_db()
+
             for result in results:
                 task_info["results"].append(result)
                 if result.get("success"):
@@ -1416,6 +1510,8 @@ class WebServer:
                     current, category_key
                 )
             )
+            # 同步到数据库
+            await self._sync_index_to_db()
 
             deleted_file_count += await self._delete_category_dir_and_count_orphans(
                 category_key

@@ -1,15 +1,9 @@
 """
 文本相似度计算工具
 提供多种文本相似度算法，用于表情包智能匹配
-
-改进说明（v2）：
-- 中文 n-gram 分词：提取 bigram/trigram 保留词组语义（如 "开心" 作为整体而非 "开"+"心"）
-- 子串包含匹配：短文本包含在长文本中时给予高分
-- 多策略融合：n-gram Jaccard + 余弦相似 + 子串匹配 + 编辑距离，加权融合
-- 文本归一化增强：重复字压缩
-- 无额外依赖：不依赖 jieba 等第三方分词库
 """
 
+import heapq
 import math
 import re
 from collections import Counter
@@ -35,18 +29,24 @@ class BM25:
         self.idf: dict[str, float] = {}
         self.doc_len: list[int] = []
         self.doc_term_freqs: list[dict[str, int]] = []
+        self._inverted_index: dict[str, set[int]] = {}
         self._initialize(corpus)
 
     def _initialize(self, corpus: list[list[str]]) -> None:
         nd: dict[str, list[int]] = {}
         self.doc_len = []
         self.doc_term_freqs = []
-        for document in corpus:
+        self._inverted_index = {}
+
+        for doc_idx, document in enumerate(corpus):
             self.doc_len.append(len(document))
             frequencies: dict[str, int] = {}
             for word in document:
-                word = word.lower()
-                frequencies[word] = frequencies.get(word, 0) + 1
+                word_lower = word.lower()
+                frequencies[word_lower] = frequencies.get(word_lower, 0) + 1
+                if word_lower not in self._inverted_index:
+                    self._inverted_index[word_lower] = set()
+                self._inverted_index[word_lower].add(doc_idx)
             self.doc_term_freqs.append(frequencies)
             for word, freq in frequencies.items():
                 if word not in nd:
@@ -70,10 +70,28 @@ class BM25:
         return scores
 
     def get_top_k(self, query: list[str], k: int = 10) -> list[tuple[int, float]]:
-        scores = self.get_scores(query)
-        indexed = [(i, score) for i, score in enumerate(scores)]
-        indexed.sort(key=lambda x: x[1], reverse=True)
-        return indexed[:k]
+        query_lower = [term.lower() for term in query]
+        query_term_counts = Counter(query_lower)
+
+        candidate_docs: set[int] = set()
+        for term in query_term_counts.keys():
+            if term in self._inverted_index:
+                candidate_docs.update(self._inverted_index[term])
+
+        if not candidate_docs:
+            return []
+
+        heap: list[tuple[float, int]] = []
+        for doc_idx in candidate_docs:
+            score = self._calculate_score(query, doc_idx)
+            if len(heap) < k:
+                heapq.heappush(heap, (-score, doc_idx))
+            elif -heap[0][0] < score:
+                heapq.heapreplace(heap, (-score, doc_idx))
+
+        result = [(doc_idx, -score) for score, doc_idx in heap]
+        result.sort(key=lambda x: x[1], reverse=True)
+        return result
 
     def _calculate_score(self, query: list[str], doc_index: int) -> float:
         score = 0.0

@@ -821,7 +821,7 @@ class CommandHandler:
         try:
             yield event.plain_result("🔄 开始重建索引，请稍候...")
 
-            # 调用插件的重建索引方法
+            # 调用插件的重建索引方法（只重建基础索引，不保存到数据库）
             rebuilt_index = await self.plugin._rebuild_index_from_files()
 
             if not rebuilt_index:
@@ -832,51 +832,89 @@ class CommandHandler:
                 )
                 return
 
-            # 获取旧索引进行对比（创建独立副本）
-            old_index = await self.plugin._load_index()
-            old_count = len(old_index)
+            # --- 收集所有旧数据源（JSON + 数据库）---
+            # 1. 尝试从数据库加载（如果有数据）
+            old_index = {}
+            db_count = self.plugin.db_service.count_total()
+            if db_count > 0:
+                old_index = self.plugin.db_service.get_index_cache_readonly()
+                logger.info(f"[rebuild_index] 从数据库加载 {len(old_index)} 条旧记录")
 
-            # 尝试加载旧版本遗留文件（Legacy Data）- 独立存储，不修改 old_index
+            # 2. 尝试加载所有可能的旧版 JSON 文件（不依赖 _load_index 的迁移逻辑）
             legacy_metadata_count = 0
-            legacy_data_map = {}  # 独立存储 legacy 数据
+            legacy_data_map = {}
             possible_legacy_paths = []
+
+            # 添加所有可能的 JSON 文件路径（包括迁移后的备份文件）
+            if self.plugin.cache_dir:
+                possible_legacy_paths.extend([
+                    self.plugin.cache_dir / "index_cache.json",
+                    self.plugin.cache_dir / "index_cache.json.backup",
+                    self.plugin.cache_dir / "index_cache.json.migrated",  # 迁移后的备份
+                ])
             if self.plugin.base_dir:
-                possible_legacy_paths.extend(
-                    [
-                        self.plugin.base_dir / "index.json",
-                        self.plugin.base_dir / "image_index.json",
-                        self.plugin.base_dir / "cache" / "index.json",
-                    ]
-                )
+                possible_legacy_paths.extend([
+                    self.plugin.base_dir / "index.json",
+                    self.plugin.base_dir / "index.json.backup",
+                    self.plugin.base_dir / "index.json.migrated",  # 迁移后的备份
+                    self.plugin.base_dir / "image_index.json",
+                    self.plugin.base_dir / "image_index.json.backup",
+                    self.plugin.base_dir / "image_index.json.migrated",
+                    self.plugin.base_dir / "cache" / "index.json",
+                    self.plugin.base_dir / "cache" / "index.json.backup",
+                    self.plugin.base_dir / "cache" / "index.json.migrated",
+                    self.plugin.base_dir / "cache" / "index_cache.json",
+                    self.plugin.base_dir / "cache" / "index_cache.json.backup",
+                    self.plugin.base_dir / "cache" / "index_cache.json.migrated",
+                ])
 
             for legacy_path in possible_legacy_paths:
                 if legacy_path.exists():
                     try:
                         with open(legacy_path, encoding="utf-8") as f:
                             legacy_data = json.load(f)
-                            if isinstance(legacy_data, dict):
+                            if isinstance(legacy_data, dict) and legacy_data:
                                 legacy_data_map.update(legacy_data)
                                 legacy_metadata_count += len(legacy_data)
-                    except Exception:
-                        pass
+                                logger.info(f"[rebuild_index] 从 JSON 加载 {len(legacy_data)} 条: {legacy_path}")
+                    except Exception as e:
+                        logger.warning(f"[rebuild_index] 加载 JSON 失败 {legacy_path}: {e}")
 
             # --- 智能合并逻辑开始 ---
-            # 1. 建立哈希查找表，用于处理文件路径变更的情况
             # 合并 old_index 和 legacy_data_map 用于查找
+            # 注意：需要按 hash 合并，而非按 path 合并，因为不同数据源可能 path 不同
             combined_index = {**old_index, **legacy_data_map}
 
+            # 1. 建立哈希查找表 - 关键：优先使用有 tags/desc 的数据
             old_hash_map = {}
             for k, v in combined_index.items():
                 if isinstance(v, dict) and v.get("hash"):
-                    old_hash_map[v["hash"]] = v
+                    hash_val = v["hash"]
+                    existing = old_hash_map.get(hash_val)
+                    # 如果已有数据但没有 tags/desc，而新数据有，则替换
+                    if existing is None:
+                        old_hash_map[hash_val] = v
+                    elif (not existing.get("tags") and not existing.get("desc") and not existing.get("scenes")):
+                        # 已有数据是空数据，用新数据替换
+                        if v.get("tags") or v.get("desc") or v.get("scenes"):
+                            old_hash_map[hash_val] = v
+
             # 同时也建立文件名->数据映射（处理哈希可能变化但文件名没变的情况）
             old_name_map = {}
             for k, v in combined_index.items():
                 if isinstance(v, dict):
                     path_obj = Path(k)
-                    old_name_map[path_obj.name] = v
-                    # 同时也用纯文件名（不带扩展名）建立映射
-                    old_name_map[path_obj.stem] = v
+                    existing = old_name_map.get(path_obj.name)
+                    # 优先使用有元数据的记录
+                    if existing is None:
+                        old_name_map[path_obj.name] = v
+                        old_name_map[path_obj.stem] = v
+                    elif (not existing.get("tags") and not existing.get("desc") and not existing.get("scenes")):
+                        if v.get("tags") or v.get("desc") or v.get("scenes"):
+                            old_name_map[path_obj.name] = v
+                            old_name_map[path_obj.stem] = v
+
+            old_count = len(combined_index)
 
             recovered_count = 0
 

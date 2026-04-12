@@ -3,6 +3,8 @@ import copy
 import hashlib
 import inspect
 import json
+import threading
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
@@ -10,588 +12,460 @@ from astrbot.api import logger
 
 
 class CacheService:
-    """缓存服务类，负责管理各种类型的缓存。"""
+    """缓存服务，负责管理内存缓存与可选的 JSON 持久化。"""
 
-    # 缓存最大大小
     _CACHE_MAX_SIZE = 100
 
     def __init__(self, cache_dir: str | Path | None = None):
-        """初始化缓存服务。
-
-        Args:
-            cache_dir: 缓存文件存储目录，如果为None则使用默认目录
-        """
         if not cache_dir:
             from astrbot.api.star import StarTools
 
-            cache_dir = Path(StarTools.get_data_dir("astrbot_plugin_stealer")).resolve() / "cache"
+            cache_dir = (
+                Path(StarTools.get_data_dir("astrbot_plugin_stealer")).resolve()
+                / "cache"
+            )
 
         self._cache_dir = Path(cache_dir)
         self._ensure_cache_dir()
 
-        # 初始化不同类型的缓存
-        self._caches: dict[str, dict[str, Any]] = {
-            "image_cache": {},  # 图片分类缓存
-            "text_cache": {},  # 文本情绪分类缓存
-            "index_cache": {},  # 索引缓存（已迁移到数据库，不再持久化到JSON）
-            "bm25_cache": {},  # BM25索引缓存
-            "desc_cache": {},  # 描述缓存
-            "blacklist_cache": {},  # 黑名单缓存
+        self._caches: dict[str, OrderedDict[str, Any]] = {
+            "image_cache": OrderedDict(),
+            "text_cache": OrderedDict(),
+            "index_cache": OrderedDict(),
+            "bm25_cache": OrderedDict(),
+            "desc_cache": OrderedDict(),
+            "blacklist_cache": OrderedDict(),
         }
-
-        # 不持久化到JSON文件的缓存（已迁移到数据库）
         self._no_persist_caches: set[str] = {"index_cache"}
+        self._lock = threading.RLock()
 
-        # 加载持久化的缓存
         self._load_caches()
 
-        # 锁保护
-        self._index_lock = asyncio.Lock()
-        self._cache_lock = asyncio.Lock()  # 通用缓存锁
-
-    def _load_caches(self):
-        """加载持久化的缓存文件。"""
-        for cache_name in self._caches.keys():
+    def _load_caches(self) -> None:
+        """加载已持久化的缓存文件。"""
+        for cache_name in self._caches:
             cache_file = self._get_cache_file(cache_name)
-            if cache_file.exists():
-                try:
-                    with open(cache_file, encoding="utf-8") as f:
-                        cached_data = json.load(f)
-                        if isinstance(cached_data, dict):
-                            self._caches[cache_name] = cached_data
-                            logger.info(
-                                f"[load_caches] loaded {len(cached_data)} items for {cache_name} from {cache_file}"
-                            )
-                except Exception as e:
-                    logger.error(f"加载缓存文件 {cache_file} 失败: {e}")
-            else:
-                logger.debug(f"[load_caches] cache file not found: {cache_file}")
+            if not cache_file.exists():
+                continue
 
-    async def _save_cache_async(self, cache_name: str):
-        """异步保存指定类型的缓存到文件。
-
-        Args:
-            cache_name: 缓存类型名称
-        """
-        if cache_name not in self._caches:
-            logger.warning(f"缓存类型 {cache_name} 不存在，无法保存")
-            return
-
-        if cache_name in self._no_persist_caches:
-            logger.debug(f"缓存 {cache_name} 已迁移到数据库，跳过JSON持久化")
-            return
-
-        try:
-            self._ensure_cache_dir()
-            cache_file = self._get_cache_file(cache_name)
-
-            # 记录保存前的数据量
-            data_size = len(self._caches[cache_name])
-            logger.debug(f"准备异步保存缓存 {cache_name}，数据量: {data_size}")
-
-            # 深拷贝数据，避免 to_thread 执行 json.dump 期间主线程修改字典导致 RuntimeError
-            data_to_save = copy.deepcopy(self._caches[cache_name])
-
-            def write_file():
-                with open(cache_file, "w", encoding="utf-8") as f:
-                    json.dump(data_to_save, f, ensure_ascii=False, indent=2)
-
-            await asyncio.to_thread(write_file)
-            logger.debug(f"缓存文件 {cache_file} 保存成功 (Async)，数据量: {data_size}")
-        except Exception as e:
-            logger.error(f"保存缓存文件 {cache_file} 失败: {e}", exc_info=True)
-
-    def _save_cache(self, cache_name: str):
-        """同步保存指定类型的缓存到文件（仅用于非异步上下文）。
-
-        尽量使用 _save_cache_async。
-        """
-        if cache_name not in self._caches:
-            logger.warning(f"缓存类型 {cache_name} 不存在，无法保存")
-            return
-
-        try:
-            self._ensure_cache_dir()
-            cache_file = self._get_cache_file(cache_name)
-
-            # 记录保存前的数据量
-            data_size = len(self._caches[cache_name])
-
-            # 深拷贝，防止写入过程中被其他协程修改
-            data_snapshot = copy.deepcopy(self._caches[cache_name])
-            with open(cache_file, "w", encoding="utf-8") as f:
-                json.dump(data_snapshot, f, ensure_ascii=False, indent=2)
-            logger.debug(f"缓存文件 {cache_file} 保存成功，数据量: {data_size}")
-        except Exception as e:
-            logger.error(f"保存缓存文件 {cache_file} 失败: {e}", exc_info=True)
+            try:
+                with open(cache_file, encoding="utf-8") as f:
+                    cached_data = json.load(f)
+                if isinstance(cached_data, dict):
+                    self._caches[cache_name] = OrderedDict(cached_data)
+                    logger.info(
+                        f"[load_caches] loaded {len(cached_data)} items for {cache_name}"
+                    )
+            except json.JSONDecodeError as e:
+                logger.warning(f"Skipped invalid cache JSON {cache_file}: {e}")
+                self._caches[cache_name] = OrderedDict()
+            except OSError as e:
+                logger.error(f"Failed to read cache file {cache_file}: {e}")
+            except Exception as e:
+                logger.error(f"Failed to load cache file {cache_file}: {e}")
 
     def _ensure_cache_dir(self) -> None:
         try:
             self._cache_dir.mkdir(parents=True, exist_ok=True)
         except Exception as e:
-            logger.error(f"创建缓存目录 {self._cache_dir} 失败: {e}")
-            raise Exception(f"无法创建缓存目录: {e}") from e
+            logger.error(f"Failed to create cache directory {self._cache_dir}: {e}")
+            raise Exception(f"Unable to create cache directory: {e}") from e
 
     def _get_cache_file(self, cache_name: str) -> Path:
         return self._cache_dir / f"{cache_name}.json"
 
-    def _clean_cache(self, cache: dict[str, Any]) -> None:
-        """清理缓存，保持在最大大小以下。
+    def _clean_cache(self, cache: OrderedDict[str, Any]) -> None:
+        """按 LRU 语义裁剪缓存大小。"""
+        while len(cache) > self._CACHE_MAX_SIZE:
+            cache.popitem(last=False)
 
-        Args:
-            cache: 要清理的缓存字典
-        """
-        if len(cache) > self._CACHE_MAX_SIZE:
-            keys_to_keep = list(cache.keys())[-self._CACHE_MAX_SIZE :]
-            items_to_keep = {k: cache[k] for k in keys_to_keep}
-            cache.clear()
-            cache.update(items_to_keep)
+    def _get_sync(self, cache_name: str, key: str) -> Any | None:
+        """同步读取缓存，并将命中的条目移动到队尾。"""
+        with self._lock:
+            if cache_name in self._caches and key in self._caches[cache_name]:
+                self._caches[cache_name].move_to_end(key)
+                return self._caches[cache_name][key]
+        return None
+
+    def _set_sync(self, cache_name: str, key: str, value: Any) -> None:
+        """同步写入缓存。"""
+        with self._lock:
+            if cache_name not in self._caches:
+                return
+            self._caches[cache_name][key] = value
+            self._clean_cache(self._caches[cache_name])
+
+    def _delete_sync(self, cache_name: str, key: str) -> bool:
+        """同步删除缓存键。"""
+        with self._lock:
+            if cache_name in self._caches and key in self._caches[cache_name]:
+                del self._caches[cache_name][key]
+                return True
+        return False
+
+    def _clear_sync(self, cache_name: str | None = None) -> None:
+        """同步清空指定缓存，或清空全部缓存。"""
+        with self._lock:
+            if cache_name:
+                if cache_name in self._caches:
+                    self._caches[cache_name].clear()
+                return
+
+            for name in self._caches:
+                self._caches[name].clear()
+
+    def _get_cache_copy_sync(self, cache_name: str) -> dict[str, Any]:
+        """返回缓存副本，避免调用方直接修改内部状态。"""
+        with self._lock:
+            return dict(self._caches.get(cache_name, OrderedDict()))
+
+    def _set_cache_sync(self, cache_name: str, cache_data: dict[str, Any]) -> None:
+        """整体替换指定缓存。"""
+        with self._lock:
+            if cache_name not in self._caches:
+                return
+            self._caches[cache_name].clear()
+            self._caches[cache_name].update(cache_data)
+            self._clean_cache(self._caches[cache_name])
+
+    def _save_cache_sync(self, cache_name: str) -> None:
+        """将指定缓存写回 JSON 文件。"""
+        if cache_name not in self._caches or cache_name in self._no_persist_caches:
+            return
+
+        try:
+            self._ensure_cache_dir()
+            cache_file = self._get_cache_file(cache_name)
+            with self._lock:
+                data_snapshot = copy.deepcopy(self._caches[cache_name])
+            with open(cache_file, "w", encoding="utf-8") as f:
+                json.dump(data_snapshot, f, ensure_ascii=False, indent=2)
+            logger.debug(f"Saved cache file {cache_file}")
+        except Exception as e:
+            logger.error(f"Failed to save cache file {cache_name}: {e}", exc_info=True)
 
     async def get(self, cache_name: str, key: str) -> Any | None:
-        """从指定类型的缓存中获取数据。
-
-        Args:
-            cache_name: 缓存类型名称
-            key: 缓存键
-
-        Returns:
-            缓存的值，如果不存在则返回None
-        """
-        async with self._cache_lock:
-            if cache_name in self._caches:
-                return self._caches[cache_name].get(key)
-        return None
+        return await asyncio.to_thread(self._get_sync, cache_name, key)
 
     async def set(
         self, cache_name: str, key: str, value: Any, persist: bool = False
     ) -> None:
-        """设置指定类型缓存的数据。
-
-        Args:
-            cache_name: 缓存类型名称
-            key: 缓存键
-            value: 缓存值
-            persist: 是否立即持久化到文件
-        """
-        if cache_name not in self._caches:
-            return
-
-        async with self._cache_lock:
-            # 设置缓存值
-            self._caches[cache_name][key] = value
-
-            # 清理缓存，保持在最大大小以下
-            self._clean_cache(self._caches[cache_name])
-
-        # 如果需要立即持久化
+        await asyncio.to_thread(self._set_sync, cache_name, key, value)
         if persist:
-            await self._save_cache_async(cache_name)
+            await asyncio.to_thread(self._save_cache_sync, cache_name)
 
     async def delete(self, cache_name: str, key: str, persist: bool = False) -> None:
-        """从指定类型的缓存中删除数据。
-
-        Args:
-            cache_name: 缓存类型名称
-            key: 缓存键
-            persist: 是否立即持久化到文件
-        """
-        if cache_name in self._caches:
-            async with self._cache_lock:
-                if key in self._caches[cache_name]:
-                    del self._caches[cache_name][key]
-
-            # 如果需要立即持久化
-            if persist:
-                await self._save_cache_async(cache_name)
+        await asyncio.to_thread(self._delete_sync, cache_name, key)
+        if persist:
+            await asyncio.to_thread(self._save_cache_sync, cache_name)
 
     async def clear(self, cache_name: str | None = None, persist: bool = False) -> None:
-        """清空缓存。
-
-        Args:
-            cache_name: 缓存类型名称，如果为None则清空所有缓存
-            persist: 是否立即持久化到文件
-        """
-        async with self._cache_lock:
-            if cache_name:
-                # 清空指定类型的缓存
-                if cache_name in self._caches:
-                    self._caches[cache_name].clear()
-            else:
-                # 清空所有缓存
-                for name in self._caches.keys():
-                    self._caches[name].clear()
-
-        # 持久化在锁外执行
+        await asyncio.to_thread(self._clear_sync, cache_name)
         if persist:
             if cache_name:
-                await self._save_cache_async(cache_name)
+                await asyncio.to_thread(self._save_cache_sync, cache_name)
             else:
-                for name in self._caches.keys():
-                    await self._save_cache_async(name)
-
-    def get_cache_size(self, cache_name: str) -> int:
-        """获取指定类型缓存的大小。
-
-        Args:
-            cache_name: 缓存类型名称
-
-        Returns:
-            缓存中的键值对数量
-        """
-        if cache_name in self._caches:
-            return len(self._caches[cache_name])
-        return 0
-
-    def compute_hash(self, data: str | bytes) -> str:
-        """计算数据的哈希值，用于生成缓存键。
-
-        Args:
-            data: 要计算哈希的数据
-
-        Returns:
-            数据的SHA256哈希值
-        """
-        if isinstance(data, str):
-            data = data.encode("utf-8")
-
-        hash_obj = hashlib.sha256()
-        hash_obj.update(data)
-        return hash_obj.hexdigest()
-
-    async def persist_all(self):
-        """将所有缓存持久化到文件（跳过已迁移到数据库的缓存）。"""
-        for cache_name in self._caches.keys():
-            if cache_name in self._no_persist_caches:
-                continue
-            await self._save_cache_async(cache_name)
-
-    def get_index_cache(self) -> dict[str, Any]:
-        """获取索引缓存的深拷贝（安全修改）。
-
-        Returns:
-            dict[str, Any]: 索引缓存字典的可变副本
-        """
-        return dict(self.get_cache("index_cache"))
-
-    def get_index_cache_readonly(self) -> dict[str, Any]:
-        """获取索引缓存的只读引用（性能优化）。
-
-        注意：返回的是内部缓存的引用，调用方不应修改返回值！
-        如果需要修改，请使用 get_index_cache() 获取副本。
-
-        Returns:
-            dict[str, Any]: 索引缓存的只读引用
-        """
-        return self._caches.get("index_cache", {})
-
-    def get_cache(self, cache_name: str) -> dict[str, Any]:
-        """获取指定类型的缓存字典（副本）。
-
-        Args:
-            cache_name: 缓存类型名称
-
-        Returns:
-            dict[str, Any]: 缓存字典的副本，如果不存在则返回空字典
-        """
-        if cache_name in self._caches:
-            return dict(self._caches[cache_name])
-        return {}
+                for name in self._caches:
+                    await asyncio.to_thread(self._save_cache_sync, name)
 
     async def set_cache(
         self, cache_name: str, cache_data: dict[str, Any], persist: bool = True
     ) -> None:
-        """设置指定类型的缓存字典（完全替换模式）。
+        await asyncio.to_thread(self._set_cache_sync, cache_name, cache_data)
+        if persist:
+            await asyncio.to_thread(self._save_cache_sync, cache_name)
 
-        Args:
-            cache_name: 缓存类型名称
-            cache_data: 要设置的缓存数据（完全替换现有数据）
-            persist: 是否立即持久化到文件
-        """
-        if cache_name in self._caches:
-            async with self._cache_lock:
-                old_len = len(self._caches[cache_name])
-                new_len = len(cache_data)
-                self._caches[cache_name].clear()
-                self._caches[cache_name].update(cache_data)
-                logger.debug(f"[set_cache] {cache_name}: {old_len} -> {new_len} items")
-            if persist:
-                await self._save_cache_async(cache_name)
+    def get_cache(self, cache_name: str) -> dict[str, Any]:
+        return self._get_cache_copy_sync(cache_name)
 
-    async def update_config(self, max_cache_size: int | None = None):
-        """更新缓存配置。
+    def get_index_cache(self) -> dict[str, Any]:
+        return self._get_cache_copy_sync("index_cache")
 
-        Args:
-            max_cache_size: 缓存最大大小，如果为None则使用默认值
-        """
-        if max_cache_size is not None:
-            self._CACHE_MAX_SIZE = max_cache_size
-            # 清理所有缓存，确保不超过新的最大大小
-            for cache in self._caches.values():
-                self._clean_cache(cache)
-            # 持久化更新后的缓存
-            await self.persist_all()
+    def get_index_cache_readonly(self) -> dict[str, Any]:
+        return self._get_cache_copy_sync("index_cache")
+
+    def get_cache_size(self, cache_name: str) -> int:
+        with self._lock:
+            return len(self._caches.get(cache_name, OrderedDict()))
+
+    def compute_hash(self, data: str | bytes) -> str:
+        if isinstance(data, str):
+            data = data.encode("utf-8")
+        return hashlib.sha256(data).hexdigest()
 
     async def load_index(self) -> dict[str, Any]:
-        """加载分类索引文件。
+        """读取索引缓存。"""
+        return await asyncio.to_thread(self._get_cache_copy_sync, "index_cache")
 
-        Returns:
-            Dict[str, Any]: 键为文件路径，值为包含 category 与 tags 的字典。
-        """
-        try:
-            async with self._index_lock:
-                cache_data = self.get_index_cache()
-                index_data = dict(cache_data) if cache_data else {}
-                return index_data
-        except Exception as e:
-            logger.error(f"加载索引失败: {e}", exc_info=True)
-            return {}
-
-    async def save_index(self, idx: dict[str, Any]):
-        """保存分类索引文件。"""
-        try:
-            async with self._index_lock:
-                await self.set_cache("index_cache", idx, persist=True)
-        except Exception as e:
-            logger.error(f"保存索引文件失败: {e}", exc_info=True)
+    async def save_index(self, idx: dict[str, Any]) -> None:
+        """保存索引缓存。"""
+        await self.set_cache("index_cache", idx, persist=True)
 
     async def update_index(self, updater, persist: bool = True) -> dict[str, Any]:
-        """原子更新索引，失败时恢复快照。
-
-        Args:
-            updater: 更新函数，接收当前索引，返回修改后的索引或 None（原地修改）
-            persist: 是否持久化到文件，默认 True
-
-        Returns:
-            dict[str, Any]: 更新后的索引
-        """
-        async with self._index_lock:
-            # 保存快照用于恢复
-            snapshot = copy.deepcopy(self._caches.get("index_cache", {}))
-            try:
+        """以原子方式更新索引缓存。"""
+        def _update_sync():
+            with self._lock:
+                snapshot = copy.deepcopy(
+                    self._caches.get("index_cache", OrderedDict())
+                )
                 current = copy.deepcopy(snapshot)
                 result = updater(current)
                 if inspect.isawaitable(result):
-                    await result
-                # 只有 updater 成功执行后，才更新缓存
-                await self.set_cache("index_cache", current, persist=persist)
+                    raise ValueError("updater must be synchronous")
+
+                self._caches["index_cache"].clear()
+                self._caches["index_cache"].update(current)
+                self._clean_cache(self._caches["index_cache"])
                 return current
+
+        try:
+            updated = await asyncio.to_thread(_update_sync)
+            if persist:
+                await asyncio.to_thread(self._save_cache_sync, "index_cache")
+            return updated
+        except Exception as e:
+            logger.error(f"Failed to update index cache: {e}", exc_info=True)
+            return await self.load_index()
+
+    async def update_config(self, max_cache_size: int | None = None) -> None:
+        if max_cache_size is not None:
+            self._CACHE_MAX_SIZE = max_cache_size
+
+            def _clean_all():
+                with self._lock:
+                    for cache in self._caches.values():
+                        self._clean_cache(cache)
+
+            await asyncio.to_thread(_clean_all)
+            await self.persist_all()
+
+    async def persist_all(self) -> None:
+        for cache_name in self._caches:
+            if cache_name not in self._no_persist_caches:
+                await asyncio.to_thread(self._save_cache_sync, cache_name)
+
+    async def cleanup(self) -> None:
+        await self.persist_all()
+
+    def _iter_legacy_index_paths(self, base_dir) -> list[Path]:
+        """收集所有可能的旧版索引 JSON 路径。"""
+        base_dir_path = Path(base_dir) if base_dir else None
+        roots: list[Path] = [self._cache_dir / "index_cache.json"]
+
+        if base_dir_path:
+            roots.extend(
+                [
+                    base_dir_path / "index.json",
+                    base_dir_path / "image_index.json",
+                    base_dir_path / "cache" / "index.json",
+                    base_dir_path / "cache" / "index_cache.json",
+                ]
+            )
+
+        candidates: list[Path] = []
+        seen: set[str] = set()
+        for root in roots:
+            for path in (
+                root,
+                root.with_suffix(root.suffix + ".migrated"),
+                root.with_suffix(root.suffix + ".backup"),
+            ):
+                key = str(path)
+                if key not in seen:
+                    seen.add(key)
+                    candidates.append(path)
+        return candidates
+
+    @staticmethod
+    def _legacy_record_score(info: dict[str, Any]) -> int:
+        """为旧记录打分，优先保留 metadata 更完整的版本。"""
+        score = 0
+        if str(info.get("desc", "") or "").strip():
+            score += 3
+        if info.get("tags"):
+            score += 3
+        if info.get("scenes") or info.get("scene"):
+            score += 2
+        if str(info.get("hash", "") or "").strip():
+            score += 2
+        for key in (
+            "source",
+            "origin_target",
+            "scope_mode",
+            "qq_emoji_id",
+            "qq_emoji_package_id",
+            "origin_url",
+            "qq_key",
+            "phash",
+        ):
+            if info.get(key):
+                score += 1
+        return score
+
+    async def load_legacy_index_data(
+        self, base_dir
+    ) -> tuple[dict[str, Any], list[Path]]:
+        """加载旧版 JSON 索引，并按路径合并出信息最完整的记录。"""
+
+        def load_old_file(path: Path):
+            with open(path, encoding="utf-8") as f:
+                return json.load(f)
+
+        merged_data: dict[str, Any] = {}
+        loaded_paths: list[Path] = []
+
+        for old_path in self._iter_legacy_index_paths(base_dir):
+            if not old_path.exists():
+                continue
+
+            try:
+                old_data = await asyncio.to_thread(load_old_file, old_path)
             except Exception as e:
-                logger.error(f"更新索引失败: {e}", exc_info=True)
-                # 恢复快照
-                self._caches["index_cache"] = snapshot
-                return snapshot
+                logger.warning(f"Failed to load legacy index file {old_path}: {e}")
+                continue
+
+            if not isinstance(old_data, dict) or not old_data:
+                continue
+
+            loaded_paths.append(old_path)
+            logger.info(f"Loaded {len(old_data)} legacy records from {old_path}")
+
+            for record_path, record in old_data.items():
+                if not isinstance(record_path, str) or not isinstance(record, dict):
+                    continue
+
+                # 相同 path 存在多份旧记录时，优先保留 metadata 更丰富的版本。
+                existing = merged_data.get(record_path)
+                if existing is None or self._legacy_record_score(
+                    record
+                ) > self._legacy_record_score(existing):
+                    merged_data[record_path] = dict(record)
+
+        return merged_data, loaded_paths
 
     async def migrate_legacy_data(self, base_dir) -> dict[str, Any]:
-        """迁移旧版本数据到新版本。
-
-        Args:
-            base_dir: 插件基础目录
-
-        Returns:
-            Dict[str, Any]: 迁移后的索引数据
-        """
+        """将旧版 JSON 索引合并进当前缓存。"""
         try:
             import shutil
-            from pathlib import Path
 
-            logger.info("开始检查和迁移旧版本数据...")
-
-            base_dir_path = Path(base_dir) if base_dir else None
-            possible_paths = []
-            if base_dir_path:
-                possible_paths.extend(
-                    [
-                        base_dir_path / "index.json",
-                        base_dir_path / "image_index.json",
-                        base_dir_path / "cache" / "index.json",
-                        base_dir_path / "cache" / "index_cache.json",
-                    ]
-                )
-
-            migrated_data = {}
-
-            # 同步文件操作放入 executor
-            def load_old_file(path):
-                with open(path, encoding="utf-8") as f:
-                    return json.load(f)
-
-            for old_path in possible_paths:
-                if old_path.exists():
-                    try:
-                        logger.info(f"发现旧版本索引文件: {old_path}")
-
-                        old_data = await asyncio.to_thread(load_old_file, old_path)
-
-                        if isinstance(old_data, dict) and old_data:
-                            logger.info(
-                                f"从 {old_path} 加载了 {len(old_data)} 条旧记录"
-                            )
-                            migrated_data.update(old_data)
-
-                            # 备份旧文件（带错误检查）
-                            backup_path = old_path.with_suffix(".json.backup")
-                            try:
-                                await asyncio.to_thread(
-                                    shutil.copy2, old_path, backup_path
-                                )
-                                # 验证备份是否成功
-                                if backup_path.exists():
-                                    logger.info(f"已备份旧索引文件到: {backup_path}")
-                                else:
-                                    logger.warning(f"备份文件创建失败: {backup_path}")
-                            except Exception as backup_err:
-                                logger.warning(
-                                    f"备份旧索引文件失败: {backup_err}，继续迁移"
-                                )
-
-                    except Exception as e:
-                        logger.error(f"迁移文件 {old_path} 失败: {e}")
-                        continue
-
+            logger.info("Starting legacy index migration scan")
+            migrated_data, loaded_paths = await self.load_legacy_index_data(base_dir)
             if not migrated_data:
-                logger.info("未发现需要迁移的旧版本数据文件")
+                logger.info("No legacy index JSON files found")
                 return {}
 
-            # 智能合并逻辑
-            try:
-                current_index = self.get_index_cache()
-            except Exception as e:
-                logger.warning(f"[migrate] 获取当前索引失败，将使用空索引: {e}")
-                current_index = {}
+            for old_path in loaded_paths:
+                if old_path.suffix.endswith("backup") or old_path.suffix.endswith(
+                    "migrated"
+                ):
+                    continue
+                # 仅对原始 JSON 做一次 .backup，避免反复覆盖已有备份文件。
+                backup_path = old_path.with_suffix(old_path.suffix + ".backup")
+                try:
+                    await asyncio.to_thread(shutil.copy2, old_path, backup_path)
+                    if backup_path.exists():
+                        logger.info(f"Backed up legacy index file to {backup_path}")
+                except Exception as backup_err:
+                    logger.warning(
+                        f"Failed to back up legacy index file: {backup_err}"
+                    )
 
-            # 建立当前索引的哈希映射
+            current_index = self._get_cache_copy_sync("index_cache")
+            if not current_index:
+                # 数据库/缓存为空时，直接采用旧索引，保证新环境也能恢复。
+                logger.info(
+                    f"Cache is empty, using {len(migrated_data)} legacy records directly"
+                )
+                await self.save_index(migrated_data)
+                return migrated_data
+
             current_hash_map = {}
-            for k, v in current_index.items():
-                if isinstance(v, dict) and v.get("hash"):
-                    current_hash_map[v["hash"]] = k
+            for path, meta in current_index.items():
+                if isinstance(meta, dict) and meta.get("hash"):
+                    current_hash_map[meta["hash"]] = path
 
             merged_count = 0
-
-            # 遍历旧数据，尝试合并到当前索引
             for old_path, old_info in migrated_data.items():
                 if not isinstance(old_info, dict):
                     continue
 
                 target_path = None
-
-                # 1. 路径完全匹配
                 if old_path in current_index:
                     target_path = old_path
-                # 2. 哈希匹配（处理路径变更）
                 elif old_info.get("hash") in current_hash_map:
                     target_path = current_hash_map[old_info["hash"]]
 
-                # 如果找到了对应的目标记录，且旧数据有描述/标签，保留之
-                if target_path:
-                    target_info = current_index[target_path]
-                    updated = False
+                if not target_path:
+                    continue
 
-                    if old_info.get("desc") and not target_info.get("desc"):
-                        target_info["desc"] = old_info["desc"]
-                        updated = True
+                target_info = current_index[target_path]
+                updated = False
+                # 旧数据只用于补充缺失 metadata，不覆盖当前已有内容。
+                if old_info.get("desc") and not target_info.get("desc"):
+                    target_info["desc"] = old_info["desc"]
+                    updated = True
+                if old_info.get("tags") and not target_info.get("tags"):
+                    target_info["tags"] = old_info["tags"]
+                    updated = True
+                if old_info.get("scenes") and not target_info.get("scenes"):
+                    target_info["scenes"] = old_info["scenes"]
+                    updated = True
 
-                    if old_info.get("tags") and not target_info.get("tags"):
-                        target_info["tags"] = old_info["tags"]
-                        updated = True
+                if updated:
+                    merged_count += 1
 
-                    if updated:
-                        merged_count += 1
-
-            # 保存合并后的索引
-            logger.info(f"成功从旧数据中恢复了 {merged_count} 条记录的元数据")
+            logger.info(
+                f"Recovered metadata for {merged_count} records from legacy data"
+            )
             await self.save_index(current_index)
-
             return current_index
-
         except Exception as e:
-            logger.error(f"数据迁移失败: {e}", exc_info=True)
+            logger.error(f"Legacy data migration failed: {e}", exc_info=True)
             return {}
 
-    async def rebuild_index_from_files(
-        self, base_dir, categories_dir
-    ) -> dict[str, Any]:
-        """从现有的分类文件重建索引。
-
-        Args:
-            base_dir: 插件基础目录
-            categories_dir: 分类目录路径
-
-        Returns:
-            Dict[str, Any]: 重建的索引数据
-        """
+    async def rebuild_index_from_files(self, base_dir, categories_dir) -> dict[str, Any]:
+        """从 `categories` 目录重建最小索引。"""
         try:
-            from pathlib import Path
-
-            rebuilt_index = {}
-
-            if not categories_dir.exists():
+            rebuilt_index: dict[str, Any] = {}
+            categories_dir_path = Path(categories_dir)
+            if not categories_dir_path.exists():
                 return rebuilt_index
 
-            # 遍历所有分类目录
-            for category_dir in categories_dir.iterdir():
+            for category_dir in categories_dir_path.iterdir():
                 if not category_dir.is_dir():
                     continue
 
                 category_name = category_dir.name
-                logger.info(f"重建分类 '{category_name}' 的索引...")
+                logger.info(f"Rebuilding index for category '{category_name}'")
 
-                # 遍历分类目录中的图片文件
                 for img_file in category_dir.iterdir():
                     if not img_file.is_file():
                         continue
-
-                    # 检查是否是图片文件
-                    if img_file.suffix.lower() not in [
+                    if img_file.suffix.lower() not in {
                         ".jpg",
                         ".jpeg",
                         ".png",
                         ".gif",
                         ".webp",
-                    ]:
+                    }:
                         continue
 
-                    # 尝试找到对应的raw文件
-                    raw_dir = Path(base_dir) / "raw"
-                    raw_path = None
-                    if raw_dir.exists():
-                        potential_raw = raw_dir / img_file.name
-                        if potential_raw.exists():
-                            raw_path = str(potential_raw)
-                        else:
-                            for raw_file in raw_dir.iterdir():
-                                if (
-                                    raw_file.is_file()
-                                    and raw_file.stem == img_file.stem
-                                ):
-                                    raw_path = str(raw_file)
-                                    break
-
-                    # 如果没找到raw文件，使用categories中的文件路径
-                    if not raw_path:
-                        raw_path = str(img_file)
-
-                    # 计算文件哈希
+                    # 重建时直接使用分类目录里的实际文件路径作为索引路径。
+                    path_str = str(img_file)
                     try:
-                        file_hash = self.compute_hash(Path(img_file).read_bytes())
+                        file_hash = self.compute_hash(img_file.read_bytes())
                     except Exception as e:
-                        logger.debug(f"计算文件哈希失败: {e}")
+                        logger.debug(f"Failed to compute file hash for {img_file}: {e}")
                         file_hash = ""
 
-                    # 创建索引记录
-                    rebuilt_index[raw_path] = {
+                    rebuilt_index[path_str] = {
                         "hash": file_hash,
                         "category": category_name,
                         "created_at": int(img_file.stat().st_mtime),
-                        "migrated": True,
                     }
 
-            logger.info(f"从文件重建了 {len(rebuilt_index)} 条索引记录")
+            logger.info(f"Rebuilt {len(rebuilt_index)} index records from files")
             return rebuilt_index
-
         except Exception as e:
-            logger.error(f"从文件重建索引失败: {e}", exc_info=True)
+            logger.error(f"Failed to rebuild index from files: {e}", exc_info=True)
             return {}
-
-    async def cleanup(self):
-        """清理资源（持久化所有缓存）。"""
-        await self.persist_all()

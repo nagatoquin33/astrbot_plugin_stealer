@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.3] - 2026-04-13
+### fix
+- 修复 `/meme rebuild_index` 后标签、描述、场景丢失的问题，支持从旧 JSON 与备份恢复索引元数据
+- 补强缓存加载异常处理、WebUI 分页查询兼容性以及 `sync_index` 异常回滚逻辑
+
 ## [2.5.01] - 2026-04-11
 ### fix
 - 修复 LLM 调用工具时多段回复导致表情包重复发送的问题

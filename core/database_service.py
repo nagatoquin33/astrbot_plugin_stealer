@@ -324,20 +324,26 @@ class DatabaseService:
                 logger.error(f"[DB] 更新表情包失败: {e}")
                 return False
 
+    # 允许更新的字段白名单（防止SQL注入）
+    _VALID_UPDATE_FIELDS = frozenset({
+        "category", "desc", "use_count", "last_used_at",
+        "hash", "phash", "source", "origin_target", "scope_mode"
+    })
+
     def _update_emoji_sync(self, path: str, updates: dict[str, Any]) -> None:
         """同步更新表情包。"""
         with self._get_connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
 
             try:
-                # 更新主表字段
-                main_fields = {
-                    "category", "desc", "use_count", "last_used_at",
-                    "hash", "phash", "source", "origin_target", "scope_mode"
+                # 白名单过滤字段名（防止SQL注入）
+                main_updates = {
+                    k: v for k, v in updates.items()
+                    if k in self._VALID_UPDATE_FIELDS
                 }
-                main_updates = {k: v for k, v in updates.items() if k in main_fields}
 
                 if main_updates:
+                    # 使用白名单验证的字段名构建SQL（安全）
                     clauses = ", ".join(f"{k} = ?" for k in main_updates.keys())
                     values = list(main_updates.values()) + [path]
                     conn.execute(
@@ -690,23 +696,44 @@ class DatabaseService:
         result: dict[str, Any] = {}
 
         with self._get_connection() as conn:
+            # 单次查询获取所有表情包
             rows = conn.execute("SELECT * FROM emoji").fetchall()
+            if not rows:
+                return result
+
+            paths = [r["path"] for r in rows]
+
+            # 批量获取所有标签（解决N+1问题）
+            tags_sql = """
+                SELECT path, tag FROM emoji_tag
+                WHERE path IN ({})
+                ORDER BY rowid
+            """.format(",".join("?" * len(paths)))
+            tags_rows = conn.execute(tags_sql, paths).fetchall()
+
+            # 批量获取所有场景（解决N+1问题）
+            scenes_sql = """
+                SELECT path, scene FROM emoji_scene
+                WHERE path IN ({})
+                ORDER BY rowid
+            """.format(",".join("?" * len(paths)))
+            scenes_rows = conn.execute(scenes_sql, paths).fetchall()
+
+            # 构建映射
+            tags_map: dict[str, list[str]] = {p: [] for p in paths}
+            for r in tags_rows:
+                tags_map[r["path"]].append(r["tag"])
+
+            scenes_map: dict[str, list[str]] = {p: [] for p in paths}
+            for r in scenes_rows:
+                scenes_map[r["path"]].append(r["scene"])
+
+            # 构建结果
             for row in rows:
                 path = row["path"]
                 entry = dict(row)
-
-                # 获取标签（按插入顺序）
-                tags = conn.execute(
-                    "SELECT tag FROM emoji_tag WHERE path = ? ORDER BY rowid", (path,)
-                ).fetchall()
-                entry["tags"] = [r["tag"] for r in tags]
-
-                # 获取场景（按插入顺序）
-                scenes = conn.execute(
-                    "SELECT scene FROM emoji_scene WHERE path = ? ORDER BY rowid", (path,)
-                ).fetchall()
-                entry["scenes"] = [r["scene"] for r in scenes]
-
+                entry["tags"] = tags_map.get(path, [])
+                entry["scenes"] = scenes_map.get(path, [])
                 result[path] = entry
 
         return result
@@ -725,6 +752,164 @@ class DatabaseService:
 
         await self.clear_all()
         await self.insert_batch(emojis)
+
+    async def sync_index(self, idx: dict[str, Any]) -> None:
+        """Synchronize the database to match a full index snapshot."""
+        async with self._write_lock:
+            await asyncio.to_thread(self._sync_index_sync, idx)
+            self._cache_valid = False
+
+    def _sync_index_sync(self, idx: dict[str, Any]) -> None:
+        desired_index = {
+            path: meta
+            for path, meta in idx.items()
+            if isinstance(path, str) and isinstance(meta, dict)
+        }
+
+        with self._get_connection() as conn:
+            transaction_started = False
+
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                transaction_started = True
+                current_rows = conn.execute("SELECT * FROM emoji").fetchall()
+                current_index: dict[str, dict[str, Any]] = {
+                    row["path"]: dict(row) for row in current_rows
+                }
+                current_paths = list(current_index.keys())
+
+                if current_paths:
+                    placeholders = ",".join("?" * len(current_paths))
+                    tags_rows = conn.execute(
+                        f"""
+                            SELECT path, tag FROM emoji_tag
+                            WHERE path IN ({placeholders})
+                            ORDER BY rowid
+                        """,
+                        current_paths,
+                    ).fetchall()
+                    scenes_rows = conn.execute(
+                        f"""
+                            SELECT path, scene FROM emoji_scene
+                            WHERE path IN ({placeholders})
+                            ORDER BY rowid
+                        """,
+                        current_paths,
+                    ).fetchall()
+
+                    for path in current_paths:
+                        current_index[path]["tags"] = []
+                        current_index[path]["scenes"] = []
+
+                    for row in tags_rows:
+                        current_index[row["path"]]["tags"].append(row["tag"])
+                    for row in scenes_rows:
+                        current_index[row["path"]]["scenes"].append(row["scene"])
+
+                desired_paths = set(desired_index.keys())
+                existing_paths = set(current_index.keys())
+
+                for stale_path in existing_paths - desired_paths:
+                    conn.execute("DELETE FROM emoji WHERE path = ?", (stale_path,))
+
+                for path in desired_paths - existing_paths:
+                    meta = desired_index[path]
+                    now = int(time.time())
+                    conn.execute(
+                        """
+                            INSERT INTO emoji
+                            (path, hash, phash, category, desc, source, origin_target,
+                             scope_mode, created_at, use_count, last_used_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            path,
+                            meta.get("hash", ""),
+                            meta.get("phash"),
+                            meta.get("category", "unknown"),
+                            meta.get("desc"),
+                            meta.get("source"),
+                            meta.get("origin_target"),
+                            meta.get("scope_mode", "public"),
+                            meta.get("created_at", now),
+                            meta.get("use_count", 0),
+                            meta.get("last_used_at", 0),
+                        ),
+                    )
+
+                    for tag in meta.get("tags") or []:
+                        if tag:
+                            conn.execute(
+                                "INSERT INTO emoji_tag (path, tag) VALUES (?, ?)",
+                                (path, tag),
+                            )
+
+                    for scene in meta.get("scenes") or []:
+                        if scene:
+                            conn.execute(
+                                "INSERT INTO emoji_scene (path, scene) VALUES (?, ?)",
+                                (path, scene),
+                            )
+
+                scalar_fields = (
+                    "hash",
+                    "phash",
+                    "category",
+                    "desc",
+                    "source",
+                    "origin_target",
+                    "scope_mode",
+                    "created_at",
+                    "use_count",
+                    "last_used_at",
+                )
+
+                for path in desired_paths & existing_paths:
+                    meta = desired_index[path]
+                    current = current_index[path]
+
+                    changed_fields: dict[str, Any] = {}
+                    for field in scalar_fields:
+                        if field not in meta:
+                            continue
+                        if meta.get(field) != current.get(field):
+                            changed_fields[field] = meta.get(field)
+
+                    if changed_fields:
+                        clauses = ", ".join(f"{field} = ?" for field in changed_fields)
+                        values = list(changed_fields.values()) + [path]
+                        conn.execute(
+                            f"UPDATE emoji SET {clauses} WHERE path = ?",
+                            values,
+                        )
+
+                    if "tags" in meta:
+                        desired_tags = [tag for tag in (meta.get("tags") or []) if tag]
+                        if desired_tags != (current.get("tags") or []):
+                            conn.execute("DELETE FROM emoji_tag WHERE path = ?", (path,))
+                            for tag in desired_tags:
+                                conn.execute(
+                                    "INSERT INTO emoji_tag (path, tag) VALUES (?, ?)",
+                                    (path, tag),
+                                )
+
+                    if "scenes" in meta:
+                        desired_scenes = [
+                            scene for scene in (meta.get("scenes") or []) if scene
+                        ]
+                        if desired_scenes != (current.get("scenes") or []):
+                            conn.execute("DELETE FROM emoji_scene WHERE path = ?", (path,))
+                            for scene in desired_scenes:
+                                conn.execute(
+                                    "INSERT INTO emoji_scene (path, scene) VALUES (?, ?)",
+                                    (path, scene),
+                                )
+
+                conn.execute("COMMIT")
+            except Exception:
+                if transaction_started and conn.in_transaction:
+                    conn.execute("ROLLBACK")
+                raise
 
     async def clear_all(self) -> None:
         """清空所有数据。"""
@@ -806,8 +991,162 @@ class DatabaseService:
                 "db_size_bytes": self._db_path.stat().st_size if self._db_path.exists() else 0,
             }
 
+    def get_corpus_signature(self) -> str:
+        """获取语料库签名，用于 BM25 索引变更检测。"""
+        with self._get_connection() as conn:
+            total = conn.execute("SELECT COUNT(*) as cnt FROM emoji").fetchone()["cnt"]
+            max_created = conn.execute(
+                "SELECT MAX(created_at) as max_created FROM emoji"
+            ).fetchone()
+            max_created_val = max_created["max_created"] if max_created else 0
+            max_used = conn.execute(
+                "SELECT MAX(last_used_at) as max_used FROM emoji"
+            ).fetchone()
+            max_used_val = max_used["max_used"] if max_used else 0
+            tags_count = conn.execute(
+                "SELECT COUNT(*) as cnt FROM emoji_tag"
+            ).fetchone()["cnt"]
+            scenes_count = conn.execute(
+                "SELECT COUNT(*) as cnt FROM emoji_scene"
+            ).fetchone()["cnt"]
+            return f"{total}:{max_created_val}:{max_used_val}:{tags_count}:{scenes_count}"
+
     def vacuum(self) -> None:
         """执行 VACUUM 优化数据库空间。"""
         with self._get_connection() as conn:
             conn.execute("VACUUM")
             logger.info("[DB] VACUUM 完成")
+
+    # ── 分页查询 ──
+
+    # 排序字段白名单（防止SQL注入）
+    _VALID_ORDER_FIELDS = {
+        "newest": "e.created_at DESC",
+        "oldest": "e.created_at ASC",
+        "most_used": "e.use_count DESC, e.last_used_at DESC",
+    }
+
+    def get_emojis_paginated(
+        self,
+        page: int = 1,
+        page_size: int = 50,
+        category: str | None = None,
+        sort_order: str = "newest",
+        search_query: str | None = None,
+        scope_target: str | None = None,
+    ) -> tuple[list[dict[str, Any]], int, dict[str, int]]:
+        """分页获取表情包列表，支持过滤、搜索和排序。
+
+        Args:
+            page: 页码（从1开始）
+            page_size: 每页数量
+            category: 分类过滤（可选）
+            sort_order: 排序方式 - "newest"(最新), "oldest"(最旧), "most_used"(最常用)
+            search_query: 搜索关键词（匹配标签、描述、场景）
+            scope_target: scope 过滤目标（可选）
+
+        Returns:
+            tuple: (图片列表, 总数, 分类统计)
+        """
+        # 白名单验证排序字段（防止SQL注入）
+        order_sql = self._VALID_ORDER_FIELDS.get(sort_order, "e.created_at DESC")
+
+        with self._get_connection() as conn:
+            # 构建基础查询条件
+            where_clauses: list[str] = []
+            params: list[Any] = []
+
+            # 分类过滤
+            if category:
+                where_clauses.append("e.category = ?")
+                params.append(category)
+
+            # scope 过滤
+            if scope_target:
+                where_clauses.append(
+                    "(e.scope_mode = 'public' OR e.origin_target = ?)"
+                )
+                params.append(scope_target)
+
+            # 搜索过滤（标签、描述、场景）
+            if search_query:
+                search_pattern = f"%{search_query}%"
+                where_clauses.append(
+                    "(e.desc LIKE ? OR EXISTS("
+                    "SELECT 1 FROM emoji_tag t WHERE t.path = e.path AND t.tag LIKE ?"
+                    ") OR EXISTS("
+                    "SELECT 1 FROM emoji_scene s WHERE s.path = e.path AND s.scene LIKE ?"
+                    "))"
+                )
+                params.extend([search_pattern, search_pattern, search_pattern])
+
+            where_sql = ""
+            if where_clauses:
+                where_sql = "WHERE " + " AND ".join(where_clauses)
+
+            # 计算总数
+            count_sql = f"SELECT COUNT(*) as cnt FROM emoji e {where_sql}"
+            total = conn.execute(count_sql, params).fetchone()["cnt"]
+
+            # 分类统计（用于侧边栏显示）
+            cat_count_sql = f"""
+                SELECT e.category, COUNT(*) as cnt
+                FROM emoji e {where_sql}
+                GROUP BY e.category
+            """
+            cat_rows = conn.execute(cat_count_sql, params).fetchall()
+            category_counts = {r["category"]: r["cnt"] for r in cat_rows}
+
+            # 分页查询
+            offset = (page - 1) * page_size
+            limit = page_size
+
+            data_sql = f"""
+                SELECT e.path, e.hash, e.category, e.desc, e.scope_mode,
+                       e.origin_target, e.created_at, e.use_count
+                FROM emoji e {where_sql}
+                ORDER BY {order_sql}
+                LIMIT ? OFFSET ?
+            """
+            rows = conn.execute(data_sql, params + [limit, offset]).fetchall()
+
+            if not rows:
+                return [], total, category_counts
+
+            # 批量获取标签和场景（解决N+1问题）
+            paths = [r["path"] for r in rows]
+
+            # 单次查询获取所有标签
+            tags_sql = """
+                SELECT path, tag FROM emoji_tag
+                WHERE path IN ({})
+                ORDER BY rowid
+            """.format(",".join("?" * len(paths)))
+            tags_rows = conn.execute(tags_sql, paths).fetchall()
+
+            # 单次查询获取所有场景
+            scenes_sql = """
+                SELECT path, scene FROM emoji_scene
+                WHERE path IN ({})
+                ORDER BY rowid
+            """.format(",".join("?" * len(paths)))
+            scenes_rows = conn.execute(scenes_sql, paths).fetchall()
+
+            # 构建标签和场景的映射
+            tags_map: dict[str, list[str]] = {p: [] for p in paths}
+            for r in tags_rows:
+                tags_map[r["path"]].append(r["tag"])
+
+            scenes_map: dict[str, list[str]] = {p: [] for p in paths}
+            for r in scenes_rows:
+                scenes_map[r["path"]].append(r["scene"])
+
+            # 构建结果列表
+            images: list[dict[str, Any]] = []
+            for row in rows:
+                item = dict(row)
+                item["tags"] = tags_map.get(row["path"], [])
+                item["scenes"] = scenes_map.get(row["path"], [])
+                images.append(item)
+
+            return images, total, category_counts

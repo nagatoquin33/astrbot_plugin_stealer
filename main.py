@@ -855,14 +855,10 @@ class Main(Star):
             return {}
 
     async def _rebuild_index_from_files(self) -> dict[str, Any]:
-        """重建索引，委托给 CacheService 后保存到数据库。"""
-        rebuilt = await self.cache_service.rebuild_index_from_files(
+        """从文件重建基础索引（不保存到数据库，等待合并后保存）。"""
+        return await self.cache_service.rebuild_index_from_files(
             self.base_dir, self.categories_dir
         )
-        if rebuilt:
-            await self.db_service.save_index(rebuilt)
-            await self.cache_service.set_cache("index_cache", rebuilt, persist=False)
-        return rebuilt
 
     async def _save_index(self, idx: dict[str, Any]):
         """保存索引到数据库（智能增量更新）。
@@ -871,8 +867,9 @@ class Main(Star):
         - 全量替换：删除场景或首次初始化
         - 增量插入：新增场景
         """
-        db_count = self.db_service.count_total()
-        idx_count = len(idx)
+        await self.db_service.sync_index(idx)
+        await self.cache_service.set_cache("index_cache", idx, persist=False)
+        return
 
         # 如果数据库为空或有删除操作（条目数减少），使用全量替换
         if db_count == 0 or idx_count < db_count:
@@ -1936,16 +1933,8 @@ class Main(Star):
                     if not raw_scenes:
                         raw_scenes = meta.get("scene", None) if isinstance(meta, dict) else None
 
-                    scenes_items: list[str] = []
-                    if isinstance(raw_scenes, str):
-                        scenes_items = [
-                            s.strip()
-                            for s in re.split(r"[，,、;；]", raw_scenes)
-                            if s.strip()
-                        ]
-                    elif isinstance(raw_scenes, list):
-                        scenes_items = [str(s).strip() for s in raw_scenes if str(s).strip()]
-
+                    # 使用 WebServer 的静态方法分割场景
+                    scenes_items = WebServer._split_scene_terms(raw_scenes)
                     scenes_str = ", ".join(scenes_items)
                     source = str(meta.get("source", "") or "") if isinstance(meta, dict) else ""
 
