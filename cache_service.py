@@ -40,6 +40,7 @@ class CacheService:
             "blacklist_cache": OrderedDict(),
         }
         self._no_persist_caches: set[str] = {"index_cache"}
+        self._unbounded_caches: set[str] = {"index_cache"}
         self._lock = threading.RLock()
 
         self._load_caches()
@@ -77,8 +78,10 @@ class CacheService:
     def _get_cache_file(self, cache_name: str) -> Path:
         return self._cache_dir / f"{cache_name}.json"
 
-    def _clean_cache(self, cache: OrderedDict[str, Any]) -> None:
+    def _clean_cache(self, cache_name: str, cache: OrderedDict[str, Any]) -> None:
         """按 LRU 语义裁剪缓存大小。"""
+        if cache_name in self._unbounded_caches:
+            return
         while len(cache) > self._CACHE_MAX_SIZE:
             cache.popitem(last=False)
 
@@ -96,7 +99,7 @@ class CacheService:
             if cache_name not in self._caches:
                 return
             self._caches[cache_name][key] = value
-            self._clean_cache(self._caches[cache_name])
+            self._clean_cache(cache_name, self._caches[cache_name])
 
     def _delete_sync(self, cache_name: str, key: str) -> bool:
         """同步删除缓存键。"""
@@ -129,7 +132,7 @@ class CacheService:
                 return
             self._caches[cache_name].clear()
             self._caches[cache_name].update(cache_data)
-            self._clean_cache(self._caches[cache_name])
+            self._clean_cache(cache_name, self._caches[cache_name])
 
     def _save_cache_sync(self, cache_name: str) -> None:
         """将指定缓存写回 JSON 文件。"""
@@ -223,7 +226,7 @@ class CacheService:
 
                 self._caches["index_cache"].clear()
                 self._caches["index_cache"].update(current)
-                self._clean_cache(self._caches["index_cache"])
+                self._clean_cache("index_cache", self._caches["index_cache"])
                 return current
 
         try:
@@ -241,8 +244,8 @@ class CacheService:
 
             def _clean_all():
                 with self._lock:
-                    for cache in self._caches.values():
-                        self._clean_cache(cache)
+                    for cache_name, cache in self._caches.items():
+                        self._clean_cache(cache_name, cache)
 
             await asyncio.to_thread(_clean_all)
             await self.persist_all()

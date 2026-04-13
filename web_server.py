@@ -78,18 +78,46 @@ class WebServer:
         """拆分 categories 请求体，兼容 list[str] 与 list[dict]。"""
         category_keys: list[str] = []
         category_info: dict[str, dict[str, str]] = {}
+        seen: set[str] = set()
         for item in new_categories_data:
             if isinstance(item, dict) and item.get("key"):
-                key = item["key"]
+                key = str(item["key"]).strip()
+                if not key or key in seen:
+                    continue
+                seen.add(key)
                 category_keys.append(key)
-                if item.get("name") or item.get("desc"):
+                name = str(item.get("name", "") or "").strip()
+                desc = str(item.get("desc", "") or "").strip()
+                if name or desc:
                     category_info[key] = {
-                        "name": item.get("name", ""),
-                        "desc": item.get("desc", ""),
+                        "name": name,
+                        "desc": desc,
                     }
             elif isinstance(item, str):
-                category_keys.append(item)
+                key = item.strip()
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                category_keys.append(key)
         return category_keys, category_info
+
+    def _get_configured_category_keys(self) -> list[str]:
+        plugin_config = getattr(self.plugin, "plugin_config", None)
+        raw_categories = []
+        if plugin_config is not None:
+            raw_categories = list(getattr(plugin_config, "categories", []) or [])
+        elif hasattr(self.plugin, "categories"):
+            raw_categories = list(getattr(self.plugin, "categories", []) or [])
+
+        category_keys: list[str] = []
+        seen: set[str] = set()
+        for item in raw_categories:
+            key = str(item or "").strip()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            category_keys.append(key)
+        return category_keys
 
     def _apply_category_keys(self, category_keys: list[str]) -> None:
         """统一写回分类列表，兼容不同插件实现。"""
@@ -1345,6 +1373,14 @@ class WebServer:
             if not category and not auto_analyze:
                 return self._err("请选择情绪分类或启用自动识别", 400)
 
+            category = str(category or "").strip() or None
+            fallback_category = category
+            if not fallback_category:
+                configured_categories = self._get_configured_category_keys()
+                if not configured_categories:
+                    return self._err("未配置任何情绪分类，请先创建分类或手动选择有效分类", 400)
+                fallback_category = configured_categories[0]
+
             task_id = str(uuid.uuid4())
 
             self._batch_upload_tasks[task_id] = {
@@ -1357,7 +1393,9 @@ class WebServer:
             }
 
             asyncio.create_task(
-                self._process_batch_upload(task_id, files_data, category, auto_analyze)
+                self._process_batch_upload(
+                    task_id, files_data, fallback_category, auto_analyze
+                )
             )
 
             return self._ok({"task_id": task_id, "total": len(files_data)})
@@ -1382,6 +1420,7 @@ class WebServer:
                     desc = ""
                     scenes = []
                     final_category = category
+                    configured_categories = self._get_configured_category_keys()
 
                     if auto_analyze:
                         try:
@@ -1403,7 +1442,15 @@ class WebServer:
                                 categories=list(self.plugin.plugin_config.categories or []),
                                 content_filtration=False,
                             )
-                            if result_category and result_category != self.plugin.image_processor_service.CATEGORY_FILTERED:
+                            if (
+                                result_category
+                                and result_category
+                                != self.plugin.image_processor_service.CATEGORY_FILTERED
+                                and (
+                                    not configured_categories
+                                    or result_category in configured_categories
+                                )
+                            ):
                                 final_category = result_category
                                 tags = result_tags or []
                                 desc = result_desc or ""
@@ -1413,6 +1460,7 @@ class WebServer:
                             logger.warning(f"自动分析失败: {e}")
                             raise Exception(f"自动分析失败: {e}")
 
+                    final_category = str(final_category or "").strip() or "unknown"
                     category_dir = self.plugin.plugin_config.ensure_category_dir(final_category)
                     file_path = category_dir / unique_filename
                     await asyncio.to_thread(
@@ -1486,8 +1534,9 @@ class WebServer:
             "status": task_info["status"],
             "total": task_info["total"],
             "processed": task_info["processed"],
-            "success": task_info["success"],
-            "failed": task_info["failed"],
+            "success_count": task_info["success"],
+            "failed_count": task_info["failed"],
+            "error": task_info.get("error", ""),
             "results": task_info.get("results", []),
         })
 
@@ -1515,9 +1564,19 @@ class WebServer:
             category_keys, category_info = self._split_categories_payload(
                 new_categories_data
             )
+            if not category_keys:
+                return self._err("分类列表无效", 400)
+
             self._apply_category_keys(category_keys)
 
+            current_info = dict(
+                getattr(self.plugin.plugin_config, "category_info", {}) or {}
+            )
+            self.plugin.plugin_config.category_info = {
+                key: current_info.get(key, {}) for key in category_keys
+            }
             self.plugin.plugin_config.category_info.update(category_info)
+            self.plugin.plugin_config.ensure_category_dirs(category_keys)
             self.plugin.plugin_config.save_category_info()
 
             return self._ok(categories=category_keys)

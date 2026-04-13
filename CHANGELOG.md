@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.5] - 2026-04-14
+### fix
+- 修复 WebUI 分类统计口径："全部"分类计数改为使用全量统计值，避免与当前筛选结果混淆
+- 修复分页边界问题：当前页超出最后一页时自动回退，避免删除或筛选后出现空白页
+- 修复批量导入任务状态字段不一致问题：前后端统一为 `success_count` / `failed_count`，并返回失败原因
+- 修复分类管理写入异常：新增分类列表去重与空值过滤，禁止写入空分类
+
+### improved
+- 批量上传默认分类体验优化：未手动选择时自动回退到当前选中分类或配置首项，减少误操作
+- 自动分析分类结果增加白名单校验，仅接受已配置分类，异常时回退兜底分类
+- 分类更新流程增强：同步维护 `category_info` 键集并确保分类目录存在
+- 缓存裁剪策略优化：允许 `index_cache` 作为无上限缓存，避免索引数据被 LRU 误裁剪
+
 ## [2.5.4] - 2026-04-14
 ### improved
 - `CacheService.update_index` 支持异步 updater，新增 `IndexCache` / `IndexUpdater` 类型别名

@@ -1055,6 +1055,8 @@ class DatabaseService:
             # 构建基础查询条件
             where_clauses: list[str] = []
             params: list[Any] = []
+            category_count_where_clauses: list[str] = []
+            category_count_params: list[Any] = []
 
             # 分类过滤
             if category:
@@ -1067,22 +1069,37 @@ class DatabaseService:
                     "(e.scope_mode = 'public' OR e.origin_target = ?)"
                 )
                 params.append(scope_target)
+                category_count_where_clauses.append(
+                    "(e.scope_mode = 'public' OR e.origin_target = ?)"
+                )
+                category_count_params.append(scope_target)
 
             # 搜索过滤（标签、描述、场景）
             if search_query:
                 search_pattern = f"%{search_query}%"
-                where_clauses.append(
+                search_clause = (
                     "(e.desc LIKE ? OR EXISTS("
                     "SELECT 1 FROM emoji_tag t WHERE t.path = e.path AND t.tag LIKE ?"
                     ") OR EXISTS("
                     "SELECT 1 FROM emoji_scene s WHERE s.path = e.path AND s.scene LIKE ?"
                     "))"
                 )
+                where_clauses.append(search_clause)
                 params.extend([search_pattern, search_pattern, search_pattern])
+                category_count_where_clauses.append(search_clause)
+                category_count_params.extend(
+                    [search_pattern, search_pattern, search_pattern]
+                )
 
             where_sql = ""
             if where_clauses:
                 where_sql = "WHERE " + " AND ".join(where_clauses)
+
+            category_count_where_sql = ""
+            if category_count_where_clauses:
+                category_count_where_sql = (
+                    "WHERE " + " AND ".join(category_count_where_clauses)
+                )
 
             # 计算总数
             count_sql = f"SELECT COUNT(*) as cnt FROM emoji e {where_sql}"
@@ -1091,10 +1108,10 @@ class DatabaseService:
             # 分类统计（用于侧边栏显示）
             cat_count_sql = f"""
                 SELECT e.category, COUNT(*) as cnt
-                FROM emoji e {where_sql}
+                FROM emoji e {category_count_where_sql}
                 GROUP BY e.category
             """
-            cat_rows = conn.execute(cat_count_sql, params).fetchall()
+            cat_rows = conn.execute(cat_count_sql, category_count_params).fetchall()
             category_counts = {r["category"]: r["cnt"] for r in cat_rows}
 
             # 分页查询

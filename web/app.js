@@ -146,7 +146,6 @@ createApp({
 
         const fetchImages = async (page = 1) => {
             loading.value = true;
-            currentPage.value = page;
             try {
                 const params = new URLSearchParams({
                     page: page.toString(),
@@ -157,9 +156,24 @@ createApp({
                 });
                 const res = await apiFetch(`api/images?${params}`);
                 const data = await res.json();
-                images.value = data.images || [];
-                total.value = data.total || 0;
+                const nextImages = data.images || [];
+                const nextTotal = Number(data.total || 0);
+                const lastPage = Math.max(1, Math.ceil(nextTotal / pageSize.value));
+
+                if (page > lastPage && nextTotal > 0) {
+                    return await fetchImages(lastPage);
+                }
+
+                currentPage.value = page;
+                images.value = nextImages;
+                total.value = nextTotal;
                 categories.value = data.categories || [];
+                if (selectedImages.value.size > 0) {
+                    const visibleHashes = new Set(nextImages.map((img) => img.hash));
+                    selectedImages.value = new Set(
+                        Array.from(selectedImages.value).filter((hash) => visibleHashes.has(hash))
+                    );
+                }
             } catch (e) {
                 console.error(e);
             } finally {
@@ -513,7 +527,12 @@ createApp({
             uploadFile.value = null;
             uploadPreviewUrl.value = null;
             uploadError.value = null;
-            Object.assign(uploadForm, { emotion: '', tags: '', scene: '', desc: '' });
+            Object.assign(uploadForm, {
+                emotion: selectedCategory.value || '',
+                tags: '',
+                scene: '',
+                desc: '',
+            });
             analysisScenes.value = [];
             fetchEmotions();
         };
@@ -531,7 +550,10 @@ createApp({
             batchUploadError.value = null;
             batchTaskId.value = null;
             batchTaskStatus.value = null;
-            Object.assign(batchUploadForm, { emotion: '', autoAnalyze: false });
+            Object.assign(batchUploadForm, {
+                emotion: selectedCategory.value || '',
+                autoAnalyze: false,
+            });
             fetchEmotions();
         };
 
@@ -609,14 +631,16 @@ createApp({
                     if (data.success) {
                         batchTaskStatus.value = data.status;
                         batchTaskProcessed.value = data.processed;
-                        batchTaskSuccess.value = data.success;
-                        batchTaskFailed.value = data.failed;
+                        batchTaskSuccess.value = Number(data.success_count || 0);
+                        batchTaskFailed.value = Number(data.failed_count || 0);
                         if (data.status === 'completed' || data.status === 'failed') {
                             clearInterval(batchPollInterval);
                             batchPollInterval = null;
                             if (data.status === 'completed') {
                                 fetchImages(1);
                                 fetchStats();
+                            } else {
+                                batchUploadError.value = data.error || '批量导入失败';
                             }
                         }
                     }
@@ -823,10 +847,15 @@ createApp({
         };
 
         const addEmotion = async () => {
-            if (!newEmotion.key) return;
+            const key = String(newEmotion.key || '').trim();
+            if (!key) return;
             addingEmotion.value = true;
             try {
-                const newCat = { ...newEmotion };
+                const newCat = {
+                    key,
+                    name: String(newEmotion.name || '').trim(),
+                    desc: String(newEmotion.desc || '').trim(),
+                };
                 const currentList = [...availableEmotions.value];
                 const existingIdx = currentList.findIndex((c) => c.key === newCat.key);
                 if (existingIdx >= 0) {
@@ -847,7 +876,8 @@ createApp({
                 const data = await res.json();
 
                 if (data.success) {
-                    fetchEmotions();
+                    await fetchEmotions();
+                    await fetchImages(1);
                     newEmotion.key = '';
                     newEmotion.name = '';
                     newEmotion.desc = '';
