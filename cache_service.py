@@ -6,9 +6,12 @@ import json
 import threading
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from astrbot.api import logger
+
+IndexCache = dict[str, Any]
+IndexUpdater = Callable[[IndexCache], Any | Awaitable[Any]]
 
 
 class CacheService:
@@ -197,21 +200,26 @@ class CacheService:
         """读取索引缓存。"""
         return await asyncio.to_thread(self._get_cache_copy_sync, "index_cache")
 
-    async def save_index(self, idx: dict[str, Any]) -> None:
+    async def save_index(self, idx: IndexCache) -> None:
         """保存索引缓存。"""
         await self.set_cache("index_cache", idx, persist=True)
 
-    async def update_index(self, updater, persist: bool = True) -> dict[str, Any]:
-        """以原子方式更新索引缓存。"""
-        def _update_sync():
+    async def update_index(
+        self, updater: IndexUpdater, persist: bool = True
+    ) -> IndexCache:
+        """以原子方式更新索引缓存。支持同步和异步 updater。"""
+
+        async def _update_async() -> IndexCache:
             with self._lock:
                 snapshot = copy.deepcopy(
                     self._caches.get("index_cache", OrderedDict())
                 )
+                # updater 修改 current，失败时 snapshot 保持不变
                 current = copy.deepcopy(snapshot)
                 result = updater(current)
+                # 支持异步 updater
                 if inspect.isawaitable(result):
-                    raise ValueError("updater must be synchronous")
+                    await result
 
                 self._caches["index_cache"].clear()
                 self._caches["index_cache"].update(current)
@@ -219,7 +227,7 @@ class CacheService:
                 return current
 
         try:
-            updated = await asyncio.to_thread(_update_sync)
+            updated = await _update_async()
             if persist:
                 await asyncio.to_thread(self._save_cache_sync, "index_cache")
             return updated

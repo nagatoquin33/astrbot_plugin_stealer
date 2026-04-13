@@ -221,23 +221,50 @@ class WebServer:
             scenes.append(text)
         return scenes
 
-    async def _collect_removed_paths_by_hashes(self, hashes: set[str]) -> list[str]:
+    async def _collect_removed_paths_by_hashes(
+        self, hashes: set[str], *, raise_on_sync_error: bool = False
+    ) -> list[str]:
         removed_paths: list[str] = []
         await self.plugin.cache_service.update_index(
             lambda current: self._remove_by_hashes(current, hashes, removed_paths)
         )
         # 同步到数据库
-        await self._sync_index_to_db()
+        await self._sync_index_to_db(raise_on_error=raise_on_sync_error)
         return removed_paths
 
-    async def _sync_index_to_db(self) -> None:
+    async def _sync_index_to_db(self, *, raise_on_error: bool = False) -> bool:
         """将 cache_service 的索引同步到数据库。"""
+        db_service = self._get_db_service()
+        if not db_service:
+            return True
+
         try:
             idx = self.plugin.cache_service.get_index_cache_readonly()
-            if idx:
-                await self.plugin.db_service.save_index(idx)
+            sync_index = getattr(db_service, "sync_index", None)
+            if callable(sync_index):
+                await sync_index(idx)
+                return True
+
+            save_index = getattr(db_service, "save_index", None)
+            if callable(save_index):
+                await save_index(idx)
+                return True
+
+            raise RuntimeError("Database service does not support index synchronization")
         except Exception as e:
-            logger.error(f"同步索引到数据库失败: {e}")
+            logger.error(f"同步索引到数据库失败: {e}", exc_info=True)
+            if raise_on_error:
+                try:
+                    rollback_snapshot = db_service.get_index_cache_readonly()
+                    await self.plugin.cache_service.set_cache(
+                        "index_cache", rollback_snapshot, persist=False
+                    )
+                except Exception as rollback_error:
+                    logger.error(
+                        f"回滚内存索引失败: {rollback_error}", exc_info=True
+                    )
+                raise
+            return False
 
     def _invalidate_hashes(self, hashes: list[str]) -> None:
         if not hashes or not hasattr(self.plugin, "image_processor_service"):
@@ -265,7 +292,7 @@ class WebServer:
 
         await self.plugin.cache_service.update_index(updater)
         # 同步到数据库
-        await self._sync_index_to_db()
+        await self._sync_index_to_db(raise_on_error=True)
         return moved_count, moved_hashes
 
     async def _error_middleware(self, app: web.Application, handler):
@@ -876,7 +903,9 @@ class WebServer:
         image_hash = request.match_info["hash"]
         add_to_blacklist = request.query.get("blacklist", "false").lower() == "true"
 
-        removed_paths = await self._collect_removed_paths_by_hashes({image_hash})
+        removed_paths = await self._collect_removed_paths_by_hashes(
+            {image_hash}, raise_on_sync_error=True
+        )
         target_path = removed_paths[0] if removed_paths else None
 
         if target_path:
@@ -1021,7 +1050,7 @@ class WebServer:
 
             await self.plugin.cache_service.update_index(updater)
             # 同步到数据库
-            await self._sync_index_to_db()
+            await self._sync_index_to_db(raise_on_error=True)
             if not updated["ok"]:
                 return self._err(updated["error"] or "Update failed", 404)
             return self._ok()
@@ -1039,7 +1068,9 @@ class WebServer:
                 return self._ok(count=0)
 
             hash_set = set(hashes)
-            removed_paths = await self._collect_removed_paths_by_hashes(hash_set)
+            removed_paths = await self._collect_removed_paths_by_hashes(
+                hash_set, raise_on_sync_error=True
+            )
 
             deleted_count = await self._delete_paths_best_effort(
                 removed_paths, "Failed to delete {path}: {error}"
@@ -1099,7 +1130,7 @@ class WebServer:
 
             await self.plugin.cache_service.update_index(updater)
             # 同步到数据库
-            await self._sync_index_to_db()
+            await self._sync_index_to_db(raise_on_error=True)
             return self._ok(count=result["updated"], skipped=result["skipped"])
         except Exception as e:
             logger.error(f"Batch scope update failed: {e}")
@@ -1254,7 +1285,7 @@ class WebServer:
                 )
             )
             # 同步到数据库
-            await self._sync_index_to_db()
+            await self._sync_index_to_db(raise_on_error=True)
             url = f"/images/{file_path.relative_to(self.data_dir).as_posix()}"
 
             return self._ok(
@@ -1423,7 +1454,7 @@ class WebServer:
             results = await asyncio.gather(*[process_one(f) for f in files_data])
 
             # 批量处理后同步到数据库
-            await self._sync_index_to_db()
+            await self._sync_index_to_db(raise_on_error=True)
 
             for result in results:
                 task_info["results"].append(result)
@@ -1525,7 +1556,7 @@ class WebServer:
                 )
             )
             # 同步到数据库
-            await self._sync_index_to_db()
+            await self._sync_index_to_db(raise_on_error=True)
 
             deleted_file_count += await self._delete_category_dir_and_count_orphans(
                 category_key

@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.4] - 2026-04-14
+### improved
+- `CacheService.update_index` 支持异步 updater，新增 `IndexCache` / `IndexUpdater` 类型别名
+- `WebServer._sync_index_to_db` 新增 `raise_on_error` 参数，写操作同步失败时向上抛出异常而非静默忽略
+- `_sync_index_to_db` 通过 `_get_db_service()` 安全获取数据库服务，兼容 `sync_index` 与 `save_index` 两种接口
+- `_collect_removed_paths_by_hashes` 新增 `raise_on_sync_error` 参数，调用方可控同步失败行为
+- 异常日志增加 `exc_info=True`，记录完整堆栈便于排查
+
 ## [2.5.3] - 2026-04-13
 ### fix
 - 修复 `/meme rebuild_index` 后标签、描述、场景丢失的问题，支持从旧 JSON 与备份恢复索引元数据
