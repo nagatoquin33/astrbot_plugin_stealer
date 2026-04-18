@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.6] - 2026-04-19
+### fix
+- 修复 `rebuild_index` 元数据恢复稳定性：按路径/哈希/文件名多级匹配并补充大小写无关 stem 回退，减少标签与描述丢失
+- 修复 WebUI 编辑后预览卡片与统计信息可能未及时刷新的问题，编辑保存后优先使用服务端最新数据回填
+- 修复分页排序在时间戳相同场景下的不稳定问题：新增路径/哈希作为次级排序键，避免列表顺序抖动
+
+### improved
+- 数据库批量关联查询复用 `_load_related_map`，大集合读取改为分块 `IN` 查询，降低长 SQL 参数列表风险
+- WebServer 运行时索引读取优先数据库快照并统一写入路径，减少 cache/DB 双源数据不一致
+- 统计接口优先使用数据库计数（含今日新增），回退内存遍历作为兜底，提升大数据量下性能与一致性
+
+### refactor
+- 抽取搜索语料签名构建逻辑，统一 BM25 签名与数据库语料签名计算口径
+- 分类与批量更新路径统一通过 `_update_runtime_index` 收敛同步流程，减少重复同步代码
+
 ## [2.5.5] - 2026-04-14
 ### fix
 - 修复 WebUI 分类统计口径："全部"分类计数改为使用全量统计值，避免与当前筛选结果混淆

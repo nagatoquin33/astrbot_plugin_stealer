@@ -8,6 +8,7 @@
 """
 
 import asyncio
+import hashlib
 import json
 import os
 import sqlite3
@@ -21,6 +22,8 @@ from astrbot.api import logger
 
 class DatabaseService:
     """SQLite 数据库服务，管理表情包索引存储。"""
+
+    _RELATED_FETCH_CHUNK_SIZE = 400
 
     # 表结构版本，用于迁移检测
     SCHEMA_VERSION = 1
@@ -147,6 +150,69 @@ class DatabaseService:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_emoji_last_used ON emoji(last_used_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_tag_tag ON emoji_tag(tag)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_scene_scene ON emoji_scene(scene)")
+
+    @staticmethod
+    def _normalize_multi_value(values: Any) -> list[str]:
+        if isinstance(values, list):
+            return [str(v).strip() for v in values if str(v).strip()]
+        if values is None:
+            return []
+        text = str(values).strip()
+        return [text] if text else []
+
+    def _chunk_paths(self, paths: list[str]):
+        chunk_size = max(1, int(self._RELATED_FETCH_CHUNK_SIZE))
+        for start in range(0, len(paths), chunk_size):
+            yield paths[start : start + chunk_size]
+
+    def _load_related_map(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        table: str,
+        value_column: str,
+        paths: list[str],
+    ) -> dict[str, list[str]]:
+        related_map: dict[str, list[str]] = {path: [] for path in paths}
+        if not paths:
+            return related_map
+
+        for chunk in self._chunk_paths(paths):
+            placeholders = ",".join("?" * len(chunk))
+            rows = conn.execute(
+                f"""
+                    SELECT path, {value_column} FROM {table}
+                    WHERE path IN ({placeholders})
+                    ORDER BY rowid
+                """,
+                chunk,
+            ).fetchall()
+            for row in rows:
+                related_map[row["path"]].append(row[value_column])
+        return related_map
+
+    def _build_search_signature_from_index(
+        self, idx: dict[str, dict[str, Any]]
+    ) -> str:
+        if not idx:
+            return "empty"
+
+        hasher = hashlib.sha256()
+        for path in sorted(idx.keys()):
+            data = idx.get(path)
+            if not isinstance(data, dict):
+                continue
+
+            category = str(data.get("category", "") or "")
+            desc = str(data.get("desc", "") or "")
+            tags = self._normalize_multi_value(data.get("tags", []))
+            scenes = self._normalize_multi_value(data.get("scenes", []))
+            payload = "\x1f".join(
+                [path, category, desc, "\x1e".join(tags), "\x1e".join(scenes)]
+            )
+            hasher.update(payload.encode("utf-8", errors="ignore"))
+            hasher.update(b"\x00")
+        return hasher.hexdigest()
 
     # ── 基础 CRUD 操作 ──
 
@@ -702,31 +768,12 @@ class DatabaseService:
                 return result
 
             paths = [r["path"] for r in rows]
-
-            # 批量获取所有标签（解决N+1问题）
-            tags_sql = """
-                SELECT path, tag FROM emoji_tag
-                WHERE path IN ({})
-                ORDER BY rowid
-            """.format(",".join("?" * len(paths)))
-            tags_rows = conn.execute(tags_sql, paths).fetchall()
-
-            # 批量获取所有场景（解决N+1问题）
-            scenes_sql = """
-                SELECT path, scene FROM emoji_scene
-                WHERE path IN ({})
-                ORDER BY rowid
-            """.format(",".join("?" * len(paths)))
-            scenes_rows = conn.execute(scenes_sql, paths).fetchall()
-
-            # 构建映射
-            tags_map: dict[str, list[str]] = {p: [] for p in paths}
-            for r in tags_rows:
-                tags_map[r["path"]].append(r["tag"])
-
-            scenes_map: dict[str, list[str]] = {p: [] for p in paths}
-            for r in scenes_rows:
-                scenes_map[r["path"]].append(r["scene"])
+            tags_map = self._load_related_map(
+                conn, table="emoji_tag", value_column="tag", paths=paths
+            )
+            scenes_map = self._load_related_map(
+                conn, table="emoji_scene", value_column="scene", paths=paths
+            )
 
             # 构建结果
             for row in rows:
@@ -779,32 +826,22 @@ class DatabaseService:
                 current_paths = list(current_index.keys())
 
                 if current_paths:
-                    placeholders = ",".join("?" * len(current_paths))
-                    tags_rows = conn.execute(
-                        f"""
-                            SELECT path, tag FROM emoji_tag
-                            WHERE path IN ({placeholders})
-                            ORDER BY rowid
-                        """,
-                        current_paths,
-                    ).fetchall()
-                    scenes_rows = conn.execute(
-                        f"""
-                            SELECT path, scene FROM emoji_scene
-                            WHERE path IN ({placeholders})
-                            ORDER BY rowid
-                        """,
-                        current_paths,
-                    ).fetchall()
+                    tags_map = self._load_related_map(
+                        conn,
+                        table="emoji_tag",
+                        value_column="tag",
+                        paths=current_paths,
+                    )
+                    scenes_map = self._load_related_map(
+                        conn,
+                        table="emoji_scene",
+                        value_column="scene",
+                        paths=current_paths,
+                    )
 
                     for path in current_paths:
-                        current_index[path]["tags"] = []
-                        current_index[path]["scenes"] = []
-
-                    for row in tags_rows:
-                        current_index[row["path"]]["tags"].append(row["tag"])
-                    for row in scenes_rows:
-                        current_index[row["path"]]["scenes"].append(row["scene"])
+                        current_index[path]["tags"] = tags_map.get(path, [])
+                        current_index[path]["scenes"] = scenes_map.get(path, [])
 
                 desired_paths = set(desired_index.keys())
                 existing_paths = set(current_index.keys())
@@ -991,25 +1028,18 @@ class DatabaseService:
                 "db_size_bytes": self._db_path.stat().st_size if self._db_path.exists() else 0,
             }
 
+    def count_created_since(self, created_at: int | float) -> int:
+        """Count emojis whose created_at is at or after the given timestamp."""
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) as cnt FROM emoji WHERE created_at >= ?",
+                (int(created_at),),
+            ).fetchone()
+            return int(row["cnt"] if row else 0)
+
     def get_corpus_signature(self) -> str:
         """获取语料库签名，用于 BM25 索引变更检测。"""
-        with self._get_connection() as conn:
-            total = conn.execute("SELECT COUNT(*) as cnt FROM emoji").fetchone()["cnt"]
-            max_created = conn.execute(
-                "SELECT MAX(created_at) as max_created FROM emoji"
-            ).fetchone()
-            max_created_val = max_created["max_created"] if max_created else 0
-            max_used = conn.execute(
-                "SELECT MAX(last_used_at) as max_used FROM emoji"
-            ).fetchone()
-            max_used_val = max_used["max_used"] if max_used else 0
-            tags_count = conn.execute(
-                "SELECT COUNT(*) as cnt FROM emoji_tag"
-            ).fetchone()["cnt"]
-            scenes_count = conn.execute(
-                "SELECT COUNT(*) as cnt FROM emoji_scene"
-            ).fetchone()["cnt"]
-            return f"{total}:{max_created_val}:{max_used_val}:{tags_count}:{scenes_count}"
+        return self._build_search_signature_from_index(self.get_index_cache_readonly())
 
     def vacuum(self) -> None:
         """执行 VACUUM 优化数据库空间。"""
@@ -1021,9 +1051,9 @@ class DatabaseService:
 
     # 排序字段白名单（防止SQL注入）
     _VALID_ORDER_FIELDS = {
-        "newest": "e.created_at DESC",
-        "oldest": "e.created_at ASC",
-        "most_used": "e.use_count DESC, e.last_used_at DESC",
+        "newest": "e.created_at DESC, e.path DESC",
+        "oldest": "e.created_at ASC, e.path ASC",
+        "most_used": "e.use_count DESC, e.last_used_at DESC, e.path ASC",
     }
 
     def get_emojis_paginated(
@@ -1132,31 +1162,12 @@ class DatabaseService:
 
             # 批量获取标签和场景（解决N+1问题）
             paths = [r["path"] for r in rows]
-
-            # 单次查询获取所有标签
-            tags_sql = """
-                SELECT path, tag FROM emoji_tag
-                WHERE path IN ({})
-                ORDER BY rowid
-            """.format(",".join("?" * len(paths)))
-            tags_rows = conn.execute(tags_sql, paths).fetchall()
-
-            # 单次查询获取所有场景
-            scenes_sql = """
-                SELECT path, scene FROM emoji_scene
-                WHERE path IN ({})
-                ORDER BY rowid
-            """.format(",".join("?" * len(paths)))
-            scenes_rows = conn.execute(scenes_sql, paths).fetchall()
-
-            # 构建标签和场景的映射
-            tags_map: dict[str, list[str]] = {p: [] for p in paths}
-            for r in tags_rows:
-                tags_map[r["path"]].append(r["tag"])
-
-            scenes_map: dict[str, list[str]] = {p: [] for p in paths}
-            for r in scenes_rows:
-                scenes_map[r["path"]].append(r["scene"])
+            tags_map = self._load_related_map(
+                conn, table="emoji_tag", value_column="tag", paths=paths
+            )
+            scenes_map = self._load_related_map(
+                conn, table="emoji_scene", value_column="scene", paths=paths
+            )
 
             # 构建结果列表
             images: list[dict[str, Any]] = []

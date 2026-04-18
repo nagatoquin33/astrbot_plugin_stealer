@@ -71,43 +71,49 @@ class EmojiSelector:
         self._bm25_dirty: bool = True
         self._bm25_signature: str = ""
 
-    def _compute_bm25_signature(self, idx: dict[str, Any]) -> str:
+    @staticmethod
+    def _search_signature_from_index(idx: dict[str, Any]) -> str:
+        if not idx:
+            return "empty"
+
+        hasher = hashlib.sha256()
+        for file_path in sorted(idx.keys()):
+            data = idx.get(file_path)
+            if not isinstance(data, dict):
+                continue
+            tags = tuple(str(tag).strip() for tag in data.get("tags", []) if str(tag).strip())
+            scenes = tuple(
+                str(scene).strip() for scene in data.get("scenes", []) if str(scene).strip()
+            )
+            desc = str(data.get("desc", "") or "")
+            category = str(data.get("category", "") or "")
+            payload = "\x1f".join(
+                [
+                    str(file_path),
+                    category,
+                    desc,
+                    "\x1e".join(tags),
+                    "\x1e".join(scenes),
+                ]
+            )
+            hasher.update(payload.encode("utf-8", errors="ignore"))
+            hasher.update(b"\x00")
+        return hasher.hexdigest()
+
+    def _compute_bm25_signature(
+        self, idx: dict[str, Any], *, prefer_db_signature: bool = True
+    ) -> str:
         """计算 BM25 语料签名。"""
         db_service = getattr(self.plugin, "db_service", None)
 
-        if db_service and db_service.count_total() > 0:
+        if prefer_db_signature and db_service and db_service.count_total() > 0:
             try:
                 return db_service.get_corpus_signature()
             except Exception as e:
                 logger.debug(f"[BM25] 获取数据库签名失败: {e}")
 
         # Fallback
-        total = len(idx)
-        if total == 0:
-            return "empty"
-
-        max_created = 0
-        max_last_used = 0
-        tag_count = 0
-        scene_count = 0
-
-        for data in idx.values():
-            if not isinstance(data, dict):
-                continue
-            created = data.get("created_at", 0)
-            if created > max_created:
-                max_created = created
-            last_used = data.get("last_used_at", 0)
-            if last_used > max_last_used:
-                max_last_used = last_used
-            tags = data.get("tags", [])
-            if isinstance(tags, list):
-                tag_count += len(tags)
-            scenes = data.get("scenes", [])
-            if isinstance(scenes, list):
-                scene_count += len(scenes)
-
-        return f"{total}:{max_created}:{max_last_used}:{tag_count}:{scene_count}"
+        return self._search_signature_from_index(idx)
 
     async def _build_bm25_index(self, idx: dict | None = None) -> None:
         if BM25 is None:
@@ -116,6 +122,7 @@ class EmojiSelector:
         # 优先使用数据库服务
         db_service = getattr(self.plugin, "db_service", None)
         cache_service = getattr(self.plugin, "cache_service", None)
+        explicit_idx = idx is not None
 
         if idx is None:
             if db_service:
@@ -126,7 +133,9 @@ class EmojiSelector:
         if not idx:
             return
 
-        signature = self._compute_bm25_signature(idx)
+        signature = self._compute_bm25_signature(
+            idx, prefer_db_signature=not explicit_idx
+        )
 
         # 优先尝试从持久化缓存加载 BM25 文档语料。
         if cache_service:

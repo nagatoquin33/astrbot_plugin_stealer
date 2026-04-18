@@ -881,92 +881,112 @@ class CommandHandler:
                         logger.warning(f"[rebuild_index] 加载 JSON 失败 {legacy_path}: {e}")
 
             # --- 智能合并逻辑开始 ---
-            # 合并 old_index 和 legacy_data_map 用于查找
-            # 注意：需要按 hash 合并，而非按 path 合并，因为不同数据源可能 path 不同
-            combined_index = {**old_index, **legacy_data_map}
+            def _has_meaningful_metadata(meta: dict[str, Any] | None) -> bool:
+                if not isinstance(meta, dict):
+                    return False
+                return bool(meta.get("tags") or meta.get("desc") or meta.get("scenes"))
 
-            # 1. 建立哈希查找表 - 关键：优先使用有 tags/desc 的数据
-            old_hash_map = {}
-            for k, v in combined_index.items():
-                if isinstance(v, dict) and v.get("hash"):
-                    hash_val = v["hash"]
-                    existing = old_hash_map.get(hash_val)
-                    # 如果已有数据但没有 tags/desc，而新数据有，则替换
-                    if existing is None:
-                        old_hash_map[hash_val] = v
-                    elif (not existing.get("tags") and not existing.get("desc") and not existing.get("scenes")):
-                        # 已有数据是空数据，用新数据替换
-                        if v.get("tags") or v.get("desc") or v.get("scenes"):
-                            old_hash_map[hash_val] = v
+            def _build_lookup_maps(index_map: dict[str, Any]) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+                hash_map: dict[str, dict[str, Any]] = {}
+                name_map: dict[str, dict[str, Any]] = {}
+                for path_key, meta in index_map.items():
+                    if not isinstance(meta, dict):
+                        continue
 
-            # 同时也建立文件名->数据映射（处理哈希可能变化但文件名没变的情况）
-            old_name_map = {}
-            for k, v in combined_index.items():
-                if isinstance(v, dict):
-                    path_obj = Path(k)
-                    existing = old_name_map.get(path_obj.name)
-                    # 优先使用有元数据的记录
-                    if existing is None:
-                        old_name_map[path_obj.name] = v
-                        old_name_map[path_obj.stem] = v
-                    elif (not existing.get("tags") and not existing.get("desc") and not existing.get("scenes")):
-                        if v.get("tags") or v.get("desc") or v.get("scenes"):
-                            old_name_map[path_obj.name] = v
-                            old_name_map[path_obj.stem] = v
+                    if meta.get("hash"):
+                        hash_val = str(meta["hash"])
+                        existing = hash_map.get(hash_val)
+                        if existing is None or (
+                            not _has_meaningful_metadata(existing)
+                            and _has_meaningful_metadata(meta)
+                        ):
+                            hash_map[hash_val] = meta
 
-            old_count = len(combined_index)
+                    path_obj = Path(path_key)
+                    for name_key in (path_obj.name, path_obj.stem):
+                        existing = name_map.get(name_key)
+                        if existing is None or (
+                            not _has_meaningful_metadata(existing)
+                            and _has_meaningful_metadata(meta)
+                        ):
+                            name_map[name_key] = meta
+                return hash_map, name_map
+
+            def _first_casefold_stem_match(
+                new_path_obj: Path, *source_indexes: dict[str, Any]
+            ) -> dict[str, Any] | None:
+                needle = new_path_obj.stem.lower()
+                for source_index in source_indexes:
+                    for old_path, old_val in source_index.items():
+                        if not isinstance(old_val, dict):
+                            continue
+                        if Path(old_path).stem.lower() == needle:
+                            return old_val
+                return None
+
+            def _resolve_old_metadata(
+                new_path: str,
+                new_data: dict[str, Any],
+            ) -> dict[str, Any] | None:
+                new_path_obj = Path(new_path)
+                new_hash = new_data.get("hash")
+
+                exact_candidates = (
+                    old_index.get(new_path),
+                    current_hash_map.get(new_hash),
+                    legacy_data_map.get(new_path),
+                    legacy_hash_map.get(new_hash),
+                    current_name_map.get(new_path_obj.name),
+                    current_name_map.get(new_path_obj.stem),
+                    legacy_name_map.get(new_path_obj.name),
+                    legacy_name_map.get(new_path_obj.stem),
+                )
+                for candidate in exact_candidates:
+                    if isinstance(candidate, dict):
+                        return candidate
+
+                return _first_casefold_stem_match(
+                    new_path_obj, old_index, legacy_data_map
+                )
+
+            def _restore_metadata(
+                target_data: dict[str, Any], source_data: dict[str, Any]
+            ) -> bool:
+                if not isinstance(source_data, dict):
+                    return False
+
+                if source_data.get("desc"):
+                    target_data["desc"] = source_data["desc"]
+                if source_data.get("tags"):
+                    target_data["tags"] = source_data["tags"]
+
+                for key in (
+                    "source_message",
+                    "source",
+                    "origin_target",
+                    "scope_mode",
+                    "qq_emoji_id",
+                    "qq_emoji_package_id",
+                    "origin_url",
+                    "qq_key",
+                    "scenes",
+                    "scene",
+                ):
+                    if key in source_data:
+                        target_data[key] = source_data[key]
+                return True
+
+            current_hash_map, current_name_map = _build_lookup_maps(old_index)
+            legacy_hash_map, legacy_name_map = _build_lookup_maps(legacy_data_map)
+
+            old_count = len(old_index) + len(legacy_data_map)
 
             recovered_count = 0
 
             # 2. 遍历重建的索引，尝试恢复元数据
             for new_path, new_data in rebuilt_index.items():
-                old_data = None
-                new_path_obj = Path(new_path)
-
-                # 优先级1: 路径直接匹配
-                if new_path in combined_index:
-                    old_data = combined_index[new_path]
-                # 优先级2: 哈希匹配（最可靠）
-                elif new_data.get("hash") in old_hash_map:
-                    old_data = old_hash_map[new_data["hash"]]
-                # 优先级3: 文件名匹配（尝试多种格式）
-                elif new_path_obj.name in old_name_map:
-                    old_data = old_name_map[new_path_obj.name]
-                elif new_path_obj.stem in old_name_map:
-                    old_data = old_name_map[new_path_obj.stem]
-                # 优先级4: 尝试从路径中提取文件名后匹配
-                else:
-                    for old_path, old_val in combined_index.items():
-                        if isinstance(old_val, dict):
-                            old_path_obj = Path(old_path)
-                            # 比较文件名（忽略大小写扩展名）
-                            if old_path_obj.stem.lower() == new_path_obj.stem.lower():
-                                old_data = old_val
-                                break
-
-                # 如果找到了旧数据，恢复关键元数据
-                if old_data and isinstance(old_data, dict):
-                    # 恢复描述和标签
-                    if old_data.get("desc"):
-                        new_data["desc"] = old_data["desc"]
-                    if old_data.get("tags"):
-                        new_data["tags"] = old_data["tags"]
-                    # 兼容可能存在的其他字段
-                    for key in (
-                        "source_message",
-                        "source",
-                        "origin_target",
-                        "scope_mode",
-                        "qq_emoji_id",
-                        "qq_emoji_package_id",
-                        "origin_url",
-                        "qq_key",
-                        "scenes",
-                        "scene",
-                    ):
-                        if key in old_data:
-                            new_data[key] = old_data[key]
-
+                old_data = _resolve_old_metadata(new_path, new_data)
+                if _restore_metadata(new_data, old_data):
                     recovered_count += 1
 
             # 3. 使用新的索引作为最终索引（自动清理了不存在的文件记录）

@@ -1,5 +1,6 @@
 import asyncio
 import hmac
+import inspect
 import shutil
 import time
 import uuid
@@ -128,6 +129,31 @@ class WebServer:
             if hasattr(self.plugin, "categories"):
                 self.plugin.categories = category_keys
 
+    def _get_runtime_index_snapshot(self) -> dict[str, Any]:
+        """Prefer the database snapshot when available to keep WebUI data complete."""
+        db_service = self._get_db_service()
+        if db_service and getattr(db_service, "count_total", None):
+            try:
+                if db_service.count_total() > 0:
+                    get_index = getattr(db_service, "get_index_cache_readonly", None)
+                    if callable(get_index):
+                        return get_index()
+            except Exception as db_error:
+                logger.warning(f"Falling back to cache snapshot: {db_error}")
+        return self.plugin.cache_service.get_index_cache_readonly()
+
+    async def _update_runtime_index(
+        self, updater, *, raise_on_sync_error: bool = False
+    ) -> dict[str, Any]:
+        """Mutate the authoritative runtime snapshot, then mirror it back to cache/DB."""
+        current = dict(self._get_runtime_index_snapshot())
+        result = updater(current)
+        if inspect.isawaitable(result):
+            await result
+        await self.plugin.cache_service.set_cache("index_cache", current, persist=False)
+        await self._sync_index_to_db(raise_on_error=raise_on_sync_error)
+        return current
+
     @staticmethod
     def _remove_category_items_inplace(
         current: dict[str, Any], category_key: str
@@ -151,7 +177,7 @@ class WebServer:
     async def _delete_category_files_from_index_snapshot(
         self, category_key: str
     ) -> tuple[int, int]:
-        index_copy = self.plugin.cache_service.get_index_cache()
+        index_copy = self._get_runtime_index_snapshot()
         deleted_missing_count = 0
         deleted_file_count = 0
 
@@ -253,11 +279,10 @@ class WebServer:
         self, hashes: set[str], *, raise_on_sync_error: bool = False
     ) -> list[str]:
         removed_paths: list[str] = []
-        await self.plugin.cache_service.update_index(
-            lambda current: self._remove_by_hashes(current, hashes, removed_paths)
+        await self._update_runtime_index(
+            lambda current: self._remove_by_hashes(current, hashes, removed_paths),
+            raise_on_sync_error=raise_on_sync_error,
         )
-        # 同步到数据库
-        await self._sync_index_to_db(raise_on_error=raise_on_sync_error)
         return removed_paths
 
     async def _sync_index_to_db(self, *, raise_on_error: bool = False) -> bool:
@@ -318,9 +343,7 @@ class WebServer:
                 current, items, target_category
             )
 
-        await self.plugin.cache_service.update_index(updater)
-        # 同步到数据库
-        await self._sync_index_to_db(raise_on_error=True)
+        await self._update_runtime_index(updater, raise_on_sync_error=True)
         return moved_count, moved_hashes
 
     async def _error_middleware(self, app: web.Application, handler):
@@ -811,7 +834,7 @@ class WebServer:
                 )
 
             # Fallback: 使用内存遍历（兼容旧版本或数据库为空时）
-            index = self.plugin.cache_service.get_index_cache()
+            index = self._get_runtime_index_snapshot()
 
             images: list[dict[str, Any]] = []
             category_counts: dict[str, int] = {}
@@ -875,9 +898,20 @@ class WebServer:
                     continue
 
             if sort_order == "oldest":
-                images.sort(key=lambda x: x["created_at"], reverse=False)
+                images.sort(
+                    key=lambda x: (
+                        int(x.get("created_at", 0) or 0),
+                        str(x.get("hash", "") or ""),
+                    )
+                )
             else:
-                images.sort(key=lambda x: x["created_at"], reverse=True)
+                images.sort(
+                    key=lambda x: (
+                        int(x.get("created_at", 0) or 0),
+                        str(x.get("hash", "") or ""),
+                    ),
+                    reverse=True,
+                )
 
             total = len(images)
             start = (page - 1) * page_size
@@ -1076,9 +1110,7 @@ class WebServer:
 
                 updated["ok"] = True
 
-            await self.plugin.cache_service.update_index(updater)
-            # 同步到数据库
-            await self._sync_index_to_db(raise_on_error=True)
+            await self._update_runtime_index(updater, raise_on_sync_error=True)
             if not updated["ok"]:
                 return self._err(updated["error"] or "Update failed", 404)
             return self._ok()
@@ -1156,9 +1188,7 @@ class WebServer:
                     meta["scope_mode"] = scope_mode
                     result["updated"] += 1
 
-            await self.plugin.cache_service.update_index(updater)
-            # 同步到数据库
-            await self._sync_index_to_db(raise_on_error=True)
+            await self._update_runtime_index(updater, raise_on_sync_error=True)
             return self._ok(count=result["updated"], skipped=result["skipped"])
         except Exception as e:
             logger.error(f"Batch scope update failed: {e}")
@@ -1166,7 +1196,7 @@ class WebServer:
 
     async def handle_get_stats(self, request):
         try:
-            index = self.plugin.cache_service.get_index_cache()
+            index = self._get_runtime_index_snapshot()
 
             # 计算今日新增
             today_start = (
@@ -1175,9 +1205,6 @@ class WebServer:
                 .timestamp()
             )
             today_count = 0
-            for meta in index.values():
-                if meta.get("created_at", 0) >= today_start:
-                    today_count += 1
 
             # 获取分类数量（配置的分类总数）
             categories_count = 0
@@ -1187,12 +1214,23 @@ class WebServer:
             db_service = self._get_db_service()
             total_count = len(index)
             get_stats = getattr(db_service, "get_stats", None) if db_service else None
+            count_created_since = (
+                getattr(db_service, "count_created_since", None) if db_service else None
+            )
+            db_today_loaded = False
             if db_service and callable(get_stats):
                 try:
                     db_stats = get_stats()
                     total_count = int(db_stats.get("total_emojis", total_count) or 0)
+                    if callable(count_created_since):
+                        today_count = int(count_created_since(today_start) or 0)
+                        db_today_loaded = True
                 except Exception as db_error:
                     logger.warning(f"Falling back to cache stats: {db_error}")
+            if not db_today_loaded:
+                for meta in index.values():
+                    if isinstance(meta, dict) and meta.get("created_at", 0) >= today_start:
+                        today_count += 1
 
             # 前端期望的数据结构是 { stats: { total, categories, today } }
             return self._ok(
@@ -1542,11 +1580,23 @@ class WebServer:
 
     async def handle_get_categories(self, request):
         try:
-            index = self.plugin.cache_service.get_index_cache()
-            categories = {}
+            categories = {key: 0 for key in self._get_configured_category_keys()}
+
+            db_service = self._get_db_service()
+            get_stats = getattr(db_service, "get_stats", None) if db_service else None
+            if db_service and callable(get_stats):
+                try:
+                    db_stats = get_stats()
+                    for key, count in (db_stats.get("categories", {}) or {}).items():
+                        categories[str(key)] = int(count or 0)
+                    return self._ok({"categories": categories})
+                except Exception as db_error:
+                    logger.warning(f"Falling back to runtime categories: {db_error}")
+
+            index = self._get_runtime_index_snapshot()
             for meta in index.values():
                 if isinstance(meta, dict):
-                    cat = meta.get("category", "unknown")
+                    cat = str(meta.get("category", "unknown") or "unknown")
                     categories[cat] = categories.get(cat, 0) + 1
             return self._ok({"categories": categories})
         except Exception as e:
@@ -1609,13 +1659,12 @@ class WebServer:
                 deleted_file_count,
             ) = await self._delete_category_files_from_index_snapshot(category_key)
 
-            await self.plugin.cache_service.update_index(
+            await self._update_runtime_index(
                 lambda current: self._remove_category_items_inplace(
                     current, category_key
-                )
+                ),
+                raise_on_sync_error=True,
             )
-            # 同步到数据库
-            await self._sync_index_to_db(raise_on_error=True)
 
             deleted_file_count += await self._delete_category_dir_and_count_orphans(
                 category_key

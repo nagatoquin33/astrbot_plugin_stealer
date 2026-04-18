@@ -174,8 +174,10 @@ createApp({
                         Array.from(selectedImages.value).filter((hash) => visibleHashes.has(hash))
                     );
                 }
+                return nextImages;
             } catch (e) {
                 console.error(e);
+                return [];
             } finally {
                 loading.value = false;
             }
@@ -340,12 +342,18 @@ createApp({
                 const data = await res.json();
                 if (data.success) {
                     isEditing.value = false;
-                    previewItem.value.category = editForm.category;
-                    previewItem.value.tags = editForm.tags.split(',').map((t) => t.trim()).filter((t) => t);
-                    previewItem.value.scenes = parseSceneList(editForm.scene);
-                    previewItem.value.desc = editForm.desc;
-                    previewItem.value.scope_mode = editForm.scope_mode || 'public';
-                    fetchImages(currentPage.value);
+                    const refreshedImages = await fetchImages(currentPage.value);
+                    const refreshedItem = refreshedImages.find((item) => item.hash === previewItem.value.hash);
+                    if (refreshedItem) {
+                        previewItem.value = refreshedItem;
+                    } else {
+                        previewItem.value.category = editForm.category;
+                        previewItem.value.tags = editForm.tags.split(',').map((t) => t.trim()).filter((t) => t);
+                        previewItem.value.scenes = parseSceneList(editForm.scene);
+                        previewItem.value.desc = editForm.desc;
+                        previewItem.value.scope_mode = editForm.scope_mode || 'public';
+                    }
+                    await fetchStats();
                 } else {
                     alert(data.error || '保存失败');
                 }
