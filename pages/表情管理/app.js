@@ -1,0 +1,1784 @@
+const { createApp, ref, reactive, onMounted } = Vue;
+
+const PLACEHOLDER = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+
+const TEMPLATE = /* html */ `
+        <header class="codex-header">
+            <div class="header-title">
+                <div class="header-icon">
+                    <svg style="width:28px;height:28px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
+                    </svg>
+                </div>
+                <div class="header-text">
+                    <h1>亨利的战利品</h1>
+                    <p>表情包小偷管理面板</p>
+                </div>
+            </div>
+
+            <div class="stats-bar">
+                <div class="stat-item">
+                    <span class="stat-value">{{ stats.total || 0 }}</span>
+                    <span class="stat-label">总数</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-value">{{ stats.categories || 0 }}</span>
+                    <span class="stat-label">分类</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-value">{{ stats.today || 0 }}</span>
+                    <span class="stat-label">今日新增</span>
+                </div>
+            </div>
+
+            <button
+                @click="toggleTheme"
+                class="theme-toggle"
+                :title="isDarkTheme ? '切换到白天模式' : '切换到黑夜模式'"
+                :class="{ 'is-dark': isDarkTheme }"
+            >
+                <div class="theme-icon-wrapper">
+                    <svg
+                        v-if="isDarkTheme"
+                        class="sun-icon"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                    >
+                        <circle cx="12" cy="12" r="4" stroke-width="2"/>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
+                    </svg>
+                    <svg
+                        v-else
+                        class="moon-icon"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                    >
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 3v2M19 6h2" opacity="0.5"/>
+                    </svg>
+                </div>
+                <div class="theme-glow"></div>
+            </button>
+        </header>
+
+        <div class="main-container">
+            <aside class="sidebar">
+                <div class="sidebar-title">分类</div>
+                <div class="category-list">
+                    <div
+                        class="category-item"
+                        :class="{ active: selectedCategory === '' }"
+                        @click="selectedCategory = ''; fetchImages(1)"
+                    >
+                        <span class="category-name">全部</span>
+                        <span class="category-count">{{ stats.total || 0 }}</span>
+                    </div>
+                    <div
+                        v-for="cat in categories"
+                        :key="cat.key"
+                        class="category-item"
+                        :class="{ active: selectedCategory === cat.key }"
+                        @click="selectedCategory = cat.key; fetchImages(1)"
+                    >
+                        <span class="category-name">{{ cat.name }}</span>
+                        <span class="category-count">{{ cat.count }}</span>
+                    </div>
+                </div>
+            </aside>
+
+            <main class="inventory-panel">
+                <div class="modal-panel-corner-bl"></div>
+                <div class="modal-panel-corner-br"></div>
+
+                <div class="inventory-toolbar">
+                    <div class="toolbar-search">
+                        <svg style="width:16px;height:16px;position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--text-muted)" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                        </svg>
+                        <input
+                            v-model="searchQuery"
+                            @input="debouncedSearch"
+                            placeholder="搜索表情包..."
+                        >
+                    </div>
+
+                    <div class="toolbar-actions">
+                        <div class="toolbar-group">
+                            <select v-model="sortBy" @change="fetchImages(1)" class="codex-input" style="width:120px">
+                                <option value="newest">最新</option>
+                                <option value="oldest">最早</option>
+                            </select>
+                        </div>
+
+                        <div class="toolbar-group">
+                            <button @click="toggleBatchMode" class="codex-btn" :class="{ primary: isBatchMode }">
+                                <svg style="width:16px;height:16px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                                </svg>
+                                {{ isBatchMode ? '完成' : '批量' }}
+                            </button>
+
+                            <button @click="openEmotionsModal" class="codex-btn">
+                                <svg style="width:16px;height:16px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/>
+                                </svg>
+                                分类
+                            </button>
+                        </div>
+
+                        <div class="toolbar-group">
+                            <button @click="openUploadModal" class="codex-btn primary">
+                                <svg style="width:16px;height:16px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                                </svg>
+                                添加
+                            </button>
+
+                            <button @click="openBatchUploadModal" class="codex-btn">
+                                <svg style="width:16px;height:16px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                                </svg>
+                                批量导入
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div v-if="loading" class="loading-state">
+                    <div class="spinner"></div>
+                    <p style="color:var(--gold-primary);font-family:'Cinzel',serif;letter-spacing:0.1em">加载中...</p>
+                </div>
+
+                <div v-else-if="images.length === 0" class="empty-state">
+                    <svg style="width:64px;height:64px;opacity:0.3;margin-bottom:16px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
+                    </svg>
+                    <p style="font-family:'Cinzel',serif;font-size:1.125rem">暂无表情包</p>
+                    <p style="font-size:0.875rem;margin-top:8px;color:var(--text-muted)">点击"添加"上传新的表情包</p>
+                </div>
+
+                <div v-else class="inventory-grid">
+                    <div
+                        v-for="img in images"
+                        :key="img.hash"
+                        class="item-slot"
+                        :class="{ selected: selectedImages.has(img.hash) }"
+                        @click="isBatchMode ? toggleSelection(img) : openPreview(img)"
+                    >
+                        <div v-if="isBatchMode" class="batch-indicator">
+                            <svg v-if="selectedImages.has(img.hash)" style="width:12px;height:12px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+                            </svg>
+                        </div>
+
+                        <div class="item-image">
+                            <img :src="imageDataUrls[img.hash] || PLACEHOLDER" loading="lazy" :alt="img.desc">
+                        </div>
+
+                        <div class="item-info">
+                            <div class="item-category">{{ img.category }}</div>
+                            <div class="item-meta-row">
+                                <span class="scope-pill" :class="img.scope_mode === 'local' ? 'local' : 'public'">{{ getScopeLabel(img.scope_mode) }}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div v-if="total > pageSize" class="pagination-bar">
+                    <button
+                        @click="prevPage"
+                        :disabled="currentPage === 1"
+                        class="codex-btn"
+                        :class="{ disabled: currentPage === 1 }"
+                    >
+                        <svg style="width:16px;height:16px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+                        </svg>
+                        上一页
+                    </button>
+
+                    <span class="page-info">{{ currentPage }} / {{ Math.ceil(total / pageSize) }}</span>
+
+                    <button
+                        @click="nextPage"
+                        :disabled="currentPage * pageSize >= total"
+                        class="codex-btn"
+                        :class="{ disabled: currentPage * pageSize >= total }"
+                    >
+                        下一页
+                        <svg style="width:16px;height:16px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                        </svg>
+                    </button>
+                </div>
+            </main>
+        </div>
+
+        <div v-if="previewOpen" class="modal-overlay" @click.self="closePreview">
+            <div class="modal-panel">
+                <div class="modal-panel-corner-bl"></div>
+                <div class="modal-panel-corner-br"></div>
+
+                <div class="modal-header">
+                    <h2>{{ isEditing ? '编辑' : '详情' }}</h2>
+                    <button @click="closePreview" class="modal-close">
+                        <svg style="width:20px;height:20px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                    </button>
+                </div>
+
+                <div class="modal-content">
+                    <div v-if="!isEditing" class="item-detail">
+                        <div class="item-preview">
+                            <button
+                                v-if="images.length > 1"
+                                @click.stop="prevImage"
+                                class="nav-btn left"
+                            >
+                                <svg style="width:24px;height:24px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+                                </svg>
+                            </button>
+
+                            <img :src="imageDataUrls[previewItem?.hash] || PLACEHOLDER" :alt="previewItem?.desc">
+
+                            <button
+                                v-if="images.length > 1"
+                                @click.stop="nextImage"
+                                class="nav-btn right"
+                            >
+                                <svg style="width:24px;height:24px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                                </svg>
+                            </button>
+                        </div>
+
+                        <div class="item-stats">
+                            <div class="stat-row">
+                                <span class="stat-name">分类</span>
+                                <span class="stat-value">{{ previewItem?.category }}</span>
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-name">作用域</span>
+                                <span class="stat-value">
+                                    <span class="scope-pill" :class="previewItem?.scope_mode === 'local' ? 'local' : 'public'">{{ getScopeLabel(previewItem?.scope_mode) }}</span>
+                                </span>
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-name">来源</span>
+                                <span class="stat-value">{{ formatOriginTarget(previewItem?.origin_target) }}</span>
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-name">描述</span>
+                            </div>
+                            <div style="padding:12px;background:rgba(0,0,0,0.3);margin-bottom:12px;border-left:3px solid var(--gold-dim)">
+                                <p style="margin:0;color:var(--text-main);font-style:italic">
+                                    {{ previewItem?.desc || '暂无描述' }}
+                                </p>
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-name">标签</span>
+                            </div>
+                            <div class="item-tags" style="margin-bottom:12px">
+                                <span v-for="tag in (previewItem?.tags || [])" :key="tag" class="tag">
+                                    {{ tag }}
+                                </span>
+                                <span v-if="!(previewItem?.tags || []).length" style="font-size:0.85rem;color:var(--text-muted)">无标签</span>
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-name">场景</span>
+                            </div>
+                            <div class="item-tags" style="margin-bottom:12px">
+                                <span v-for="scene in (previewItem?.scenes || [])" :key="scene" class="tag scene-tag">
+                                    {{ scene }}
+                                </span>
+                                <span v-if="!(previewItem?.scenes || []).length" style="font-size:0.85rem;color:var(--text-muted)">无场景</span>
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-name">添加时间</span>
+                                <span class="stat-value">{{ formatDate(previewItem?.created_at) }}</span>
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-name">ID</span>
+                                <span class="stat-value" style="font-size:0.75rem;word-break:break-all">{{ previewItem?.hash?.slice(0, 16) }}...</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div v-else style="padding:24px;width:100%">
+                        <div style="max-width:500px;margin:0 auto">
+                            <div style="margin-bottom:20px">
+                                <label style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--text-muted);display:block;margin-bottom:8px">分类</label>
+                                <select v-model="editForm.category" class="codex-input">
+                                    <option v-for="cat in categories" :key="cat.key" :value="cat.key">{{ cat.name }}</option>
+                                </select>
+                            </div>
+
+                            <div style="margin-bottom:20px">
+                                <label style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--text-muted);display:block;margin-bottom:8px">作用域</label>
+                                <select v-model="editForm.scope_mode" class="codex-input">
+                                    <option value="public">public / 公共</option>
+                                    <option value="local">local / 本群限定</option>
+                                </select>
+                                <div class="form-hint">来源：{{ formatOriginTarget(previewItem?.origin_target) }}</div>
+                            </div>
+
+                            <div style="margin-bottom:20px">
+                                <label style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--text-muted);display:block;margin-bottom:8px">描述</label>
+                                <textarea v-model="editForm.desc" class="codex-input" rows="3"></textarea>
+                            </div>
+
+                            <div style="margin-bottom:20px">
+                                <label style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--text-muted);display:block;margin-bottom:8px">场景 (顿号/逗号分隔)</label>
+                                <input v-model="editForm.scene" type="text" class="codex-input" placeholder="例如: 庆祝、表达开心">
+                            </div>
+
+                            <div style="margin-bottom:20px">
+                                <label style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--text-muted);display:block;margin-bottom:8px">标签 (逗号分隔)</label>
+                                <input v-model="editForm.tags" type="text" class="codex-input" placeholder="例如: 可爱, 搞怪, 稀有">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="modal-actions">
+                    <template v-if="!isEditing">
+                        <a href="#" @click.prevent="downloadImage(previewItem)" class="codex-btn" style="flex:1">
+                            <svg style="width:16px;height:16px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                            </svg>
+                            下载
+                        </a>
+                        <button @click="startEdit" class="codex-btn" style="flex:1">
+                            <svg style="width:16px;height:16px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
+                            </svg>
+                            编辑
+                        </button>
+                        <button @click="toggleScope(previewItem, previewItem?.scope_mode === 'local' ? 'public' : 'local')" class="codex-btn" style="flex:1">
+                            {{ previewItem?.scope_mode === 'local' ? '解除限定' : '限定本群' }}
+                        </button>
+                        <button @click="deleteImage(previewItem)" class="codex-btn danger" style="flex:1">
+                            <svg style="width:16px;height:16px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                            </svg>
+                            删除
+                        </button>
+                        <button @click="deleteImage(previewItem, true)" class="codex-btn danger" style="flex:1" title="删除并加入黑名单">
+                            <svg style="width:16px;height:16px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/>
+                            </svg>
+                            拉黑
+                        </button>
+                    </template>
+                    <template v-else>
+                        <button @click="cancelEdit" class="codex-btn" style="flex:1">取消</button>
+                        <button @click="saveEdit" class="codex-btn primary" style="flex:1">保存</button>
+                    </template>
+                </div>
+            </div>
+        </div>
+
+        <div v-if="uploadOpen" class="modal-overlay" @click.self="closeUploadModal">
+            <div class="modal-panel" style="max-width:600px">
+                <div class="modal-panel-corner-bl"></div>
+                <div class="modal-panel-corner-br"></div>
+
+                <div class="modal-header">
+                    <h2>添加表情包</h2>
+                    <button @click="closeUploadModal" class="modal-close">
+                        <svg style="width:20px;height:20px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                    </button>
+                </div>
+
+                <form @submit.prevent="submitUpload" style="padding:24px">
+                    <div class="upload-area" @click="$refs.fileInput.click()">
+                        <input
+                            ref="fileInput"
+                            type="file"
+                            accept="image/*"
+                            @change="handleFileSelect"
+                            style="display:none"
+                        >
+
+                        <div v-if="uploadPreviewUrl" style="display:flex;align-items:center;gap:20px">
+                            <img :src="uploadPreviewUrl" class="upload-preview">
+                            <div style="text-align:left">
+                                <p style="margin:0 0 8px 0;color:var(--gold-primary);font-family:'Cinzel',serif">{{ uploadFile?.name }}</p>
+                                <p style="margin:0;color:var(--text-muted);font-size:0.9rem">{{ (uploadFile?.size / 1024).toFixed(1) }} KB</p>
+                            </div>
+                        </div>
+
+                        <div v-else>
+                            <svg style="width:48px;height:48px;margin:0 auto 16px auto;color:var(--gold-dim);opacity:0.5;display:block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                            </svg>
+                            <p style="margin:0;color:var(--text-muted);font-family:'Cinzel',serif;text-align:center">点击上传图片</p>
+                        </div>
+                    </div>
+
+                    <div style="margin-top:20px">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                            <label style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--text-muted)">分类 *</label>
+                            <button
+                                v-if="uploadFile"
+                                type="button"
+                                @click.prevent="analyzeImage"
+                                :disabled="analyzing || !uploadFile"
+                                class="codex-btn"
+                                style="font-size:0.7rem;padding:6px 12px;min-height:auto"
+                            >
+                                <svg v-if="!analyzing" style="width:14px;height:14px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                                </svg>
+                                <svg v-else style="width:14px;height:14px;animation:spin 1s linear infinite" fill="none" viewBox="0 0 24 24">
+                                    <circle style="opacity:0.25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                    <path style="opacity:0.75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                <span v-if="analyzing">分析中...</span>
+                                <span v-else>自动识别</span>
+                            </button>
+                        </div>
+                        <select v-model="uploadForm.emotion" class="codex-input" required>
+                            <option value="">请选择分类...</option>
+                            <option v-for="emo in availableEmotions" :key="emo.key" :value="emo.key">{{ emo.name || emo.key }}</option>
+                        </select>
+                    </div>
+
+                    <div v-if="analysisScenes.length" class="analysis-result" style="margin-top:16px">
+                        <div class="analysis-result-head">
+                            <div class="analysis-result-title">识别到的场景</div>
+                            <div class="analysis-result-subtitle">点击标签可添加/移除到"场景"输入框</div>
+                        </div>
+                        <div class="item-tags" style="margin-top:10px">
+                            <button
+                                v-for="scene in analysisScenes"
+                                :key="scene"
+                                type="button"
+                                class="tag scene-tag scene-tag-btn"
+                                :class="{ active: isSceneSelected(scene) }"
+                                @click="toggleScene(scene)"
+                            >
+                                {{ scene }}
+                            </button>
+                        </div>
+                    </div>
+
+                    <div style="margin-top:16px">
+                        <label style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--text-muted);display:block;margin-bottom:8px">场景</label>
+                        <input v-model="uploadForm.scene" type="text" class="codex-input" placeholder="例如: 办公室、聊天窗口、深夜">
+                        <p style="margin:8px 0 0;font-size:0.8rem;color:var(--text-muted)">支持使用中文顿号、逗号或分号分隔。</p>
+                    </div>
+
+                    <div style="margin-top:16px">
+                        <label style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--text-muted);display:block;margin-bottom:8px">标签</label>
+                        <input v-model="uploadForm.tags" type="text" class="codex-input" placeholder="例如: 可爱, 搞怪">
+                    </div>
+
+                    <div style="margin-top:16px">
+                        <label style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--text-muted);display:block;margin-bottom:8px">描述</label>
+                        <textarea v-model="uploadForm.desc" class="codex-input" rows="2" placeholder="关于此表情包的描述..."></textarea>
+                    </div>
+
+                    <div v-if="uploadError" style="color:#ef4444;font-size:0.875rem;border:1px solid rgba(239,68,68,0.3);background:rgba(239,68,68,0.1);padding:12px;margin-top:16px">
+                        {{ uploadError }}
+                    </div>
+
+                    <div style="display:flex;gap:12px;margin-top:24px;padding-top:20px;border-top:1px solid var(--gold-dark)">
+                        <button type="button" @click="closeUploadModal" class="codex-btn" style="flex:1">取消</button>
+                        <button type="submit" :disabled="uploading || !uploadFile" class="codex-btn primary" style="flex:1">
+                            <span v-if="uploading">上传中...</span>
+                            <span v-else>确认添加</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div v-if="batchUploadOpen" class="modal-overlay" @click.self="closeBatchUploadModal">
+            <div class="modal-panel" style="max-width:700px">
+                <div class="modal-panel-corner-bl"></div>
+                <div class="modal-panel-corner-br"></div>
+
+                <div class="modal-header">
+                    <h2>批量导入表情包</h2>
+                    <button @click="closeBatchUploadModal" class="modal-close">
+                        <svg style="width:20px;height:20px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                    </button>
+                </div>
+
+                <form @submit.prevent="submitBatchUpload" style="padding:24px">
+                    <div v-if="!batchTaskId">
+                        <div class="upload-area" @click="$refs.batchFileInput.click()" style="min-height:150px">
+                            <input
+                                ref="batchFileInput"
+                                type="file"
+                                accept="image/*"
+                                multiple
+                                @change="handleBatchFileSelect"
+                                style="display:none"
+                            >
+
+                            <div v-if="batchFiles.length">
+                                <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+                                    <svg style="width:32px;height:32px;color:var(--gold-primary)" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                                    </svg>
+                                    <div>
+                                        <p style="margin:0 0 4px 0;color:var(--gold-primary);font-family:'Cinzel',serif">已选择 {{ batchFiles.length }} 张图片</p>
+                                        <p style="margin:0;color:var(--text-muted);font-size:0.85rem">{{ formatBatchSize() }}</p>
+                                    </div>
+                                </div>
+                                <div class="batch-file-list">
+                                    <div v-for="(file, idx) in batchFiles.slice(0, 8)" :key="idx" class="batch-file-item">
+                                        <img v-if="batchPreviews[idx]" :src="batchPreviews[idx]" class="batch-file-thumb">
+                                        <span class="batch-file-name">{{ file.name }}</span>
+                                    </div>
+                                    <div v-if="batchFiles.length > 8" class="batch-file-more">
+                                        还有 {{ batchFiles.length - 8 }} 张...
+                                    </div>
+                                </div>
+                                <button type="button" @click.stop="clearBatchFiles" class="codex-btn" style="margin-top:12px;font-size:0.8rem;padding:6px 12px">
+                                    清除选择
+                                </button>
+                            </div>
+
+                            <div v-else>
+                                <svg style="width:48px;height:48px;margin:0 auto 16px auto;color:var(--gold-dim);opacity:0.5;display:block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                                </svg>
+                                <p style="margin:0;color:var(--text-muted);font-family:'Cinzel',serif;text-align:center">点击或拖拽上传多张图片</p>
+                                <p style="margin:8px 0 0;color:var(--text-muted);font-size:0.85rem;text-align:center">支持 PNG, JPG, GIF, WEBP, BMP</p>
+                            </div>
+                        </div>
+
+                        <div style="margin-top:20px">
+                            <label style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--text-muted);display:block;margin-bottom:8px">默认分类 *</label>
+                            <select v-model="batchUploadForm.emotion" class="codex-input" :disabled="batchUploadForm.autoAnalyze" required>
+                                <option value="">请选择分类...</option>
+                                <option v-for="emo in availableEmotions" :key="emo.key" :value="emo.key">{{ emo.name || emo.key }}</option>
+                            </select>
+                            <p style="margin:8px 0 0;font-size:0.8rem;color:var(--text-muted)">图片会保存到此分类（自动分析时无需选择）</p>
+                        </div>
+
+                        <div style="margin-top:16px">
+                            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                                <input type="checkbox" v-model="batchUploadForm.autoAnalyze" class="codex-checkbox" :disabled="batchUploadForm.emotion !== ''">
+                                <span style="font-size:0.85rem;color:var(--text-main)">自动识别（使用AI分析每张图片并自动分类）</span>
+                            </label>
+                            <p v-if="batchUploadForm.emotion !== ''" style="margin:4px 0 0 24px;font-size:0.75rem;color:var(--gold-dim)">请先取消分类选择才能启用自动识别</p>
+                            <p v-if="batchUploadForm.autoAnalyze" style="margin:8px 0 0 24px;font-size:0.75rem;color:#f59e0b;padding:8px;background:rgba(245,158,11,0.1);border-radius:4px">⚠️ 自动分析会高并发调用VLM，请确认API支持并发或分批次分析</p>
+                        </div>
+
+                        <div v-if="batchUploadError" style="color:#ef4444;font-size:0.875rem;border:1px solid rgba(239,68,68,0.3);background:rgba(239,68,68,0.1);padding:12px;margin-top:16px">
+                            {{ batchUploadError }}
+                        </div>
+
+                        <div style="display:flex;gap:12px;margin-top:24px;padding-top:20px;border-top:1px solid var(--gold-dark)">
+                            <button type="button" @click="closeBatchUploadModal" class="codex-btn" style="flex:1">取消</button>
+                            <button type="submit" :disabled="batchUploading || batchFiles.length === 0" class="codex-btn primary" style="flex:1">
+                                <span v-if="batchUploading">上传中...</span>
+                                <span v-else>开始导入 ({{ batchFiles.length }}张)</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div v-else style="padding:24px">
+                        <div style="text-align:center;margin-bottom:24px">
+                            <div v-if="batchTaskStatus === 'processing'" class="batch-spinner">
+                                <svg style="width:48px;height:48px;animation:spin 1s linear infinite;color:var(--gold-primary)" fill="none" viewBox="0 0 24 24">
+                                    <circle style="opacity:0.25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                    <path style="opacity:0.75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                            </div>
+                            <div v-else-if="batchTaskStatus === 'completed'" style="color:#22c55e">
+                                <svg style="width:48px;height:48px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                                </svg>
+                            </div>
+                            <div v-else-if="batchTaskStatus === 'failed'" style="color:#ef4444">
+                                <svg style="width:48px;height:48px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                                </svg>
+                            </div>
+
+                            <h3 style="margin:16px 0 8px;font-size:1.2rem;color:var(--text-main)">
+                                <span v-if="batchTaskStatus === 'processing'">正在处理...</span>
+                                <span v-else-if="batchTaskStatus === 'completed'">导入完成</span>
+                                <span v-else-if="batchTaskStatus === 'failed'">导入失败</span>
+                            </h3>
+
+                            <p style="margin:0;color:var(--text-muted);font-size:0.9rem">
+                                {{ batchTaskProcessed }} / {{ batchTaskTotal }}
+                                <span v-if="batchTaskSuccess > 0" style="color:#22c55e"> ({{ batchTaskSuccess }} 成功)</span>
+                                <span v-if="batchTaskFailed > 0" style="color:#ef4444"> ({{ batchTaskFailed }} 失败)</span>
+                            </p>
+                        </div>
+
+                        <div v-if="batchTaskStatus === 'processing'" style="margin-bottom:16px">
+                            <div class="progress-bar">
+                                <div class="progress-fill" :style="{ width: (batchTaskProcessed / batchTaskTotal * 100) + '%' }"></div>
+                            </div>
+                        </div>
+
+                        <div v-if="batchUploadError && batchTaskStatus === 'failed'" style="color:#ef4444;font-size:0.875rem;text-align:center;margin-bottom:16px">
+                            {{ batchUploadError }}
+                        </div>
+
+                        <div v-if="batchTaskStatus === 'completed'" style="display:flex;gap:12px">
+                            <button type="button" @click="resetBatchUpload" class="codex-btn" style="flex:1">继续导入</button>
+                            <button type="button" @click="closeBatchUploadModal" class="codex-btn primary" style="flex:1">完成</button>
+                        </div>
+                        <div v-else-if="batchTaskStatus === 'failed'" style="display:flex;gap:12px">
+                            <button type="button" @click="resetBatchUpload" class="codex-btn" style="flex:1">重试</button>
+                            <button type="button" @click="closeBatchUploadModal" class="codex-btn" style="flex:1">关闭</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div v-if="emotionsOpen" class="modal-overlay" @click.self="closeEmotionsModal">
+            <div class="modal-panel" style="max-width:700px">
+                <div class="modal-panel-corner-bl"></div>
+                <div class="modal-panel-corner-br"></div>
+
+                <div class="modal-header">
+                    <h2>分类管理</h2>
+                    <button @click="closeEmotionsModal" class="modal-close">
+                        <svg style="width:20px;height:20px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                    </button>
+                </div>
+
+                <div style="padding:24px">
+                    <div style="background:var(--bg-main);padding:16px;margin-bottom:20px;border:1px solid var(--gold-dark)">
+                        <h3 style="margin:0 0 16px 0;font-size:0.9rem;color:var(--gold-primary);font-family:'Cinzel',serif">新增分类</h3>
+                        <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:12px">
+                            <input v-model="newEmotion.key" placeholder="标识 (如: happy)" class="codex-input">
+                            <input v-model="newEmotion.name" placeholder="名称 (如: 开心)" class="codex-input">
+                            <input v-model="newEmotion.desc" placeholder="描述 (可选)" class="codex-input">
+                            <button @click="addEmotion" :disabled="!newEmotion.key || addingEmotion" class="codex-btn primary">
+                                {{ addingEmotion ? '...' : '添加' }}
+                            </button>
+                        </div>
+                    </div>
+
+                    <div style="display:flex;flex-direction:column;gap:8px;max-height:400px;overflow-y:auto">
+                        <div
+                            v-for="cat in availableEmotions"
+                            :key="cat.key"
+                            style="display:flex;align-items:center;justify-content:space-between;padding:16px;background:var(--bg-slot);border:1px solid var(--gold-dark)"
+                        >
+                            <div>
+                                <div style="display:flex;align-items:center;gap:12px;margin-bottom:4px">
+                                    <span style="font-family:'Cinzel',serif;color:var(--gold-primary);font-size:1.1rem">{{ cat.name || cat.key }}</span>
+                                    <span style="font-size:0.75rem;color:var(--text-muted);background:var(--bg-main);padding:2px 8px;border:1px solid var(--gold-dark)">{{ cat.key }}</span>
+                                </div>
+                                <p style="margin:0;color:var(--text-muted);font-size:0.85rem;font-style:italic">{{ cat.desc || '暂无描述' }}</p>
+                            </div>
+                            <button
+                                @click="deleteEmotion(cat)"
+                                :disabled="deletingEmotionKey === cat.key"
+                                class="codex-btn danger"
+                            >
+                                {{ deletingEmotionKey === cat.key ? '...' : '删除' }}
+                            </button>
+                        </div>
+
+                        <div v-if="availableEmotions.length === 0" class="empty-state" style="padding:40px">
+                            <p>暂无分类</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div v-if="batchMoveOpen" class="modal-overlay" @click.self="closeBatchMoveModal">
+            <div class="modal-panel" style="max-width:400px">
+                <div class="modal-panel-corner-bl"></div>
+                <div class="modal-panel-corner-br"></div>
+
+                <div class="modal-header">
+                    <h2>批量移动</h2>
+                </div>
+
+                <div style="padding:24px">
+                    <p style="margin:0 0 16px 0;color:var(--text-muted)">已选择 {{ selectedImages.size }} 张图片</p>
+
+                    <label style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--text-muted);display:block;margin-bottom:8px">目标分类</label>
+                    <select v-model="batchTargetCategory" class="codex-input" style="margin-bottom:20px">
+                        <option value="">请选择...</option>
+                        <option v-for="cat in categories" :key="cat.key" :value="cat.key">{{ cat.name }}</option>
+                    </select>
+
+                    <div style="display:flex;gap:12px">
+                        <button @click="closeBatchMoveModal" class="codex-btn" style="flex:1">取消</button>
+                        <button @click="confirmBatchMove" :disabled="!batchTargetCategory" class="codex-btn primary" style="flex:1">确认移动</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div v-if="batchScopeOpen" class="modal-overlay" @click.self="closeBatchScopeModal">
+            <div class="modal-panel" style="max-width:400px">
+                <div class="modal-panel-corner-bl"></div>
+                <div class="modal-panel-corner-br"></div>
+
+                <div class="modal-header">
+                    <h2>批量作用域</h2>
+                </div>
+
+                <div style="padding:24px">
+                    <p style="margin:0 0 16px 0;color:var(--text-muted)">已选择 {{ selectedImages.size }} 张图片</p>
+
+                    <label style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--text-muted);display:block;margin-bottom:8px">目标作用域</label>
+                    <select v-model="batchScopeMode" class="codex-input" style="margin-bottom:20px">
+                        <option value="public">public / 公共</option>
+                        <option value="local">local / 本群限定</option>
+                    </select>
+                    <div class="form-hint">批量设为 local 时，缺少来源群信息的图片会被自动跳过。</div>
+
+                    <div style="display:flex;gap:12px;margin-top:20px">
+                        <button @click="closeBatchScopeModal" class="codex-btn" style="flex:1">取消</button>
+                        <button @click="confirmBatchScope" class="codex-btn primary" style="flex:1">确认设置</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div v-if="isBatchMode && selectedImages.size > 0" class="batch-bar">
+            <span style="font-family:'Cinzel',serif;color:var(--gold-bright);font-size:1rem">已选择 {{ selectedImages.size }} 张</span>
+            <div style="width:1px;height:24px;background:var(--gold-dark)"></div>
+            <button @click="selectAll" class="codex-btn" style="font-size:0.8rem;padding:8px 16px">全选</button>
+            <button @click="openBatchMoveModal" class="codex-btn" style="font-size:0.8rem;padding:8px 16px">移动</button>
+            <button @click="handleBatchDelete" class="codex-btn danger" style="font-size:0.8rem;padding:8px 16px">删除</button>
+            <button @click="openBatchScopeModal" class="codex-btn" style="font-size:0.8rem;padding:8px 16px">作用域</button>
+            <div style="width:1px;height:24px;background:var(--gold-dark)"></div>
+            <button @click="toggleBatchMode" class="codex-btn icon-btn" style="width:32px;height:32px">
+                <svg style="width:16px;height:16px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+            </button>
+        </div>`;
+
+createApp({
+    setup() {
+        const images = ref([]);
+        const categories = ref([]);
+        const stats = reactive({ total: 0, categories: 0, today: 0 });
+        const loading = ref(true);
+        const searchQuery = ref('');
+        const selectedCategory = ref('');
+        const sortBy = ref('newest');
+        const currentPage = ref(1);
+        const pageSize = ref(30);
+        const total = ref(0);
+
+        const previewOpen = ref(false);
+        const previewItem = ref(null);
+        const isEditing = ref(false);
+        const editForm = reactive({ category: '', tags: '', scene: '', desc: '', scope_mode: 'public' });
+
+        const isBatchMode = ref(false);
+        const selectedImages = ref(new Set());
+        const batchMoveOpen = ref(false);
+        const batchTargetCategory = ref('');
+        const batchScopeOpen = ref(false);
+        const batchScopeMode = ref('public');
+
+        const uploadOpen = ref(false);
+        const uploading = ref(false);
+        const uploadFile = ref(null);
+        const uploadPreviewUrl = ref(null);
+        const uploadError = ref(null);
+        const uploadForm = reactive({ emotion: '', tags: '', scene: '', desc: '' });
+        const availableEmotions = ref([]);
+        const analysisScenes = ref([]);
+
+        const batchUploadOpen = ref(false);
+        const batchUploading = ref(false);
+        const batchFiles = ref([]);
+        const batchPreviews = ref([]);
+        const batchUploadError = ref(null);
+        const batchUploadForm = reactive({ emotion: '', autoAnalyze: false });
+        const batchTaskId = ref(null);
+        const batchTaskStatus = ref(null);
+        const batchTaskTotal = ref(0);
+        const batchTaskProcessed = ref(0);
+        const batchTaskSuccess = ref(0);
+        const batchTaskFailed = ref(0);
+        let batchPollInterval = null;
+
+        const parseSceneList = (rawText) => {
+            if (!rawText) return [];
+            const seen = new Set();
+            return String(rawText)
+                .split(/[，,、;；\n\t]+/)
+                .map((item) => item.trim())
+                .filter((item) => {
+                    if (!item || seen.has(item)) return false;
+                    seen.add(item);
+                    return true;
+                });
+        };
+
+        const toggleScene = (scene) => {
+            const sceneList = parseSceneList(uploadForm.scene);
+            if (sceneList.includes(scene)) {
+                uploadForm.scene = sceneList.filter((item) => item !== scene).join('、');
+                return;
+            }
+            uploadForm.scene = [...sceneList, scene].join('、');
+        };
+
+        const isSceneSelected = (scene) => parseSceneList(uploadForm.scene).includes(scene);
+
+        const formatOriginTarget = (target) => {
+            const raw = String(target || '').trim();
+            if (!raw) return '未记录';
+            if (raw.startsWith('group:')) return '群 ' + raw.slice(6);
+            if (raw.startsWith('user:')) return '用户 ' + raw.slice(5);
+            return raw;
+        };
+
+        const getScopeLabel = (scopeMode) => (
+            String(scopeMode || 'public').toLowerCase() === 'local' ? '本群限定' : '公共'
+        );
+
+        const emotionsOpen = ref(false);
+        const newEmotion = reactive({ key: '', name: '', desc: '' });
+        const addingEmotion = ref(false);
+        const deletingEmotionKey = ref('');
+
+        const searchTimeout = ref(null);
+
+        const isDarkTheme = ref(true);
+        const theme = ref('dark');
+
+        const bridge = window.AstrBotPluginPage;
+
+        const imageDataUrls = reactive({});
+
+        const loadImageData = async (hash) => {
+            if (!hash || imageDataUrls[hash]) return;
+            try {
+                const data = await bridge.apiGet('image-data', { hash });
+                if (data && data.url) {
+                    imageDataUrls[hash] = data.url;
+                }
+            } catch (e) {
+                console.error('Failed to load image:', hash, e);
+            }
+        };
+
+        const downloadImage = async (item) => {
+            if (!item?.hash) return;
+            const dataUrl = imageDataUrls[item.hash];
+            if (!dataUrl) return;
+            const a = document.createElement('a');
+            a.href = dataUrl;
+            a.download = (item.desc || item.hash) + '.png';
+            a.click();
+        };
+
+        const fileToBase64 = (file) => new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
+
+        const apiFetch = async (url, options = {}) => {
+            const urlStr = String(url).replace(/^\/?api\//, '');
+            const [path, queryString] = urlStr.split('?');
+            const endpoint = path.replace(/\/$/, '');
+
+            const params = {};
+            if (queryString) {
+                const sp = new URLSearchParams(queryString);
+                for (const [k, v] of sp) { params[k] = v; }
+            }
+
+            const method = (options.method || 'GET').toUpperCase();
+            let body = options.body;
+
+            try {
+                let data;
+
+                if (method === 'POST' || method === 'PUT' || method === 'DELETE') {
+                    if (body instanceof FormData) {
+                        const file = body.get('file');
+                        if (file instanceof File) {
+                            data = await bridge.upload(endpoint, file);
+                        } else {
+                            const json = {};
+                            for (const [k, v] of body.entries()) {
+                                if (v instanceof File) {
+                                    json[k] = await fileToBase64(v);
+                                    json[k + '_name'] = v.name;
+                                } else {
+                                    json[k] = v;
+                                }
+                            }
+                            data = await bridge.apiPost(endpoint, json);
+                        }
+                    } else {
+                        if (typeof body === 'string') {
+                            try { body = JSON.parse(body); } catch(e) {}
+                        }
+                        data = await bridge.apiPost(endpoint, body || {});
+                    }
+                } else {
+                    data = await bridge.apiGet(endpoint, Object.keys(params).length ? params : undefined);
+                }
+
+                return {
+                    ok: true,
+                    status: 200,
+                    json: async () => data,
+                    text: async () => (typeof data === 'string' ? data : JSON.stringify(data)),
+                };
+            } catch (e) {
+                return {
+                    ok: false,
+                    status: 500,
+                    json: async () => { throw e; },
+                    text: async () => e.message,
+                };
+            }
+        };
+
+        const fetchStats = async () => {
+            try {
+                const res = await apiFetch('api/stats');
+                const data = await res.json();
+                Object.assign(stats, data.stats || {});
+            } catch (e) {
+                console.error(e);
+            }
+        };
+
+        const fetchImages = async (page = 1) => {
+            loading.value = true;
+            try {
+                const params = new URLSearchParams({
+                    page: page.toString(),
+                    size: pageSize.value.toString(),
+                    q: searchQuery.value,
+                    category: selectedCategory.value,
+                    sort: sortBy.value,
+                });
+                const res = await apiFetch('api/images?' + params.toString());
+                const data = await res.json();
+                const nextImages = data.images || [];
+                const nextTotal = Number(data.total || 0);
+                const lastPage = Math.max(1, Math.ceil(nextTotal / pageSize.value));
+
+                if (page > lastPage && nextTotal > 0) {
+                    return await fetchImages(lastPage);
+                }
+
+                currentPage.value = page;
+                images.value = nextImages;
+                nextImages.forEach(img => loadImageData(img.hash));
+                total.value = nextTotal;
+                categories.value = data.categories || [];
+                if (selectedImages.value.size > 0) {
+                    const visibleHashes = new Set(nextImages.map((img) => img.hash));
+                    selectedImages.value = new Set(
+                        Array.from(selectedImages.value).filter((hash) => visibleHashes.has(hash))
+                    );
+                }
+                return nextImages;
+            } catch (e) {
+                console.error(e);
+                return [];
+            } finally {
+                loading.value = false;
+            }
+        };
+
+        const fetchEmotions = async () => {
+            try {
+                const res = await apiFetch('api/emotions');
+                const data = await res.json();
+                availableEmotions.value = data.emotions || [];
+            } catch (e) {
+                console.error(e);
+            }
+        };
+
+        const loadAll = async () => {
+            await fetchStats();
+            await fetchEmotions();
+            await fetchImages(1);
+        };
+
+        const debouncedSearch = () => {
+            clearTimeout(searchTimeout.value);
+            searchTimeout.value = setTimeout(() => fetchImages(1), 400);
+        };
+
+        const prevPage = () => currentPage.value > 1 && fetchImages(currentPage.value - 1);
+        const nextPage = () => currentPage.value * pageSize.value < total.value && fetchImages(currentPage.value + 1);
+
+        const openPreview = (img) => {
+            previewItem.value = img;
+            previewOpen.value = true;
+        };
+
+        const closePreview = () => {
+            previewOpen.value = false;
+            previewItem.value = null;
+            isEditing.value = false;
+        };
+
+        const prevImage = () => {
+            if (!previewItem.value) return;
+            const idx = images.value.findIndex((i) => i.hash === previewItem.value.hash);
+            if (idx > 0) previewItem.value = images.value[idx - 1];
+        };
+
+        const nextImage = () => {
+            if (!previewItem.value) return;
+            const idx = images.value.findIndex((i) => i.hash === previewItem.value.hash);
+            if (idx < images.value.length - 1) previewItem.value = images.value[idx + 1];
+        };
+
+        const handleKeydown = (e) => {
+            if (!previewOpen.value) return;
+            if (isEditing.value) return;
+            if (e.key === 'ArrowLeft') prevImage();
+            if (e.key === 'ArrowRight') nextImage();
+            if (e.key === 'Escape') closePreview();
+        };
+
+        const startEdit = () => {
+            if (!previewItem.value) return;
+            Object.assign(editForm, {
+                category: previewItem.value.category,
+                tags: (previewItem.value.tags || []).join(', '),
+                scene: (previewItem.value.scenes || []).join('、'),
+                desc: previewItem.value.desc,
+                scope_mode: previewItem.value.scope_mode || 'public',
+            });
+            isEditing.value = true;
+        };
+
+        const cancelEdit = () => {
+            isEditing.value = false;
+        };
+
+        const saveEdit = async () => {
+            if (!previewItem.value) return;
+            try {
+                const res = await apiFetch('api/images/' + previewItem.value.hash, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(editForm),
+                });
+                const data = await res.json();
+                if (data.success) {
+                    isEditing.value = false;
+                    const refreshedImages = await fetchImages(currentPage.value);
+                    const refreshedItem = refreshedImages.find((item) => item.hash === previewItem.value.hash);
+                    if (refreshedItem) {
+                        previewItem.value = refreshedItem;
+                    } else {
+                        previewItem.value.category = editForm.category;
+                        previewItem.value.tags = editForm.tags.split(',').map((t) => t.trim()).filter((t) => t);
+                        previewItem.value.scenes = parseSceneList(editForm.scene);
+                        previewItem.value.desc = editForm.desc;
+                        previewItem.value.scope_mode = editForm.scope_mode || 'public';
+                    }
+                    await fetchStats();
+                } else {
+                    alert(data.error || '保存失败');
+                }
+            } catch (e) {
+                alert('保存出错: ' + e.message);
+            }
+        };
+
+        const deleteImage = async (img, blacklist = false) => {
+            const msg = blacklist
+                ? '确定要删除并拉黑这张图片吗？\n拉黑后将不再自动收集此图片。'
+                : '确定要删除这张图片吗？此操作无法撤销。';
+            if (!confirm(msg)) return;
+            try {
+                const url = blacklist ? 'api/images/' + img.hash + '?blacklist=true' : 'api/images/' + img.hash;
+                const res = await apiFetch(url, { method: 'DELETE' });
+                if (res.ok) {
+                    closePreview();
+                    if (images.value.length === 1 && currentPage.value > 1) {
+                        currentPage.value--;
+                    }
+                    fetchImages(currentPage.value);
+                    fetchStats();
+                } else {
+                    alert('删除失败');
+                }
+            } catch (e) {
+                alert('操作失败');
+            }
+        };
+
+        const toggleBatchMode = () => {
+            isBatchMode.value = !isBatchMode.value;
+            selectedImages.value.clear();
+        };
+
+        const toggleSelection = (img) => {
+            if (selectedImages.value.has(img.hash)) {
+                selectedImages.value.delete(img.hash);
+            } else {
+                selectedImages.value.add(img.hash);
+            }
+        };
+
+        const selectAll = () => {
+            if (selectedImages.value.size === images.value.length) {
+                selectedImages.value.clear();
+            } else {
+                images.value.forEach((img) => selectedImages.value.add(img.hash));
+            }
+        };
+
+        const handleBatchDelete = async () => {
+            if (selectedImages.value.size === 0) return;
+            if (!confirm('确定要删除选中的 ' + selectedImages.value.size + ' 张图片吗？')) return;
+
+            try {
+                const res = await apiFetch('api/images/batch/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ hashes: Array.from(selectedImages.value) }),
+                });
+                const data = await res.json();
+                if (data.success) {
+                    selectedImages.value.clear();
+                    fetchImages(currentPage.value);
+                    fetchStats();
+                } else {
+                    alert(data.error || '删除失败');
+                }
+            } catch (e) {
+                alert('操作失败: ' + e.message);
+            }
+        };
+
+        const openBatchMoveModal = () => {
+            if (selectedImages.value.size === 0) return;
+            batchTargetCategory.value = '';
+            batchMoveOpen.value = true;
+        };
+
+        const closeBatchMoveModal = () => {
+            batchMoveOpen.value = false;
+        };
+
+        const openBatchScopeModal = () => {
+            if (selectedImages.value.size === 0) return;
+            batchScopeMode.value = 'public';
+            batchScopeOpen.value = true;
+        };
+
+        const closeBatchScopeModal = () => {
+            batchScopeOpen.value = false;
+        };
+
+        const confirmBatchMove = async () => {
+            if (!batchTargetCategory.value) return;
+            try {
+                const res = await apiFetch('api/images/batch/move', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        hashes: Array.from(selectedImages.value),
+                        category: batchTargetCategory.value,
+                    }),
+                });
+                const data = await res.json();
+                if (data.success) {
+                    batchMoveOpen.value = false;
+                    selectedImages.value.clear();
+                    isBatchMode.value = false;
+                    fetchImages(currentPage.value);
+                    fetchStats();
+                } else {
+                    alert(data.error || '转移失败');
+                }
+            } catch (e) {
+                alert('操作失败: ' + e.message);
+            }
+        };
+
+        const confirmBatchScope = async () => {
+            if (!batchScopeMode.value) return;
+            try {
+                const res = await apiFetch('api/images/batch/scope', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        hashes: Array.from(selectedImages.value),
+                        scope_mode: batchScopeMode.value,
+                    }),
+                });
+                const data = await res.json();
+                if (data.success) {
+                    batchScopeOpen.value = false;
+                    selectedImages.value.clear();
+                    isBatchMode.value = false;
+                    await fetchImages(currentPage.value);
+                    if (Number(data.skipped || 0) > 0) {
+                        alert('已更新 ' + (data.count || 0) + ' 张，另有 ' + data.skipped + ' 张缺少来源群信息，无法设为 local。');
+                    }
+                } else {
+                    alert(data.error || '作用域设置失败');
+                }
+            } catch (e) {
+                alert('操作失败: ' + e.message);
+            }
+        };
+
+        const toggleScope = async (img, scopeMode) => {
+            if (!img) return;
+            try {
+                const res = await apiFetch('api/images/' + img.hash, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ scope_mode: scopeMode }),
+                });
+                const data = await res.json();
+                if (data.success) {
+                    if (previewItem.value && previewItem.value.hash === img.hash) {
+                        previewItem.value.scope_mode = scopeMode;
+                    }
+                    await fetchImages(currentPage.value);
+                } else if (data.error === 'Origin target missing') {
+                    alert('该图片缺少来源群信息，无法设置为 local。');
+                } else {
+                    alert(data.error || '作用域更新失败');
+                }
+            } catch (e) {
+                alert('操作失败: ' + e.message);
+            }
+        };
+
+        const openUploadModal = () => {
+            uploadOpen.value = true;
+            uploadFile.value = null;
+            uploadPreviewUrl.value = null;
+            uploadError.value = null;
+            Object.assign(uploadForm, {
+                emotion: selectedCategory.value || '',
+                tags: '',
+                scene: '',
+                desc: '',
+            });
+            analysisScenes.value = [];
+            fetchEmotions();
+        };
+
+        const closeUploadModal = () => {
+            uploadOpen.value = false;
+            analysisScenes.value = [];
+        };
+
+        const openBatchUploadModal = () => {
+            batchUploadOpen.value = true;
+            batchFiles.value = [];
+            batchPreviews.value = [];
+            batchUploadError.value = null;
+            batchTaskId.value = null;
+            batchTaskStatus.value = null;
+            Object.assign(batchUploadForm, {
+                emotion: selectedCategory.value || '',
+                autoAnalyze: false,
+            });
+            fetchEmotions();
+        };
+
+        const closeBatchUploadModal = () => {
+            batchUploadOpen.value = false;
+            if (batchPollInterval) {
+                clearInterval(batchPollInterval);
+                batchPollInterval = null;
+            }
+        };
+
+        const clearBatchFiles = () => {
+            batchFiles.value = [];
+            batchPreviews.value = [];
+        };
+
+        const handleBatchFileSelect = (e) => {
+            const files = Array.from(e.target.files).filter(f => f.type.startsWith('image/'));
+            if (files.length === 0) return;
+            batchFiles.value = files;
+            batchPreviews.value = files.map(f => URL.createObjectURL(f));
+        };
+
+        const formatBatchSize = () => {
+            const totalSize = batchFiles.value.reduce((sum, f) => sum + f.size, 0);
+            if (totalSize < 1024) return totalSize + ' B';
+            if (totalSize < 1024 * 1024) return (totalSize / 1024).toFixed(1) + ' KB';
+            return (totalSize / (1024 * 1024)).toFixed(1) + ' MB';
+        };
+
+        const submitBatchUpload = async () => {
+            if (batchFiles.value.length === 0) return;
+            if (!batchUploadForm.emotion && !batchUploadForm.autoAnalyze) {
+                batchUploadError.value = '请选择分类或启用自动识别';
+                return;
+            }
+            batchUploading.value = true;
+            batchUploadError.value = null;
+            try {
+                const formData = new FormData();
+                for (const file of batchFiles.value) {
+                    formData.append('files', file);
+                }
+                if (batchUploadForm.emotion) {
+                    formData.append('category', batchUploadForm.emotion);
+                }
+                formData.append('auto_analyze', String(batchUploadForm.autoAnalyze));
+
+                const res = await apiFetch('api/images/batch/upload', { method: 'POST', body: formData });
+                const data = await res.json();
+                if (data.success) {
+                    batchTaskId.value = data.task_id;
+                    batchTaskTotal.value = data.total;
+                    batchTaskProcessed.value = 0;
+                    batchTaskSuccess.value = 0;
+                    batchTaskFailed.value = 0;
+                    startBatchStatusPoll();
+                } else {
+                    batchUploadError.value = data.error || '上传失败';
+                }
+            } catch (e) {
+                batchUploadError.value = '上传出错';
+            } finally {
+                batchUploading.value = false;
+            }
+        };
+
+        const startBatchStatusPoll = () => {
+            if (batchPollInterval) clearInterval(batchPollInterval);
+            batchPollInterval = setInterval(async () => {
+                if (!batchTaskId.value) return;
+                try {
+                    const res = await apiFetch('api/batch/upload/' + batchTaskId.value);
+                    const data = await res.json();
+                    if (data.success) {
+                        batchTaskStatus.value = data.status;
+                        batchTaskProcessed.value = data.processed;
+                        batchTaskSuccess.value = Number(data.success_count || 0);
+                        batchTaskFailed.value = Number(data.failed_count || 0);
+                        if (data.status === 'completed' || data.status === 'failed') {
+                            clearInterval(batchPollInterval);
+                            batchPollInterval = null;
+                            if (data.status === 'completed') {
+                                fetchImages(1);
+                                fetchStats();
+                            } else {
+                                batchUploadError.value = data.error || '批量导入失败';
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error('Batch status poll error:', e);
+                }
+            }, 1000);
+        };
+
+        const resetBatchUpload = () => {
+            batchTaskId.value = null;
+            batchTaskStatus.value = null;
+            batchFiles.value = [];
+            batchPreviews.value = [];
+            batchUploadError.value = null;
+        };
+
+        const handleFileSelect = (e) => {
+            const file = e.target.files[0];
+            if (file && file.type.startsWith('image/')) {
+                uploadFile.value = file;
+                uploadPreviewUrl.value = URL.createObjectURL(file);
+                uploadError.value = null;
+                uploadForm.scene = '';
+                analysisScenes.value = [];
+            }
+        };
+
+        const submitUpload = async () => {
+            if (!uploadFile.value) return;
+            uploading.value = true;
+            try {
+                const uploadRes = await bridge.upload('images/upload', uploadFile.value);
+                if (!uploadRes.success || !uploadRes.hash) {
+                    uploadError.value = uploadRes.error || '上传失败';
+                    return;
+                }
+                await bridge.apiPost('images/update', {
+                    hash: uploadRes.hash,
+                    category: uploadForm.emotion,
+                    tags: uploadForm.tags,
+                    scene: uploadForm.scene,
+                    desc: uploadForm.desc,
+                });
+                closeUploadModal();
+                fetchImages(1);
+                fetchStats();
+            } catch (e) {
+                uploadError.value = '上传出错';
+            } finally {
+                uploading.value = false;
+            }
+        };
+
+        const useImageAnalyzer = () => {
+            const isAnalyzing = ref(false);
+            const lastAnalysisResult = ref(null);
+
+            const analyze = async (file) => {
+                if (!file) {
+                    throw new Error('请先选择图片');
+                }
+
+                isAnalyzing.value = true;
+                console.log('[Analyzer] 开始分析图片:', file.name);
+
+                try {
+                    const uploadRes = await bridge.upload('images/upload', file);
+                    if (!uploadRes.success || !uploadRes.hash) {
+                        throw new Error(uploadRes.error || '上传失败');
+                    }
+
+                    const res = await apiFetch('api/analyze', {
+                        method: 'POST',
+                        body: JSON.stringify({ hash: uploadRes.hash }),
+                    });
+                    const data = await res.json();
+
+                    if (!data.success) {
+                        throw new Error(data.error || '分析失败');
+                    }
+
+                    lastAnalysisResult.value = data;
+                    console.log('[Analyzer] 分析成功:', data);
+                    return data;
+                } catch (e) {
+                    console.error('[Analyzer] 分析失败:', e);
+                    throw e;
+                } finally {
+                    isAnalyzing.value = false;
+                }
+            };
+
+            const applyToForm = (data, form, categories = []) => {
+                const result = { filled: false, fields: [] };
+
+                if (data.category) {
+                    const exists = categories.some(e => e.key === data.category);
+                    if (exists) {
+                        form.emotion = data.category;
+                        result.fields.push('category');
+                    } else if (categories.length > 0) {
+                        console.warn('[Analyzer] 分类不存在，使用默认:', data.category);
+                        form.emotion = categories[0].key;
+                        result.fields.push('category');
+                    }
+                }
+
+                if (data.tags && data.tags.length > 0) {
+                    const existingTags = form.tags ? form.tags.split(',').map(t => t.trim()).filter(t => t) : [];
+                    const newTags = data.tags.filter(t => !existingTags.includes(t));
+                    if (newTags.length > 0) {
+                        form.tags = [...existingTags, ...newTags].join(', ');
+                        result.fields.push('tags');
+                    }
+                }
+
+                if (Array.isArray(data.scenes) && data.scenes.length > 0) {
+                    form.scene = parseSceneList(data.scenes.join('、')).join('、');
+                    result.fields.push('scenes');
+                }
+
+                if (data.description && !form.desc) {
+                    form.desc = data.description;
+                    result.fields.push('desc');
+                }
+
+                result.filled = result.fields.length > 0;
+                console.log('[Analyzer] 表单填充结果:', result);
+                return result;
+            };
+
+            return {
+                isAnalyzing,
+                lastAnalysisResult,
+                analyze,
+                applyToForm,
+            };
+        };
+
+        const imageAnalyzer = useImageAnalyzer();
+        const analyzing = imageAnalyzer.isAnalyzing;
+
+        const analyzeImage = async () => {
+            uploadError.value = null;
+
+            try {
+                const data = await imageAnalyzer.analyze(uploadFile.value);
+                analysisScenes.value = Array.isArray(data.scenes) ? data.scenes : [];
+                const result = imageAnalyzer.applyToForm(data, uploadForm, availableEmotions.value);
+
+                if (!result.filled) {
+                    uploadError.value = '未能识别有效信息';
+                }
+            } catch (e) {
+                uploadError.value = e.message || '分析失败';
+            }
+        };
+
+        const openEmotionsModal = () => {
+            emotionsOpen.value = true;
+            fetchEmotions();
+        };
+
+        const closeEmotionsModal = () => {
+            emotionsOpen.value = false;
+        };
+
+        const addEmotion = async () => {
+            const key = String(newEmotion.key || '').trim();
+            if (!key) return;
+            addingEmotion.value = true;
+            try {
+                const newCat = {
+                    key,
+                    name: String(newEmotion.name || '').trim(),
+                    desc: String(newEmotion.desc || '').trim(),
+                };
+                const currentList = [...availableEmotions.value];
+                const existingIdx = currentList.findIndex((c) => c.key === newCat.key);
+                if (existingIdx >= 0) {
+                    if (!confirm('分类 ' + newCat.key + ' 已存在，确定要更新吗？')) {
+                        addingEmotion.value = false;
+                        return;
+                    }
+                    currentList[existingIdx] = newCat;
+                } else {
+                    currentList.push(newCat);
+                }
+
+                const res = await apiFetch('api/categories', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ categories: currentList }),
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    await fetchEmotions();
+                    await fetchImages(1);
+                    newEmotion.key = '';
+                    newEmotion.name = '';
+                    newEmotion.desc = '';
+                } else {
+                    alert(data.error || '添加失败');
+                }
+            } catch (e) {
+                alert('操作失败: ' + e.message);
+            } finally {
+                addingEmotion.value = false;
+            }
+        };
+
+        const deleteEmotion = async (cat) => {
+            if (!cat?.key) return;
+            if (!confirm('确定要删除分类 ' + cat.key + ' 吗？该分类下的图片会被直接删除且无法恢复。'))
+                return;
+            deletingEmotionKey.value = cat.key;
+            try {
+                const res = await apiFetch('api/categories/' + encodeURIComponent(cat.key), {
+                    method: 'DELETE',
+                });
+                const data = await res.json().catch(() => ({}));
+                if (res.ok && data.success) {
+                    if (selectedCategory.value === cat.key) selectedCategory.value = '';
+                    if (editForm.category === cat.key) editForm.category = '';
+                    if (previewItem.value && previewItem.value.category === cat.key)
+                        previewItem.value.category = 'unknown';
+                    fetchEmotions();
+                    fetchImages(currentPage.value);
+                    fetchStats();
+                } else {
+                    alert(data.error || '删除失败');
+                }
+            } catch (e) {
+                alert('操作失败: ' + e.message);
+            } finally {
+                deletingEmotionKey.value = '';
+            }
+        };
+
+        const formatDate = (timestamp) => {
+            if (!timestamp) return '未知';
+            const date = new Date(timestamp * 1000);
+            return date.toLocaleDateString('zh-CN', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+            });
+        };
+
+        const initTheme = () => {
+            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            theme.value = prefersDark ? 'dark' : 'light';
+            isDarkTheme.value = prefersDark;
+            applyTheme();
+        };
+
+        const applyTheme = () => {
+            document.documentElement.setAttribute('data-theme', theme.value);
+        };
+
+        const toggleTheme = () => {
+            const flash = document.createElement('div');
+            flash.className = 'theme-flash active';
+            document.body.appendChild(flash);
+
+            isDarkTheme.value = !isDarkTheme.value;
+            theme.value = isDarkTheme.value ? 'dark' : 'light';
+            applyTheme();
+
+            setTimeout(() => {
+                flash.remove();
+            }, 600);
+        };
+
+        onMounted(() => {
+            initTheme();
+            window.addEventListener('keydown', handleKeydown);
+            loadAll();
+        });
+
+        return {
+            images,
+            categories,
+            stats,
+            loading,
+            searchQuery,
+            selectedCategory,
+            sortBy,
+            currentPage,
+            pageSize,
+            total,
+
+            previewOpen,
+            previewItem,
+            isEditing,
+            editForm,
+            openPreview,
+            closePreview,
+            prevImage,
+            nextImage,
+            startEdit,
+            cancelEdit,
+            saveEdit,
+
+            isBatchMode,
+            selectedImages,
+            batchMoveOpen,
+            batchTargetCategory,
+            batchScopeOpen,
+            batchScopeMode,
+            toggleBatchMode,
+            toggleSelection,
+            selectAll,
+            handleBatchDelete,
+            openBatchMoveModal,
+            closeBatchMoveModal,
+            confirmBatchMove,
+            openBatchScopeModal,
+            closeBatchScopeModal,
+            confirmBatchScope,
+
+            uploadOpen,
+            uploading,
+            uploadFile,
+            uploadPreviewUrl,
+            uploadError,
+            uploadForm,
+            availableEmotions,
+            analysisScenes,
+            isSceneSelected,
+            toggleScene,
+            openUploadModal,
+            closeUploadModal,
+            handleFileSelect,
+            submitUpload,
+
+            analyzing,
+            analyzeImage,
+
+            batchUploadOpen,
+            batchFiles,
+            batchPreviews,
+            batchUploadError,
+            batchUploadForm,
+            batchTaskId,
+            batchTaskStatus,
+            batchTaskTotal,
+            batchTaskProcessed,
+            batchTaskSuccess,
+            batchTaskFailed,
+            openBatchUploadModal,
+            closeBatchUploadModal,
+            clearBatchFiles,
+            handleBatchFileSelect,
+            formatBatchSize,
+            submitBatchUpload,
+            resetBatchUpload,
+
+            emotionsOpen,
+            newEmotion,
+            addingEmotion,
+            deletingEmotionKey,
+            openEmotionsModal,
+            closeEmotionsModal,
+            addEmotion,
+            deleteEmotion,
+
+            isDarkTheme,
+            theme,
+            toggleTheme,
+
+            fetchImages,
+            debouncedSearch,
+            deleteImage,
+            toggleScope,
+            prevPage,
+            nextPage,
+            formatDate,
+            formatOriginTarget,
+            getScopeLabel,
+            imageDataUrls,
+            downloadImage,
+        };
+    },
+    template: TEMPLATE,
+}).mount('#app');

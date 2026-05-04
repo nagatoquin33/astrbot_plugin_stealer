@@ -205,43 +205,47 @@
     "invisible": true
   },
   "webui": {
-    "description": "WebUI 管理界面配置",
+    "description": "WebUI 管理界面配置（已适配 AstrBot Pages 系统）",
     "type": "object",
+    "invisible": true,
     "items": {
       "enabled": {
-        "description": "启用 WebUI",
+        "description": "启用 WebUI [已弃用]",
         "type": "bool",
         "default": false,
-        "hint": "⚠️ 开启后会启动 Web 服务器，如果与其他插件端口冲突请修改或关闭"
+        "hint": "⚠️ 此选项已弃用。插件 WebUI 已迁移至 AstrBot Pages 系统，在插件详情的「组件」中查看。无需独立端口。",
+        "invisible": true
       },
       "host": {
-        "description": "监听地址",
+        "description": "监听地址 [已弃用]",
         "type": "string",
         "default": "0.0.0.0",
-        "hint": "0.0.0.0=允许外部访问，127.0.0.1=仅本地访问"
+        "invisible": true
       },
       "port": {
-        "description": "监听端口",
+        "description": "监听端口 [已弃用]",
         "type": "int",
-        "default": 9191
+        "default": 9191,
+        "invisible": true
       },
       "auth_enabled": {
-        "description": "启用登录验证",
+        "description": "启用登录验证 [已弃用]",
         "type": "bool",
         "default": true,
-        "hint": "✅ 开启：访问需登录（推荐）\n❌ 关闭：无需登录（仅建议内网使用）"
+        "hint": "认证由 AstrBot 面板统一管理，无需插件独立配置。",
+        "invisible": true
       },
       "password": {
-        "description": "访问密码",
+        "description": "访问密码 [已弃用]",
         "type": "string",
         "default": "",
-        "hint": "仅在登录验证开启时生效。留空将自动生成 6 位随机密码"
+        "invisible": true
       },
       "session_timeout": {
-        "description": "会话超时时间/秒",
+        "description": "会话超时时间/秒 [已弃用]",
         "type": "int",
         "default": 3600,
-        "hint": "登录会话有效时长，超时需重新登录"
+        "invisible": true
       }
     }
   },

@@ -3,7 +3,6 @@ import json
 import os
 import random
 import re
-import secrets
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +15,7 @@ from astrbot.api.event.filter import (
 )
 from astrbot.api.message_components import Plain
 from astrbot.api.star import Context, Star
+from astrbot.core.agent.message import TextPart
 
 from .cache_service import CacheService
 from .core.command_handler import CommandHandler
@@ -26,7 +26,7 @@ from .core.event_handler import EventHandler
 from .core.image_processor_service import ImageProcessorService
 from .core.natural_emotion_analyzer import SmartEmotionMatcher
 from .task_scheduler import TaskScheduler
-from .web_server import WebServer
+from .plugin_api import PluginAPI, PLUGIN_NAME
 
 try:
     import aiofiles  # type: ignore
@@ -138,6 +138,8 @@ class Main(Star):
         self.db_service = DatabaseService(self.cache_dir / "emoji.db")
         self.command_handler = CommandHandler(self)
         self.web_server = None
+        self.plugin_api = PluginAPI(self)
+        self.plugin_api.register(context)
 
         self.event_handler = EventHandler(self)
         self.image_processor_service = ImageProcessorService(self)
@@ -252,34 +254,7 @@ class Main(Star):
         # 同步图片处理节流配置
         self.image_processing_cooldown = self.plugin_config.image_processing_cooldown
 
-        # 同步 WebUI 配置
-        self.webui_enabled = self.plugin_config.webui.enabled
-        self.webui_host = self.plugin_config.webui.host
-        self.webui_port = self.plugin_config.webui.port
-        self.webui_auth_enabled = self.plugin_config.webui.auth_enabled
-        self.webui_password = self.plugin_config.webui.password
-        self.webui_session_timeout = self.plugin_config.webui.session_timeout
-
-    def _ensure_webui_password(self) -> bool:
-        """确保 WebUI 密码已设置，自动生成时返回明文密码供用户查看。
-
-        Returns:
-            bool: 是否生成了新密码
-        """
-        if (
-            self.plugin_config.webui.enabled
-            and self.plugin_config.webui.auth_enabled
-            and not str(self.plugin_config.webui.password or "").strip()
-        ):
-            # 生成随机密码（仅在首次生成时返回明文）
-            generated = f"{secrets.randbelow(1000000):06d}"
-            # 存储密码（配置文件中的密码由用户自行管理安全性）
-            # 注意：配置文件本身应设置适当的文件权限
-            self.plugin_config.webui.password = generated
-            self.plugin_config.save_webui_config()
-            logger.info("WebUI 访问密码已自动生成，请在配置中查看")
-            return True
-        return False
+        # WebUI 已迁移至 AstrBot Pages 系统，无需同步独立服务器配置
 
     def _apply_prompts(self, prompts: dict) -> None:
         for key, value in prompts.items():
@@ -505,47 +480,6 @@ class Main(Star):
                 logger.warning(log_message)
         return event_handler
 
-    def _snapshot_webui_runtime(self) -> tuple[bool, str, int, str, int]:
-        """获取当前 WebUI 运行态配置快照。"""
-        return (
-            getattr(self, "webui_enabled", True),
-            getattr(self, "webui_host", "0.0.0.0"),
-            getattr(self, "webui_port", 9191),
-            getattr(self, "webui_password", ""),
-            getattr(self, "webui_session_timeout", 3600),
-        )
-
-    def _is_webui_runtime_changed(
-        self, old_state: tuple[bool, str, int, str, int]
-    ) -> bool:
-        return old_state != self._snapshot_webui_runtime()
-
-    async def _restart_webui(self) -> None:
-        logger.info("检测到 WebUI 配置变更，正在重启 WebUI...")
-
-        if not self.webui_enabled:
-            # WebUI 已禁用，停止旧服务即可
-            if self.web_server:
-                await self.web_server.stop()
-                self.web_server = None
-            return
-
-        # 保存旧服务引用，在新服务启动成功后再停止
-        old_server = self.web_server
-
-        try:
-            new_server = WebServer(self, host=self.webui_host, port=self.webui_port)
-            await new_server.start()
-            # 新服务启动成功，更新引用并停止旧服务
-            self.web_server = new_server
-            if old_server:
-                try:
-                    await old_server.stop()
-                except Exception as e:
-                    logger.warning(f"停止旧 WebUI 服务时出错: {e}")
-            logger.info("WebUI 重启成功")
-        except Exception as e:
-            logger.error(f"重启 WebUI 失败: {e}", exc_info=True)
 
     def _apply_plugin_config_updates(self, config_dict: dict) -> None:
         """将更新字典写回 PluginConfig（包含 webui 嵌套字段兼容）。"""
@@ -591,19 +525,10 @@ class Main(Star):
         try:
             # 使用配置服务更新配置
             if self.plugin_config:
-                old_webui_state = self._snapshot_webui_runtime()
                 self._apply_plugin_config_updates(config_dict)
 
                 # 统一同步所有配置
                 self._sync_all_config()
-
-                if self._ensure_webui_password():
-                    self._sync_all_config()
-
-                # 检查 WebUI 配置是否变化并重启
-                # 注意：on_config_update 可能是同步调用，重启操作涉及IO，使用 create_task 异步执行
-                if self._is_webui_runtime_changed(old_webui_state):
-                    self._safe_create_task(self._restart_webui(), name="restart_webui")
 
                 # 更新其他服务的配置
                 self._sync_image_processor_from_runtime()
@@ -628,7 +553,6 @@ class Main(Star):
         """
         try:
             # ── 从 __init__ 移入的IO操作 ──
-            self._ensure_webui_password()
             self._validate_config()
 
             if (
@@ -676,17 +600,9 @@ class Main(Star):
             except Exception as e:
                 logger.error(f"初始化提示词失败: {e}")
 
-            # 启动WebUI（如果启用）
-            if self.webui_enabled:
-                try:
-                    self.web_server = WebServer(
-                        self, host=self.webui_host, port=self.webui_port
-                    )
-                    await self.web_server.start()
-                except Exception as e:
-                    logger.error(f"启动WebUI失败: {e}")
-            else:
-                logger.info("WebUI 已禁用，跳过启动")
+            # WebUI 已迁移至 AstrBot Pages 系统
+            # 插件页面通过 pages/ 目录提供服务，API 通过 register_web_api 注册
+            logger.info("WebUI 使用 AstrBot Pages 系统，无需独立端口")
 
             # 加载索引缓存
             await self._load_index()
@@ -724,13 +640,6 @@ class Main(Star):
         if self._terminated:
             return
         self._terminated = True
-
-        # 停止WebUI
-        if getattr(self, "web_server", None):
-            try:
-                await self.web_server.stop()
-            except Exception as e:
-                logger.error(f"停止WebUI失败: {e}")
 
         logger.info("[Stealer] 开始清理插件资源...")
 
@@ -1077,12 +986,11 @@ class Main(Star):
                 continue
 
     @filter.on_llm_request()
-    async def _inject_emotion_instruction(self, event: AstrMessageEvent, request):
+    async def _inject_emotion_instruction(self, event: AstrMessageEvent, req):
         """在 LLM 请求时动态注入情绪选择指令。
 
-            模式切换逻辑：
-        - LLM模式（enable_natural_emotion_analysis=True）：不注入提示词，由轻量模型分析
-        - 被动标签模式（enable_natural_emotion_analysis=False）：注入提示词，LLM插入标签
+        使用 extra_user_content_parts 追加指令，避免修改 system_prompt
+        破坏 LLM 提供商的提示词缓存。参见插件开发文档 listen-message-event.md。
         """
         try:
             # 检查是否启用自动发送
@@ -1121,7 +1029,7 @@ class Main(Star):
             # 构建情绪分类字符串
             categories_str = ", ".join(self.categories)
 
-            # 生成情绪选择指令
+            # 生成情绪选择指令（作为额外用户消息，不破坏缓存）
             emotion_instruction = f"""
 {self._persona_marker}
 # 角色指令：情绪表达
@@ -1138,16 +1046,10 @@ class Main(Star):
 {self._persona_marker}
 """
 
-            # 将指令添加到系统提示词
-            if hasattr(request, "system_prompt"):
-                request.system_prompt = (
-                    request.system_prompt or ""
-                ) + emotion_instruction
-                logger.debug(
-                    f"[Stealer] 被动标签模式：已注入情绪选择指令 (categories: {len(self.categories)})"
-                )
-            else:
-                logger.warning("[Stealer] LLM 请求对象没有 system_prompt 属性")
+            req.extra_user_content_parts.append(TextPart(text=emotion_instruction))
+            logger.debug(
+                f"[Stealer] 被动标签模式：已注入情绪选择指令 (categories: {len(self.categories)})"
+            )
 
         except Exception as e:
             logger.error(f"[Stealer] 注入情绪选择指令失败: {e}", exc_info=True)
@@ -1634,7 +1536,7 @@ class Main(Star):
 
     @filter.command_group("meme")
     def meme(self):
-        """指令组占位符（按官方文档：指令组函数无需实现逻辑）。"""
+        """表情包管理指令"""
         pass
 
     @filter.permission_type(PermissionType.ADMIN)
@@ -1865,8 +1767,7 @@ class Main(Star):
                     if not raw_scenes:
                         raw_scenes = meta.get("scene", None) if isinstance(meta, dict) else None
 
-                    # 使用 WebServer 的静态方法分割场景
-                    scenes_items = WebServer._split_scene_terms(raw_scenes)
+                    scenes_items = PluginAPI.split_scene_terms(raw_scenes)
                     scenes_str = ", ".join(scenes_items)
                     source = str(meta.get("source", "") or "") if isinstance(meta, dict) else ""
 
