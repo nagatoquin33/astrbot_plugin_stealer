@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.1] - 2026-05-11
+
+### fix
+- 修复 `_enforce_capacity` 方法名不匹配：重构时误改名为 `_enforce_capacity_sync`，导致容量控制循环崩溃
+- 修复 `_clean_raw_directory` 方法缺失：Phase 4 拆分时被误删，导致 raw 目录定时清理失败
+- 修复 `send_emoji_by_id` 工具消息乱码：编码损坏导致用户可见文本变乱码
+- 修复 `calculate_hybrid_similarity` 导入缺失：`emoji_smart_select_service.py` 未导入该函数
+- 修复 `PHashDedupService` 类名引用错误：未导入直接使用类名
+- 修复 `LANCZOS` 常量引用错误：Pillow 新版移除该常量，改为 `PILImage.LANCZOS`
+- 清理所有未使用的 import 和冗余代码
+
+### changed
+- `image_mgmt_command.py`：list 命令改用数据库分页查询，limit 上限提升至 100
+- `plugin_api.py`：补充 list 接口的数据库分页路径与分类统计口径对齐
+
 ## [2.6.0] - 2026-05-09
 
 ### changed

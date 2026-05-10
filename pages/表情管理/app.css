@@ -497,6 +497,17 @@ h2 {
     padding-left: 0;
 }
 
+.toolbar-sort-select {
+    width: 120px;
+}
+
+@media (max-width: 768px) {
+    .toolbar-sort-select {
+        width: auto;
+        min-width: 0;
+    }
+}
+
 /* ========== Inventory Grid ========== */
 .inventory-grid {
     flex: 1;
@@ -1697,6 +1708,56 @@ select.codex-input {
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
 }
 
+.upload-preview-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.upload-preview-info {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-align: left;
+}
+
+.upload-preview-name {
+    margin: 0 0 6px 0;
+    color: var(--gold-primary);
+    font-family: 'Cinzel', serif;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.upload-preview-size {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+}
+
+.modal-footer-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 24px;
+    padding-top: 20px;
+    border-top: 1px solid var(--gold-dark);
+}
+
+@media (max-width: 768px) {
+    .upload-preview-row {
+        flex-direction: column;
+        gap: 12px;
+    }
+    .upload-preview-info {
+        text-align: center;
+    }
+    .modal-footer-actions {
+        margin-top: 16px;
+        padding-top: 12px;
+    }
+}
+
 /* ========== Batch Bar ========== */
 .batch-bar {
     position: fixed;
@@ -2571,4 +2632,160 @@ select.codex-input {
 @keyframes toast-in {
     from { opacity: 0; transform: translateX(-50%) translateY(20px); }
     to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* ========== Mobile Modal & Upload Fixes ========== */
+@media (max-width: 768px) {
+    /* Modal full-screen on mobile */
+    .modal-overlay {
+        padding: 0;
+        align-items: flex-start;
+    }
+
+    .modal-panel {
+        max-height: 100vh;
+        border-radius: 0;
+        max-width: 100% !important;
+        animation: none;
+    }
+
+    /* Override inline style padding:24px on modal forms */
+    .modal-panel form,
+    .modal-panel > div[style*="padding:24px"],
+    .modal-panel > div > div[style*="padding:24px"] {
+        padding: 16px !important;
+    }
+
+    /* Upload area shrink */
+    .upload-area {
+        padding: 20px !important;
+    }
+
+    .upload-area[style*="min-height:150px"] {
+        min-height: 100px !important;
+    }
+
+    /* Upload preview: stack vertically on mobile */
+    .upload-area div[style*="display:flex;align-items:center;gap:20px"] {
+        flex-direction: column !important;
+        gap: 12px !important;
+    }
+
+    .upload-preview {
+        max-width: 120px;
+        max-height: 120px;
+    }
+
+    /* Override inline margin-top on form sections */
+    .modal-panel div[style*="margin-top:20px"] {
+        margin-top: 12px !important;
+    }
+
+    .modal-panel div[style*="margin-top:16px"] {
+        margin-top: 10px !important;
+    }
+
+    /* Override inline footer bar spacing */
+    .modal-panel div[style*="margin-top:24px;padding-top:20px"] {
+        margin-top: 16px !important;
+        padding-top: 12px !important;
+    }
+
+    /* Toolbar select width */
+    .toolbar-search input,
+    select.codex-input[style*="width:120px"] {
+        width: 100% !important;
+        min-width: 0 !important;
+    }
+
+    .toolbar-search {
+        flex: 1 1 100%;
+        min-width: 0;
+        max-width: none;
+    }
+
+    .toolbar-group {
+        border-left: none;
+        padding: 0 4px;
+    }
+
+    .toolbar-actions .codex-btn {
+        padding: 8px 10px;
+        min-height: 36px;
+        font-size: 0.75rem;
+    }
+
+    /* Batch file list */
+    .batch-file-list {
+        grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
+        max-height: 150px;
+    }
+
+    .batch-file-thumb {
+        width: 50px;
+        height: 50px;
+    }
+
+    /* Emotions modal list */
+    .modal-panel div[style*="padding:40px"] {
+        padding: 20px !important;
+    }
+
+    /* Confirm dialog */
+    .modal-panel[style*="max-width:400px"] {
+        max-width: 100% !important;
+    }
+
+    /* Toast notification */
+    .toast-notification {
+        left: 12px;
+        right: 12px;
+        transform: none;
+        bottom: 80px;
+        font-size: 0.8rem;
+        padding: 10px 16px;
+    }
+
+    @keyframes toast-in {
+        from { opacity: 0; transform: translateY(20px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+}
+
+@media (max-width: 380px) {
+    .modal-panel form,
+    .modal-panel > div[style*="padding:24px"],
+    .modal-panel > div > div[style*="padding:24px"] {
+        padding: 12px !important;
+    }
+
+    .upload-area {
+        padding: 12px !important;
+    }
+
+    .toolbar-actions {
+        gap: 4px;
+    }
+
+    .toolbar-group {
+        gap: 4px;
+        padding: 0;
+    }
+
+    .toolbar-actions .codex-btn {
+        padding: 6px 8px;
+        min-height: 32px;
+        font-size: 0.7rem;
+        gap: 4px;
+    }
+
+    .toolbar-actions .codex-btn svg {
+        width: 12px;
+        height: 12px;
+    }
+
+    .codex-input {
+        padding: 8px 10px;
+        font-size: 0.85rem;
+    }
 }

@@ -106,7 +106,7 @@ const TEMPLATE = /* html */ `
 
                     <div class="toolbar-actions">
                         <div class="toolbar-group">
-                            <select v-model="sortBy" @change="fetchImages(1)" class="codex-input" style="width:120px">
+                            <select v-model="sortBy" @change="fetchImages(1)" class="codex-input toolbar-sort-select">
                                 <option value="newest">最新</option>
                                 <option value="oldest">最早</option>
                             </select>
@@ -406,11 +406,11 @@ const TEMPLATE = /* html */ `
                             style="display:none"
                         >
 
-                        <div v-if="uploadPreviewUrl" style="display:flex;align-items:center;gap:20px">
+                        <div v-if="uploadPreviewUrl" class="upload-preview-row">
                             <img :src="uploadPreviewUrl" class="upload-preview">
-                            <div style="text-align:left">
-                                <p style="margin:0 0 8px 0;color:var(--gold-primary);font-family:'Cinzel',serif">{{ uploadFile?.name }}</p>
-                                <p style="margin:0;color:var(--text-muted);font-size:0.9rem">{{ (uploadFile?.size / 1024).toFixed(1) }} KB</p>
+                            <div class="upload-preview-info">
+                                <p class="upload-preview-name">{{ uploadFile?.name }}</p>
+                                <p class="upload-preview-size">{{ (uploadFile?.size / 1024).toFixed(1) }} KB</p>
                             </div>
                         </div>
 
@@ -489,7 +489,7 @@ const TEMPLATE = /* html */ `
                         {{ uploadError }}
                     </div>
 
-                    <div style="display:flex;gap:12px;margin-top:24px;padding-top:20px;border-top:1px solid var(--gold-dark)">
+                    <div class="modal-footer-actions">
                         <button type="button" @click="closeUploadModal" class="codex-btn" style="flex:1">取消</button>
                         <button type="submit" :disabled="uploading || !uploadFile" class="codex-btn primary" style="flex:1">
                             <span v-if="uploading">上传中...</span>
@@ -581,7 +581,7 @@ const TEMPLATE = /* html */ `
                             {{ batchUploadError }}
                         </div>
 
-                        <div style="display:flex;gap:12px;margin-top:24px;padding-top:20px;border-top:1px solid var(--gold-dark)">
+                        <div class="modal-footer-actions">
                             <button type="button" @click="closeBatchUploadModal" class="codex-btn" style="flex:1">取消</button>
                             <button type="submit" :disabled="batchUploading || batchFiles.length === 0" class="codex-btn primary" style="flex:1">
                                 <span v-if="batchUploading">上传中...</span>
@@ -1209,7 +1209,7 @@ createApp({
 
         const handleBatchDelete = async () => {
             if (selectedImages.value.size === 0) return;
-            if (!confirm('确定要删除选中的 ' + selectedImages.value.size + ' 张图片吗？')) return;
+            if (!await showConfirm('确定要删除选中的 ' + selectedImages.value.size + ' 张图片吗？')) return;
 
             try {
                 const res = await apiFetch('api/images/batch-delete', {
@@ -1223,7 +1223,7 @@ createApp({
                     fetchImages(currentPage.value);
                     fetchStats();
                 } else {
-                    alert(data.error || '删除失败');
+                    showAlert(data.error || '删除失败');
                 }
             } catch (e) {
                 showAlert('操作失败: ' + e.message);
@@ -1269,7 +1269,7 @@ createApp({
                     fetchImages(currentPage.value);
                     fetchStats();
                 } else {
-                    alert(data.error || '转移失败');
+                    showAlert(data.error || '转移失败');
                 }
             } catch (e) {
                 showAlert('操作失败: ' + e.message);
@@ -1294,10 +1294,10 @@ createApp({
                     isBatchMode.value = false;
                     await fetchImages(currentPage.value);
                     if (Number(data.skipped || 0) > 0) {
-                        alert('已更新 ' + (data.count || 0) + ' 张，另有 ' + data.skipped + ' 张缺少来源群信息，无法设为 local。');
+                        showAlert('已更新 ' + (data.count || 0) + ' 张，另有 ' + data.skipped + ' 张缺少来源群信息，无法设为 local。');
                     }
                 } else {
-                    alert(data.error || '作用域设置失败');
+                    showAlert(data.error || '作用域设置失败');
                 }
             } catch (e) {
                 showAlert('操作失败: ' + e.message);
@@ -1319,9 +1319,9 @@ createApp({
                     }
                     await fetchImages(currentPage.value);
                 } else if (data.error === 'Origin target missing') {
-                    alert('该图片缺少来源群信息，无法设置为 local。');
+                    showAlert('该图片缺少来源群信息，无法设置为 local。');
                 } else {
-                    alert(data.error || '作用域更新失败');
+                    showAlert(data.error || '作用域更新失败');
                 }
             } catch (e) {
                 showAlert('操作失败: ' + e.message);
@@ -1513,14 +1513,11 @@ createApp({
                 console.log('[Analyzer] 开始分析图片:', file.name);
 
                 try {
-                    const uploadRes = await bridge.upload('images/upload', file);
-                    if (!uploadRes.success || !uploadRes.hash) {
-                        throw new Error(uploadRes.error || '上传失败');
-                    }
-
+                    // 直接用 base64 调用 analyze，不再先上传（避免 sandbox iframe 中 File 传输失败和重复入库）
+                    const base64Data = await fileToBase64(file);
                     const res = await apiFetch('api/analyze', {
                         method: 'POST',
-                        body: JSON.stringify({ hash: uploadRes.hash }),
+                        body: JSON.stringify({ base64: base64Data }),
                     });
                     const data = await res.json();
 
@@ -1627,7 +1624,7 @@ createApp({
                 const currentList = [...availableEmotions.value];
                 const existingIdx = currentList.findIndex((c) => c.key === newCat.key);
                 if (existingIdx >= 0) {
-                    if (!confirm('分类 ' + newCat.key + ' 已存在，确定要更新吗？')) {
+                    if (!await showConfirm('分类 ' + newCat.key + ' 已存在，确定要更新吗？')) {
                         addingEmotion.value = false;
                         return;
                     }
@@ -1650,7 +1647,7 @@ createApp({
                     newEmotion.name = '';
                     newEmotion.desc = '';
                 } else {
-                    alert(data.error || '添加失败');
+                    showAlert(data.error || '添加失败');
                 }
             } catch (e) {
                 showAlert('操作失败: ' + e.message);
@@ -1661,7 +1658,7 @@ createApp({
 
         const deleteEmotion = async (cat) => {
             if (!cat?.key) return;
-            if (!confirm('确定要删除分类 ' + cat.key + ' 吗？该分类下的图片会被直接删除且无法恢复。'))
+            if (!await showConfirm('确定要删除分类 ' + cat.key + ' 吗？该分类下的图片会被直接删除且无法恢复。'))
                 return;
             deletingEmotionKey.value = cat.key;
             try {
@@ -1680,7 +1677,7 @@ createApp({
                     fetchImages(currentPage.value);
                     fetchStats();
                 } else {
-                    alert(data.error || '删除失败');
+                    showAlert(data.error || '删除失败');
                 }
             } catch (e) {
                 showAlert('操作失败: ' + e.message);

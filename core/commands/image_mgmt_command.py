@@ -56,7 +56,7 @@ class ImageManagementCommand:
             per_page = int(limit)
         except Exception:
             per_page = 10
-        per_page = max(1, min(20, per_page))
+        per_page = max(1, min(100, per_page))
 
         # 解析页码
         try:
@@ -65,27 +65,69 @@ class ImageManagementCommand:
             page_num = 1
         page_num = max(1, page_num)
 
-        image_index = await self.plugin._load_index()
+        # 使用数据库分页查询，避免全量加载
+        db_service = getattr(self.plugin, "db_service", None)
+        if db_service and hasattr(db_service, "get_emojis_paginated"):
+            cat_filter = category if category else None
+            rows, total_filtered, category_counts = db_service.get_emojis_paginated(
+                page=page_num, page_size=per_page, category=cat_filter, sort_order="newest"
+            )
+            total_all = db_service.count_total()
 
-        if not image_index:
-            yield event.plain_result("暂无表情包数据")
-            return
+            if total_all == 0:
+                yield event.plain_result("暂无表情包数据")
+                return
 
-        # 收集所有有效图片（先不做分类过滤，保证序号与 /meme delete 的全局序号一致）
-        all_images = []
-        for img_path, img_info in image_index.items():
-            if isinstance(img_info, dict):
-                img_category = img_info.get("category", "未分类")
-                img_desc = img_info.get("desc", "")
-                img_source = img_info.get("source", "")
-                img_pkg = img_info.get("qq_emoji_package_id", "")
+            # 构建展示列表，标记文件是否存在
+            display_images = []
+            missing_count = 0
+            for row in rows:
+                img_path = row.get("path", "")
+                file_exists = Path(img_path).exists()
+                if not file_exists:
+                    missing_count += 1
+                display_images.append({
+                    "path": img_path,
+                    "name": Path(img_path).name,
+                    "category": row.get("category", "未分类"),
+                    "desc": str(row.get("desc", "") or ""),
+                    "source": str(row.get("source", "") or ""),
+                    "qq_emoji_package_id": str(row.get("qq_emoji_package_id", "") or ""),
+                    "created_at": row.get("created_at", 0),
+                    "file_exists": file_exists,
+                })
 
-                # 检查文件是否存在
-                if not Path(img_path).exists():
-                    continue
+            if not display_images and not category:
+                yield event.plain_result("暂无有效的表情包文件")
+                return
+            if not display_images and category:
+                yield event.plain_result(f"分类 '{category}' 中暂无表情包")
+                return
 
-                all_images.append(
-                    {
+            total_pages = max(1, (total_filtered + per_page - 1) // per_page)
+            if page_num > total_pages:
+                page_num = total_pages
+
+        else:
+            # 兜底：旧的全量加载方式
+            image_index = await self.plugin._load_index()
+
+            if not image_index:
+                yield event.plain_result("暂无表情包数据")
+                return
+
+            all_images = []
+            missing_count = 0
+            for img_path, img_info in image_index.items():
+                if isinstance(img_info, dict):
+                    file_exists = Path(img_path).exists()
+                    if not file_exists:
+                        missing_count += 1
+                    img_category = img_info.get("category", "未分类")
+                    img_desc = img_info.get("desc", "")
+                    img_source = img_info.get("source", "")
+                    img_pkg = img_info.get("qq_emoji_package_id", "")
+                    all_images.append({
                         "path": img_path,
                         "name": Path(img_path).name,
                         "category": img_category,
@@ -93,41 +135,39 @@ class ImageManagementCommand:
                         "source": str(img_source or ""),
                         "qq_emoji_package_id": str(img_pkg or ""),
                         "created_at": img_info.get("created_at", 0),
-                    }
-                )
+                        "file_exists": file_exists,
+                    })
 
-        if not all_images:
-            if category:
+            if not all_images:
+                if category:
+                    yield event.plain_result(f"分类 '{category}' 中暂无表情包")
+                else:
+                    yield event.plain_result("暂无有效的表情包文件")
+                return
+
+            all_images.sort(key=lambda x: x["created_at"], reverse=True)
+            for i, img in enumerate(all_images, 1):
+                img["index"] = i
+
+            filtered_images = [
+                img for img in all_images if (not category or img.get("category") == category)
+            ]
+            if not filtered_images:
                 yield event.plain_result(f"分类 '{category}' 中暂无表情包")
-            else:
-                yield event.plain_result("暂无有效的表情包文件")
-            return
+                return
 
-        # 按创建时间排序（最新的在前），并分配全局序号（与 delete 的序号一致）
-        all_images.sort(key=lambda x: x["created_at"], reverse=True)
-        for i, img in enumerate(all_images, 1):
-            img["index"] = i
+            total_filtered = len(filtered_images)
+            total_all = len(all_images)
+            total_pages = max(1, (total_filtered + per_page - 1) // per_page)
+            if page_num > total_pages:
+                page_num = total_pages
 
-        # 分类过滤只影响展示与分页，不影响序号
-        filtered_images = [
-            img for img in all_images if (not category or img.get("category") == category)
-        ]
-        if not filtered_images:
-            yield event.plain_result(f"分类 '{category}' 中暂无表情包")
-            return
+            start = (page_num - 1) * per_page
+            display_images = filtered_images[start : start + per_page]
 
-        total_filtered = len(filtered_images)
-        total_all = len(all_images)
-        total_pages = max(1, (total_filtered + per_page - 1) // per_page)
-        if page_num > total_pages:
-            page_num = total_pages
-
-        start = (page_num - 1) * per_page
-        display_images = filtered_images[start : start + per_page]
-
+        # 渲染输出
         if getattr(self.plugin, "image_processor_service", None):
             if event.get_platform_name() == "aiocqhttp":
-                # aiocqhttp/NapCat 场景优先发 URL 图，绕开本地 file copy 的权限问题
                 url = await self.plugin.image_processor_service.render_emoji_list_page_url(
                     items=display_images,
                     page=page_num,
@@ -141,7 +181,6 @@ class ImageManagementCommand:
                     yield event.image_result(url).stop_event()
                     return
 
-            # 优先使用 AstrBot 内置 html-to-pic（网络 t2i），失败再回退到本地 PIL 渲染
             file_path = await self.plugin.image_processor_service.render_emoji_list_page_file(
                 items=display_images,
                 page=page_num,
@@ -156,7 +195,6 @@ class ImageManagementCommand:
                     yield event.make_result().file_image(file_path).stop_event()
                     return
 
-            # 回退到 base64 渲染（避免本地 file copy 权限问题）
             b64 = await self.plugin.image_processor_service.render_emoji_list_page_base64(
                 items=display_images,
                 page=page_num,
@@ -170,10 +208,14 @@ class ImageManagementCommand:
                 yield event.make_result().base64_image(b64).stop_event()
                 return
 
-        # 纯文本 fallback（或渲染失败）
-        title = f"表情包列表 ({page_num}/{total_pages}) ({len(display_images)}/{total_filtered}) (总 {total_all})"
+        # 纯文本 fallback
+        title = f"表情包列表 ({page_num}/{total_pages}) ({len(display_images)}/{total_filtered})"
+        if total_all != total_filtered:
+            title += f" (总 {total_all})"
         if category:
             title += f" - 分类: {category}"
+        if missing_count:
+            title += f" [文件丢失: {missing_count}]"
 
         result_text = title + "\n\n"
         for img in display_images:
@@ -183,9 +225,15 @@ class ImageManagementCommand:
                 desc = str(img.get("name", "") or "")
             if len(desc) > 28:
                 desc = desc[:25] + "..."
-            result_text += f"{idx:4d}. {desc}\n"
+            marker = "" if img.get("file_exists", True) else "⚠"
+            result_text += f"{idx:4d}. {marker}{desc}\n"
 
-        result_text += "\n用法: /meme list [分类] [每页数量] [页码]\n删除: /meme delete <序号>"
+        if total_pages > 1:
+            next_page_hint = f"\n下一页: /meme list {page_num + 1}"
+            if category:
+                next_page_hint = f"\n下一页: /meme list {category} {page_num + 1}"
+            result_text += next_page_hint
+        result_text += "\n用法: /meme list [分类] [每页数量] [页码]"
         yield event.plain_result(result_text).stop_event()
 
     async def delete_image(self, event: AstrMessageEvent, identifier: str = ""):

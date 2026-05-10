@@ -3,7 +3,6 @@
 import asyncio
 import os
 from pathlib import Path
-from typing import Any
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
@@ -195,7 +194,7 @@ class VLMCallService:
                         im.seek(idx)
                         frame = im.convert("RGBA")
                         if scale < 1.0:
-                            frame = frame.resize((frame_width, frame_height), LANCZOS)
+                            frame = frame.resize((frame_width, frame_height), PILImage.LANCZOS)
                         all_frames.append(frame)
 
                 # 相似帧过滤

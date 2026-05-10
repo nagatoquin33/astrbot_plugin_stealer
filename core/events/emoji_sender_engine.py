@@ -7,8 +7,6 @@ from typing import Any
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
-from astrbot.api.message_components import Plain
-from astrbot.core.agent.message import TextPart
 
 
 class _EmojiTurnState:
@@ -69,6 +67,15 @@ class _EmojiTurnState:
         """检查是否已占用自动发送权限。"""
         return self._auto_send_claimed
 
+    def reset_for_new_turn(self) -> None:
+        """重置回合状态，为新的一轮对话做准备。"""
+        self._active_sent = False
+        self._candidates = []
+        self._auto_decided = False
+        self._auto_allowed = False
+        self._auto_reason = ""
+        self._auto_send_claimed = False
+
 
 class EmojiSenderEngine:
     """负责表情包自动发送决策、情绪注入和响应处理。"""
@@ -108,6 +115,21 @@ class EmojiSenderEngine:
             except Exception:
                 pass
         return session_id or "global"
+
+    def reset_turn_state(self, event: AstrMessageEvent) -> None:
+        """重置表情包回合状态及事件 extras，为新的一轮对话做准备。"""
+        turn_state = self.emoji_turn_state(event)
+        turn_state.reset_for_new_turn()
+        for key in (
+            "stealer_active_sent",
+            "stealer_auto_emoji_turn_decided",
+            "stealer_auto_emoji_turn_allowed",
+            "stealer_auto_emoji_turn_claimed",
+        ):
+            try:
+                event.set_extra(key, False)
+            except Exception:
+                pass
 
     # --- 决策检查 ---
 
@@ -207,7 +229,6 @@ class EmojiSenderEngine:
             if hasattr(selector, "try_send_emoji"):
                 return await selector.try_send_emoji(event, emotions, cleaned_text)
 
-            from ...core.search.emoji_selector import EmojiSelector
 
             # 提取情绪
             emotion = emotions[0] if emotions else "default"
@@ -261,17 +282,17 @@ class EmojiSenderEngine:
         *,
         user_query: str = "",
     ):
-        """异步分析并发送表情包。"""
-        try:
-            turn_state = self.emoji_turn_state(event)
-            if turn_state.is_active_sent():
-                logger.debug("[EmojiSenderEngine] 当前回合已发送过表情包，跳过")
-                return
+        """异步分析并发送表情包。
 
+        注意：调用方 _prepare_emoji_response 已通过 claim_auto_emoji_turn
+        设置 _active_sent，防止重复创建任务。本方法不再重复检查 is_active_sent，
+        直接尝试发送，成功后再标记 mark_active_sent 以记录实际发送时间。
+        """
+        try:
             sent = await self.try_send_emoji(event, emotions, text)
             if sent:
                 await self.mark_auto_emoji_sent(event)
-                turn_state.mark_active_sent()
+                self.emoji_turn_state(event).mark_active_sent()
         except Exception as e:
             logger.debug(f"[EmojiSenderEngine] 异步分析发送表情包失败: {e}")
 

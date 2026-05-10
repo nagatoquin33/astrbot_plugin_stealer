@@ -119,14 +119,23 @@ class PlatformDetector:
                 and hasattr(event.message_obj, "raw_message")
             ):
                 raw_event = event.message_obj.raw_message
-                if hasattr(raw_event, "message") and isinstance(raw_event.message, list):
+                logger.debug(f"[EmojiCheck] 方式0: raw_event type={type(raw_event).__name__}, is_dict={isinstance(raw_event, dict)}")
+                # raw_event 可能是 dict（aiocqhttp）或对象，需要兼容两种类型
+                if isinstance(raw_event, dict):
+                    raw_message = raw_event.get("message")
+                elif raw_event is not None:
+                    raw_message = getattr(raw_event, "message", None)
+                logger.debug(f"[EmojiCheck] 方式0: raw_message type={type(raw_message).__name__ if raw_message else 'None'}")
+                if isinstance(raw_message, list):
                     image_segments = [
                         seg
-                        for seg in raw_event.message
+                        for seg in raw_message
                         if isinstance(seg, dict) and seg.get("type") == "image"
                     ]
+                    logger.debug(f"[EmojiCheck] 方式0: 提取到 {len(image_segments)} 个图片段")
 
             if image_segments:
+                logger.debug(f"[EmojiCheck] 有 {len(image_segments)} 个 image_segments 可匹配, img_index={img_index}")
                 matched_data: dict[str, object] | None = None
 
                 if (
@@ -172,6 +181,7 @@ class PlatformDetector:
                                 break
 
                 if matched_data is not None:
+                    logger.debug(f"[EmojiCheck] matched_data keys: {list(matched_data.keys())}")
                     sub_type = matched_data.get("sub_type")
                     if is_sub_type_emoji(sub_type):
                         logger.debug(f"检测到表情包标记: sub_type={sub_type} (从原始事件)")

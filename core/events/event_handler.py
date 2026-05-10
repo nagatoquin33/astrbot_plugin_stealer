@@ -43,6 +43,10 @@ class EventHandler:
 
     # ===== 门面委托：子服务方法 =====
 
+    def _normalize_str(self, value: object) -> str:
+        """规范化字符串值，委托给 PlatformDetector。"""
+        return self._platform_detector._normalize_str(value)
+
     def _get_event_platform_name(self, event: AstrMessageEvent | None = None) -> str:
         """获取事件平台名（小写），失败时返回空字符串。"""
         return self._platform_detector.get_platform_name(event)
@@ -174,8 +178,8 @@ class EventHandler:
         remove_count = min(len(image_items) - max_reg, len(image_items))
         return image_items[:remove_count]
 
-    def _enforce_capacity_sync(self, image_index: dict) -> list[str]:
-        """同步版本的容量控制，删除索引条目并返回需要删除的文件路径。
+    async def _enforce_capacity(self, image_index: dict) -> list[str]:
+        """容量控制，删除索引条目并返回需要删除的文件路径。
 
         Args:
             image_index: 索引字典
@@ -380,7 +384,14 @@ class EventHandler:
         raw_image_file_map: dict[str, dict] = {}
         try:
             raw_event = getattr(getattr(event, "message_obj", None), "raw_message", None)
-            raw_message = getattr(raw_event, "message", None)
+            logger.debug(f"raw_event type: {type(raw_event).__name__}, is_dict: {isinstance(raw_event, dict)}")
+            # raw_event 可能是 dict（aiocqhttp）或对象，需要兼容两种类型
+            raw_message = None
+            if isinstance(raw_event, dict):
+                raw_message = raw_event.get("message")
+            elif raw_event is not None:
+                raw_message = getattr(raw_event, "message", None)
+            logger.debug(f"raw_message type: {type(raw_message).__name__ if raw_message else 'None'}")
             if isinstance(raw_message, list):
                 raw_image_segments = [
                     seg
@@ -394,7 +405,9 @@ class EventHandler:
                     seg_file = self._normalize_str(data.get("file", ""))
                     if seg_file and seg_file not in raw_image_file_map:
                         raw_image_file_map[seg_file] = data
-        except Exception:
+                logger.debug(f"提取到 {len(raw_image_segments)} 个原始图片段, {len(raw_image_file_map)} 个文件映射")
+        except Exception as e:
+            logger.debug(f"提取原始图片段失败: {e}")
             raw_image_segments = []
             raw_image_file_map = {}
         origin_target_str = ""
@@ -588,6 +601,25 @@ class EventHandler:
                 plugin_instance.consume_force_capture(event)
             except Exception:
                 pass
+
+    async def _clean_raw_directory(self) -> int:
+        """清理 raw 目录中的所有临时文件。"""
+        deleted = 0
+        try:
+            raw_dir = getattr(self.plugin, "raw_dir", None)
+            if raw_dir and raw_dir.exists():
+                for f in raw_dir.iterdir():
+                    try:
+                        if f.is_file():
+                            f.unlink()
+                            deleted += 1
+                    except Exception:
+                        pass
+        except Exception as e:
+            logger.warning(f"清理 raw 目录失败: {e}")
+        if deleted:
+            logger.debug(f"raw 目录清理: 删除了 {deleted} 个文件")
+        return deleted
 
     async def cleanup_async(self) -> None:
         """异步清理资源。"""

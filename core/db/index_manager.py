@@ -1,6 +1,5 @@
 """索引管理器：负责索引加载、持久化、重建和迁移。"""
 
-from pathlib import Path
 from typing import Any
 
 from astrbot.api import logger

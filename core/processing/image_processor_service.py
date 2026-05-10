@@ -2,10 +2,8 @@ import asyncio
 import hashlib
 import json
 import os
-import re
 import shutil
 import time
-from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -501,7 +499,7 @@ class ImageProcessorService:
             if _phash and db_service:
                 phash_map = db_service.get_phash_map()
                 for entry_path, existing_phash in phash_map.items():
-                    distance = PHashDedupService.hamming_distance(_phash, existing_phash)
+                    distance = self._phash_service.hamming_distance(_phash, existing_phash)
                     if distance <= self._phash_service.PHASH_HAMMING_THRESHOLD:
                         logger.info(
                             f"[去重] 感知哈希相似度匹配命中: "

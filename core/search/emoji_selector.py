@@ -1,5 +1,4 @@
 import asyncio
-import os
 import random
 import re
 import time
@@ -15,8 +14,6 @@ from .emoji_selection_strategy import EmojiSelectionStrategy
 
 from .text_similarity import (
     _extract_words,
-    calculate_hybrid_similarity,
-    tokenize_for_bm25,
 )
 
 

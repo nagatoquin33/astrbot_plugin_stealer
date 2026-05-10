@@ -756,17 +756,46 @@ class PluginAPI:
 
             data = await request.get_json() or {}
             img_hash = (data.get("hash", "") or "").strip()
-            if not img_hash:
-                return jsonify({"success": False, "error": "缺少 hash"})
+            img_base64 = (data.get("base64", "") or "").strip()
+            tmp_file_to_cleanup = None
 
-            index = self._get_index()
             file_path = None
-            for p, m in index.items():
-                if isinstance(m, dict) and m.get("hash") == img_hash:
-                    file_path = p
-                    break
-            if not file_path or not os.path.isfile(file_path):
-                return jsonify({"success": False, "error": "图片文件不存在"})
+
+            # 优先通过 hash 从索引查找文件路径
+            if img_hash:
+                index = self._get_index()
+                for p, m in index.items():
+                    if isinstance(m, dict) and m.get("hash") == img_hash:
+                        file_path = p
+                        break
+                if not file_path or not os.path.isfile(file_path):
+                    file_path = None
+
+            # hash 查不到或未提供 hash 时，回退到 base64 方式
+            if not file_path and img_base64:
+                import base64
+                import tempfile
+
+                b64_data = img_base64
+                if "," in b64_data:
+                    b64_data = b64_data.split(",", 1)[1]
+                file_content = base64.b64decode(b64_data)
+                ext = ".png"
+                if img_base64.startswith("data:image/jpeg") or img_base64.startswith("data:image/jpg"):
+                    ext = ".jpg"
+                elif img_base64.startswith("data:image/gif"):
+                    ext = ".gif"
+                elif img_base64.startswith("data:image/webp"):
+                    ext = ".webp"
+
+                tmp = tempfile.NamedTemporaryFile(suffix=ext, delete=False)
+                tmp.write(file_content)
+                tmp.close()
+                file_path = tmp.name
+                tmp_file_to_cleanup = file_path
+
+            if not file_path:
+                return jsonify({"success": False, "error": "缺少 hash 或 base64 图片数据"})
 
             cat, tags, desc, _, scenes = await proc.classify_image(
                 event=None,
@@ -791,6 +820,12 @@ class PluginAPI:
         except Exception as e:
             logger.error(f"VLM分析失败: {e}", exc_info=True)
             return jsonify({"success": False, "error": f"分析失败: {e}"})
+        finally:
+            if tmp_file_to_cleanup:
+                try:
+                    os.unlink(tmp_file_to_cleanup)
+                except Exception:
+                    pass
 
     # ── Categories ────────────────────────────────────────────
 

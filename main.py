@@ -1,7 +1,6 @@
 import asyncio
 import json
 import os
-import random
 import re
 from pathlib import Path
 from typing import Any
@@ -13,7 +12,6 @@ from astrbot.api.event.filter import (
     PermissionType,
     PlatformAdapterType,
 )
-from astrbot.api.message_components import Plain
 from astrbot.api.star import Context, Star
 from astrbot.core.agent.message import TextPart
 
@@ -23,12 +21,12 @@ from .core.config.config import PluginConfig
 from .core.db.database_service import DatabaseService
 from .core.search.emoji_selector import EmojiSelector
 from .core.events.event_handler import EventHandler
-from .core.events.emoji_sender_engine import EmojiSenderEngine, _EmojiTurnState
+from .core.events.emoji_sender_engine import EmojiSenderEngine
 from .core.db.index_manager import IndexManager
 from .core.processing.natural_emotion_analyzer import SmartEmotionMatcher
 from .core.processing.image_processor_service import ImageProcessorService
 from .task_scheduler import TaskScheduler
-from .plugin_api import PluginAPI, PLUGIN_NAME
+from .plugin_api import PluginAPI
 
 try:
     import aiofiles  # type: ignore
@@ -370,49 +368,49 @@ class Main(Star):
             logger.error(f"更新配置失败: {e}")
 
     # ===== 门面委托：EmojiSenderEngine =====
-    _emoji_turn_state = lambda self, event: self._emoji_sender_engine.emoji_turn_state(event)
-    _send_explicit_emojis = (
+    _emoji_turn_state = lambda self, event: self._emoji_sender_engine.emoji_turn_state(event)  # noqa: E731
+    _send_explicit_emojis = (  # noqa: E731
         lambda self, event, paths, text: self._emoji_sender_engine.send_explicit_emojis(
             event, paths, text
         )
     )
-    _get_auto_emoji_session_key = (
+    _get_auto_emoji_session_key = (  # noqa: E731
         lambda self, event: self._emoji_sender_engine.get_auto_emoji_session_key(event)
     )
-    _should_skip_auto_emoji_by_gate = (
+    _should_skip_auto_emoji_by_gate = (  # noqa: E731
         lambda self, text: self._emoji_sender_engine.should_skip_auto_emoji_by_gate(text)
     )
-    _is_auto_emoji_cooldown_ready = (
+    _is_auto_emoji_cooldown_ready = (  # noqa: E731
         lambda self, event: self._emoji_sender_engine.is_auto_emoji_cooldown_ready(event)
     )
-    _normalize_auto_emoji_chance = (
+    _normalize_auto_emoji_chance = (  # noqa: E731
         lambda self: self._emoji_sender_engine.normalize_auto_emoji_chance()
     )
-    _resolve_auto_emoji_turn_permission = (
+    _resolve_auto_emoji_turn_permission = (  # noqa: E731
         lambda self, event: self._emoji_sender_engine.resolve_auto_emoji_turn_permission(event)
     )
-    _claim_auto_emoji_turn = lambda self, event: self._emoji_sender_engine.claim_auto_emoji_turn(
+    _claim_auto_emoji_turn = lambda self, event: self._emoji_sender_engine.claim_auto_emoji_turn(  # noqa: E731
         event
     )
-    _prune_auto_emoji_cooldowns = (
+    _prune_auto_emoji_cooldowns = (  # noqa: E731
         lambda self, now: self._emoji_sender_engine.prune_auto_emoji_cooldowns(now)
     )
-    _mark_auto_emoji_sent = lambda self, event: self._emoji_sender_engine.mark_auto_emoji_sent(
+    _mark_auto_emoji_sent = lambda self, event: self._emoji_sender_engine.mark_auto_emoji_sent(  # noqa: E731
         event
     )
-    _try_send_emoji = lambda self, event, emotions, text: self._emoji_sender_engine.try_send_emoji(
+    _try_send_emoji = lambda self, event, emotions, text: self._emoji_sender_engine.try_send_emoji(  # noqa: E731
         event, emotions, text
     )
-    _get_emoji_send_delay = lambda self: self._emoji_sender_engine.get_emoji_send_delay()
-    _async_analyze_and_send_emoji = (
+    _get_emoji_send_delay = lambda self: self._emoji_sender_engine.get_emoji_send_delay()  # noqa: E731
+    _async_analyze_and_send_emoji = (  # noqa: E731
         lambda self,
         event,
         text,
         emotions,
         **kw: self._emoji_sender_engine.async_analyze_and_send_emoji(event, text, emotions, **kw)
     )
-    _validate_result = lambda self, result: self._emoji_sender_engine.validate_result(result)
-    _update_result_with_cleaned_text_safe = (
+    _validate_result = lambda self, result: self._emoji_sender_engine.validate_result(result)  # noqa: E731
+    _update_result_with_cleaned_text_safe = (  # noqa: E731
         lambda self,
         event,
         result,
@@ -654,7 +652,7 @@ class Main(Star):
                     if not raw_scenes:
                         raw_scenes = meta.get("scene", None) if isinstance(meta, dict) else None
 
-                    scenes_items = PluginAPI.split_scene_terms(raw_scenes)
+                    scenes_items = PluginAPI._split_scenes(raw_scenes)
                     scenes_str = ", ".join(scenes_items)
                     source = str(meta.get("source", "") or "") if isinstance(meta, dict) else ""
 
@@ -753,7 +751,7 @@ class Main(Star):
             logger.info(f"[Tool] 发送选中的表情包: {path} (emotion={emotion})")
             send_mode = await self.emoji_selector.send_emoji_message(event, path)
             if not send_mode:
-                yield "鍙戦€佸け璐ワ細琛ㄦ儏鍖呯紪鐮佹垨鍙戦€佸け璐ワ紝璇烽噸璇曘€?"
+                yield "发送失败：表情包编码或发送失败，请重试。"
                 return
             sent_as_sticker = send_mode == "telegram_sticker"
 
@@ -841,6 +839,8 @@ class Main(Star):
     @filter.platform_adapter_type(PlatformAdapterType.ALL)
     async def on_message(self, event: AstrMessageEvent):
         """消息监听：偷取消息中的图片并分类存储。"""
+        # 每条新消息到达时重置回合状态，防止上一轮的标记影响当前对话
+        self._emoji_sender_engine.reset_turn_state(event)
         event_handler = self._get_event_handler(
             log_message="[Stealer] event_handler 未初始化，跳过消息处理",
             log_level="debug",

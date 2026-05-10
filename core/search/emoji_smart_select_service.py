@@ -1,14 +1,13 @@
 """表情包智能选择服务。"""
 
-import asyncio
 import os
 import random
-import time
-from pathlib import Path
 from typing import Any
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
+
+from .text_similarity import calculate_hybrid_similarity, tokenize_for_bm25, _extract_words
 
 
 class EmojiSmartSelectService:
