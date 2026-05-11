@@ -603,9 +603,7 @@ class Main(Star):
         query = str(query or "").strip()
         logger.info(f"[Tool] LLM 搜索表情包: {query}")
 
-        # Mark this turn as an explicit emoji flow and suppress auto-send hooks.
         turn_state = self._emoji_turn_state(event)
-        turn_state.mark_active_sent()
 
         try:
             if not query:
@@ -707,9 +705,7 @@ class Main(Star):
 
         """
         logger.info(f"[Tool] LLM 选择发送表情包编号: {emoji_id}")
-        # Mark this turn as an explicit emoji flow and suppress auto-send hooks.
         turn_state = self._emoji_turn_state(event)
-        turn_state.mark_active_sent()
 
         try:
             if not self.is_send_enabled_for_event(event):
@@ -748,6 +744,14 @@ class Main(Star):
                 yield "发送失败：该表情包被限制为仅来源群可发送，请选择其他表情包。"
                 return
 
+            if not await self._resolve_auto_emoji_turn_permission(event):
+                yield "发送失败：当前轮次未触发表情包发送条件"
+                return
+
+            if not self._claim_auto_emoji_turn(event):
+                yield "发送失败：当前轮次已经有表情包发送流程"
+                return
+
             logger.info(f"[Tool] 发送选中的表情包: {path} (emotion={emotion})")
             send_mode = await self.emoji_selector.send_emoji_message(event, path)
             if not send_mode:
@@ -756,6 +760,8 @@ class Main(Star):
             sent_as_sticker = send_mode == "telegram_sticker"
 
             await self.emoji_selector.record_emoji_usage(path, trigger="llm_tool")
+            await self._mark_auto_emoji_sent(event)
+            turn_state.mark_active_sent()
 
             mode_desc = "Telegram贴纸" if sent_as_sticker else "图片"
             success_msg = f"发送成功（{mode_desc}）。\n\n你发送的表情包：\n- 编号：{emoji_id}\n- 分类：{emotion}\n- 描述：{desc}"
@@ -911,14 +917,12 @@ class Main(Star):
         if not result.is_llm_result():
             return False
         turn_state = self._emoji_turn_state(event)
-        if turn_state.is_active_sent() or turn_state.is_auto_claimed():
+        if turn_state.is_active_sent():
             text = result.get_plain_text() or ""
             if text.strip():
                 _, cleaned_text = await self._extract_emotions_from_text(event, text)
                 if cleaned_text != text:
                     self._update_result_with_cleaned_text_safe(event, result, cleaned_text)
-            if event.get_extra("stealer_auto_emoji_turn_claimed"):
-                return True
             return False
         text = result.get_plain_text() or ""
         if not text.strip():
@@ -932,14 +936,30 @@ class Main(Star):
             _, cleaned_text = await self._extract_emotions_from_text(event, text_without_explicit)
             if cleaned_text != text:
                 self._update_result_with_cleaned_text_safe(event, result, cleaned_text)
+            if not turn_allowed:
+                return cleaned_text != text
             if not self._claim_auto_emoji_turn(event):
                 return cleaned_text != text
-            await self._send_explicit_emojis(event, explicit_emojis, cleaned_text)
-            return True
+            sent = await self._send_explicit_emojis(event, explicit_emojis, cleaned_text)
+            if sent:
+                await self._mark_auto_emoji_sent(event)
+                turn_state.mark_active_sent()
+                return True
+            return cleaned_text != text
         if not turn_allowed:
             return False
         if self._should_skip_auto_emoji_by_gate(text_without_explicit):
             return False
+
+        emotions = []
+        cleaned_text = text_without_explicit
+        if not self.enable_natural_emotion_analysis:
+            emotions, cleaned_text = await self._extract_emotions_from_text(event, text_without_explicit)
+            if cleaned_text != text:
+                self._update_result_with_cleaned_text_safe(event, result, cleaned_text)
+            if not emotions:
+                return cleaned_text != text
+
         if not self._claim_auto_emoji_turn(event):
             return False
         user_query = ""
@@ -948,7 +968,7 @@ class Main(Star):
         except Exception:
             pass
         self._safe_create_task(
-            self._async_analyze_and_send_emoji(event, text_without_explicit, [], user_query=user_query),
+            self._async_analyze_and_send_emoji(event, cleaned_text, emotions, user_query=user_query),
             name="emoji_analyze_passive",
         )
         return True

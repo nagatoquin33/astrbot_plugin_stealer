@@ -519,25 +519,31 @@ class EmojiSmartSelectService:
 
     async def send_emoji_with_text(
         self, event: AstrMessageEvent, emoji_path: str, cleaned_text: str
-    ) -> None:
+    ) -> bool:
         """Send one emoji message in the fastest compatible format."""
         try:
+            # active_sent means an emoji was actually sent, not merely auto-claimed.
             if self.plugin._emoji_turn_state(event).is_active_sent():
                 logger.debug("[Stealer] 已主动发送过表情包，跳过自动发送")
-                return
+                return False
 
             if not self._check_group_allowed(event):
-                return
+                return False
 
             send_mode = await self.send_emoji_message(event, emoji_path)
             if not send_mode:
-                return
+                return False
 
-            await self.record_emoji_usage(emoji_path, trigger="auto")
+            try:
+                await self.record_emoji_usage(emoji_path, trigger="auto")
+            except Exception as e:
+                logger.debug(f"[Stealer] 记录表情包使用失败: {e}")
             logger.debug(f"[Stealer] 已发送表情包 ({send_mode}): {emoji_path}")
+            return True
 
         except Exception as e:
             logger.error(f"发送表情包失败: {e}", exc_info=True)
+            return False
 
     async def send_explicit_emojis(
         self, event: AstrMessageEvent, emoji_paths: list[str], cleaned_text: str
@@ -584,6 +590,7 @@ class EmojiSmartSelectService:
         if not self._check_group_allowed(event):
             return False
 
+        # active_sent means an emoji was actually sent, not merely auto-claimed.
         if self.plugin._emoji_turn_state(event).is_active_sent():
             logger.debug("[Stealer] 检测到已发送，跳过表情发送")
             return False
@@ -592,7 +599,9 @@ class EmojiSmartSelectService:
         for emotion in emotions:
             emoji_path = await self.plugin.emoji_selector.select_emoji(emotion, cleaned_text, event=event)
             if emoji_path:
-                await self.send_emoji_with_text(event, emoji_path, cleaned_text)
+                sent = await self.send_emoji_with_text(event, emoji_path, cleaned_text)
+                if not sent:
+                    continue
                 logger.debug(f"已发送表情包 (情绪={emotion})")
                 return True
 

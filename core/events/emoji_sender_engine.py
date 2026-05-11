@@ -153,10 +153,7 @@ class EmojiSenderEngine:
         now = asyncio.get_event_loop().time()
         async with self._auto_emoji_cooldowns_lock:
             last = self._auto_emoji_cooldowns.get(key, 0)
-            if now - last < self.AUTO_EMOJI_COOLDOWN_SECONDS:
-                return False
-            self._auto_emoji_cooldowns[key] = now
-            return True
+            return now - last >= self.AUTO_EMOJI_COOLDOWN_SECONDS
 
     def normalize_auto_emoji_chance(self) -> float:
         """归一化自动表情发送概率。"""
@@ -169,36 +166,41 @@ class EmojiSenderEngine:
     async def resolve_auto_emoji_turn_permission(self, event: AstrMessageEvent) -> bool:
         """解析自动表情发送权限。"""
         turn_state = self.emoji_turn_state(event)
+
+        if turn_state.is_auto_decided():
+            return turn_state.get_auto_allowed()
+
+        def decide(allowed: bool, reason: str) -> bool:
+            event.set_extra("stealer_auto_emoji_turn_decided", True)
+            event.set_extra("stealer_auto_emoji_turn_allowed", allowed)
+            event.set_extra("stealer_auto_emoji_turn_reason", reason)
+            turn_state.set_auto_decision(allowed, reason)
+            return allowed
+
         if not getattr(self.plugin, "auto_send", False):
-            event.set_extra("stealer_auto_emoji_turn_decided", True)
-            event.set_extra("stealer_auto_emoji_turn_reason", "auto_send_disabled")
-            turn_state.set_auto_decision(False, "auto_send_disabled")
-            return False
+            return decide(False, "auto_send_disabled")
         if not self.plugin.is_send_enabled_for_event(event):
-            event.set_extra("stealer_auto_emoji_turn_decided", True)
-            event.set_extra("stealer_auto_emoji_turn_reason", "send_disabled")
-            turn_state.set_auto_decision(False, "send_disabled")
-            return False
+            return decide(False, "send_disabled")
+        if not await self.is_auto_emoji_cooldown_ready(event):
+            return decide(False, "cooldown")
         chance = self.normalize_auto_emoji_chance()
         if chance <= 0:
-            event.set_extra("stealer_auto_emoji_turn_decided", True)
-            event.set_extra("stealer_auto_emoji_turn_reason", "chance_zero")
-            event.set_extra("stealer_auto_emoji_turn_allowed", False)
-            turn_state.set_auto_decision(False, "chance_zero")
-            return False
-        event.set_extra("stealer_auto_emoji_turn_decided", True)
-        event.set_extra("stealer_auto_emoji_turn_reason", "allowed")
-        turn_state.set_auto_decision(True, "allowed")
-        return True
+            return decide(False, "chance_zero")
+        if chance >= 1:
+            return decide(True, "chance_hit")
+        if random.random() < chance:
+            return decide(True, "chance_hit")
+        return decide(False, "chance_miss")
 
     def claim_auto_emoji_turn(self, event: AstrMessageEvent) -> bool:
         """尝试占用当前回合的表情包发送权。"""
         turn_state = self.emoji_turn_state(event)
         if event.get_extra("stealer_auto_emoji_turn_claimed"):
-            return True
+            return False
         if turn_state.is_active_sent():
             return False
-        turn_state._auto_send_claimed = True
+        if not turn_state.claim_auto_send():
+            return False
         event.set_extra("stealer_auto_emoji_turn_claimed", True)
         return True
 
@@ -214,6 +216,7 @@ class EmojiSenderEngine:
         key = self.get_auto_emoji_session_key(event)
         now = asyncio.get_event_loop().time()
         async with self._auto_emoji_cooldowns_lock:
+            self.prune_auto_emoji_cooldowns(now)
             self._auto_emoji_cooldowns[key] = now
 
     # --- 发送 ---
@@ -237,26 +240,28 @@ class EmojiSenderEngine:
                 return False
 
             # 发送
-            await self.send_explicit_emojis(event, [emoji_path], cleaned_text)
-            return True
+            return await self.send_explicit_emojis(event, [emoji_path], cleaned_text)
         except Exception as e:
             logger.debug(f"[EmojiSenderEngine] 尝试发送表情包失败: {e}")
             return False
 
     async def send_explicit_emojis(
         self, event: AstrMessageEvent, emoji_paths: list[str], cleaned_text: str
-    ):
+    ) -> bool:
         """发送指定的表情包。"""
         from astrbot.api.message_components import Image
 
         if not emoji_paths:
-            return
+            return False
 
+        sent = False
         for path in emoji_paths:
             try:
                 await event.send(Image(file=path))
+                sent = True
             except Exception as e:
                 logger.warning(f"[EmojiSenderEngine] 发送表情包失败: {e}")
+        return sent
 
     def get_emoji_send_delay(self) -> float:
         """获取表情包发送延迟（秒）。"""
@@ -289,19 +294,28 @@ class EmojiSenderEngine:
         本方法成功发送后再标记 mark_active_sent 以记录实际发送时间。
         """
         try:
-            # 无显式情绪且开启自然语言分析时，用小模型分析回复文本的情绪
-            if (
-                not emotions
-                and getattr(self.plugin, "enable_natural_emotion_analysis", False)
-                and hasattr(self.plugin, "smart_emotion_matcher")
+            final_emotions = list(emotions or [])
+
+            if getattr(self.plugin, "enable_natural_emotion_analysis", False) and hasattr(
+                self.plugin, "smart_emotion_matcher"
             ):
                 analyzed = await self.plugin.smart_emotion_matcher.analyze_and_match_emotion(
-                    event, text, user_query=user_query
+                    event,
+                    text,
+                    use_natural_analysis=True,
+                    user_query=user_query,
                 )
                 if analyzed:
-                    emotions = [analyzed]
+                    final_emotions = [analyzed]
 
-            sent = await self.try_send_emoji(event, emotions, text)
+            if not final_emotions:
+                return
+
+            delay = self.get_emoji_send_delay()
+            if delay > 0:
+                await asyncio.sleep(delay)
+
+            sent = await self.try_send_emoji(event, final_emotions, text)
             if sent:
                 await self.mark_auto_emoji_sent(event)
                 self.emoji_turn_state(event).mark_active_sent()
