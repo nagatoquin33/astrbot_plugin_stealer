@@ -8,6 +8,7 @@ from typing import Any
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
+from astrbot.api.message_components import Image as ImageComponent, Reply
 
 
 class CommandHandler:
@@ -194,8 +195,52 @@ class CommandHandler:
         yield event.plain_result("操作无效，请使用 add / del / clear / show")
 
     async def capture(self, event: AstrMessageEvent):
-        window_seconds = 30
+        """进入强制接收模式，30秒内发送的图片将直接入库。如果当前消息或引用消息中包含图片，则直接收录。"""
+        from astrbot.api.message_components import Image as ImageComponent
+        from astrbot.api.message_components import Reply # 确保 Reply 组件已导入
+        from pathlib import Path
 
+        all_images = []
+
+        # 1. 检查当前消息链中的图片
+        for component in event.message_obj.message:
+            if isinstance(component, ImageComponent):
+                all_images.append(component)
+            elif isinstance(component, Reply):
+                # 2. 检查引用消息链中的图片
+                if hasattr(component, 'chain') and component.chain:
+                    for sub_comp in component.chain:
+                        if isinstance(sub_comp, ImageComponent):
+                            all_images.append(sub_comp)
+
+        if all_images:
+            img = all_images[0] # 只处理找到的第一张图片
+            try:
+                file_path = await img.convert_to_file_path()
+                if not file_path or not Path(file_path).exists():
+                    yield event.plain_result("❌ 收录失败：图片文件不存在或无法访问。")
+                    return
+
+                success, updated_idx = await self.plugin._process_image(
+                    event,
+                    file_path,
+                    is_temp=True,
+                    is_platform_emoji=True,
+                    extra_meta={"source": "message_chain_image"},
+                )
+
+                if success and updated_idx:
+                    await self.plugin._save_index(updated_idx)
+                    yield event.plain_result("✅ 已收录图片并自动分类入库！")
+                else:
+                    yield event.plain_result("❌ 未收录图片（可能被判定为非表情包/审核不通过/重复或处理失败）。")
+            except Exception as e:
+                logger.error(f"处理图片失败: {e}", exc_info=True)
+                yield event.plain_result(f"❌ 收录失败：处理图片时发生错误：{e}")
+            return
+
+        # 如果没有图片，则进入强制接收模式 (原逻辑)
+        window_seconds = 30
         if hasattr(self.plugin, "begin_force_capture"):
             self.plugin.begin_force_capture(event, window_seconds)
             yield event.plain_result(
