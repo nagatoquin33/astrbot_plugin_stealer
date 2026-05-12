@@ -17,7 +17,7 @@ IndexUpdater = Callable[[IndexCache], Any | Awaitable[Any]]
 class CacheService:
     """缓存服务，负责管理内存缓存与可选的 JSON 持久化。"""
 
-    _CACHE_MAX_SIZE = 100
+    _CACHE_MAX_SIZE = 1000
 
     def __init__(self, cache_dir: str | Path | None = None):
         if not cache_dir:
@@ -40,7 +40,7 @@ class CacheService:
             "blacklist_cache": OrderedDict(),
         }
         self._no_persist_caches: set[str] = {"index_cache"}
-        self._unbounded_caches: set[str] = {"index_cache"}
+        self._unbounded_caches: set[str] = set()
         self._lock = threading.RLock()
 
         self._load_caches()
