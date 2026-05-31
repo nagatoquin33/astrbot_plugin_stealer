@@ -18,7 +18,7 @@
 
 ## 📢 Introduction
 
-An [AstrBot](https://github.com/Soulter/AstrBot) entertainment plugin powered by multimodal AI. Automatically steals emojis from chat, classifies them with a vision model, and sends a mood-matching emoji during conversations to make Bot replies feel more human. Stealing and auto-sending can be toggled independently.
+An [AstrBot](https://github.com/AstrBotDevs/AstrBot) entertainment plugin powered by multimodal AI. Automatically steals emojis from chat, classifies them with a vision model, and sends a mood-matching emoji during conversations to make Bot replies feel more human. Stealing and auto-sending can be toggled independently.
 
 This plugin is fully open-source and free. Issues and PRs are welcome.
 

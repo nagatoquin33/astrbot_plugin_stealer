@@ -124,6 +124,7 @@ class ImageRenderService:
                                 duration=durations,
                                 loop=0,
                                 optimize=True,
+                                disposal=2,
                             )
                     else:
                         if scale != 1.0:

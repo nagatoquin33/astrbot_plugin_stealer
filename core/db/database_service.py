@@ -330,14 +330,14 @@ class DatabaseService:
                     for tag in emoji.get("tags") or []:
                         if tag:
                             conn.execute(
-                                "INSERT INTO emoji_tag (path, tag) VALUES (?, ?)", (path, tag)
+                                "INSERT OR IGNORE INTO emoji_tag (path, tag) VALUES (?, ?)", (path, tag)
                             )
 
                     # 插入场景
                     for scene in emoji.get("scenes") or []:
                         if scene:
                             conn.execute(
-                                "INSERT INTO emoji_scene (path, scene) VALUES (?, ?)", (path, scene)
+                                "INSERT OR IGNORE INTO emoji_scene (path, scene) VALUES (?, ?)", (path, scene)
                             )
 
                     count += 1
@@ -475,14 +475,14 @@ class DatabaseService:
                     for tag in meta.get("tags") or []:
                         if tag:
                             conn.execute(
-                                "INSERT INTO emoji_tag (path, tag) VALUES (?, ?)",
+                                "INSERT OR IGNORE INTO emoji_tag (path, tag) VALUES (?, ?)",
                                 (path, tag),
                             )
 
                     for scene in meta.get("scenes") or []:
                         if scene:
                             conn.execute(
-                                "INSERT INTO emoji_scene (path, scene) VALUES (?, ?)",
+                                "INSERT OR IGNORE INTO emoji_scene (path, scene) VALUES (?, ?)",
                                 (path, scene),
                             )
 
@@ -524,7 +524,7 @@ class DatabaseService:
                             conn.execute("DELETE FROM emoji_tag WHERE path = ?", (path,))
                             for tag in desired_tags:
                                 conn.execute(
-                                    "INSERT INTO emoji_tag (path, tag) VALUES (?, ?)",
+                                    "INSERT OR IGNORE INTO emoji_tag (path, tag) VALUES (?, ?)",
                                     (path, tag),
                                 )
 
@@ -534,7 +534,7 @@ class DatabaseService:
                             conn.execute("DELETE FROM emoji_scene WHERE path = ?", (path,))
                             for scene in desired_scenes:
                                 conn.execute(
-                                    "INSERT INTO emoji_scene (path, scene) VALUES (?, ?)",
+                                    "INSERT OR IGNORE INTO emoji_scene (path, scene) VALUES (?, ?)",
                                     (path, scene),
                                 )
 

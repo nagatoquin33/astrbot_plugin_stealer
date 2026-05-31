@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.4] - 2026-05-28
+
+### fix
+- 修复动图转 GIF 发送时出现拖影：GIF 保存缺少 `disposal=2`，导致帧叠加产生残影
+
 ## [2.6.3] - 2026-05-11
 
 ### added
