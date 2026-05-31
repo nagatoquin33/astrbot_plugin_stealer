@@ -1,4 +1,4 @@
-const { createApp, ref, reactive, onMounted } = Vue;
+const { createApp, ref, reactive, onMounted, nextTick } = Vue;
 
 const PLACEHOLDER = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
@@ -174,7 +174,7 @@ const TEMPLATE = /* html */ `
                         </div>
 
                         <div class="item-image">
-                            <img :src="imageDataUrls[img.hash] || PLACEHOLDER" loading="lazy" :alt="img.desc">
+                            <img :src="imageDataUrls[img.hash] || PLACEHOLDER" loading="lazy" :alt="img.desc" :data-hash="img.hash">
                         </div>
 
                         <div class="item-info">
@@ -243,7 +243,7 @@ const TEMPLATE = /* html */ `
                                 </svg>
                             </button>
 
-                            <img :src="imageDataUrls[previewItem?.hash] || PLACEHOLDER" :alt="previewItem?.desc">
+                            <img :src="originalDataUrls[previewItem?.hash] || imageDataUrls[previewItem?.hash] || PLACEHOLDER" :alt="previewItem?.desc">
 
                             <button
                                 v-if="images.length > 1"
@@ -859,6 +859,17 @@ createApp({
         const batchTaskSuccess = ref(0);
         const batchTaskFailed = ref(0);
         let batchPollInterval = null;
+        let imgObserver = null;
+
+        const observeImages = () => {
+            if (!imgObserver) return;
+            document.querySelectorAll('.item-image img[data-hash]').forEach((img) => {
+                if (!img.dataset.observed) {
+                    img.dataset.observed = 'true';
+                    imgObserver.observe(img);
+                }
+            });
+        };
 
         const parseSceneList = (rawText) => {
             if (!rawText) return [];
@@ -909,22 +920,35 @@ createApp({
         const bridge = window.AstrBotPluginPage;
 
         const imageDataUrls = reactive({});
+        const originalDataUrls = reactive({});
 
         const loadImageData = async (hash) => {
             if (!hash || imageDataUrls[hash]) return;
             try {
-                const data = await bridge.apiGet('image-data', { hash });
+                const data = await bridge.apiGet('thumbnail', { hash, size: 300 });
                 if (data && data.url) {
                     imageDataUrls[hash] = data.url;
                 }
             } catch (e) {
-                console.error('Failed to load image:', hash, e);
+                console.error('Failed to load thumbnail:', hash, e);
+            }
+        };
+
+        const loadOriginalImage = async (hash) => {
+            if (!hash || originalDataUrls[hash]) return;
+            try {
+                const data = await bridge.apiGet('image-data', { hash });
+                if (data && data.url) {
+                    originalDataUrls[hash] = data.url;
+                }
+            } catch (e) {
+                console.error('Failed to load original image:', hash, e);
             }
         };
 
         const downloadImage = async (item) => {
             if (!item?.hash) return;
-            const dataUrl = imageDataUrls[item.hash];
+            const dataUrl = originalDataUrls[item.hash] || imageDataUrls[item.hash];
             if (!dataUrl) return;
             const a = document.createElement('a');
             a.href = dataUrl;
@@ -1040,9 +1064,9 @@ createApp({
 
                 currentPage.value = page;
                 images.value = nextImages;
-                nextImages.forEach(img => loadImageData(img.hash));
                 total.value = nextTotal;
                 categories.value = data.categories || [];
+                nextTick(() => observeImages());
                 if (selectedImages.value.size > 0) {
                     const visibleHashes = new Set(nextImages.map((img) => img.hash));
                     selectedImages.value = new Set(
@@ -1085,6 +1109,9 @@ createApp({
         const openPreview = (img) => {
             previewItem.value = img;
             previewOpen.value = true;
+            if (img?.hash) {
+                loadOriginalImage(img.hash);
+            }
         };
 
         const closePreview = () => {
@@ -1096,13 +1123,19 @@ createApp({
         const prevImage = () => {
             if (!previewItem.value) return;
             const idx = images.value.findIndex((i) => i.hash === previewItem.value.hash);
-            if (idx > 0) previewItem.value = images.value[idx - 1];
+            if (idx > 0) {
+                previewItem.value = images.value[idx - 1];
+                loadOriginalImage(previewItem.value.hash);
+            }
         };
 
         const nextImage = () => {
             if (!previewItem.value) return;
             const idx = images.value.findIndex((i) => i.hash === previewItem.value.hash);
-            if (idx < images.value.length - 1) previewItem.value = images.value[idx + 1];
+            if (idx < images.value.length - 1) {
+                previewItem.value = images.value[idx + 1];
+                loadOriginalImage(previewItem.value.hash);
+            }
         };
 
         const handleKeydown = (e) => {
@@ -1726,6 +1759,15 @@ createApp({
         onMounted(() => {
             initTheme();
             window.addEventListener('keydown', handleKeydown);
+            imgObserver = new IntersectionObserver((entries) => {
+                entries.forEach((entry) => {
+                    if (entry.isIntersecting) {
+                        const hash = entry.target.dataset.hash;
+                        if (hash) loadImageData(hash);
+                        imgObserver.unobserve(entry.target);
+                    }
+                });
+            }, { rootMargin: '200px' });
             loadAll();
         });
 
@@ -1831,6 +1873,7 @@ createApp({
             getScopeLabel,
             PLACEHOLDER,
             imageDataUrls,
+            originalDataUrls,
             downloadImage,
 
             confirmOpen,

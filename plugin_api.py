@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from PIL import Image
 from quart import jsonify, request
 
 try:
@@ -36,6 +37,7 @@ class PluginAPI:
             ("/images", "handle_list_images", ["GET"]),
             ("/image-data", "handle_image_data", ["GET"]),
             ("/serve-image", "handle_serve_image", ["GET"]),
+            ("/thumbnail", "handle_thumbnail", ["GET"]),
             ("/images/upload", "handle_upload_image", ["POST"]),
             ("/images/update", "handle_update_image", ["POST"]),
             ("/images/delete", "handle_delete_image", ["POST"]),
@@ -266,6 +268,62 @@ class PluginAPI:
                         logger.warning(f"读取图片失败: {e}")
                 break
         return jsonify({"success": False, "error": "图片未找到"})
+
+    async def _get_or_create_thumbnail(
+        self, img_hash: str, file_path: str, max_size: int = 300
+    ) -> str:
+        """生成或返回缓存的缩略图路径。"""
+        thumb_dir = self._data_dir / "thumb_cache"
+        thumb_path = thumb_dir / f"{img_hash}_{max_size}.jpg"
+
+        if thumb_path.exists():
+            return str(thumb_path)
+
+        if not os.path.isfile(file_path):
+            raise FileNotFoundError(file_path)
+
+        thumb_dir.mkdir(parents=True, exist_ok=True)
+
+        def _create() -> str:
+            with Image.open(file_path) as img:
+                img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+                if img.mode in ("RGBA", "P"):
+                    img = img.convert("RGB")
+                img.save(thumb_path, "JPEG", quality=85)
+            return str(thumb_path)
+
+        return await asyncio.to_thread(_create)
+
+    async def handle_thumbnail(self):
+        """返回缩略图的 base64 data URL，用于列表展示。"""
+        img_hash = request.args.get("hash", "").strip()
+        max_size = request.args.get("size", 300, type=int)
+
+        if not img_hash:
+            return jsonify({"success": False, "error": "缺少 hash"}), 400
+
+        file_path = None
+        for p, m in self._get_index().items():
+            if isinstance(m, dict) and m.get("hash") == img_hash:
+                file_path = p
+                break
+
+        if not file_path or not os.path.isfile(file_path):
+            return jsonify({"success": False, "error": "图片未找到"}), 404
+
+        try:
+            thumb_path = await self._get_or_create_thumbnail(
+                img_hash, file_path, max_size
+            )
+            data_url = self._file_base64(thumb_path)
+            return jsonify({"success": True, "hash": img_hash, "url": data_url})
+        except Exception as e:
+            logger.warning(f"生成缩略图失败: {e}")
+            try:
+                data_url = self._file_base64(file_path)
+                return jsonify({"success": True, "hash": img_hash, "url": data_url})
+            except Exception as e2:
+                return jsonify({"success": False, "error": str(e2)}), 500
 
     # ── List / Stats / Health ─────────────────────────────────
 
