@@ -277,13 +277,16 @@ h2 {
     z-index: 50;
 }
 .sidebar-title {
-    font-size: 0.75rem;
-    color: var(--text-tertiary);
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--gold-primary);
     text-transform: uppercase;
-    letter-spacing: 0.1em;
-    padding: 0 8px 12px;
+    letter-spacing: 0.15em;
+    padding: 8px 12px 12px;
     margin-bottom: 8px;
-    border-bottom: 1px solid var(--glass-border);
+    border-bottom: 2px solid var(--gold-dim);
+    text-align: center;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
 }
 
 .category-list {
@@ -300,8 +303,19 @@ h2 {
     border-radius: 8px;
     cursor: pointer;
     white-space: nowrap;
-    transition: background-color 0.2s;
+    transition: all 0.2s ease;
     border-left: 3px solid transparent;
+    position: relative;
+}
+.category-item + .category-item::before {
+    content: '';
+    position: absolute;
+    top: -3px;
+    left: 12px;
+    right: 12px;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--glass-border), transparent);
+    opacity: 0.6;
 }
 .category-item:hover {
     background: rgba(212, 168, 83, 0.1);
@@ -467,7 +481,7 @@ h2 {
 .item-slot {
     background: var(--bg-card);
     border-radius: 12px;
-    border: 1px solid transparent;
+    border: 1px solid rgba(212, 168, 83, 0.08);
     position: relative;
     cursor: pointer;
     overflow: hidden;
@@ -475,15 +489,18 @@ h2 {
     display: flex;
     flex-direction: column;
     transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.05);
+    content-visibility: auto;
+    contain: layout style paint;
 }
 .item-slot:hover {
     transform: translateY(-4px);
     border-color: var(--gold-dim);
-    box-shadow: 0 8px 32px rgba(0,0,0,0.3), 0 0 20px var(--gold-glow);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.35), 0 0 24px var(--gold-glow), inset 0 1px 0 rgba(255,255,255,0.1);
 }
 .item-slot.selected {
     border-color: var(--gold-primary);
-    box-shadow: 0 0 0 2px var(--gold-glow);
+    box-shadow: 0 0 0 2px var(--gold-glow), 0 4px 16px rgba(212, 168, 83, 0.2);
 }
 
 /* Batch Indicator */

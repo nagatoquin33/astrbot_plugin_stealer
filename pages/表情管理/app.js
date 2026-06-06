@@ -1184,7 +1184,10 @@ createApp({
             } catch (e) { healthStatus.value = 'error'; }
         };
 
+        let isFetching = false;
         const fetchImages = async (page = 1) => {
+            if (isFetching) return;
+            isFetching = true;
             loading.value = true;
             try {
                 const params = new URLSearchParams({
@@ -1223,8 +1226,12 @@ createApp({
             } catch (e) {
                 console.error(e);
                 return [];
+            } catch (e) {
+                console.error(e);
+                return [];
             } finally {
                 loading.value = false;
+                isFetching = false;
             }
         };
 
@@ -1942,17 +1949,22 @@ createApp({
             }, 600);
         };
 
+        let resizeTimer = null;
         onMounted(() => {
             initTheme();
             updatePageSize();
             window.addEventListener('keydown', handleKeydown);
-            window.addEventListener('resize', () => { updatePageSize(); fetchImages(1); });
+            window.addEventListener('resize', () => {
+                clearTimeout(resizeTimer);
+                resizeTimer = setTimeout(() => { updatePageSize(); fetchImages(1); }, 300);
+            });
             imgObserver = new IntersectionObserver((entries) => {
                 entries.forEach((entry) => {
                     if (entry.isIntersecting) {
                         const hash = entry.target.dataset.hash;
                         if (hash) loadImageData(hash);
                         imgObserver.unobserve(entry.target);
+                        entry.target.dataset.observed = '';
                     }
                 });
             }, { rootMargin: '200px' });
