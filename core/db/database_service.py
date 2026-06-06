@@ -25,7 +25,7 @@ class DatabaseService:
     _RELATED_FETCH_CHUNK_SIZE = 400
 
     # 表结构版本，用于迁移检测
-    SCHEMA_VERSION = 1
+    SCHEMA_VERSION = 2
 
     def __init__(self, db_path: str | Path | None = None):
         """初始化数据库服务。
@@ -94,6 +94,19 @@ class DatabaseService:
             if current_version < self.SCHEMA_VERSION:
                 logger.info(f"[DB] 升级数据库 schema: {current_version} -> {self.SCHEMA_VERSION}")
                 self._create_tables(conn)
+
+                # 版本 2 迁移：添加 is_favorite 字段
+                if current_version < 2:
+                    try:
+                        conn.execute("ALTER TABLE emoji ADD COLUMN is_favorite INTEGER DEFAULT 0")
+                        conn.execute("CREATE INDEX IF NOT EXISTS idx_emoji_favorite ON emoji(is_favorite)")
+                        logger.info("[DB] 迁移完成: 添加 is_favorite 字段")
+                    except sqlite3.OperationalError as e:
+                        if "duplicate column name" in str(e).lower():
+                            logger.info("[DB] is_favorite 字段已存在，跳过")
+                        else:
+                            raise
+
                 conn.execute(
                     "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?)",
                     (str(self.SCHEMA_VERSION),),
@@ -114,7 +127,8 @@ class DatabaseService:
                 scope_mode TEXT DEFAULT 'public',
                 created_at INTEGER DEFAULT 0,
                 use_count INTEGER DEFAULT 0,
-                last_used_at INTEGER DEFAULT 0
+                last_used_at INTEGER DEFAULT 0,
+                is_favorite INTEGER DEFAULT 0
             )
         """)
 
@@ -304,8 +318,8 @@ class DatabaseService:
                         """
                         INSERT OR REPLACE INTO emoji
                         (path, hash, phash, category, desc, source, origin_target,
-                         scope_mode, created_at, use_count, last_used_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         scope_mode, created_at, use_count, last_used_at, is_favorite)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                         (
                             path,
@@ -319,6 +333,7 @@ class DatabaseService:
                             emoji.get("created_at", now),
                             emoji.get("use_count", 0),
                             emoji.get("last_used_at", 0),
+                            int(bool(emoji.get("is_favorite", 0))),
                         ),
                     )
 
@@ -454,8 +469,8 @@ class DatabaseService:
                         """
                             INSERT INTO emoji
                             (path, hash, phash, category, desc, source, origin_target,
-                             scope_mode, created_at, use_count, last_used_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                             scope_mode, created_at, use_count, last_used_at, is_favorite)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             path,
@@ -469,6 +484,7 @@ class DatabaseService:
                             meta.get("created_at", now),
                             meta.get("use_count", 0),
                             meta.get("last_used_at", 0),
+                            int(bool(meta.get("is_favorite", 0))),
                         ),
                     )
 
@@ -497,6 +513,7 @@ class DatabaseService:
                     "created_at",
                     "use_count",
                     "last_used_at",
+                    "is_favorite",
                 )
 
                 for path in desired_paths & existing_paths:
@@ -653,6 +670,7 @@ class DatabaseService:
         sort_order: str = "newest",
         search_query: str | None = None,
         scope_target: str | None = None,
+        favorite_only: bool = False,
     ) -> tuple[list[dict[str, Any]], int, dict[str, int]]:
         """分页获取表情包列表，支持过滤、搜索和排序。
 
@@ -663,6 +681,7 @@ class DatabaseService:
             sort_order: 排序方式 - "newest"(最新), "oldest"(最旧), "most_used"(最常用)
             search_query: 搜索关键词（匹配标签、描述、场景）
             scope_target: scope 过滤目标（可选）
+            favorite_only: 仅显示收藏的表情包
 
         Returns:
             tuple: (图片列表, 总数, 分类统计)
@@ -681,6 +700,11 @@ class DatabaseService:
             if category:
                 where_clauses.append("e.category = ?")
                 params.append(category)
+
+            # 收藏过滤
+            if favorite_only:
+                where_clauses.append("e.is_favorite = 1")
+                category_count_where_clauses.append("e.is_favorite = 1")
 
             # scope 过滤
             if scope_target:
