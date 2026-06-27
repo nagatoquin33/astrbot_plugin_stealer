@@ -128,6 +128,10 @@ class Main(Star):
         self.enable_natural_emotion_analysis = self.plugin_config.enable_natural_emotion_analysis
         self.emotion_analysis_provider_id = self.plugin_config.emotion_analysis_provider_id
         self.image_processing_cooldown = self.plugin_config.image_processing_cooldown
+        # 待审核池 / 嵌入检索（steal_pool_capacity 调整后即时生效：护栏每次 on_message 读此属性）
+        self.steal_pool_capacity = self.plugin_config.steal_pool_capacity
+        self.enable_embedding_search = self.plugin_config.enable_embedding_search
+        self.embedding_provider_id = str(self.plugin_config.embedding_provider_id or "").strip()
 
     def _load_vision_provider_id(self) -> str:
         """加载视觉模型提供商ID。"""
@@ -258,6 +262,11 @@ class Main(Star):
             self.steal_chance = 0.6
             fixed.append("偷图概率已重置为0.6")
             fixed_values["steal_chance"] = 0.6
+        if not isinstance(self.steal_pool_capacity, int) or self.steal_pool_capacity < 10:
+            errors.append("待审核池容量必须是不小于10的整数")
+            self.steal_pool_capacity = 200
+            fixed.append("待审核池容量已重置为200")
+            fixed_values["steal_pool_capacity"] = 200
         if errors:
             logger.warning(f"配置验证发现问题: {'; '.join(errors)}")
         if fixed:

@@ -228,6 +228,30 @@
     ],
     "hint": "conservative=只清理失效索引和临时文件，balanced=额外清理孤儿文件和缩略图缓存，aggressive=额外清理 raw 目录"
   },
+  "steal_pool_capacity": {
+    "description": "待审核池容量上限",
+    "type": "int",
+    "default": 200,
+    "slider": {
+      "min": 10,
+      "max": 2000,
+      "step": 10
+    },
+    "hint": "自动偷取的图片先进「待审核池」，达到此数量后暂停偷取，待人工审核（通过入库或删除）腾出空间后自动恢复。调整保存后即时生效，无需重启"
+  },
+  "enable_embedding_search": {
+    "description": "启用嵌入向量检索",
+    "type": "bool",
+    "default": true,
+    "hint": "✅ 开启：用嵌入向量召回表情包，更贴合语义（需配置嵌入模型，否则自动降级为关键词检索）\n❌ 关闭：始终使用关键词(BM25)检索"
+  },
+  "embedding_provider_id": {
+    "description": "嵌入模型",
+    "type": "string",
+    "hint": "留空则自动使用框架首个可用的嵌入模型。",
+    "_special": "select_provider",
+    "default": ""
+  },
   "_advanced_section": {
     "description": "=== 高级配置（特殊情况使用） ===",
     "type": "text",

@@ -45,6 +45,11 @@ class PluginConfig(BaseModel):
     emotion_analysis_provider_id: str = ""  # 情绪分析专用模型
     smart_emoji_selection: bool = True  # 智能表情包选择
 
+    # === 待审核池 / 嵌入检索 ===
+    steal_pool_capacity: int = 200  # 待审核池容量上限，到达即暂停自动偷取
+    enable_embedding_search: bool = True  # 启用嵌入向量检索；不可用时降级 BM25
+    embedding_provider_id: str = ""  # 嵌入模型；留空则尝试框架首个 embedding provider
+
     # === 自定义提示词 ===
     custom_emoji_classification_prompt: str = ""
     custom_emoji_classification_with_filter_prompt: str = ""
