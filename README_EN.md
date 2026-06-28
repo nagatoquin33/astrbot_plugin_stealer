@@ -31,12 +31,15 @@ This plugin is fully open-source and free. Issues and PRs are welcome.
 
 | Feature | Description |
 |:---|:---|
-| **Auto Steal** | Monitor group chat images, auto-collect by probability or cooldown, with optional content filtration |
+| **Auto Steal** | Monitor group chat images, auto-collect by probability or cooldown, with pending pool capacity control |
+| **Pending Review Pool** | Auto-stolen images enter a review queue first; manual approval prevents low-quality images from polluting the library |
 | **Smart Classification** | Use VLM to identify image content and classify by emotion preset categories |
+| **Semantic Search** | FaissVecDB vector embedding matches emojis by meaning, not just keywords; auto-degrades to BM25 when unavailable |
 | **Emotion Matching** | Analyze the emotion of Bot replies and append a matching emoji |
 | **LLM Proactive Selection** | LLM can search and send the best emoji via tool calls during conversation |
 | **Dual-Mode Emotion Analysis** | LLM mode (lightweight post-reply analysis, doesn't modify the reply) / Passive tag mode (LLM directly tags emotion) |
-| **WebUI Management** | View, search, delete, blacklist, and manage emojis with `public/local` scoping, origin display, batch operations, storage cleanup, and scope repair |
+| **WebUI Dual-Section** | Review Queue: manually approve/reject pending emojis / Library: browse, sort, batch manage |
+| **Sort & Filter** | Most used / Recently used / Newest / Oldest — all via SQL ORDER BY |
 | **Group Filtering** | Whitelist/blacklist control over which groups allow stealing/sending |
 
 ## 🚀 Quick Start
@@ -164,6 +167,14 @@ All settings can be modified in the AstrBot admin panel.
 | **Steal blacklist** | `[]` | Can coexist with whitelist. |
 | **Steal filter priority** | `whitelist_first` | `whitelist_first` or `blacklist_first` |
 
+### Pending Pool & Embedding Search
+
+| Setting | Default | Description |
+|:---|:---|:---|
+| **Pending pool capacity** | `200` | Auto-stolen images enter the pool first; stealing pauses when full. Resumes after manual review. Adjustable in real-time |
+| **Enable embedding search** | `true` | FaissVecDB semantic similarity matching; auto-degrades to BM25 when disabled or unavailable |
+| **Embedding model ID** | `""` | Leave blank to auto-use AstrBot's first Embedding Provider. Check AstrBot Admin → LLM Config for available embedding model IDs (e.g., `openai_embedding`) |
+
 ### Storage & Advanced
 
 | Setting | Default | Description |
@@ -222,14 +233,14 @@ All commands use the `/meme` prefix.
 
 | Tool | Description |
 |:---|:---|
-| `search_emoji` | LLM searches for matching emoji candidates with category, scene, scope, and usage hints |
-| `send_emoji_by_id` | LLM selects and sends an emoji from the candidate list; failures include explicit reason codes |
-| `steal_sticker` | LLM imports an image when the user asks to collect it or the current message contains a suitable emoji; `image_ref` may be omitted to use the first image in the current message, and VLM handles category, tags, description, and scene analysis |
+| `search_meme` | LLM searches for matching meme candidates with category, scene, scope, and usage hints |
+| `send_meme` | LLM selects and sends a meme from the candidate list; failures include explicit reason codes |
+| `steal_meme` | LLM imports an image when the user asks to collect it or the current message contains a suitable meme; `image_ref` may be omitted to use the first image in the current message, and VLM handles category, tags, description, and scene analysis |
 
 ## ⚠️ Notes
 
 - **Deleting a category via WebUI** also deletes all associated image files. Use with caution.
-- With `send_emoji_as_gif` enabled, very large images converted to GIF may cause memory spikes. Turn it off on low-memory environments.
+- With `send_meme_as_gif` enabled, very large images converted to GIF may cause memory spikes. Turn it off on low-memory environments.
 - A **vision model (VLM)** is required. Without one, the plugin's core functions won't work.
 
 ### 📝 Prompt Format Update

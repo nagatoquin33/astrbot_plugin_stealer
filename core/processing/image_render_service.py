@@ -55,7 +55,7 @@ class ImageRenderService:
 
     async def file_to_gif_base64(self, file_path: str) -> str:
         """将文件转换为 GIF 格式的 base64 编码（用于发送侧强制 GIF）。"""
-        if not getattr(self.plugin, "send_emoji_as_gif", True):
+        if not getattr(self.plugin, "send_meme_as_gif", True):
             return await self.file_to_base64(file_path)
 
         try:

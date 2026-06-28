@@ -341,6 +341,19 @@ class ImageProcessorService:
                     continue
                 entry[k] = v
         idx[cat_path] = entry
+
+        # 入库后写入嵌入向量（失败不阻塞）
+        try:
+            smart_service = getattr(
+                getattr(self.plugin, "emoji_selector", None),
+                "_smart_select_service", None
+            )
+            if smart_service and smart_service._embedding_service:
+                await smart_service._embedding_service.insert_emoji(cat_path, entry)
+                smart_service._invalidate_embedding_index()
+        except Exception as e:
+            logger.debug(f"嵌入写入失败（不阻塞入库）: {e}")
+
         return True, idx
 
     async def _store_to_pending(
@@ -368,6 +381,28 @@ class ImageProcessorService:
         if not hash_val or not os.path.exists(file_path):
             logger.warning(f"pending: 源文件缺失或无哈希: {file_path}")
             return False, None
+
+        # 去重：哈希已在正式库 / 待审核池 / 黑名单中则跳过
+        db = self.plugin.db_service
+        if db and hash_val:
+            # 查正式库
+            if db.get_emoji_by_hash(hash_val):
+                logger.debug(f"pending: 哈希已存在于正式库，跳过: {hash_val}")
+                if is_temp and os.path.exists(file_path):
+                    await self.plugin._safe_remove_file(file_path)
+                return False, None
+            # 查待审核池
+            if db.get_pending_by_hash(hash_val):
+                logger.debug(f"pending: 哈希已在待审核池中，跳过: {hash_val}")
+                if is_temp and os.path.exists(file_path):
+                    await self.plugin._safe_remove_file(file_path)
+                return False, None
+            # 查黑名单
+            if hasattr(db, "blacklisted_hashes") and hash_val in db.blacklisted_hashes():
+                logger.debug(f"pending: 哈希已在黑名单中，跳过: {hash_val}")
+                if is_temp and os.path.exists(file_path):
+                    await self.plugin._safe_remove_file(file_path)
+                return False, None
 
         pending_dir = self.plugin_config.ensure_pending_dir()
         if not pending_dir:

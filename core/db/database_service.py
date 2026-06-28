@@ -1258,6 +1258,17 @@ class DatabaseService:
             item["scenes"] = self._split_multi(item.pop("scenes_text", ""))
             return item
 
+    def get_pending_by_hash(self, hash_val: str) -> dict[str, Any] | None:
+        """按内容哈希查一条待审核记录（用于缩略图回退）。返回含 path 字段。"""
+        if not hash_val:
+            return None
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT path, hash, phash, category FROM emoji_pending WHERE hash = ? LIMIT 1",
+                (hash_val,),
+            ).fetchone()
+            return dict(row) if row else None
+
     def delete_pending(self, pending_id: int) -> dict[str, Any] | None:
         """删除单条待审核记录，返回被删行的 path/hash（供删除磁盘文件用）；不存在返回 None。"""
         with self._get_connection() as conn:

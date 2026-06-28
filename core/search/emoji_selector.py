@@ -325,7 +325,7 @@ class EmojiSelector:
     ) -> str | None:
         """选择表情包（智能或随机）。"""
         async with self._selection_lock:
-            use_smart = self.plugin.smart_emoji_selection
+            use_smart = self.plugin.smart_meme_selection
             candidate_categories = self._get_candidate_categories(category)
 
             if use_smart and context_text and len(context_text.strip()) > 5:

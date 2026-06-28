@@ -4,7 +4,7 @@
     "type": "text",
     "invisible": true
   },
-  "steal_emoji": {
+  "steal_meme": {
     "description": "开启表情包偷取功能",
     "type": "bool",
     "default": false,
@@ -59,25 +59,25 @@
     "type": "text",
     "invisible": true
   },
-  "auto_send": {
+  "auto_send_meme": {
     "description": "自动随聊发送表情包",
     "type": "bool",
     "default": false,
     "hint": "开启后 Bot 会在聊天中自动发送表情包，建议先测试效果"
   },
-  "auto_emoji_intent_gate": {
+  "auto_meme_intent_gate": {
     "description": "自动表情意图门控",
     "type": "bool",
     "default": true,
     "hint": "开启后会跳过命令、严肃错误回复、过短回复和连续提问等不适合自动发图的场景"
   },
-  "auto_emoji_cancel_on_new_message": {
+  "auto_meme_cancel_on_new_message": {
     "description": "新消息取消待发送表情",
     "type": "bool",
     "default": true,
     "hint": "开启后同一会话有新消息到达时，会取消上一轮仍在延迟等待中的自动表情"
   },
-  "emoji_chance": {
+  "meme_chance": {
     "description": "表情包发送概率",
     "type": "float",
     "default": 0.2,
@@ -88,25 +88,25 @@
     },
     "hint": "自动发送表情包的概率，0.0=从不发送，1.0=每次都发送，建议 0.1-0.3"
   },
-  "send_emoji_as_gif": {
+  "send_meme_as_gif": {
     "description": "真表情包样式（GIF发送）",
     "type": "bool",
     "default": false,
     "hint": "✅ 开启：以 GIF 输出（更接近真表情包样式）\n❌ 关闭：按原文件格式发送（png/jpg/gif 等）\n\n⚠️ 开启后高频发送大图/动图场景会有较高瞬时内存占用"
   },
-  "emoji_send_delay": {
+  "meme_send_delay": {
     "description": "表情包发送延迟/秒",
     "type": "float",
     "default": 5.0,
     "hint": "等待此时间后发送表情包，避免与分段插件冲突\n建议 5.0 秒以上，让分段先发完\n设为 0 则立即发送"
   },
-  "emoji_send_delay_random": {
+  "meme_send_delay_random": {
     "description": "随机延迟",
     "type": "bool",
     "default": false,
     "hint": "✅ 开启：在 [延迟] ~ [最大延迟] 之间随机等待，更自然\n❌ 关闭：使用固定延迟"
   },
-  "emoji_send_delay_max": {
+  "meme_send_delay_max": {
     "description": "随机延迟最大值/秒",
     "type": "float",
     "default": 8.0,
@@ -117,7 +117,7 @@
     },
     "hint": "仅随机延迟开启时生效，实际延迟在 [延迟] ~ [最大值] 之间随机"
   },
-  "smart_emoji_selection": {
+  "smart_meme_selection": {
     "description": "智能表情包选择",
     "type": "bool",
     "default": true,
@@ -240,30 +240,29 @@
     "hint": "自动偷取的图片先进「待审核池」，达到此数量后暂停偷取，待人工审核（通过入库或删除）腾出空间后自动恢复。调整保存后即时生效，无需重启"
   },
   "enable_embedding_search": {
-    "description": "启用嵌入向量检索",
+    "description": "启用嵌入向量检索（语义搜索）",
     "type": "bool",
     "default": true,
-    "hint": "✅ 开启：用嵌入向量召回表情包，更贴合语义（需配置嵌入模型，否则自动降级为关键词检索）\n❌ 关闭：始终使用关键词(BM25)检索"
+    "hint": "✅ 开启：用嵌入向量（FaissVecDB）召回表情包，按语义相似度匹配\n❌ 关闭：始终使用关键词(BM25)检索\n\n⚠️ 开启后需在下方的「嵌入模型 ID」中配置，否则自动降级为关键词检索"
   },
   "embedding_provider_id": {
-    "description": "嵌入模型",
+    "description": "嵌入模型 ID（Embedding Provider）",
     "type": "string",
-    "hint": "留空则自动使用框架首个可用的嵌入模型。",
-    "_special": "select_provider",
-    "default": ""
+    "default": "",
+    "hint": "用于生成表情包语义向量的嵌入模型。留空则自动使用 AstrBot 首个可用的 Embedding Provider。\n\n📌 如何查找：在 AstrBot 管理后台 → 「LLM 配置」→ 查看已配置的 Embedding 模型 ID（通常以 _embedding 结尾，如 openai_embedding、qwen_embedding 等）。\n\n⚠️ 注意：此字段填写的是 Embedding 模型 ID，不是聊天/视觉模型 ID。如果在这里看不到选项，说明尚未在 AstrBot 中配置嵌入模型。"
   },
   "_advanced_section": {
     "description": "=== 高级配置（特殊情况使用） ===",
     "type": "text",
     "invisible": true
   },
-  "custom_emoji_classification_prompt": {
+  "custom_meme_classification_prompt": {
     "description": "VLM 分类提示词",
     "type": "text",
     "default": "",
     "hint": "可直接编辑修改。{emotion_list} 会被替换为分类列表。恢复默认：删除全部内容后保存，重启插件"
   },
-  "custom_emoji_classification_with_filter_prompt": {
+  "custom_meme_classification_with_filter_prompt": {
     "description": "VLM 分类提示词（带审核）",
     "type": "text",
     "default": "",

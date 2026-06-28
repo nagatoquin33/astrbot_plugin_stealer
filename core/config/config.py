@@ -11,17 +11,17 @@ from astrbot.api.star import Context, StarTools
 
 class PluginConfig(BaseModel):
     # === 基础功能 ===
-    steal_emoji: bool = False
+    steal_meme: bool = False
     steal_mode: str = "probability"  # "probability" 或 "cooldown"
     steal_chance: float = 0.3  # 概率模式下的偷图概率
-    auto_send: bool = False
-    emoji_chance: float = 0.2
-    send_emoji_as_gif: bool = False
-    emoji_send_delay: float = 5.0
-    emoji_send_delay_random: bool = False
-    emoji_send_delay_max: float = 8.0
-    auto_emoji_intent_gate: bool = True
-    auto_emoji_cancel_on_new_message: bool = True
+    auto_send_meme: bool = False
+    meme_chance: float = 0.2
+    send_meme_as_gif: bool = False
+    meme_send_delay: float = 5.0
+    meme_send_delay_random: bool = False
+    meme_send_delay_max: float = 8.0
+    auto_meme_intent_gate: bool = True
+    auto_meme_cancel_on_new_message: bool = True
 
     # === 群聊过滤 ===
     steal_target_whitelist: list[str] = []
@@ -43,7 +43,7 @@ class PluginConfig(BaseModel):
     image_processing_cooldown: int = 30
     enable_natural_emotion_analysis: bool = True  # 情绪识别模式
     emotion_analysis_provider_id: str = ""  # 情绪分析专用模型
-    smart_emoji_selection: bool = True  # 智能表情包选择
+    smart_meme_selection: bool = True  # 智能表情包选择
 
     # === 待审核池 / 嵌入检索 ===
     steal_pool_capacity: int = 200  # 待审核池容量上限，到达即暂停自动偷取
@@ -51,8 +51,8 @@ class PluginConfig(BaseModel):
     embedding_provider_id: str = ""  # 嵌入模型；留空则尝试框架首个 embedding provider
 
     # === 自定义提示词 ===
-    custom_emoji_classification_prompt: str = ""
-    custom_emoji_classification_with_filter_prompt: str = ""
+    custom_meme_classification_prompt: str = ""
+    custom_meme_classification_with_filter_prompt: str = ""
 
     # === 内化常量（不再暴露给用户） ===
     DO_REPLACE: ClassVar[bool] = True  # 达到上限始终替换旧表情
@@ -445,8 +445,8 @@ class PluginConfig(BaseModel):
         Returns:
             dict: 包含两个提示词的字典
         """
-        custom_prompt = getattr(self, "custom_emoji_classification_prompt", "")
-        custom_filter_prompt = getattr(self, "custom_emoji_classification_with_filter_prompt", "")
+        custom_prompt = getattr(self, "custom_meme_classification_prompt", "")
+        custom_filter_prompt = getattr(self, "custom_meme_classification_with_filter_prompt", "")
 
         result = {
             "emoji_classification_prompt": "",

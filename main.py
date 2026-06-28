@@ -104,22 +104,22 @@ class Main(Star):
 
     def _sync_all_config(self) -> None:
         """从配置服务同步所有配置到实例属性。"""
-        self.auto_send = self.plugin_config.auto_send
-        self.emoji_chance = self.plugin_config.emoji_chance
+        self.auto_send_meme = self.plugin_config.auto_send_meme
+        self.meme_chance = self.plugin_config.meme_chance
         self.steal_mode = self.plugin_config.steal_mode
         self.steal_chance = self.plugin_config.steal_chance
-        self.send_emoji_as_gif = self.plugin_config.send_emoji_as_gif
-        self.emoji_send_delay = self.plugin_config.emoji_send_delay
-        self.emoji_send_delay_random = self.plugin_config.emoji_send_delay_random
-        self.emoji_send_delay_max = self.plugin_config.emoji_send_delay_max
+        self.send_meme_as_gif = self.plugin_config.send_meme_as_gif
+        self.meme_send_delay = self.plugin_config.meme_send_delay
+        self.meme_send_delay_random = self.plugin_config.meme_send_delay_random
+        self.meme_send_delay_max = self.plugin_config.meme_send_delay_max
         self.max_reg_num = self.plugin_config.max_reg_num
         self.content_filtration = self.plugin_config.content_filtration
         self.content_filtration_fail_open = self.plugin_config.content_filtration_fail_open
         self.storage_cleanup_strategy = self.plugin_config.storage_cleanup_strategy
-        self.smart_emoji_selection = self.plugin_config.smart_emoji_selection
-        self.steal_emoji = self.plugin_config.steal_emoji
-        self.auto_emoji_intent_gate = self.plugin_config.auto_emoji_intent_gate
-        self.auto_emoji_cancel_on_new_message = self.plugin_config.auto_emoji_cancel_on_new_message
+        self.smart_meme_selection = self.plugin_config.smart_meme_selection
+        self.steal_meme = self.plugin_config.steal_meme
+        self.auto_meme_intent_gate = self.plugin_config.auto_meme_intent_gate
+        self.auto_meme_cancel_on_new_message = self.plugin_config.auto_meme_cancel_on_new_message
         self.categories = list(self.plugin_config.categories or []) or list(
             self.plugin_config.DEFAULT_CATEGORIES
         )
@@ -160,18 +160,18 @@ class Main(Star):
     def _ensure_default_prompts_in_config(self, prompts: dict) -> None:
         """如果配置中的提示词字段为空，将 prompts.json 内容写入配置作为默认显示值。"""
         updates = {}
-        current_prompt = getattr(self.plugin_config, "custom_emoji_classification_prompt", "")
+        current_prompt = getattr(self.plugin_config, "custom_meme_classification_prompt", "")
         if not current_prompt or not current_prompt.strip():
             default_prompt = prompts.get("EMOJI_CLASSIFICATION_PROMPT", "")
             if default_prompt:
-                updates["custom_emoji_classification_prompt"] = default_prompt
+                updates["custom_meme_classification_prompt"] = default_prompt
         current_filter_prompt = getattr(
-            self.plugin_config, "custom_emoji_classification_with_filter_prompt", ""
+            self.plugin_config, "custom_meme_classification_with_filter_prompt", ""
         )
         if not current_filter_prompt or not current_filter_prompt.strip():
             default_filter_prompt = prompts.get("EMOJI_CLASSIFICATION_WITH_FILTER_PROMPT", "")
             if default_filter_prompt:
-                updates["custom_emoji_classification_with_filter_prompt"] = default_filter_prompt
+                updates["custom_meme_classification_with_filter_prompt"] = default_filter_prompt
         if updates:
             self._update_config_from_dict(updates)
             logger.info(f"已将默认提示词写入配置: {list(updates.keys())}")
@@ -247,11 +247,11 @@ class Main(Star):
             self.max_reg_num = 100
             fixed.append("最大表情数量已重置为100")
             fixed_values["max_reg_num"] = 100
-        if not isinstance(self.emoji_chance, (int, float)) or not (0 <= self.emoji_chance <= 1):
+        if not isinstance(self.meme_chance, (int, float)) or not (0 <= self.meme_chance <= 1):
             errors.append("表情发送概率必须在0-1之间")
-            self.emoji_chance = 0.4
+            self.meme_chance = 0.4
             fixed.append("表情发送概率已重置为0.4")
-            fixed_values["emoji_chance"] = 0.4
+            fixed_values["meme_chance"] = 0.4
         if self.steal_mode not in ("probability", "cooldown"):
             errors.append(f"偷图模式 '{self.steal_mode}' 无效，必须为 probability 或 cooldown")
             self.steal_mode = "probability"
@@ -431,8 +431,8 @@ class Main(Star):
     _is_auto_emoji_cooldown_ready = (  # noqa: E731
         lambda self, event: self._emoji_sender_engine.is_auto_emoji_cooldown_ready(event)
     )
-    _normalize_auto_emoji_chance = (  # noqa: E731
-        lambda self: self._emoji_sender_engine.normalize_auto_emoji_chance()
+    _normalize_auto_meme_chance = (  # noqa: E731
+        lambda self: self._emoji_sender_engine.normalize_auto_meme_chance()
     )
     _resolve_auto_emoji_turn_permission = (  # noqa: E731
         lambda self, event: self._emoji_sender_engine._resolve_with_log(event)
@@ -457,7 +457,7 @@ class Main(Star):
     _try_send_emoji = lambda self, event, emotions, text: self._emoji_sender_engine.try_send_emoji(  # noqa: E731
         event, emotions, text
     )
-    _get_emoji_send_delay = lambda self: self._emoji_sender_engine.get_emoji_send_delay()  # noqa: E731
+    _get_meme_send_delay = lambda self: self._emoji_sender_engine.get_meme_send_delay()  # noqa: E731
     _async_analyze_and_send_emoji = (  # noqa: E731
         lambda self,
         event,
@@ -636,7 +636,7 @@ class Main(Star):
         """找到与查询词最相似的多个分类，委托给 EmojiSelector。"""
         return self.emoji_selector.find_similar_categories(query, top_n)
 
-    @filter.llm_tool(name="search_emoji")
+    @filter.llm_tool(name="search_meme")
     async def search_emoji(self, event: AstrMessageEvent, query: str):
         """搜索表情包候选，并优先按你当前心情词进行匹配。
 
@@ -760,7 +760,7 @@ class Main(Star):
             logger.error(f"[Tool] 搜索表情包失败: {e}", exc_info=True)
             yield f"搜索出错：{e}"
 
-    @filter.llm_tool(name="send_emoji_by_id")
+    @filter.llm_tool(name="send_meme")
     async def send_emoji_by_id(self, event: AstrMessageEvent, emoji_id: int):
         """发送你选择的表情包。必须先调用 search_emoji 获取候选列表。
 
@@ -833,7 +833,7 @@ class Main(Star):
             yield f"发送出错：{e}"
             return
 
-    @filter.llm_tool(name="steal_sticker")
+    @filter.llm_tool(name="steal_meme")
     async def steal_sticker(
         self,
         event: AstrMessageEvent,
@@ -856,7 +856,7 @@ class Main(Star):
         """
         event = _unwrap_event(event)
         try:
-            if not self.steal_emoji:
+            if not self.steal_meme:
                 yield "偷取失败：表情包偷取功能未开启，请先在插件配置中启用"
                 return
 
@@ -1091,7 +1091,7 @@ class Main(Star):
     async def on_message(self, event: AstrMessageEvent):
         """消息监听：偷取消息中的图片并分类存储。"""
         # 每条新消息到达时重置回合状态，防止上一轮的标记影响当前对话
-        if getattr(self, "auto_emoji_cancel_on_new_message", True):
+        if getattr(self, "auto_meme_cancel_on_new_message", True):
             self._cancel_pending_auto_emoji(event)
         self._emoji_sender_engine.reset_turn_state(event)
         event_handler = self._get_event_handler(
@@ -1113,7 +1113,7 @@ class Main(Star):
         破坏 LLM 提供商的提示词缓存。
         """
         try:
-            if not self.auto_send:
+            if not self.auto_send_meme:
                 return
 
             turn_state = self._emoji_turn_state(event)
@@ -1258,10 +1258,24 @@ class Main(Star):
             await self._load_index()
             await self._migrate_blacklist_to_db()
             await self._clean_legacy_files()
+            await self._cleanup_orphans()  # §4.2：清理无文件索引 / 无索引文件
             self._sync_all_config()
             self._sync_image_processor_from_runtime()
             self.task_scheduler.create_task("raw_cleanup_loop", self._raw_cleanup_loop())
             self.task_scheduler.create_task("capacity_control_loop", self._capacity_control_loop())
+
+            # 初始化嵌入向量服务 + 回填旧数据
+            try:
+                smart_service = getattr(self.emoji_selector, "_smart_select_service", None)
+                if smart_service and smart_service._embedding_service:
+                    await smart_service._embedding_service.initialize()
+                    # 同步回填旧数据（分批处理，每批 20 条）
+                    backfilled = await smart_service._embedding_service.backfill_existing(batch_size=20)
+                    if backfilled > 0:
+                        logger.info(f"[Embedding] 旧数据回填完成: {backfilled} 条新向量")
+            except Exception as e:
+                logger.warning(f"[Embedding] 初始化失败: {e}")
+
             logger.info("[Stealer] 插件初始化完成")
         except Exception as e:
             logger.error(f"初始化插件失败: {e}")
@@ -1287,6 +1301,14 @@ class Main(Star):
                 await self.task_scheduler.cleanup()
             except Exception:
                 pass
+        # 关闭嵌入向量服务
+        try:
+            smart_service = getattr(self.emoji_selector, "_smart_select_service", None)
+            if smart_service and smart_service._embedding_service:
+                await smart_service._embedding_service.close()
+        except Exception:
+            pass
+
         if self.image_processor_service:
             try:
                 self.image_processor_service.cleanup()
@@ -1346,6 +1368,70 @@ class Main(Star):
                 logger.info(f"[DB] 黑名单从缓存迁移完成，新增 {imported} 条")
         except Exception as e:
             logger.warning(f"[DB] 黑名单迁移失败: {e}")
+
+    async def _cleanup_orphans(self) -> None:
+        """§4.2 孤儿扫描：清理无文件索引 + 无索引文件。
+
+        - emoji 表有记录但物理文件缺失 → 删 DB 行（CASCADE tag/scene/embedding）
+        - emoji_pending 表有记录但物理文件缺失 → 删 pending 行
+        - categories/ 下有文件但 emoji 表无对应 → 删孤儿文件
+        - pending/ 下有文件但 emoji_pending 表无对应 → 删孤儿文件
+        """
+        try:
+            db = self.db_service
+            if not db:
+                return
+
+            all_paths = db.get_all_paths()
+
+            # ── 1. DB 有记录但文件缺失 ──
+            if all_paths:
+                stale_paths = [p for p in all_paths if p and not os.path.isfile(str(p))]
+                if stale_paths:
+                    await db.delete_paths(stale_paths)
+                    logger.info(f"[Orphan] 清除 {len(stale_paths)} 条失效索引（文件已丢失）")
+
+                # pending 表
+                pending_rows = db.get_pending_paginated(page=1, page_size=100000)
+                if pending_rows and pending_rows[0]:
+                    stale_ids = [
+                        r["id"] for r in pending_rows[0]
+                        if r.get("path") and not os.path.isfile(str(r.get("path")))
+                    ]
+                    if stale_ids:
+                        db.delete_pending_batch(stale_ids)
+                        logger.info(f"[Orphan] 清除 {len(stale_ids)} 条失效待审核记录")
+
+                # ── 2. 文件存在但 DB 无记录（仅在 DB 有数据时执行，避免误删新实例） ──
+                db_count = db.count_total()
+                if db_count == 0:
+                    return  # 空库不删文件
+
+                db_paths = set(all_paths)
+                pending_db_paths = set(
+                    r.get("path") for r in (pending_rows[0] if pending_rows else [])
+                    if r.get("path")
+                )
+
+                # 扫 categories/
+                categories_dir = str(self.plugin_config.categories_dir)
+                if os.path.isdir(categories_dir):
+                    for root, _dirs, files in os.walk(categories_dir):
+                        for fname in files:
+                            fpath = os.path.join(root, fname)
+                            if fpath not in db_paths:
+                                await self._safe_remove_file(fpath)
+
+                # 扫 pending/
+                pending_dir = str(self.plugin_config.pending_dir)
+                if os.path.isdir(pending_dir):
+                    for fname in os.listdir(pending_dir):
+                        fpath = os.path.join(pending_dir, fname)
+                        if os.path.isfile(fpath) and fpath not in pending_db_paths:
+                            await self._safe_remove_file(fpath)
+
+        except Exception as e:
+            logger.debug(f"[Orphan] 孤儿扫描异常（不阻塞）: {e}")
 
     async def _clean_legacy_files(self) -> None:
         """删除迁移残留文件：.backup / .migrated / categories/*/index.json / cache/index_cache.json 等。

@@ -54,6 +54,10 @@ class PluginAPI:
             ("/storage/scan", "handle_storage_scan", ["GET"]),
             ("/storage/cleanup", "handle_storage_cleanup", ["POST"]),
             ("/stats", "handle_get_stats", ["GET"]),
+            ("/pending", "handle_list_pending", ["GET"]),
+            ("/pending/approve", "handle_pending_approve", ["POST"]),
+            ("/pending/reject", "handle_pending_reject", ["POST"]),
+            ("/pending/stats", "handle_pending_stats", ["GET"]),
             ("/categories", "handle_categories", ["GET", "POST"]),
             ("/categories/delete", "handle_delete_category", ["POST"]),
             ("/emotions", "handle_get_emotions", ["GET"]),
@@ -629,6 +633,17 @@ class PluginAPI:
                 file_path = p
                 break
 
+        # 回退：正式库未命中时查待审核池（审核区缩略图走此路径）
+        if not file_path:
+            db = self._db
+            if db and hasattr(db, "get_pending_by_hash"):
+                try:
+                    pending_row = db.get_pending_by_hash(img_hash)
+                except Exception:
+                    pending_row = None
+                if pending_row:
+                    file_path = pending_row.get("path")
+
         if not file_path or not os.path.isfile(file_path):
             return jsonify({"success": False, "error": "图片未找到"}), 404
 
@@ -760,6 +775,241 @@ class PluginAPI:
     async def handle_health_check(self):
         return jsonify({"success": True, "status": "ok", "service": "emoji-manager-webui"})
 
+    # ── Pending (待审核池) ────────────────────────────────────
+
+    def _build_pending_item(self, row: dict[str, Any]) -> dict[str, Any] | None:
+        """把 emoji_pending 行构造成前端 item（带 id 供审核定位）。"""
+        try:
+            path_str = str(row.get("path", "") or "")
+            Path(path_str)
+            return {
+                "id": row.get("id"),
+                "hash": str(row.get("hash", "") or ""),
+                "category": str(row.get("category", "") or "unknown"),
+                "tags": list(row.get("tags", []) or []),
+                "desc": str(row.get("desc", "") or ""),
+                "scenes": self._split_scenes(row.get("scenes", [])),
+                "scope_mode": self._norm_scope(row.get("scope_mode")),
+                "origin_target": str(row.get("origin_target", "") or ""),
+                "source": str(row.get("source", "") or ""),
+                "review_status": str(row.get("review_status", "pending") or "pending"),
+                "created_at": int(row.get("created_at", 0) or 0),
+            }
+        except (ValueError, TypeError):
+            return None
+
+    async def handle_list_pending(self):
+        """GET /pending —— 分页返回待审核列表（分类筛选/搜索/sort=newest）。"""
+        try:
+            db = self._db
+            if not db or not hasattr(db, "get_pending_paginated"):
+                return jsonify({"success": True, "images": [], "total": 0, "categories": {}})
+
+            page = request.args.get("page", 1, type=int)
+            page_size = request.args.get("size", 50, type=int)
+            category = request.args.get("category", None)
+            search = str(request.args.get("q", "")).strip().lower()
+
+            raw, total, cat_counts = db.get_pending_paginated(
+                page=max(1, page),
+                page_size=max(1, min(page_size, 200)),
+                category=category if category else None,
+                search_query=search if search else None,
+            )
+            images = [item for item in (self._build_pending_item(r) for r in raw) if item]
+            return jsonify(
+                {
+                    "success": True,
+                    "images": images,
+                    "total": total,
+                    "categories": cat_counts,
+                }
+            )
+        except Exception as e:
+            logger.error(f"列出待审核失败: {e}", exc_info=True)
+            return jsonify({"success": False, "error": str(e)})
+
+    async def handle_pending_stats(self):
+        """GET /pending/stats —— 供审核区顶部进度条。"""
+        try:
+            db = self._db
+            pending = db.count_pending() if db and hasattr(db, "count_pending") else 0
+            capacity = int(getattr(self.plugin, "steal_pool_capacity", 200) or 200)
+            return jsonify(
+                {
+                    "success": True,
+                    "stats": {
+                        "pending": pending,
+                        "capacity": capacity,
+                        "paused": pending >= capacity,
+                    },
+                }
+            )
+        except Exception as e:
+            logger.error(f"待审核统计失败: {e}", exc_info=True)
+            return jsonify({"success": False, "error": str(e)})
+
+    async def _resolve_pending_ids(self, data: dict[str, Any]) -> list[int]:
+        """支持 {id} 或 {ids:[...]} 两种入参，返回去重后的 int id 列表。"""
+        raw = data.get("ids")
+        if raw is None:
+            single = data.get("id")
+            raw = [single] if single is not None else []
+        if not isinstance(raw, list):
+            raw = []
+        return list({int(i) for i in raw if i is not None})
+
+    async def _approve_one(self, db, pending_id: int) -> tuple[bool, str]:
+        """审核通过单条：pending 文件 → categories/，写 emoji+tag+scene，删 pending 行。
+
+        原子性：文件 move 成功 → 写 emoji；emoji 写入失败 → 文件移回 pending，视为本次失败。
+        embedding 在阶段 4 接入，此处不写向量。
+        """
+        row = db.get_pending(pending_id)
+        if not row:
+            return False, "pending not found"
+
+        src_path = str(row.get("path", "") or "")
+        if not src_path or not os.path.isfile(src_path):
+            # 文件已丢失：清理孤儿 pending 行
+            db.delete_pending(pending_id)
+            return False, "pending file missing"
+
+        category = str(row.get("category", "") or "").strip()
+        if not category or category not in self._cfg.categories:
+            # 分类无效：保留 pending 行让用户改，或可选拒绝。这里返回失败不删。
+            return False, f"invalid category: {category!r}"
+
+        cat_dir = self._cfg.ensure_category_dir(category)
+        cat_path = str(cat_dir / os.path.basename(src_path))
+
+        moved = False
+        try:
+            if os.path.abspath(src_path) != os.path.abspath(cat_path):
+                await asyncio.to_thread(shutil.move, src_path, cat_path)
+            moved = True
+
+            emoji_entry: dict[str, Any] = {
+                "path": cat_path,
+                "hash": str(row.get("hash", "") or ""),
+                "phash": row.get("phash") or "",
+                "category": category,
+                "desc": str(row.get("desc", "") or ""),
+                "source": str(row.get("source", "") or ""),
+                "origin_target": str(row.get("origin_target", "") or ""),
+                "scope_mode": str(row.get("scope_mode", "public") or "public"),
+                "created_at": int(row.get("created_at", 0) or int(time.time())),
+                "use_count": 0,
+                "last_used_at": 0,
+                "tags": list(row.get("tags", []) or []),
+                "scenes": list(row.get("scenes", []) or []),
+            }
+            inserted = await db.insert_batch([emoji_entry])
+            if not inserted:
+                raise RuntimeError("insert emoji returned 0")
+            db.delete_pending(pending_id)
+
+            # 审核通过后写入嵌入向量（失败不阻塞）
+            try:
+                smart_service = getattr(getattr(self.plugin, "emoji_selector", None), "_smart_select_service", None)
+                if smart_service and smart_service._embedding_service:
+                    await smart_service._embedding_service.insert_emoji(cat_path, emoji_entry)
+                    smart_service._invalidate_embedding_index()
+            except Exception as embed_err:
+                logger.debug(f"审核通过后嵌入写入失败（不阻塞）: {embed_err}")
+
+            return True, ""
+        except Exception as e:
+            # 回滚：把文件移回 pending 路径，保留 pending 行
+            if moved and os.path.isfile(cat_path):
+                try:
+                    await asyncio.to_thread(shutil.move, cat_path, src_path)
+                except Exception as rb:
+                    logger.warning(f"审核回滚移动文件失败: {rb}")
+            logger.error(f"审核通过失败 id={pending_id}: {e}", exc_info=True)
+            return False, str(e)
+
+    async def handle_pending_approve(self):
+        """POST /pending/approve —— 批量通过 {id} 或 {ids:[]}。"""
+        try:
+            data = await request.get_json() or {}
+            ids = await self._resolve_pending_ids(data)
+            if not ids:
+                return jsonify({"success": False, "error": "缺少 id/ids"})
+
+            db = self._db
+            if not db:
+                return jsonify({"success": False, "error": "db 不可用"})
+
+            approved = 0
+            errors: list[str] = []
+            for pending_id in ids:
+                ok, msg = await self._approve_one(db, pending_id)
+                if ok:
+                    approved += 1
+                elif msg and msg not in ("pending not found",):
+                    errors.append(f"id={pending_id}: {msg}")
+
+            # 审核通过后刷新缓存索引（从 DB 重载，而非 sync_index 的反向覆盖）
+            try:
+                cache = getattr(self.plugin, "cache_service", None)
+                if cache and hasattr(cache, "mark_dirty"):
+                    cache.mark_dirty()
+                selector = getattr(self.plugin, "emoji_selector", None)
+                if selector and hasattr(selector, "_invalidate_bm25_index"):
+                    selector._invalidate_bm25_index()
+            except Exception as e:
+                logger.warning(f"审核后刷新缓存失败: {e}")
+
+            return jsonify(
+                {
+                    "success": approved > 0,
+                    "approved": approved,
+                    "errors": errors,
+                }
+            )
+        except Exception as e:
+            logger.error(f"审核通过失败: {e}", exc_info=True)
+            return jsonify({"success": False, "error": str(e)})
+
+    async def handle_pending_reject(self):
+        """POST /pending/reject —— 批量拒绝 {id} 或 {ids:[...], blacklist?:bool}。"""
+        try:
+            data = await request.get_json() or {}
+            ids = await self._resolve_pending_ids(data)
+            if not ids:
+                return jsonify({"success": False, "error": "缺少 id/ids"})
+            blacklist = bool(data.get("blacklist", False))
+
+            db = self._db
+            if not db:
+                return jsonify({"success": False, "error": "db 不可用"})
+
+            removed_rows = db.delete_pending_batch(ids)
+            deleted = 0
+            blacklisted = 0
+            for r in removed_rows:
+                p = str(r.get("path", "") or "")
+                h = str(r.get("hash", "") or "")
+                if p:
+                    try:
+                        if await self.plugin._safe_remove_file(p):
+                            deleted += 1
+                    except Exception as e:
+                        logger.warning(f"拒绝时删除文件失败 {p}: {e}")
+                if blacklist and h:
+                    try:
+                        await db.add_blacklist(h)
+                        blacklisted += 1
+                    except Exception as e:
+                        logger.warning(f"拉黑失败 {h}: {e}")
+            return jsonify(
+                {"success": True, "deleted": deleted, "blacklisted": blacklisted}
+            )
+        except Exception as e:
+            logger.error(f"审核拒绝失败: {e}", exc_info=True)
+            return jsonify({"success": False, "error": str(e)})
+
     # ── Upload / Update / Delete ──────────────────────────────
 
     async def handle_upload_image(self):
@@ -767,7 +1017,6 @@ class PluginAPI:
             files = await request.files
             form = await request.form
             file_content = None
-            file_ext = ".png"
             filename = "upload.png"
             metadata_source: dict[str, Any] = {}
 

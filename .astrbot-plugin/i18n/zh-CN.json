@@ -1,125 +1,137 @@
 {
-  "metadata": {
-    "display_name": "表情包小偷",
-    "short_desc": "自动偷取并智能发送表情包",
-    "desc": "监听聊天中的图片并使用 VLM 自动分类存储，对话时根据情绪智能匹配并发送表情包。支持 LLM 主动搜索表情包、WebUI 管理面板、存储清理、作用域修复、智能情绪匹配和多平台适配。"
-  },
-  "config": {
-    "steal_emoji": {
-      "description": "开启表情包偷取功能",
-      "hint": "开启后会监听并保存聊天中的图片，请确保有视觉模型支持"
+    "metadata": {
+        "display_name": "表情包小偷",
+        "short_desc": "自动偷取并智能发送表情包",
+        "desc": "监听聊天中的图片并使用 VLM 自动分类存储，对话时根据情绪智能匹配并发送表情包。支持 LLM 主动搜索表情包、WebUI 管理面板、存储清理、作用域修复、智能情绪匹配和多平台适配。"
     },
-    "steal_mode": {
-      "description": "偷图模式",
-      "hint": "probability=概率模式：每次收到图片按概率决定是否偷取\ncooldown=冷却模式：两次偷取之间必须间隔指定秒数"
-    },
-    "steal_chance": {
-      "description": "偷图概率（概率模式生效）",
-      "hint": "概率模式下每次收到图片时尝试偷取的概率，0.0=从不偷取，1.0=每次都偷。建议 0.2-0.5"
-    },
-    "image_processing_cooldown": {
-      "description": "偷图冷却时间/秒（冷却模式生效）",
-      "hint": "冷却模式下两次偷取之间的最小间隔（秒）。0=不限制"
-    },
-    "content_filtration": {
-      "description": "内容审核（过滤不当图片）",
-      "hint": "开启后会使用 VLM 审核图片内容，可能增加处理时间"
-    },
-    "content_filtration_fail_open": {
-      "description": "内容审核异常时允许入库",
-      "hint": "仅作为审核服务异常时的策略提示；明确审核不通过的图片仍不会入库"
-    },
-    "auto_send": {
-      "description": "自动随聊发送表情包",
-      "hint": "开启后 Bot 会在聊天中自动发送表情包，建议先测试效果"
-    },
-    "auto_emoji_intent_gate": {
-      "description": "自动表情意图门控",
-      "hint": "开启后会跳过命令、严肃错误回复、过短回复和连续提问等不适合自动发图的场景"
-    },
-    "auto_emoji_cancel_on_new_message": {
-      "description": "新消息取消待发送表情",
-      "hint": "开启后同一会话有新消息到达时，会取消上一轮仍在延迟等待中的自动表情"
-    },
-    "emoji_chance": {
-      "description": "表情包发送概率",
-      "hint": "自动发送表情包的概率，0.0=从不发送，1.0=每次都发送，建议 0.1-0.3"
-    },
-    "send_emoji_as_gif": {
-      "description": "真表情包样式（GIF发送）",
-      "hint": "开启：以 GIF 输出（更接近真表情包样式）\n关闭：按原文件格式发送（png/jpg/gif 等）\n\n开启后高频发送大图/动图场景会有较高瞬时内存占用"
-    },
-    "emoji_send_delay": {
-      "description": "表情包发送延迟/秒",
-      "hint": "等待此时间后发送表情包，避免与分段插件冲突\n建议 5.0 秒以上，让分段先发完\n设为 0 则立即发送"
-    },
-    "emoji_send_delay_random": {
-      "description": "随机延迟",
-      "hint": "开启：在 [延迟] ~ [最大延迟] 之间随机等待，更自然\n关闭：使用固定延迟"
-    },
-    "emoji_send_delay_max": {
-      "description": "随机延迟最大值/秒",
-      "hint": "仅随机延迟开启时生效，实际延迟在 [延迟] ~ [最大值] 之间随机"
-    },
-    "smart_emoji_selection": {
-      "description": "智能表情包选择",
-      "hint": "开启=综合评分选择（多样性+匹配度+相似度）\n关闭=随机选择（仍会避免短期重复）"
-    },
-    "enable_natural_emotion_analysis": {
-      "description": "情绪识别模式",
-      "hint": "开启=LLM模式（轻量模型分析语义，不修改LLM回复）\n关闭=被动标签模式（LLM插入情绪标签，会修改回复内容）\n\n切换模式后建议使用 /reset 清除对话上下文"
-    },
-    "emotion_analysis_provider_id": {
-      "description": "情绪分析专用模型（LLM模式）",
-      "hint": "留空则使用当前会话模型，建议使用轻量免费模型，小参数量模型即可胜任"
-    },
-    "vision_provider_id": {
-      "description": "视觉模型（用于图片分类）",
-      "hint": "留空则自动使用 AstrBot 全局配置的「图片描述模型」(default_image_caption_provider_id)"
-    },
-    "send_target_whitelist": {
-      "description": "发表情白名单",
-      "hint": "格式：group:群号 或 user:QQ号。非空时仅白名单目标可通过"
-    },
-    "send_target_blacklist": {
-      "description": "发表情黑名单",
-      "hint": "格式：group:群号 或 user:QQ号。可与白名单同时生效，冲突时按优先级判定"
-    },
-    "send_target_filter_mode": {
-      "description": "发表情名单优先级",
-      "hint": "允许白名单和黑名单同时生效。whitelist_first=白名单优先，blacklist_first=黑名单优先"
-    },
-    "steal_target_whitelist": {
-      "description": "偷表情白名单",
-      "hint": "格式：group:群号 或 user:QQ号。非空时仅白名单目标可通过"
-    },
-    "steal_target_blacklist": {
-      "description": "偷表情黑名单",
-      "hint": "格式：group:群号 或 user:QQ号。可与白名单同时生效，冲突时按优先级判定"
-    },
-    "steal_target_filter_mode": {
-      "description": "偷表情名单优先级",
-      "hint": "允许白名单和黑名单同时生效。whitelist_first=白名单优先，blacklist_first=黑名单优先"
-    },
-    "max_reg_num": {
-      "description": "最大表情包数量",
-      "hint": "表情包存储上限，超过后自动清理旧表情包"
-    },
-    "storage_cleanup_strategy": {
-      "description": "存储清理策略",
-      "hint": "conservative=只清理失效索引和临时文件，balanced=额外清理孤儿文件和缩略图缓存，aggressive=额外清理 raw 目录"
-    },
-    "custom_emoji_classification_prompt": {
-      "description": "VLM 分类提示词",
-      "hint": "可直接编辑修改。{emotion_list} 会被替换为分类列表。恢复默认：删除全部内容后保存，重启插件"
-    },
-    "custom_emoji_classification_with_filter_prompt": {
-      "description": "VLM 分类提示词（带审核）",
-      "hint": "可直接编辑修改。开启内容审核时使用。恢复默认：删除全部内容后保存，重启插件"
-    },
-    "napcat_token": {
-      "description": "NapCat 访问令牌",
-      "hint": "仅在特殊网络环境下需要：Docker 部署 AstrBot + 本地部署 NapCat 时，如果自动获取 token 失败，可手动填写此项。留空则自动从 OneBot 适配器配置中获取"
+    "config": {
+        "steal_mode": {
+            "description": "偷图模式",
+            "hint": "probability=概率模式：每次收到图片按概率决定是否偷取\ncooldown=冷却模式：两次偷取之间必须间隔指定秒数"
+        },
+        "steal_chance": {
+            "description": "偷图概率（概率模式生效）",
+            "hint": "概率模式下每次收到图片时尝试偷取的概率，0.0=从不偷取，1.0=每次都偷。建议 0.2-0.5"
+        },
+        "image_processing_cooldown": {
+            "description": "偷图冷却时间/秒（冷却模式生效）",
+            "hint": "冷却模式下两次偷取之间的最小间隔（秒）。0=不限制"
+        },
+        "content_filtration": {
+            "description": "内容审核（过滤不当图片）",
+            "hint": "开启后会使用 VLM 审核图片内容，可能增加处理时间"
+        },
+        "content_filtration_fail_open": {
+            "description": "内容审核异常时允许入库",
+            "hint": "仅作为审核服务异常时的策略提示；明确审核不通过的图片仍不会入库"
+        },
+        "enable_natural_emotion_analysis": {
+            "description": "情绪识别模式",
+            "hint": "开启=LLM模式（轻量模型分析语义，不修改LLM回复）\n关闭=被动标签模式（LLM插入情绪标签，会修改回复内容）\n\n切换模式后建议使用 /reset 清除对话上下文"
+        },
+        "emotion_analysis_provider_id": {
+            "description": "情绪分析专用模型（LLM模式）",
+            "hint": "留空则使用当前会话模型，建议使用轻量免费模型，小参数量模型即可胜任"
+        },
+        "vision_provider_id": {
+            "description": "视觉模型（用于图片分类）",
+            "hint": "留空则自动使用 AstrBot 全局配置的「图片描述模型」(default_image_caption_provider_id)"
+        },
+        "send_target_whitelist": {
+            "description": "发表情白名单",
+            "hint": "格式：group:群号 或 user:QQ号。非空时仅白名单目标可通过"
+        },
+        "send_target_blacklist": {
+            "description": "发表情黑名单",
+            "hint": "格式：group:群号 或 user:QQ号。可与白名单同时生效，冲突时按优先级判定"
+        },
+        "send_target_filter_mode": {
+            "description": "发表情名单优先级",
+            "hint": "允许白名单和黑名单同时生效。whitelist_first=白名单优先，blacklist_first=黑名单优先"
+        },
+        "steal_target_whitelist": {
+            "description": "偷表情白名单",
+            "hint": "格式：group:群号 或 user:QQ号。非空时仅白名单目标可通过"
+        },
+        "steal_target_blacklist": {
+            "description": "偷表情黑名单",
+            "hint": "格式：group:群号 或 user:QQ号。可与白名单同时生效，冲突时按优先级判定"
+        },
+        "steal_target_filter_mode": {
+            "description": "偷表情名单优先级",
+            "hint": "允许白名单和黑名单同时生效。whitelist_first=白名单优先，blacklist_first=黑名单优先"
+        },
+        "max_reg_num": {
+            "description": "最大表情包数量",
+            "hint": "表情包存储上限，超过后自动清理旧表情包"
+        },
+        "storage_cleanup_strategy": {
+            "description": "存储清理策略",
+            "hint": "conservative=只清理失效索引和临时文件，balanced=额外清理孤儿文件和缩略图缓存，aggressive=额外清理 raw 目录"
+        },
+        "napcat_token": {
+            "description": "NapCat 访问令牌",
+            "hint": "仅在特殊网络环境下需要：Docker 部署 AstrBot + 本地部署 NapCat 时，如果自动获取 token 失败，可手动填写此项。留空则自动从 OneBot 适配器配置中获取"
+        },
+        "steal_meme": {
+            "description": "开启表情包偷取功能",
+            "hint": "开启后会监听并保存聊天中的图片，请确保有视觉模型支持"
+        },
+        "auto_send_meme": {
+            "description": "自动随聊发送表情包",
+            "hint": "开启后 Bot 会在聊天中自动发送表情包，建议先测试效果"
+        },
+        "meme_chance": {
+            "description": "表情包发送概率",
+            "hint": "自动发送表情包的概率，0.0=从不发送，1.0=每次都发送，建议 0.1-0.3"
+        },
+        "send_meme_as_gif": {
+            "description": "真表情包样式（GIF发送）",
+            "hint": "开启：以 GIF 输出（更接近真表情包样式）\n关闭：按原文件格式发送（png/jpg/gif 等）\n\n开启后高频发送大图/动图场景会有较高瞬时内存占用"
+        },
+        "meme_send_delay": {
+            "description": "表情包发送延迟/秒",
+            "hint": "等待此时间后发送表情包，避免与分段插件冲突\n建议 5.0 秒以上，让分段先发完\n设为 0 则立即发送"
+        },
+        "meme_send_delay_random": {
+            "description": "随机延迟",
+            "hint": "开启：在 [延迟] ~ [最大延迟] 之间随机等待，更自然\n关闭：使用固定延迟"
+        },
+        "meme_send_delay_max": {
+            "description": "随机延迟最大值/秒",
+            "hint": "仅随机延迟开启时生效，实际延迟在 [延迟] ~ [最大值] 之间随机"
+        },
+        "auto_meme_intent_gate": {
+            "description": "自动表情意图门控",
+            "hint": "开启后会跳过命令、严肃错误回复、过短回复和连续提问等不适合自动发图的场景"
+        },
+        "auto_meme_cancel_on_new_message": {
+            "description": "新消息取消待发送表情",
+            "hint": "开启后同一会话有新消息到达时，会取消上一轮仍在延迟等待中的自动表情"
+        },
+        "smart_meme_selection": {
+            "description": "智能表情包选择",
+            "hint": "开启=综合评分选择（多样性+匹配度+相似度）\n关闭=随机选择（仍会避免短期重复）"
+        },
+        "custom_meme_classification_prompt": {
+            "description": "VLM 分类提示词",
+            "hint": "可直接编辑修改。{emotion_list} 会被替换为分类列表。恢复默认：删除全部内容后保存，重启插件"
+        },
+        "custom_meme_classification_with_filter_prompt": {
+            "description": "VLM 分类提示词（带审核）",
+            "hint": "可直接编辑修改。开启内容审核时使用。恢复默认：删除全部内容后保存，重启插件"
+        },
+        "steal_pool_capacity": {
+            "description": "待审核池容量上限",
+            "hint": "自动偷取的图片先进待审核池，达到上限暂停偷取，审核后恢复。可实时调整"
+        },
+        "enable_embedding_search": {
+            "description": "启用嵌入向量检索（语义搜索）",
+            "hint": "用FaissVecDB做语义相似度匹配；关闭或不可用时降级BM25"
+        },
+        "embedding_provider_id": {
+            "description": "嵌入模型 ID（Embedding Provider）",
+            "hint": "留空自动使用AstrBot首个Embedding Provider。可在后台LLM配置中查看"
+        }
     }
-  }
 }

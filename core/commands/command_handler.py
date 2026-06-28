@@ -22,22 +22,22 @@ class CommandHandler:
 
     async def meme_on(self, event: AstrMessageEvent):
         """开启偷表情包功能。"""
-        self._apply_config_updates({"steal_emoji": True})
+        self._apply_config_updates({"steal_meme": True})
         yield event.plain_result("已开启偷表情包")
 
     async def meme_off(self, event: AstrMessageEvent):
         """关闭偷表情包功能。"""
-        self._apply_config_updates({"steal_emoji": False})
+        self._apply_config_updates({"steal_meme": False})
         yield event.plain_result("已关闭偷表情包")
 
     async def auto_on(self, event: AstrMessageEvent):
         """开启自动发送功能。"""
-        self._apply_config_updates({"auto_send": True})
+        self._apply_config_updates({"auto_send_meme": True})
         yield event.plain_result("已开启自动发送")
 
     async def auto_off(self, event: AstrMessageEvent):
         """关闭自动发送功能。"""
-        self._apply_config_updates({"auto_send": False})
+        self._apply_config_updates({"auto_send_meme": False})
         yield event.plain_result("已关闭自动发送")
 
     # ===== 门面委托：子服务方法 =====
@@ -159,7 +159,7 @@ class CommandHandler:
                 status_text += "- 依赖LLM遵循格式要求\n"
 
             status_text += "\n⚙️ 配置状态:\n"
-            status_text += f"自动发送: {'启用' if self.plugin.auto_send else '禁用'}\n"
+            status_text += f"自动发送: {'启用' if self.plugin.auto_send_meme else '禁用'}\n"
             status_text += (
                 f"分析模型: {self.plugin.emotion_analysis_provider_id or '使用当前会话模型'}\n"
             )
@@ -178,8 +178,8 @@ class CommandHandler:
 
     async def status(self, event: AstrMessageEvent):
         """显示插件状态和详细的表情包统计信息。"""
-        stealing_status = "开启" if self.plugin.steal_emoji else "关闭"
-        auto_send_status = "开启" if self.plugin.auto_send else "关闭"
+        stealing_status = "开启" if self.plugin.steal_meme else "关闭"
+        auto_send_meme_status = "开启" if self.plugin.auto_send_meme else "关闭"
 
         image_index = await self.plugin._load_index()
         total_count = len(image_index)
@@ -197,8 +197,8 @@ class CommandHandler:
         status_text = "🔧 插件状态:\n"
         status_text += f"偷取: {stealing_status}\n"
         status_text += f"偷图模式: {mode_desc}\n"
-        status_text += f"自动发送: {auto_send_status}\n"
-        status_text += f"发送概率: {self.plugin.emoji_chance}\n"
+        status_text += f"自动发送: {auto_send_meme_status}\n"
+        status_text += f"发送概率: {self.plugin.meme_chance}\n"
         status_text += f"审核: {self.plugin.content_filtration}\n"
         status_text += f"视觉模型: {vision_model}\n\n"
 

@@ -104,42 +104,112 @@ const TEMPLATE = /* html */ `
 
         <div class="main-container">
             <aside class="sidebar">
-                <div class="sidebar-title">分类</div>
-                <div class="category-list">
+                <!-- 分区切换器 -->
+                <div class="section-switcher">
                     <div
-                        class="category-item favorite-category"
-                        :class="{ active: selectedCategory === '__favorite__' }"
-                        @click="selectedCategory = '__favorite__'; fetchImages(1)"
+                        class="section-tab"
+                        :class="{ active: activeSection === 'pending' }"
+                        @click="switchSection('pending')"
                     >
-                        <span class="category-icon">⭐</span>
-                        <span class="category-name">收藏</span>
-                        <span class="category-count">{{ favoriteCount }}</span>
+                        <svg class="section-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+                        </svg>
+                        <span class="section-tab-label">审核区</span>
+                        <span v-if="pendingStats.pending > 0" class="section-badge">{{ pendingStats.pending }}</span>
                     </div>
                     <div
-                        class="category-item"
-                        :class="{ active: selectedCategory === '' }"
-                        @click="selectedCategory = ''; fetchImages(1)"
+                        class="section-tab"
+                        :class="{ active: activeSection === 'library' }"
+                        @click="switchSection('library')"
                     >
-                        <span class="category-name">全部</span>
-                        <span class="category-count">{{ stats.total || 0 }}</span>
-                    </div>
-                    <div
-                        v-for="cat in categories"
-                        :key="cat.key"
-                        class="category-item"
-                        :class="{ active: selectedCategory === cat.key }"
-                        @click="selectedCategory = cat.key; fetchImages(1)"
-                    >
-                        <span class="category-name">{{ cat.name }}</span>
-                        <span class="category-count">{{ cat.count }}</span>
+                        <svg class="section-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
+                        </svg>
+                        <span class="section-tab-label">表情包库</span>
                     </div>
                 </div>
+
+                <!-- 表情包库：分类列表 -->
+                <template v-if="activeSection === 'library'">
+                    <div class="sidebar-divider"></div>
+                    <div class="sidebar-title">分类</div>
+                    <div class="category-list">
+                        <div
+                            class="category-item favorite-category"
+                            :class="{ active: selectedCategory === '__favorite__' }"
+                            @click="selectedCategory = '__favorite__'; fetchImages(1)"
+                        >
+                            <span class="category-icon">⭐</span>
+                            <span class="category-name">收藏</span>
+                            <span class="category-count">{{ favoriteCount }}</span>
+                        </div>
+                        <div
+                            class="category-item"
+                            :class="{ active: selectedCategory === '' }"
+                            @click="selectedCategory = ''; fetchImages(1)"
+                        >
+                            <span class="category-name">全部</span>
+                            <span class="category-count">{{ stats.total || 0 }}</span>
+                        </div>
+                        <div
+                            v-for="cat in categories"
+                            :key="cat.key"
+                            class="category-item"
+                            :class="{ active: selectedCategory === cat.key }"
+                            @click="selectedCategory = cat.key; fetchImages(1)"
+                        >
+                            <span class="category-name">{{ cat.name }}</span>
+                            <span class="category-count">{{ cat.count }}</span>
+                        </div>
+                    </div>
+                </template>
+
+                <!-- 审核区：容量统计 + 分类筛选 -->
+                <template v-if="activeSection === 'pending'">
+                    <div class="sidebar-divider"></div>
+                    <div class="pending-sidebar-stats">
+                        <div class="capacity-header">
+                            <span class="capacity-label">待审核池</span>
+                            <span class="capacity-count">{{ pendingStats.pending }}</span>
+                        </div>
+                        <div class="pending-capacity-bar">
+                            <div class="capacity-fill" :style="{ width: Math.min(100, pendingStats.pending / pendingStats.capacity * 100) + '%' }" :class="{ full: pendingStats.paused }"></div>
+                        </div>
+                        <div class="capacity-sub">
+                            <span>容量 {{ pendingStats.capacity }}</span>
+                            <span v-if="pendingStats.paused" class="capacity-paused">已暂停</span>
+                        </div>
+                    </div>
+                    <div class="sidebar-title">分类筛选</div>
+                    <div class="category-list">
+                        <div
+                            class="category-item"
+                            :class="{ active: pendingCategory === '' }"
+                            @click="pendingCategory = ''; fetchPendingImages(1)"
+                        >
+                            <span class="category-name">全部</span>
+                            <span class="category-count">{{ pendingTotal }}</span>
+                        </div>
+                        <div
+                            v-for="cat in pendingCategories"
+                            :key="cat.key"
+                            class="category-item"
+                            :class="{ active: pendingCategory === cat.key }"
+                            @click="pendingCategory = cat.key; fetchPendingImages(1)"
+                        >
+                            <span class="category-name">{{ cat.name }}</span>
+                            <span class="category-count">{{ cat.count }}</span>
+                        </div>
+                    </div>
+                </template>
             </aside>
 
             <main class="inventory-panel">
                 <div class="modal-panel-corner-bl"></div>
                 <div class="modal-panel-corner-br"></div>
 
+                <!-- ═══════════ 表情包库视图 ═══════════ -->
+                <template v-if="activeSection === 'library'">
                 <div class="inventory-toolbar">
                     <div class="toolbar-search">
                         <svg style="width:16px;height:16px;position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--text-muted)" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -163,8 +233,10 @@ const TEMPLATE = /* html */ `
 
                         <div class="toolbar-group">
                             <select v-model="sortBy" @change="fetchImages(1)" class="codex-input toolbar-sort-select">
-                                <option value="newest">最新</option>
-                                <option value="oldest">最早</option>
+                                <option value="newest">最新入库</option>
+                                <option value="oldest">最早入库</option>
+                                <option value="most_used">最常发送</option>
+                                <option value="last_used">最近发送</option>
                             </select>
                         </div>
 
@@ -208,6 +280,7 @@ const TEMPLATE = /* html */ `
                     </div>
                 </div>
 
+                <!-- 表情包库内容 -->
                 <div v-if="loading" class="skeleton-grid">
                   <div v-for="n in pageSize" :key="n" class="skeleton-card">
                     <div class="skeleton-image"></div>
@@ -289,6 +362,143 @@ const TEMPLATE = /* html */ `
                         </svg>
                     </button>
                 </div>
+                </template>
+
+                <!-- ═══════════ 审核区视图 ═══════════ -->
+                <template v-if="activeSection === 'pending'">
+                <!-- 审核区进度条 -->
+                <div class="pending-progress">
+                    <div class="progress-track">
+                        <div class="progress-fill" :style="{ width: Math.min(100, pendingStats.pending / pendingStats.capacity * 100) + '%' }" :class="{ full: pendingStats.paused }"></div>
+                    </div>
+                    <div class="progress-info">
+                        <span>待审核 {{ pendingStats.pending }} / {{ pendingStats.capacity }}</span>
+                        <span v-if="pendingStats.paused" class="progress-paused-label">⚠️ 偷取已暂停，审核后自动恢复</span>
+                    </div>
+                </div>
+
+                <!-- 审核区工具栏 -->
+                <div class="inventory-toolbar">
+                    <div class="toolbar-search">
+                        <svg style="width:16px;height:16px;position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--text-muted)" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                        </svg>
+                        <input
+                            v-model="pendingSearchQuery"
+                            @input="pendingDebouncedSearch"
+                            placeholder="搜索待审核表情包..."
+                        >
+                    </div>
+
+                    <div class="toolbar-actions">
+                        <div class="toolbar-group">
+                            <button @click="togglePendingBatchMode" class="codex-btn" :class="{ primary: pendingBatchMode }">
+                                <svg style="width:16px;height:16px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                                </svg>
+                                {{ pendingBatchMode ? '完成' : '批量' }}
+                            </button>
+                        </div>
+
+                        <div v-if="pendingBatchMode" class="toolbar-group pending-batch-actions">
+                            <button @click="approvePendingBatch" class="codex-btn approve-batch-btn">✅ 全部通过</button>
+                            <button @click="rejectPendingBatch(false)" class="codex-btn reject-batch-btn">🗑 全部删除</button>
+                            <button @click="rejectPendingBatch(true)" class="codex-btn reject-bl-batch-btn">🚫 删除并拉黑</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 审核区内容 -->
+                <div v-if="pendingLoading" class="skeleton-grid">
+                  <div v-for="n in pendingPageSize" :key="n" class="skeleton-card">
+                    <div class="skeleton-image"></div>
+                    <div class="skeleton-text"></div>
+                  </div>
+                </div>
+
+                <div v-else-if="pendingImages.length === 0" class="empty-state">
+                    <svg style="width:64px;height:64px;opacity:0.3;margin-bottom:16px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 13l4 4L19 7"/>
+                    </svg>
+                    <p style="font-family:'Cinzel',serif;font-size:1.125rem">暂无待审核表情包</p>
+                    <p style="font-size:0.875rem;margin-top:8px;color:var(--text-muted)">偷取的新表情包会出现在这里等待审核</p>
+                </div>
+
+                <div v-else class="pending-grid">
+                    <div
+                        v-for="item in pendingImages"
+                        :key="item.id"
+                        class="pending-card"
+                        :class="{ selected: pendingSelectedImages.has(item.id) }"
+                        @click="pendingBatchMode ? togglePendingSelection(item) : null"
+                    >
+                        <div v-if="pendingBatchMode" class="batch-indicator">
+                            <svg v-if="pendingSelectedImages.has(item.id)" style="width:12px;height:12px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+                            </svg>
+                        </div>
+
+                        <div class="pending-image">
+                            <div v-if="!imageDataUrls[item.hash]" class="image-placeholder" :style="{ backgroundColor: hashToColor(item.hash) }"></div>
+                            <img v-else :src="imageDataUrls[item.hash]" loading="lazy" :alt="item.desc" class="fade-in">
+                        </div>
+
+                        <div class="pending-info">
+                            <div class="pending-meta">
+                                <span class="pending-category-badge">{{ item.category }}</span>
+                                <span v-if="item.scope_mode === 'local'" class="scope-pill local">本群</span>
+                                <span class="pending-source">{{ item.source === 'auto' ? '🤖' : '👤' }}</span>
+                            </div>
+                            <div class="pending-desc">{{ item.desc || '无描述' }}</div>
+                            <div class="pending-tags" v-if="(item.tags || []).length">
+                                <span v-for="tag in item.tags" :key="tag" class="tag pending-tag">{{ tag }}</span>
+                            </div>
+                            <div class="pending-actions" v-if="!pendingBatchMode">
+                                <button @click.stop="approvePending(item.id)" class="pending-btn approve-btn" title="审核通过，入库">
+                                    <svg style="width:14px;height:14px" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                                    通过
+                                </button>
+                                <button @click.stop="rejectPending(item.id)" class="pending-btn reject-btn" title="删除此待审核项">
+                                    <svg style="width:14px;height:14px" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                                    删除
+                                </button>
+                                <button @click.stop="rejectPending(item.id, true)" class="pending-btn reject-bl-btn" title="删除并拉黑哈希">
+                                    <svg style="width:14px;height:14px" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
+                                    拉黑
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div v-if="pendingTotal > pendingPageSize" class="pagination-bar">
+                    <button
+                        @click="pendingCurrentPage > 1 && fetchPendingImages(pendingCurrentPage - 1)"
+                        :disabled="pendingCurrentPage === 1"
+                        class="codex-btn"
+                        :class="{ disabled: pendingCurrentPage === 1 }"
+                    >
+                        <svg style="width:16px;height:16px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+                        </svg>
+                        上一页
+                    </button>
+
+                    <span class="page-info">{{ pendingCurrentPage }} / {{ Math.ceil(pendingTotal / pendingPageSize) }}</span>
+
+                    <button
+                        @click="pendingCurrentPage * pendingPageSize < pendingTotal && fetchPendingImages(pendingCurrentPage + 1)"
+                        :disabled="pendingCurrentPage * pendingPageSize >= pendingTotal"
+                        class="codex-btn"
+                        :class="{ disabled: pendingCurrentPage * pendingPageSize >= pendingTotal }"
+                    >
+                        下一页
+                        <svg style="width:16px;height:16px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                        </svg>
+                    </button>
+                </div>
+                </template>
             </main>
         </div>
 
@@ -911,6 +1121,10 @@ const TEMPLATE = /* html */ `
 
 createApp({
     setup() {
+        // ── 分区切换 ──
+        const activeSection = ref('library'); // 'library' | 'pending'
+
+        // ── 表情包库状态 ──
         const images = ref([]);
         const categories = ref([]);
         const stats = reactive({ total: 0, categories: 0, today: 0 });
@@ -921,6 +1135,18 @@ createApp({
         const currentPage = ref(1);
         const pageSize = ref(24);
         const total = ref(0);
+
+        // ── 审核区状态 ──
+        const pendingImages = ref([]);
+        const pendingTotal = ref(0);
+        const pendingCategories = ref([]);
+        const pendingStats = reactive({ pending: 0, capacity: 200, paused: false });
+        const pendingLoading = ref(false);
+        const pendingSearchQuery = ref('');
+        const pendingCategory = ref('');
+        const pendingCurrentPage = ref(1);
+        const pendingPageSize = ref(24);
+        let pendingFetchLock = false;
 
         const updatePageSize = () => {
           const w = window.innerWidth;
@@ -1317,6 +1543,155 @@ createApp({
             } catch (e) {
                 console.error(e);
             }
+        };
+
+        // ── 审核区 API ──
+
+        const fetchPendingStats = async () => {
+            try {
+                const res = await apiFetch('api/pending/stats');
+                const data = await res.json();
+                if (data.success) Object.assign(pendingStats, data.stats);
+            } catch (e) { console.error(e); }
+        };
+
+        const fetchPendingImages = async (page = 1) => {
+            if (pendingFetchLock) return;
+            pendingFetchLock = true;
+            pendingLoading.value = true;
+            try {
+                const params = new URLSearchParams({
+                    page: page.toString(),
+                    size: pendingPageSize.value.toString(),
+                    q: pendingSearchQuery.value,
+                    category: pendingCategory.value,
+                });
+                const res = await apiFetch('api/pending?' + params.toString());
+                const data = await res.json();
+                if (!data.success) { pendingImages.value = []; pendingTotal.value = 0; return; }
+                const nextImages = data.images || [];
+                const nextTotal = Number(data.total || 0);
+                const lastPage = Math.max(1, Math.ceil(nextTotal / pendingPageSize.value));
+                if (page > lastPage && nextTotal > 0) {
+                    pendingFetchLock = false;
+                    return await fetchPendingImages(lastPage);
+                }
+                pendingCurrentPage.value = page;
+                pendingImages.value = nextImages;
+                pendingTotal.value = nextTotal;
+                pendingCategories.value = normalizeCategories(data.categories);
+                // 加载缩略图
+                nextImages.forEach(img => { if (img.hash) loadImageData(img.hash); });
+            } catch (e) { console.error(e); }
+            finally { pendingLoading.value = false; pendingFetchLock = false; }
+        };
+
+        const switchSection = (section) => {
+            activeSection.value = section;
+            if (section === 'pending') {
+                fetchPendingStats();
+                fetchPendingImages(1);
+            } else {
+                fetchImages(1);
+            }
+        };
+
+        const pendingDebouncedSearch = () => {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => fetchPendingImages(1), 400);
+        };
+
+        const approvePending = async (id) => {
+            try {
+                const res = await apiFetch('api/pending/approve', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id }),
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showAlert(`已通过 ${data.approved} 条`);
+                    await fetchPendingImages(pendingCurrentPage.value);
+                    await fetchPendingStats();
+                } else {
+                    showAlert('通过失败: ' + (data.error || '未知错误'));
+                }
+            } catch (e) { showAlert('通过失败: ' + e.message); }
+        };
+
+        const rejectPending = async (id, blacklist = false) => {
+            try {
+                const res = await apiFetch('api/pending/reject', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id, blacklist }),
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showAlert(`已删除 ${data.deleted} 条` + (data.blacklisted ? '，已拉黑' : ''));
+                    await fetchPendingImages(pendingCurrentPage.value);
+                    await fetchPendingStats();
+                } else {
+                    showAlert('删除失败: ' + (data.error || '未知错误'));
+                }
+            } catch (e) { showAlert('删除失败: ' + e.message); }
+        };
+
+        const approvePendingBatch = async () => {
+            const ids = Array.from(pendingSelectedImages.value);
+            if (!ids.length) { showAlert('请先选择待审核项'); return; }
+            const confirmed = await showConfirm(`确认通过 ${ids.length} 条待审核表情包？`);
+            if (!confirmed) return;
+            try {
+                const res = await apiFetch('api/pending/approve', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ids }),
+                });
+                const data = await res.json();
+                if (data.approved) showAlert(`已通过 ${data.approved} 条` + (data.errors?.length ? `，${data.errors.length} 条失败` : ''));
+                pendingSelectedImages.value = new Set();
+                pendingBatchMode.value = false;
+                await fetchPendingImages(pendingCurrentPage.value);
+                await fetchPendingStats();
+            } catch (e) { showAlert('批量通过失败: ' + e.message); }
+        };
+
+        const rejectPendingBatch = async (blacklist = false) => {
+            const ids = Array.from(pendingSelectedImages.value);
+            if (!ids.length) { showAlert('请先选择待审核项'); return; }
+            const label = blacklist ? '确认删除并拉黑' : '确认删除';
+            const confirmed = await showConfirm(`${label} ${ids.length} 条待审核表情包？`);
+            if (!confirmed) return;
+            try {
+                const res = await apiFetch('api/pending/reject', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ids, blacklist }),
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showAlert(`已删除 ${data.deleted} 条` + (data.blacklisted ? `，已拉黑 ${data.blacklisted} 条` : ''));
+                }
+                pendingSelectedImages.value = new Set();
+                pendingBatchMode.value = false;
+                await fetchPendingImages(pendingCurrentPage.value);
+                await fetchPendingStats();
+            } catch (e) { showAlert('批量删除失败: ' + e.message); }
+        };
+
+        const pendingBatchMode = ref(false);
+        const pendingSelectedImages = ref(new Set());
+
+        const togglePendingBatchMode = () => {
+            pendingBatchMode.value = !pendingBatchMode.value;
+            if (!pendingBatchMode.value) pendingSelectedImages.value = new Set();
+        };
+
+        const togglePendingSelection = (item) => {
+            const s = new Set(pendingSelectedImages.value);
+            s.has(item.id) ? s.delete(item.id) : s.add(item.id);
+            pendingSelectedImages.value = s;
         };
 
         const loadAll = async () => {
@@ -2108,6 +2483,11 @@ body: JSON.stringify({ key: cat.key }),
         });
 
         return {
+            // 分区
+            activeSection,
+            switchSection,
+
+            // 表情包库
             images,
             categories,
             stats,
@@ -2118,6 +2498,28 @@ body: JSON.stringify({ key: cat.key }),
             currentPage,
             pageSize,
             total,
+
+            // 审核区
+            pendingImages,
+            pendingTotal,
+            pendingCategories,
+            pendingStats,
+            pendingLoading,
+            pendingSearchQuery,
+            pendingCategory,
+            pendingCurrentPage,
+            pendingPageSize,
+            pendingBatchMode,
+            pendingSelectedImages,
+            fetchPendingImages,
+            fetchPendingStats,
+            pendingDebouncedSearch,
+            approvePending,
+            rejectPending,
+            approvePendingBatch,
+            rejectPendingBatch,
+            togglePendingBatchMode,
+            togglePendingSelection,
 
             previewOpen,
             previewItem,

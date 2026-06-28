@@ -1,125 +1,137 @@
 {
-  "metadata": {
-    "display_name": "Emoji Stealer",
-    "short_desc": "Auto-collect and intelligently send stickers",
-    "desc": "Monitors chat images and uses VLM to auto-classify and store them. Intelligently matches and sends stickers based on conversation mood. Supports LLM proactive sticker search, WebUI management, storage cleanup, scope repair, smart emotion matching, and multi-platform compatibility."
-  },
-  "config": {
-    "steal_emoji": {
-      "description": "Enable emoji stealing",
-      "hint": "Monitors and saves images from chat. Requires visual model support."
+    "metadata": {
+        "display_name": "Emoji Stealer",
+        "short_desc": "Auto-collect and intelligently send stickers",
+        "desc": "Monitors chat images and uses VLM to auto-classify and store them. Intelligently matches and sends stickers based on conversation mood. Supports LLM proactive sticker search, WebUI management, storage cleanup, scope repair, smart emotion matching, and multi-platform compatibility."
     },
-    "steal_mode": {
-      "description": "Steal mode",
-      "hint": "probability=Probability mode: random chance on each received image\ncooldown=Cooldown mode: enforce a minimum interval between collections"
-    },
-    "steal_chance": {
-      "description": "Steal probability (in probability mode)",
-      "hint": "Probability of attempting to collect each received image. 0.0=never, 1.0=always. Recommended: 0.2–0.5"
-    },
-    "image_processing_cooldown": {
-      "description": "Steal cooldown in seconds (in cooldown mode)",
-      "hint": "Minimum interval between two collections in seconds. 0=no limit."
-    },
-    "content_filtration": {
-      "description": "Content filtering (block inappropriate images)",
-      "hint": "Uses VLM to review image content. May increase processing time."
-    },
-    "content_filtration_fail_open": {
-      "description": "Allow import on audit service errors",
-      "hint": "Policy hint for audit-service failures only. Images explicitly rejected by moderation will still not be imported."
-    },
-    "auto_send": {
-      "description": "Auto-send stickers in chat",
-      "hint": "Bot will automatically send stickers during conversation. Test first."
-    },
-    "auto_emoji_intent_gate": {
-      "description": "Auto-send intent gate",
-      "hint": "Skips commands, serious/error replies, very short replies, and question-heavy messages where auto-sending is inappropriate."
-    },
-    "auto_emoji_cancel_on_new_message": {
-      "description": "Cancel pending auto-send on new message",
-      "hint": "Cancels the previous delayed auto-send when a new message arrives in the same session."
-    },
-    "emoji_chance": {
-      "description": "Emoji send probability",
-      "hint": "Probability of auto-sending a sticker. 0.0=never, 1.0=always. Recommended: 0.1–0.3"
-    },
-    "send_emoji_as_gif": {
-      "description": "Send as GIF (native sticker style)",
-      "hint": "On: send as GIF (closer to native sticker style)\nOff: send in original format (png/jpg/gif etc.)\n\nHigh-frequency GIF sending of large images may cause high memory usage."
-    },
-    "emoji_send_delay": {
-      "description": "Emoji send delay in seconds",
-      "hint": "Delay before sending emoji to avoid conflicts with message-segmentation plugins.\nRecommended: ≥ 5.0 s. Set to 0 to send immediately."
-    },
-    "emoji_send_delay_random": {
-      "description": "Random delay",
-      "hint": "On: random delay between [delay] ~ [max delay] for more natural timing\nOff: use fixed delay"
-    },
-    "emoji_send_delay_max": {
-      "description": "Max random delay in seconds",
-      "hint": "Only applies when random delay is enabled. Actual delay = random between [delay] ~ [max]."
-    },
-    "smart_emoji_selection": {
-      "description": "Smart emoji selection",
-      "hint": "On: composite scoring (diversity + relevance + similarity)\nOff: random selection (still avoids short-term repeats)"
-    },
-    "enable_natural_emotion_analysis": {
-      "description": "Emotion recognition mode",
-      "hint": "On: LLM mode (lightweight model analyzes semantics, doesn't modify LLM replies)\nOff: Passive tag mode (LLM inserts emotion tags, modifies reply content)\n\nUse /reset to clear context after switching modes."
-    },
-    "emotion_analysis_provider_id": {
-      "description": "Emotion analysis model (LLM mode)",
-      "hint": "Leave blank to use current session model. A lightweight free model is recommended."
-    },
-    "vision_provider_id": {
-      "description": "Vision model (for image classification)",
-      "hint": "Leave blank to auto-use AstrBot's global default_image_caption_provider_id."
-    },
-    "send_target_whitelist": {
-      "description": "Send target whitelist",
-      "hint": "Format: group:group_id or user:user_id. When non-empty, only whitelisted targets can receive stickers."
-    },
-    "send_target_blacklist": {
-      "description": "Send target blacklist",
-      "hint": "Format: group:group_id or user:user_id. Can be combined with whitelist; priority controls conflict resolution."
-    },
-    "send_target_filter_mode": {
-      "description": "Send filter priority",
-      "hint": "whitelist_first=whitelist takes priority, blacklist_first=blacklist takes priority."
-    },
-    "steal_target_whitelist": {
-      "description": "Steal target whitelist",
-      "hint": "Format: group:group_id or user:user_id. When non-empty, only whitelisted targets allow collection."
-    },
-    "steal_target_blacklist": {
-      "description": "Steal target blacklist",
-      "hint": "Format: group:group_id or user:user_id. Can be combined with whitelist; priority controls conflict resolution."
-    },
-    "steal_target_filter_mode": {
-      "description": "Steal filter priority",
-      "hint": "whitelist_first=whitelist takes priority, blacklist_first=blacklist takes priority."
-    },
-    "max_reg_num": {
-      "description": "Maximum emoji count",
-      "hint": "Storage limit. Old images are removed when the limit is exceeded."
-    },
-    "storage_cleanup_strategy": {
-      "description": "Storage cleanup strategy",
-      "hint": "conservative=clean stale index rows and temp files only, balanced=also clean orphan files and thumbnail cache, aggressive=also clean raw files."
-    },
-    "custom_emoji_classification_prompt": {
-      "description": "VLM classification prompt",
-      "hint": "Edit directly. {emotion_list} will be replaced with the category list. Delete all and save, then reload plugin to restore defaults."
-    },
-    "custom_emoji_classification_with_filter_prompt": {
-      "description": "VLM classification prompt (with filtering)",
-      "hint": "Used when content filtering is enabled. Delete all and save, then reload plugin to restore defaults."
-    },
-    "napcat_token": {
-      "description": "NapCat access token",
-      "hint": "Only needed in special network setups: Docker AstrBot + local NapCat where auto token detection fails. Leave blank to auto-detect from OneBot adapter config."
+    "config": {
+        "steal_mode": {
+            "description": "Steal mode",
+            "hint": "probability=Probability mode: random chance on each received image\ncooldown=Cooldown mode: enforce a minimum interval between collections"
+        },
+        "steal_chance": {
+            "description": "Steal probability (in probability mode)",
+            "hint": "Probability of attempting to collect each received image. 0.0=never, 1.0=always. Recommended: 0.2–0.5"
+        },
+        "image_processing_cooldown": {
+            "description": "Steal cooldown in seconds (in cooldown mode)",
+            "hint": "Minimum interval between two collections in seconds. 0=no limit."
+        },
+        "content_filtration": {
+            "description": "Content filtering (block inappropriate images)",
+            "hint": "Uses VLM to review image content. May increase processing time."
+        },
+        "content_filtration_fail_open": {
+            "description": "Allow import on audit service errors",
+            "hint": "Policy hint for audit-service failures only. Images explicitly rejected by moderation will still not be imported."
+        },
+        "enable_natural_emotion_analysis": {
+            "description": "Emotion recognition mode",
+            "hint": "On: LLM mode (lightweight model analyzes semantics, doesn't modify LLM replies)\nOff: Passive tag mode (LLM inserts emotion tags, modifies reply content)\n\nUse /reset to clear context after switching modes."
+        },
+        "emotion_analysis_provider_id": {
+            "description": "Emotion analysis model (LLM mode)",
+            "hint": "Leave blank to use current session model. A lightweight free model is recommended."
+        },
+        "vision_provider_id": {
+            "description": "Vision model (for image classification)",
+            "hint": "Leave blank to auto-use AstrBot's global default_image_caption_provider_id."
+        },
+        "send_target_whitelist": {
+            "description": "Send target whitelist",
+            "hint": "Format: group:group_id or user:user_id. When non-empty, only whitelisted targets can receive stickers."
+        },
+        "send_target_blacklist": {
+            "description": "Send target blacklist",
+            "hint": "Format: group:group_id or user:user_id. Can be combined with whitelist; priority controls conflict resolution."
+        },
+        "send_target_filter_mode": {
+            "description": "Send filter priority",
+            "hint": "whitelist_first=whitelist takes priority, blacklist_first=blacklist takes priority."
+        },
+        "steal_target_whitelist": {
+            "description": "Steal target whitelist",
+            "hint": "Format: group:group_id or user:user_id. When non-empty, only whitelisted targets allow collection."
+        },
+        "steal_target_blacklist": {
+            "description": "Steal target blacklist",
+            "hint": "Format: group:group_id or user:user_id. Can be combined with whitelist; priority controls conflict resolution."
+        },
+        "steal_target_filter_mode": {
+            "description": "Steal filter priority",
+            "hint": "whitelist_first=whitelist takes priority, blacklist_first=blacklist takes priority."
+        },
+        "max_reg_num": {
+            "description": "Maximum emoji count",
+            "hint": "Storage limit. Old images are removed when the limit is exceeded."
+        },
+        "storage_cleanup_strategy": {
+            "description": "Storage cleanup strategy",
+            "hint": "conservative=clean stale index rows and temp files only, balanced=also clean orphan files and thumbnail cache, aggressive=also clean raw files."
+        },
+        "napcat_token": {
+            "description": "NapCat access token",
+            "hint": "Only needed in special network setups: Docker AstrBot + local NapCat where auto token detection fails. Leave blank to auto-detect from OneBot adapter config."
+        },
+        "steal_meme": {
+            "description": "Enable emoji stealing",
+            "hint": "Monitors and saves images from chat. Requires visual model support."
+        },
+        "auto_send_meme": {
+            "description": "Auto-send stickers in chat",
+            "hint": "Bot will automatically send stickers during conversation. Test first."
+        },
+        "meme_chance": {
+            "description": "Emoji send probability",
+            "hint": "Probability of auto-sending a sticker. 0.0=never, 1.0=always. Recommended: 0.1–0.3"
+        },
+        "send_meme_as_gif": {
+            "description": "Send as GIF (native sticker style)",
+            "hint": "On: send as GIF (closer to native sticker style)\nOff: send in original format (png/jpg/gif etc.)\n\nHigh-frequency GIF sending of large images may cause high memory usage."
+        },
+        "meme_send_delay": {
+            "description": "Emoji send delay in seconds",
+            "hint": "Delay before sending emoji to avoid conflicts with message-segmentation plugins.\nRecommended: ≥ 5.0 s. Set to 0 to send immediately."
+        },
+        "meme_send_delay_random": {
+            "description": "Random delay",
+            "hint": "On: random delay between [delay] ~ [max delay] for more natural timing\nOff: use fixed delay"
+        },
+        "meme_send_delay_max": {
+            "description": "Max random delay in seconds",
+            "hint": "Only applies when random delay is enabled. Actual delay = random between [delay] ~ [max]."
+        },
+        "auto_meme_intent_gate": {
+            "description": "Auto-send intent gate",
+            "hint": "Skips commands, serious/error replies, very short replies, and question-heavy messages where auto-sending is inappropriate."
+        },
+        "auto_meme_cancel_on_new_message": {
+            "description": "Cancel pending auto-send on new message",
+            "hint": "Cancels the previous delayed auto-send when a new message arrives in the same session."
+        },
+        "smart_meme_selection": {
+            "description": "Smart emoji selection",
+            "hint": "On: composite scoring (diversity + relevance + similarity)\nOff: random selection (still avoids short-term repeats)"
+        },
+        "custom_meme_classification_prompt": {
+            "description": "VLM classification prompt",
+            "hint": "Edit directly. {emotion_list} will be replaced with the category list. Delete all and save, then reload plugin to restore defaults."
+        },
+        "custom_meme_classification_with_filter_prompt": {
+            "description": "VLM classification prompt (with filtering)",
+            "hint": "Used when content filtering is enabled. Delete all and save, then reload plugin to restore defaults."
+        },
+        "steal_pool_capacity": {
+            "description": "Pending pool capacity",
+            "hint": "Auto-stolen images enter the pool first; stealing pauses when full. Adjustable in real-time"
+        },
+        "enable_embedding_search": {
+            "description": "Enable embedding vector search",
+            "hint": "FaissVecDB semantic similarity matching; auto-degrades to BM25 when unavailable"
+        },
+        "embedding_provider_id": {
+            "description": "Embedding model ID",
+            "hint": "Leave blank to auto-use AstrBot first Embedding Provider. Check Admin LLM Config for available IDs"
+        }
     }
-  }
 }

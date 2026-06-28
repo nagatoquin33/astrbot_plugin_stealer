@@ -19,7 +19,7 @@ class _EmojiTurnState:
         self._auto_decided = False
         self._auto_allowed = False
         self._auto_reason = ""
-        self._auto_send_claimed = False
+        self._auto_send_meme_claimed = False
 
     def mark_active_sent(self) -> None:
         """标记当前回合已主动发送过表情包。"""
@@ -57,16 +57,16 @@ class _EmojiTurnState:
         """获取自动决策原因。"""
         return self._auto_reason
 
-    def claim_auto_send(self) -> bool:
+    def claim_auto_send_meme(self) -> bool:
         """尝试占用自动发送权限。"""
-        if self._auto_decided and self._auto_allowed and not self._auto_send_claimed:
-            self._auto_send_claimed = True
+        if self._auto_decided and self._auto_allowed and not self._auto_send_meme_claimed:
+            self._auto_send_meme_claimed = True
             return True
         return False
 
     def is_auto_claimed(self) -> bool:
         """检查是否已占用自动发送权限。"""
-        return self._auto_send_claimed
+        return self._auto_send_meme_claimed
 
     def reset_for_new_turn(self) -> None:
         """重置回合状态，为新的一轮对话做准备。"""
@@ -75,7 +75,7 @@ class _EmojiTurnState:
         self._auto_decided = False
         self._auto_allowed = False
         self._auto_reason = ""
-        self._auto_send_claimed = False
+        self._auto_send_meme_claimed = False
 
 
 class EmojiSenderEngine:
@@ -170,7 +170,7 @@ class EmojiSenderEngine:
         """根据文本内容判断是否跳过自动发送。"""
         if not text:
             return True
-        if not getattr(self.plugin, "auto_emoji_intent_gate", True):
+        if not getattr(self.plugin, "auto_meme_intent_gate", True):
             return False
         normalized = re.sub(r"\s+", " ", text).strip()
         if len(normalized) <= 2:
@@ -214,10 +214,10 @@ class EmojiSenderEngine:
             last = self._auto_emoji_cooldowns.get(key, 0)
             return now - last >= self.AUTO_EMOJI_COOLDOWN_SECONDS
 
-    def normalize_auto_emoji_chance(self) -> float:
+    def normalize_auto_meme_chance(self) -> float:
         """归一化自动表情发送概率。"""
         try:
-            chance = float(getattr(self.plugin, "emoji_chance", 0.4))
+            chance = float(getattr(self.plugin, "meme_chance", 0.4))
         except (TypeError, ValueError):
             chance = 0.4
         return max(0.0, min(1.0, chance))
@@ -236,13 +236,13 @@ class EmojiSenderEngine:
             turn_state.set_auto_decision(allowed, reason)
             return allowed
 
-        if not getattr(self.plugin, "auto_send", False):
-            return decide(False, "auto_send_disabled")
+        if not getattr(self.plugin, "auto_send_meme", False):
+            return decide(False, "auto_send_meme_disabled")
         if not self.plugin.is_send_enabled_for_event(event):
             return decide(False, "send_disabled")
         if not await self.is_auto_emoji_cooldown_ready(event):
             return decide(False, "cooldown")
-        chance = self.normalize_auto_emoji_chance()
+        chance = self.normalize_auto_meme_chance()
         if chance <= 0:
             return decide(False, "chance_zero")
         if chance >= 1:
@@ -265,7 +265,7 @@ class EmojiSenderEngine:
             return False
         if turn_state.is_active_sent():
             return False
-        if not turn_state.claim_auto_send():
+        if not turn_state.claim_auto_send_meme():
             return False
         event.set_extra("stealer_auto_emoji_turn_claimed", True)
         return True
@@ -329,10 +329,10 @@ class EmojiSenderEngine:
                 logger.warning(f"[EmojiSenderEngine] 发送表情包失败: {e}")
         return sent
 
-    def get_emoji_send_delay(self) -> float:
+    def get_meme_send_delay(self) -> float:
         """获取表情包发送延迟（秒）。"""
-        delay = getattr(self.plugin, "emoji_send_delay", 0.5)
-        delay_random = getattr(self.plugin, "emoji_send_delay_random", 0.0)
+        delay = getattr(self.plugin, "meme_send_delay", 0.5)
+        delay_random = getattr(self.plugin, "meme_send_delay_random", 0.0)
         try:
             base = float(delay)
         except (TypeError, ValueError):
@@ -356,7 +356,7 @@ class EmojiSenderEngine:
         """异步分析并发送表情包。
 
         调用方 _prepare_emoji_response 已通过 claim_auto_emoji_turn
-        占用发送权（_auto_send_claimed），防止重复创建任务。
+        占用发送权（_auto_send_meme_claimed），防止重复创建任务。
         本方法成功发送后再标记 mark_active_sent 以记录实际发送时间。
         """
         try:
@@ -377,7 +377,7 @@ class EmojiSenderEngine:
             if not final_emotions:
                 return
 
-            delay = self.get_emoji_send_delay()
+            delay = self.get_meme_send_delay()
             if delay > 0:
                 await asyncio.sleep(delay)
 

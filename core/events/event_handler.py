@@ -458,7 +458,7 @@ class EventHandler:
                 return
         except (AttributeError, TypeError, KeyError):
             return
-        if not plugin_instance.steal_emoji and not force_active:
+        if not plugin_instance.steal_meme and not force_active:
             return
         imgs: list[Image] = [comp for comp in event.get_messages() if isinstance(comp, Image)]
         store_urls = self._extract_store_emoji_urls(event)
@@ -598,8 +598,7 @@ class EventHandler:
                     if isinstance(result, Exception):
                         logger.error(f"处理图片异常: {result}")
                         continue
-                    if not isinstance(result, tuple) or len(result) != 2:
-                        continue
+                    # _process_image 固定返回 (bool, dict|None)
                     success, idx = result
                     if success and isinstance(idx, dict):
                         merge_result_idx(idx)
@@ -642,10 +641,9 @@ class EventHandler:
                 for result in store_results:
                     if isinstance(result, Exception):
                         continue
-                    if isinstance(result, tuple) and len(result) == 2:
-                        success, idx = result
-                        if success and isinstance(idx, dict):
-                            merge_result_idx(idx)
+                    success, idx = result
+                    if success and isinstance(idx, dict):
+                        merge_result_idx(idx)
         if merged_idx:
             await plugin_instance._save_index(merged_idx)
 

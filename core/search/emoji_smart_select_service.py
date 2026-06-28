@@ -9,6 +9,7 @@ from astrbot.api.event import AstrMessageEvent
 from astrbot.core.agent.run_context import ContextWrapper
 
 from .text_similarity import calculate_hybrid_similarity, calculate_simple_similarity, tokenize_for_bm25, _extract_words
+from .embedding_service import EmbeddingService
 
 
 def _unwrap_event(event: AstrMessageEvent) -> AstrMessageEvent:
@@ -36,6 +37,9 @@ class EmojiSmartSelectService:
         self.plugin = plugin_instance
         self._selector = None
         self._search_engine = None
+
+        # ── Embedding ──
+        self._embedding_service = EmbeddingService(plugin_instance) if plugin_instance else None
 
     def __getattr__(self, name: str):
         """将缺失的属性/方法委托给 EmojiSelector。"""
@@ -133,6 +137,28 @@ class EmojiSmartSelectService:
             else:
                 prefiltered_entries = scoped_entries
 
+            # 嵌入检索增强：预计算 top-K 语义相似 path → 为后续打分提供 bonus
+            embedding_paths: dict[str, float] = {}
+            emb_ready = self._is_embedding_ready()
+            if not emb_ready:
+                logger.debug("[Embedding] auto-emoji: 嵌入未就绪，跳过语义增强")
+            elif not context_text.strip():
+                pass  # 空文本跳过
+            else:
+                try:
+                    emb_results = await self._embedding_service.search(context_text, k=80)
+                    for path, score in emb_results:
+                        canonical = self._canon_path(path)
+                        embedding_paths[canonical] = score
+                    if embedding_paths:
+                        logger.info(
+                            f"[Embedding] 语义增强: context='{context_text[:50]}', topk={len(embedding_paths)}"
+                        )
+                    else:
+                        logger.debug("[Embedding] auto-emoji: 嵌入搜索返回空结果（向量库可能为空）")
+                except Exception as e:
+                    logger.warning(f"[Embedding] auto-emoji 语义增强异常: {e}")
+
             # 智能选择时若已积累足够高分候选，可提前终止打分
             SMART_EARLY_STOP_COUNT = 5
             SMART_EARLY_STOP_THRESHOLD = 0.7
@@ -169,6 +195,10 @@ class EmojiSmartSelectService:
                 use_count_bonus = min(0.08, int(data.get("use_count", 0) or 0) * 0.01)
                 bm25_bonus = fast_score * self.SMART_BM25_BONUS_WEIGHT
                 favorite_bonus = 0.3 if data.get("is_favorite") else 0.0
+                # 嵌入语义 bonus：score 已是 [0,1] 余弦相似度
+                embedding_bonus = embedding_paths.get(
+                    self._canon_path(file_path), 0.0
+                ) * 0.20
                 base_score = (
                     desc_score * 0.35
                     + tag_score * 0.25
@@ -177,6 +207,7 @@ class EmojiSmartSelectService:
                     + use_count_bonus
                     + bm25_bonus
                     + favorite_bonus
+                    + embedding_bonus
                 )
 
                 if base_score < 0.15:
@@ -257,6 +288,21 @@ class EmojiSmartSelectService:
             return [str(t).lower() for t in raw_tags if t]
         return []
 
+    # ═══════════════════════════════════════════════════
+    #  嵌入检索
+    # ═══════════════════════════════════════════════════
+
+    def _is_embedding_ready(self) -> bool:
+        """嵌入检索是否就绪。"""
+        if not self._embedding_service:
+            return False
+        return self._embedding_service.is_available()
+
+    def _invalidate_embedding_index(self) -> None:
+        """标记嵌入索引为过期（新增/删除 emoji 时调用）。"""
+        if self._embedding_service:
+            self._embedding_service.invalidate_cache()
+
     async def search_images(
         self,
         query: str,
@@ -264,8 +310,48 @@ class EmojiSmartSelectService:
         idx: dict | None = None,
         event: AstrMessageEvent | None = None,
     ) -> list[tuple[str, str, str, str]]:
-        """根据查询词搜索图片（BM25 检索）。"""
+        """根据查询词搜索图片（嵌入优先 → BM25 降级）。"""
         try:
+            # ── 嵌入检索路径 ──
+            if self._is_embedding_ready():
+                embedding_results = await self._embedding_service.search(query, limit * 5)
+                if embedding_results:
+                    if idx is None:
+                        idx = self._get_index()
+
+                    recently_used_paths: set[str] = set()
+                    for cat_paths in self._recent_usage.values():
+                        recently_used_paths.update(cat_paths)
+
+                    results: list[tuple[str, str, str, str]] = []
+                    seen_paths: set[str] = set()
+                    for file_path, _cos_sim in embedding_results:
+                        if file_path in seen_paths:
+                            continue
+                        if file_path in recently_used_paths:
+                            continue
+                        if not self._is_entry_allowed_for_event(idx.get(file_path) if idx else None, event):
+                            continue
+                        seen_paths.add(file_path)
+                        data = idx.get(file_path, {}) if idx else {}
+                        desc = str(data.get("desc", "") or "")
+                        category = self._get_category_from_data(data)
+                        tags = self._parse_tags(data.get("tags", []))
+                        tags_str = ", ".join(tags)
+                        results.append((file_path, desc, category, tags_str))
+                        if len(results) >= limit:
+                            break
+                    if results:
+                        logger.debug(f"[Embedding] 嵌入检索命中 {len(results)} 条, query='{query}'")
+                        return results
+                    # 嵌入结果都被过滤掉了，降级 BM25
+                    logger.debug("[Embedding] 嵌入结果均被过滤，降级 BM25")
+                else:
+                    logger.debug("[Embedding] 嵌入检索无结果，降级 BM25")
+            else:
+                logger.debug("[Embedding] 嵌入检索不可用，走 BM25")
+
+            # ── BM25 降级路径 ──
             # 安全网：即便写入路径遗漏了 _invalidate_bm25_index，
             # 也会在签名与当前语料不一致时强制重建，避免使用过期的 BM25 索引。
             need_rebuild = (
@@ -485,7 +571,7 @@ class EmojiSmartSelectService:
 
     def _should_send_file_directly(self, event: AstrMessageEvent) -> bool:
         """Prefer local file sends when GIF coercion is disabled and the adapter is friendly."""
-        if getattr(self.plugin, "send_emoji_as_gif", True):
+        if getattr(self.plugin, "send_meme_as_gif", True):
             return False
 
         try:
