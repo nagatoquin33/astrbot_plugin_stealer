@@ -1053,20 +1053,22 @@ class DatabaseService:
                 )
                 category_count_params.append(scope_target)
 
-            # 搜索过滤（标签、描述、场景）
+            # 搜索过滤（描述/标签/场景/分类/hash/来源/文件名/路径）
             if search_query:
                 search_pattern = f"%{search_query}%"
                 search_clause = (
-                    "(e.desc LIKE ? OR EXISTS("
+                    "(e.desc LIKE ? OR e.category LIKE ? OR e.hash LIKE ?"
+                    " OR e.origin_target LIKE ? OR e.source LIKE ? OR e.path LIKE ?"
+                    " OR EXISTS("
                     "SELECT 1 FROM emoji_tag t WHERE t.path = e.path AND t.tag LIKE ?"
                     ") OR EXISTS("
                     "SELECT 1 FROM emoji_scene s WHERE s.path = e.path AND s.scene LIKE ?"
                     "))"
                 )
                 where_clauses.append(search_clause)
-                params.extend([search_pattern, search_pattern, search_pattern])
+                params.extend([search_pattern] * 8)
                 category_count_where_clauses.append(search_clause)
-                category_count_params.extend([search_pattern, search_pattern, search_pattern])
+                category_count_params.extend([search_pattern] * 8)
 
             where_sql = ""
             if where_clauses:
@@ -1206,9 +1208,11 @@ class DatabaseService:
         if search_query:
             search_pattern = f"%{search_query}%"
             where_clauses.append(
-                "(p.desc LIKE ? OR p.tags_text LIKE ? OR p.scenes_text LIKE ?)"
+                "(p.desc LIKE ? OR p.tags_text LIKE ? OR p.scenes_text LIKE ?"
+                " OR p.category LIKE ? OR p.hash LIKE ?"
+                " OR p.origin_target LIKE ? OR p.source LIKE ? OR p.path LIKE ?)"
             )
-            params.extend([search_pattern, search_pattern, search_pattern])
+            params.extend([search_pattern] * 8)
 
         where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
