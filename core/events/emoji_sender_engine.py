@@ -1,13 +1,43 @@
 """表情包发送决策引擎：负责 LLM 响应拦截、自动发送决策和表情包发送。"""
 
 import asyncio
+import os
 import random
 import re
 from typing import Any
 
+from astrbot.api.message_components import Image
+from astrbot.core.message.message_event_result import MessageChain
+
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 from astrbot.api.message_components import Plain
+
+
+async def _send_qq_image_as_sticker(
+    event: AstrMessageEvent,
+    file_path: str,
+    summary: str = "[动画表情]",
+) -> bool:
+    """在 QQ (aiocqhttp) 平台发送表情包时修改 summary 外显。"""
+    try:
+        from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import (
+            AiocqhttpMessageEvent,
+        )
+    except ImportError:
+        return False
+    if not isinstance(event, AiocqhttpMessageEvent):
+        return False
+    if not file_path or not os.path.exists(file_path):
+        return False
+    try:
+        chain = MessageChain(chain=[Image(file=file_path)])
+        obmsg = await event._parse_onebot_json(chain)
+        obmsg[0]["data"]["summary"] = summary
+        await event.bot.send(event.message_obj.raw_message, obmsg)
+        return True
+    except Exception:
+        return False
 
 
 class _EmojiTurnState:
@@ -315,15 +345,14 @@ class EmojiSenderEngine:
         self, event: AstrMessageEvent, emoji_paths: list[str], cleaned_text: str
     ) -> bool:
         """发送指定的表情包。"""
-        from astrbot.api.message_components import Image
-
         if not emoji_paths:
             return False
 
         sent = False
         for path in emoji_paths:
             try:
-                await event.send(Image(file=path))
+                if not await _send_qq_image_as_sticker(event, path):
+                    await event.send(Image(file=path))
                 sent = True
             except Exception as e:
                 logger.warning(f"[EmojiSenderEngine] 发送表情包失败: {e}")

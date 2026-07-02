@@ -8,6 +8,8 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 from astrbot.core.agent.run_context import ContextWrapper
 
+from ..events.emoji_sender_engine import _send_qq_image_as_sticker
+
 from .text_similarity import calculate_hybrid_similarity, calculate_simple_similarity, tokenize_for_bm25, _extract_words
 from .embedding_service import EmbeddingService
 
@@ -631,6 +633,9 @@ class EmojiSmartSelectService:
         event = _unwrap_event(event)
         if await self._try_send_telegram_sticker(event, emoji_path):
             return "telegram_sticker"
+
+        if await _send_qq_image_as_sticker(event, emoji_path):
+            return "qq_sticker"
 
         if await self._send_emoji_file_directly(event, emoji_path):
             return "file_image"
