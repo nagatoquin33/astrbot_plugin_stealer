@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.3] - 2026-07-03
+
+### fixed
+- 修复 `send_meme_as_gif` 开启时 QQ (aiocqhttp) sticker 路径未执行 GIF 转换的问题，`_send_qq_image_as_sticker` 新增 GIF 联动逻辑 (#84) — 感谢 @Foolllll-J
+
+### added
+- 新增 `meme_send_char_delay` 按字延迟配置（0.3s/字），发送延迟与 LLM 回复长度成正比，设为 0 回退原有固定/随机延迟 (#84) — 感谢 @Foolllll-J
+- 新增空回复跳过保护：LLM 主回复被置空时自动跳过表情发送，避免"纯表情无文本"的异常场景 (#84) — 感谢 @Foolllll-J
+
+### changed
+- `meme_send_delay` 描述从"表情包发送延迟/秒"改为"表情包发送固定延迟/秒"，与新增的按字延迟做区分 (#84) — 感谢 @Foolllll-J
+
 ## [2.7.2] - 2026-07-02
 
 ### added
