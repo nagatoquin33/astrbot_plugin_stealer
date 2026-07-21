@@ -2866,6 +2866,18 @@ input, select, textarea {
     border-color: #f87171;
 }
 
+/* issue #87: 审核区编辑按钮（与主库 edit-btn 共用主色变量） */
+.pending-btn.edit-btn {
+    border-color: rgba(184, 154, 95, 0.35);
+    color: var(--gold-dim, #b89a5f);
+}
+
+.pending-btn.edit-btn:hover {
+    background: rgba(184, 154, 95, 0.12);
+    border-color: var(--gold, #d4af37);
+    color: var(--gold, #d4af37);
+}
+
 
 .pending-batch-actions {
     display: flex;

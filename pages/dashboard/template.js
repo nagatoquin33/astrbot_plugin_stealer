@@ -363,6 +363,15 @@ export const TEMPLATE = `
                                 </svg>
                                 {{ t('pages.dashboard.actions.approve', 'Approve') }}
                             </button>
+                            <button @click.stop="openPendingEdit(item)" class="pending-btn edit-btn"
+                                :title="t('pages.dashboard.actions.edit_approve', 'Edit & approve')">
+                                <svg style="width:14px;height:14px" fill="none" stroke="currentColor"
+                                    viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                </svg>
+                                {{ t('pages.dashboard.actions.edit', 'Edit') }}
+                            </button>
                             <button @click.stop="rejectPending(item.id)" class="pending-btn reject-btn"
                                 :title="t('pages.dashboard.actions.delete', 'Delete')">
                                 <svg style="width:14px;height:14px" fill="none" stroke="currentColor"
@@ -1042,6 +1051,107 @@ export const TEMPLATE = `
                 <button @click="onConfirmNo" class="codex-btn" style="flex:1">{{ t('pages.dashboard.actions.cancel', 'Cancel') }}</button>
                 <button @click="onConfirmYes" class="codex-btn danger" style="flex:1">{{ t('pages.dashboard.actions.confirm', 'Confirm') }}</button>
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- 审核区编辑弹窗（issue #87） -->
+<div v-if="pendingEditOpen" class="modal-overlay" @click.self="closePendingEdit">
+    <div class="modal-panel">
+        <div class="modal-panel-corner-bl"></div>
+        <div class="modal-panel-corner-br"></div>
+
+        <div class="modal-header">
+            <h2>{{ t('pages.dashboard.modal.edit_pending', 'Edit Pending Sticker') }}</h2>
+            <button @click="closePendingEdit" class="modal-close">
+                <svg style="width:20px;height:20px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M6 18L18 6M6 6l12 12" />
+                </svg>
+            </button>
+        </div>
+
+        <div class="modal-content">
+            <div style="padding:24px;width:100%">
+                <div style="max-width:520px;margin:0 auto">
+                    <div class="pending-edit-preview"
+                        style="display:flex;gap:16px;align-items:center;margin-bottom:20px;padding:12px;background:rgba(0,0,0,0.25);border-radius:6px">
+                        <img v-if="pendingEditForm.hash && imageDataUrls[pendingEditForm.hash]"
+                            :src="imageDataUrls[pendingEditForm.hash]"
+                            style="width:96px;height:96px;object-fit:contain;border-radius:4px;background:#000">
+                        <div v-else
+                            style="width:96px;height:96px;border-radius:4px;background:#000;display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:0.75rem">
+                            {{ t('pages.dashboard.messages.no_preview', 'No preview') }}
+                        </div>
+                        <div style="flex:1;min-width:0">
+                            <div style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--text-muted)">
+                                {{ t('pages.dashboard.labels.hash', 'Hash') }}</div>
+                            <div style="font-size:0.85rem;word-break:break-all;color:var(--text-main)">
+                                {{ pendingEditForm.hash || '-' }}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="margin-bottom:16px">
+                        <label
+                            style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--text-muted);display:block;margin-bottom:6px">
+                            {{ t('pages.dashboard.fields.category', 'Category') }}
+                        </label>
+                        <select v-model="pendingEditForm.category" class="codex-input">
+                            <option v-for="cat in categories" :key="cat.key" :value="cat.key">{{ cat.name }}</option>
+                        </select>
+                    </div>
+
+                    <div style="margin-bottom:16px">
+                        <label
+                            style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--text-muted);display:block;margin-bottom:6px">
+                            {{ t('pages.dashboard.fields.scope', 'Scope') }}
+                        </label>
+                        <select v-model="pendingEditForm.scope_mode" class="codex-input">
+                            <option value="public">{{ t('pages.dashboard.scope.public', 'Public') }}</option>
+                            <option value="local">{{ t('pages.dashboard.scope.local', 'Local only') }}</option>
+                        </select>
+                    </div>
+
+                    <div style="margin-bottom:16px">
+                        <label
+                            style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--text-muted);display:block;margin-bottom:6px">
+                            {{ t('pages.dashboard.fields.description', 'Description') }}
+                        </label>
+                        <textarea v-model="pendingEditForm.desc" class="codex-input" rows="3"></textarea>
+                    </div>
+
+                    <div style="margin-bottom:16px">
+                        <label
+                            style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--text-muted);display:block;margin-bottom:6px">
+                            {{ t('pages.dashboard.fields.tags', 'Tags') }}
+                            ({{ t('pages.dashboard.messages.tag_separator_hint', 'comma separated') }})
+                        </label>
+                        <input v-model="pendingEditForm.tagsText" type="text" class="codex-input">
+                    </div>
+
+                    <div style="margin-bottom:8px">
+                        <label
+                            style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--text-muted);display:block;margin-bottom:6px">
+                            {{ t('pages.dashboard.fields.scenes', 'Scenes') }}
+                            ({{ t('pages.dashboard.messages.scene_separator_hint', 'comma separated') }})
+                        </label>
+                        <input v-model="pendingEditForm.scenesText" type="text" class="codex-input">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="modal-actions">
+            <button @click="closePendingEdit" class="codex-btn" style="flex:1">
+                {{ t('pages.dashboard.actions.cancel', 'Cancel') }}
+            </button>
+            <button @click="savePendingEdit(false)" class="codex-btn" style="flex:1">
+                {{ t('pages.dashboard.actions.save_only', 'Save') }}
+            </button>
+            <button @click="savePendingEdit(true)" class="codex-btn primary" style="flex:1">
+                {{ t('pages.dashboard.actions.save_and_approve', 'Save & Approve') }}
+            </button>
         </div>
     </div>
 </div>

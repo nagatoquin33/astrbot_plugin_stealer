@@ -129,5 +129,26 @@
             "description": "",
             "hint": ""
         }
+    },
+    "pages": {
+        "dashboard": {
+            "actions": {
+                "edit_approve": "Изменить и одобрить",
+                "save_only": "Только сохранить",
+                "save_and_approve": "Сохранить и одобрить"
+            },
+            "modal": {
+                "edit_pending": "Изменить стикер на модерации"
+            },
+            "messages": {
+                "no_preview": "Нет предпросмотра"
+            },
+            "labels": {
+                "hash": "Хеш"
+            },
+            "alerts": {
+                "pending_saved": "Изменения на модерации сохранены."
+            }
+        }
     }
 }

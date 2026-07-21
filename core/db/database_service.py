@@ -1273,6 +1273,91 @@ class DatabaseService:
             ).fetchone()
             return dict(row) if row else None
 
+    async def update_pending(
+        self,
+        pending_id: int,
+        fields: dict[str, Any],
+        *,
+        allowed_fields: tuple[str, ...] = (
+            "category",
+            "desc",
+            "tags",
+            "scenes",
+            "scope_mode",
+            "phash",
+        ),
+    ) -> dict[str, Any] | None:
+        """更新一条待审核记录。仅允许白名单字段，避免改写 path/hash/source/origin_target。
+
+        Args:
+            pending_id: 待审核行 id
+            fields: 待更新字段；tags/scenes 会 join 为多值列，其它原样写入
+            allowed_fields: 白名单，防止调用方误改 path/hash
+
+        Returns:
+            更新后的完整行（dict），不存在或字段非白名单导致无写入时返回 None。
+        """
+        if not pending_id or not isinstance(fields, dict) or not fields:
+            return None
+
+        # 字段白名单过滤
+        clean_fields: dict[str, Any] = {}
+        for key, value in fields.items():
+            if key in allowed_fields:
+                clean_fields[key] = value
+
+        if not clean_fields:
+            return None
+
+        # tags/scenes 需要 join_multi
+        if "tags" in clean_fields:
+            clean_fields["tags_text"] = self._join_multi(clean_fields.pop("tags"))
+        if "scenes" in clean_fields:
+            clean_fields["scenes_text"] = self._join_multi(clean_fields.pop("scenes"))
+
+        # scope_mode 兜底
+        if "scope_mode" in clean_fields:
+            sm = str(clean_fields["scope_mode"] or "").strip().lower()
+            clean_fields["scope_mode"] = sm if sm in ("public", "local") else "public"
+
+        # category 不能为空
+        if "category" in clean_fields:
+            cat = str(clean_fields["category"] or "").strip()
+            if not cat:
+                return None
+            clean_fields["category"] = cat
+
+        # desc 兜底字符串
+        if "desc" in clean_fields:
+            clean_fields["desc"] = str(clean_fields["desc"] or "").strip() or None
+
+        async with self._write_lock:
+            return await asyncio.to_thread(
+                self._update_pending_sync, pending_id, clean_fields
+            )
+
+    def _update_pending_sync(
+        self, pending_id: int, clean_fields: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        set_clause = ", ".join(f"{col} = ?" for col in clean_fields.keys())
+        params: list[Any] = list(clean_fields.values()) + [pending_id]
+        with self._get_connection() as conn:
+            conn.execute(
+                f"UPDATE emoji_pending SET {set_clause} WHERE id = ?",
+                params,
+            )
+            # 注：SQLite 对值未变的 no-op UPDATE 会返回 rowcount=0，
+            # 不能据此判断"行不存在"。统一回查一次行存在性。
+            row = conn.execute(
+                "SELECT * FROM emoji_pending WHERE id = ?", (pending_id,)
+            ).fetchone()
+            if not row:
+                return None
+            item = dict(row)
+            item["tags"] = self._split_multi(item.pop("tags_text", ""))
+            item["scenes"] = self._split_multi(item.pop("scenes_text", ""))
+            return item
+
     def delete_pending(self, pending_id: int) -> dict[str, Any] | None:
         """删除单条待审核记录，返回被删行的 path/hash（供删除磁盘文件用）；不存在返回 None。"""
         with self._get_connection() as conn:

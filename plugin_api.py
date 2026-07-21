@@ -57,6 +57,7 @@ class PluginAPI:
             ("/pending", "handle_list_pending", ["GET"]),
             ("/pending/approve", "handle_pending_approve", ["POST"]),
             ("/pending/reject", "handle_pending_reject", ["POST"]),
+            ("/pending/update", "handle_pending_update", ["POST"]),
             ("/pending/stats", "handle_pending_stats", ["GET"]),
             ("/categories", "handle_categories", ["GET", "POST"]),
             ("/categories/delete", "handle_delete_category", ["POST"]),
@@ -1009,6 +1010,74 @@ class PluginAPI:
             )
         except Exception as e:
             logger.error(f"审核拒绝失败: {e}", exc_info=True)
+            return jsonify({"success": False, "error": str(e)})
+
+    async def handle_pending_update(self):
+        """POST /pending/update —— 修改一条 pending 的元数据（分类/描述/标签/场景/作用域）。"""
+        try:
+            data = await request.get_json() or {}
+            try:
+                pending_id = int(data.get("id") or 0)
+            except (TypeError, ValueError):
+                pending_id = 0
+            if pending_id <= 0:
+                return jsonify({"success": False, "error": "缺少 id"})
+
+            db = self._db
+            if not db or not hasattr(db, "update_pending"):
+                return jsonify({"success": False, "error": "db 不可用"})
+
+            # 字段白名单 + 类型归一化（与 update_pending 内部白名单一致）
+            fields: dict[str, Any] = {}
+            if "category" in data:
+                category = str(data.get("category") or "").strip()
+                if category and category in (self._cfg.categories or []):
+                    fields["category"] = category
+                elif category:
+                    return jsonify(
+                        {"success": False, "error": f"分类无效: {category!r}"}
+                    )
+            if "desc" in data:
+                fields["desc"] = str(data.get("desc") or "").strip()
+            if "scope_mode" in data:
+                fields["scope_mode"] = str(data.get("scope_mode") or "public").strip()
+            if "tags" in data:
+                tags_raw = data.get("tags")
+                if isinstance(tags_raw, list):
+                    fields["tags"] = [
+                        str(t).strip() for t in tags_raw if str(t or "").strip()
+                    ]
+                else:
+                    fields["tags"] = [
+                        t.strip()
+                        for t in str(tags_raw or "").split(",")
+                        if t.strip()
+                    ]
+            if "scenes" in data:
+                scenes_raw = data.get("scenes")
+                if isinstance(scenes_raw, list):
+                    fields["scenes"] = [
+                        str(s).strip() for s in scenes_raw if str(s or "").strip()
+                    ]
+                else:
+                    fields["scenes"] = [
+                        s.strip()
+                        for s in str(scenes_raw or "").split(",")
+                        if s.strip()
+                    ]
+
+            if not fields:
+                return jsonify({"success": False, "error": "没有可更新字段"})
+
+            updated = await db.update_pending(pending_id, fields)
+            if not updated:
+                return jsonify(
+                    {"success": False, "error": "pending 不存在"}
+                )
+
+            return jsonify({"success": True, "item": self._build_pending_item(updated)})
+        except Exception as e:
+            logger.error(f"待审核更新失败: {e}", exc_info=True)
             return jsonify({"success": False, "error": str(e)})
 
     # ── Upload / Update / Delete ──────────────────────────────

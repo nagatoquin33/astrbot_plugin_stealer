@@ -133,6 +133,18 @@ createApp({
         const isEditing = ref(false);
         const editForm = reactive({ category: '', tags: '', scene: '', desc: '', scope_mode: 'public' });
 
+        // 审核区编辑弹窗（issue #87）
+        const pendingEditOpen = ref(false);
+        const pendingEditId = ref(null);
+        const pendingEditForm = reactive({
+            hash: '',
+            category: '',
+            scope_mode: 'public',
+            desc: '',
+            tagsText: '',
+            scenesText: '',
+        });
+
         const isBatchMode = ref(false);
         const selectedImages = ref(new Set());
         const batchMoveOpen = ref(false);
@@ -559,6 +571,75 @@ createApp({
                     showAlert(`${t('pages.dashboard.alerts.approve_failed', 'Approve failed')}: ${data.error || t('pages.dashboard.messages.unknown_error', 'Unknown error')}`);
                 }
             } catch (e) { showAlert(`${t('pages.dashboard.alerts.approve_failed', 'Approve failed')}: ${e.message}`); }
+        };
+
+        // issue #87：审核区编辑
+        const parseListField = (value) => {
+            if (Array.isArray(value)) {
+                return value.map((v) => String(v || '').trim()).filter(Boolean);
+            }
+            return String(value || '')
+                .split(/[,，]/)
+                .map((v) => v.trim())
+                .filter(Boolean);
+        };
+
+        const openPendingEdit = async (item) => {
+            if (!item || item.id == null) return;
+            pendingEditId.value = item.id;
+            pendingEditForm.hash = item.hash || '';
+            pendingEditForm.category = item.category || '';
+            pendingEditForm.scope_mode = item.scope_mode || 'public';
+            pendingEditForm.desc = item.desc || '';
+            pendingEditForm.tagsText = (item.tags || []).join(', ');
+            pendingEditForm.scenesText = (item.scenes || []).join(', ');
+            pendingEditOpen.value = true;
+            if (item.hash && !imageDataUrls[item.hash]) {
+                loadOriginalImage(item.hash);
+            }
+        };
+
+        const closePendingEdit = () => {
+            pendingEditOpen.value = false;
+            pendingEditId.value = null;
+        };
+
+        const savePendingEdit = async (alsoApprove) => {
+            if (!pendingEditId.value) return;
+            try {
+                const payload = {
+                    id: pendingEditId.value,
+                    category: pendingEditForm.category,
+                    scope_mode: pendingEditForm.scope_mode,
+                    desc: pendingEditForm.desc,
+                    tags: parseListField(pendingEditForm.tagsText),
+                    scenes: parseListField(pendingEditForm.scenesText),
+                };
+                const res = await apiFetch('api/pending/update', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                const data = await res.json();
+                if (!data.success) {
+                    showAlert(`${t('pages.dashboard.alerts.save_failed', 'Save failed')}: ${data.error || t('pages.dashboard.messages.unknown_error', 'Unknown error')}`);
+                    return;
+                }
+
+                if (alsoApprove) {
+                    await approvePending(pendingEditId.value);
+                    closePendingEdit();
+                    return;
+                }
+
+                // 仅保存：刷新当前页
+                showAlert(t('pages.dashboard.alerts.pending_saved', 'Pending item saved.'));
+                closePendingEdit();
+                await fetchPendingImages(pendingCurrentPage.value);
+                await fetchPendingStats();
+            } catch (e) {
+                showAlert(`${t('pages.dashboard.alerts.save_failed', 'Save failed')}: ${e.message}`);
+            }
         };
 
         const rejectPending = async (id, blacklist = false) => {
@@ -1582,6 +1663,15 @@ createApp({
             rejectPendingBatch,
             togglePendingBatchMode,
             togglePendingSelection,
+
+            // issue #87：审核区编辑
+            pendingEditOpen,
+            pendingEditId,
+            pendingEditForm,
+            openPendingEdit,
+            closePendingEdit,
+            savePendingEdit,
+            parseListField,
 
             previewOpen,
             previewItem,

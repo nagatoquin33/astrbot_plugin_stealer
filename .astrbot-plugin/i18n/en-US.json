@@ -193,6 +193,9 @@
                 "blacklist": "Blacklist",
                 "download": "Download",
                 "edit": "Edit",
+                "edit_approve": "Edit & Approve",
+                "save_only": "Save Only",
+                "save_and_approve": "Save & Approve",
                 "unset_local": "Unset Local",
                 "set_local": "Set Local",
                 "cancel": "Cancel",
@@ -229,6 +232,7 @@
             },
             "modal": {
                 "edit": "Edit",
+                "edit_pending": "Edit Pending Sticker",
                 "details": "Details",
                 "add_sticker": "Add Sticker",
                 "batch_import": "Batch Import Stickers",
@@ -267,9 +271,13 @@
                 "not_favorited": "Not favorited",
                 "no_tags": "No tags",
                 "no_scenes": "No scenes",
+                "no_preview": "No preview",
                 "scene_separator_hint": "comma separated",
                 "tag_separator_hint": "comma separated",
                 "scene_input_hint": "You can separate scenes with commas or semicolons."
+            },
+            "labels": {
+                "hash": "Hash"
             },
             "placeholders": {
                 "edit_scene": "Example: celebration, happy",
@@ -314,6 +322,7 @@
             },
             "alerts": {
                 "pending_approved": "Approved {count} item(s).",
+                "pending_saved": "Pending item saved.",
                 "approve_failed": "Approve failed",
                 "and_blacklisted": "(blacklisted)",
                 "pending_deleted": "Deleted {count} item(s).",

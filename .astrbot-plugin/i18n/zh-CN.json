@@ -193,6 +193,9 @@
                 "blacklist": "拉黑",
                 "download": "下载",
                 "edit": "编辑",
+                "edit_approve": "修改后通过",
+                "save_only": "仅保存",
+                "save_and_approve": "保存并通过",
                 "unset_local": "解除限定",
                 "set_local": "限定本群",
                 "cancel": "取消",
@@ -229,6 +232,7 @@
             },
             "modal": {
                 "edit": "编辑",
+                "edit_pending": "编辑待审核表情包",
                 "details": "详情",
                 "add_sticker": "添加表情包",
                 "batch_import": "批量导入表情包",
@@ -267,9 +271,13 @@
                 "not_favorited": "未收藏",
                 "no_tags": "无标签",
                 "no_scenes": "无场景",
+                "no_preview": "无预览",
                 "scene_separator_hint": "逗号分隔",
                 "tag_separator_hint": "逗号分隔",
                 "scene_input_hint": "支持使用逗号或分号分隔。"
+            },
+            "labels": {
+                "hash": "哈希"
             },
             "placeholders": {
                 "edit_scene": "例如: 庆祝, 表达开心",
@@ -314,6 +322,7 @@
             },
             "alerts": {
                 "pending_approved": "已通过 {count} 条。",
+                "pending_saved": "已保存修改。",
                 "approve_failed": "通过失败",
                 "and_blacklisted": "已拉黑",
                 "pending_deleted": "已删除 {count} 条。",
