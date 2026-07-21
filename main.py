@@ -889,7 +889,17 @@ class Main(Star):
                 is_temp = False
 
             if not os.path.exists(temp_path):
-                yield f"偷取失败：图片文件不存在: {temp_path}"
+                hint = ""
+                # 当 LLM 传来的是非 URL 形式（相对路径/裸文件名）且仍无法定位时，
+                # 提示它从消息中已有的 Image URL 选择（issue #88）。
+                ref_value = str(image_ref or "").strip()
+                if ref_value and not (
+                    ref_value.startswith("http://")
+                    or ref_value.startswith("https://")
+                    or ref_value.startswith("file:")
+                ):
+                    hint = "（请确认 image_ref 是当前消息中的图片 URL 或本地绝对路径）"
+                yield f"偷取失败：图片文件不存在: {temp_path}{hint}"
                 return
 
             precheck_ok, precheck_reason = self._precheck_image_file(temp_path)
@@ -956,11 +966,35 @@ class Main(Star):
         image_ref: str,
         event_handler: Any,
     ) -> tuple[str, str]:
-        """Resolve an explicit or current-message image reference for steal_sticker."""
+        """Resolve an explicit or current-message image reference for steal_sticker.
+
+        修复 issue #88：LLM 偶尔会传相对路径（如 ``./image.png``）或仅文件名。
+        之前的实现直接把 ``explicit_ref`` 原样返回，下游 ``os.path.abspath``
+        会拼到 CWD（如 ``/AstrBot/image.png``），触发"图片文件不存在"。
+
+        现在对非 URL 形式的 ``image_ref``，优先在当前消息的 ``Image`` 组件中
+        按 basename 匹配，再回退到组件自带的 url/file/path/convert_to_file_path。
+        """
         explicit_ref = str(image_ref or "").strip()
-        if explicit_ref:
+
+        # 1. URL 形式（http/https/file 协议）直接信任 LLM 传入
+        if explicit_ref and (
+            explicit_ref.startswith("http://")
+            or explicit_ref.startswith("https://")
+            or explicit_ref.startswith("file:")
+        ):
             return explicit_ref, "llm_tool"
 
+        # 2. 尝试把显式 ref 解析为消息内某张图片的真实位置
+        resolved_explicit = ""
+        if explicit_ref:
+            resolved_explicit = await self._resolve_image_ref_against_event(
+                event, explicit_ref
+            )
+            if resolved_explicit:
+                return resolved_explicit, "llm_tool"
+
+        # 3. 未提供 ref 或 ref 解析失败：取当前消息中第一张可用图片
         try:
             for comp in event.get_messages():
                 if not isinstance(comp, MessageImage):
@@ -977,13 +1011,79 @@ class Main(Star):
         except Exception:
             pass
 
+        # 4. 兜底：QQ 商城表情 URL
         try:
             store_urls = event_handler._extract_store_emoji_urls(event)
         except Exception:
             store_urls = []
         if store_urls:
             return str(store_urls[0] or "").strip(), "qq_store"
-        return "", "llm_tool"
+
+        # 5. 都没有的话才把显式 ref 原样回传（让下游报错时提示更准确）
+        return explicit_ref, "llm_tool"
+
+    async def _resolve_image_ref_against_event(
+        self,
+        event: AstrMessageEvent,
+        image_ref: str,
+    ) -> str:
+        """在当前消息的 Image 组件中按 basename / 绝对路径 / 已有本地路径匹配。
+
+        返回：
+            - 命中组件时：组件真实的 url/file/path，或 ``convert_to_file_path()`` 结果；
+            - 未命中或异常时：空串。
+        """
+        ref_norm = image_ref.replace("\\", "/").strip()
+        ref_basename = Path(ref_norm).name if ref_norm else ""
+
+        try:
+            comps = list(event.get_messages())
+        except Exception:
+            return ""
+
+        for comp in comps:
+            if not isinstance(comp, MessageImage):
+                continue
+
+            # a. basename 命中组件的 url/file/path
+            if ref_basename:
+                for attr in ("url", "file", "path"):
+                    value = str(getattr(comp, attr, "") or "").strip()
+                    if not value:
+                        continue
+                    value_norm = value.replace("\\", "/").split("?", 1)[0].split("#", 1)[0]
+                    value_basename = value_norm.rsplit("/", 1)[-1]
+                    if value_basename and value_basename == ref_basename:
+                        return value
+
+            # b. ref 是已存在的绝对路径且等于组件本地路径
+            if os.path.isabs(image_ref):
+                for attr in ("file", "path"):
+                    value = str(getattr(comp, attr, "") or "").strip()
+                    if value and os.path.normcase(os.path.normpath(value)) == os.path.normcase(
+                        os.path.normpath(image_ref)
+                    ):
+                        return value
+
+            # c. 调用组件自身方法把图片落到本地，返回真实可读路径
+            if hasattr(comp, "convert_to_file_path"):
+                try:
+                    path = await comp.convert_to_file_path()
+                    path = str(path or "").strip()
+                except Exception:
+                    path = ""
+                if not path:
+                    continue
+                path_norm = path.replace("\\", "/")
+                path_basename = path_norm.rsplit("/", 1)[-1].split("?")[0]
+                if ref_basename and path_basename == ref_basename:
+                    return path
+                if os.path.isabs(image_ref) and os.path.normcase(
+                    os.path.normpath(path)
+                ) == os.path.normcase(os.path.normpath(image_ref)):
+                    return path
+
+        return ""
 
     def _build_steal_tool_extra_meta(
         self,
