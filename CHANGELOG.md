@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.5] - 2026-07-21
+
+### fixed
+- 修复 LLM `steal_meme` 工具传入相对路径（如 `./image.png`）时返回"图片文件不存在"的问题 (#88)
+  - `_resolve_steal_image_ref` 现在对非 URL 形式的 `image_ref` 先在当前消息的 `Image` 组件中按 basename / 绝对路径 / `convert_to_file_path()` 解析，再回退到原值
+  - 解析失败时错误提示附带"请从当前消息的 Image URL 中选择"提示，便于 LLM 自纠
+
+### added
+- WebUI 审核区信息编辑功能 (#87)：在每张待审核卡片上新增 ✏️ 编辑按钮，弹窗可修改分类 / 作用域 / 描述 / 标签 / 场景
+  - 弹窗底部提供「仅保存」与「保存并通过」两个动作
+  - 新增后端 API：`POST /astrbot_plugin_stealer/pending/update`（`handle_pending_update`）
+  - 新增 DB 层方法：`DatabaseService.update_pending()`，使用字段白名单防止改写 `path` / `hash` / `source` / `origin_target`
+  - 同时修复 `update_pending()` 对值未变的 no-op UPDATE 误判"行不存在"的问题：SQLite 的 no-op UPDATE 返回 rowcount=0，统一改为回查 SELECT 判定存在性
+  - 中英俄 i18n 同步新增：`actions.edit_approve` / `actions.save_only` / `actions.save_and_approve` / `modal.edit_pending` / `messages.no_preview` / `labels.hash` / `alerts.pending_saved`
+
+### tests
+- 新增 4 个 steal_meme 路径解析回归测试（相对路径 / 绝对路径 / `convert_to_file_path` / 无图回退）
+- 新增 5 个 `update_pending` 单元测试（白名单、字段过滤、未知 id、空字段、no-op 仍返回行）
+
 ## [2.7.4] - 2026-07-04
 
 ### fixed
