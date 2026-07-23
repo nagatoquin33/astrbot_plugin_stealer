@@ -1824,6 +1824,7 @@ createApp({
             PLACEHOLDER,
             imageDataUrls,
             originalDataUrls,
+            loadOriginalImage,
             downloadImage,
 
             favoriteCount,
