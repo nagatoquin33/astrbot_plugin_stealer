@@ -519,15 +519,28 @@ class PluginAPI:
         image_hash = request.args.get("hash", "").strip()
         if not image_hash:
             return jsonify({"success": False, "error": "缺少 hash"})
+        file_path = None
         for path_str, meta in self._get_index().items():
             if isinstance(meta, dict) and meta.get("hash") == image_hash:
-                if os.path.isfile(path_str):
-                    try:
-                        data_url = self._file_base64(path_str)
-                        return jsonify({"success": True, "hash": image_hash, "url": data_url})
-                    except Exception as e:
-                        logger.warning(f"读取图片失败: {e}")
+                file_path = path_str
                 break
+
+        if not file_path:
+            db = self._db
+            if db and hasattr(db, "get_pending_by_hash"):
+                try:
+                    pending_row = db.get_pending_by_hash(image_hash)
+                except Exception:
+                    pending_row = None
+                if pending_row:
+                    file_path = pending_row.get("path")
+
+        if file_path and os.path.isfile(file_path):
+            try:
+                data_url = self._file_base64(file_path)
+                return jsonify({"success": True, "hash": image_hash, "url": data_url})
+            except Exception as e:
+                logger.warning(f"读取图片失败: {e}")
         return jsonify({"success": False, "error": "图片未找到"})
 
     async def _get_or_create_thumbnail(
@@ -758,7 +771,7 @@ class PluginAPI:
                     "success": True,
                     "images": images,
                     "total": total,
-                    "categories": cat_counts,
+                    "categories": self._build_categories_list(cat_counts),
                 }
             )
         except Exception as e:
