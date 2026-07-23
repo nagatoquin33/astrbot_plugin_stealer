@@ -1,6 +1,12 @@
 export const TEMPLATE = `
 <header class="codex-header">
     <div class="header-title">
+        <button class="mobile-menu-button" type="button" @click="sidebarOpen = true"
+            :aria-label="t('pages.dashboard.actions.open_navigation', 'Open navigation')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+        </button>
         <div class="header-icon">
             <svg style="width:28px;height:28px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
@@ -37,7 +43,8 @@ export const TEMPLATE = `
 </header>
 
 <div class="main-container">
-    <aside class="sidebar">
+    <div v-if="sidebarOpen" class="mobile-sidebar-backdrop" @click="sidebarOpen = false"></div>
+    <aside class="sidebar" :class="{ 'is-open': sidebarOpen }">
         <div class="section-switcher">
             <div class="section-tab" :class="{ active: activeSection === 'pending' }" @click="switchSection('pending')">
                 <svg class="section-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -61,19 +68,19 @@ export const TEMPLATE = `
             <div class="sidebar-title">{{ t('pages.dashboard.categories.title', 'Categories') }}</div>
             <div class="category-list">
                 <div class="category-item favorite-category" :class="{ active: selectedCategory === '__favorite__' }"
-                    @click="selectedCategory = '__favorite__'; fetchImages(1)">
+                    @click="selectLibraryCategory('__favorite__')">
                     <span class="category-icon">⭐</span>
                     <span class="category-name">{{ t('pages.dashboard.categories.favorites', 'Favorites') }}</span>
                     <span class="category-count">{{ favoriteCount }}</span>
                 </div>
                 <div class="category-item" :class="{ active: selectedCategory === '' }"
-                    @click="selectedCategory = ''; fetchImages(1)">
+                    @click="selectLibraryCategory('')">
                     <span class="category-name">{{ t('pages.dashboard.categories.all', 'All') }}</span>
                     <span class="category-count">{{ stats.total || 0 }}</span>
                 </div>
                 <div v-for="cat in categories" :key="cat.key" class="category-item"
                     :class="{ active: selectedCategory === cat.key }"
-                    @click="selectedCategory = cat.key; fetchImages(1)">
+                    @click="selectLibraryCategory(cat.key)">
                     <span class="category-name">{{ cat.name }}</span>
                     <span class="category-count">{{ cat.count }}</span>
                 </div>
@@ -100,13 +107,13 @@ export const TEMPLATE = `
             <div class="sidebar-title">{{ t('pages.dashboard.pending.category_filter', 'Category Filter') }}</div>
             <div class="category-list">
                 <div class="category-item" :class="{ active: pendingCategory === '' }"
-                    @click="pendingCategory = ''; fetchPendingImages(1)">
+                    @click="selectPendingCategory('')">
                     <span class="category-name">{{ t('pages.dashboard.categories.all', 'All') }}</span>
-                    <span class="category-count">{{ pendingTotal }}</span>
+                    <span class="category-count">{{ pendingCategoryTotal }}</span>
                 </div>
                 <div v-for="cat in pendingCategories" :key="cat.key" class="category-item"
                     :class="{ active: pendingCategory === cat.key }"
-                    @click="pendingCategory = cat.key; fetchPendingImages(1)">
+                    @click="selectPendingCategory(cat.key)">
                     <span class="category-name">{{ cat.name }}</span>
                     <span class="category-count">{{ cat.count }}</span>
                 </div>
@@ -229,14 +236,15 @@ export const TEMPLATE = `
                         </svg>
                     </button>
 
-                    <div class="item-image" :data-hash="img.hash">
+                    <div class="item-image" :data-hash="img.hash" @mouseenter="loadOriginalImage(img.hash)">
                         <div v-if="!imageDataUrls[img.hash]" class="image-placeholder"
                             :style="{ backgroundColor: hashToColor(img.hash) }"></div>
-                        <img v-else :src="imageDataUrls[img.hash]" loading="lazy" :alt="img.desc" class="fade-in">
+                        <img v-else :src="originalDataUrls[img.hash] || imageDataUrls[img.hash]" loading="lazy"
+                            :alt="img.desc" class="fade-in">
                     </div>
 
                     <div class="item-info">
-                        <div class="item-category">{{ img.category }}</div>
+                        <div class="item-category">{{ getCategoryName(img.category) }}</div>
                         <div class="item-meta-row">
                             <span class="scope-pill" :class="img.scope_mode === 'local' ? 'local' : 'public'">{{
                                 getScopeLabel(img.scope_mode) }}</span>
@@ -340,15 +348,16 @@ export const TEMPLATE = `
                         </svg>
                     </div>
 
-                    <div class="pending-image">
+                    <div class="pending-image" @mouseenter="loadOriginalImage(item.hash)">
                         <div v-if="!imageDataUrls[item.hash]" class="image-placeholder"
                             :style="{ backgroundColor: hashToColor(item.hash) }"></div>
-                        <img v-else :src="imageDataUrls[item.hash]" loading="lazy" :alt="item.desc" class="fade-in">
+                        <img v-else :src="originalDataUrls[item.hash] || imageDataUrls[item.hash]" loading="lazy"
+                            :alt="item.desc" class="fade-in">
                     </div>
 
                     <div class="pending-info">
                         <div class="pending-meta">
-                            <span class="pending-category-badge">{{ item.category }}</span>
+                            <span class="pending-category-badge">{{ getCategoryName(item.category) }}</span>
                             <span v-if="item.scope_mode === 'local'" class="scope-pill local">{{ t('pages.dashboard.scope.local_short', 'Local') }}</span>
                             <span class="pending-source">{{ item.source === 'auto' ? '🤖' : '👤' }}</span>
                         </div>
@@ -357,41 +366,41 @@ export const TEMPLATE = `
                             <span v-for="tag in item.tags" :key="tag" class="tag pending-tag">{{ tag }}</span>
                         </div>
                         <div class="pending-actions" v-if="!pendingBatchMode">
-                            <button @click.stop="approvePending(item.id)" class="pending-btn approve-btn"
-                                :title="t('pages.dashboard.actions.approve', 'Approve')">
-                                <svg style="width:14px;height:14px" fill="none" stroke="currentColor"
-                                    viewBox="0 0 24 24">
+                            <button type="button" @click.stop="approvePending(item.id)"
+                                class="pending-btn approve-btn"
+                                :aria-label="t('pages.dashboard.actions.approve', 'Approve')"
+                                :data-tooltip="t('pages.dashboard.actions.approve', 'Approve')">
+                                <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"
                                         d="M5 13l4 4L19 7" />
                                 </svg>
-                                {{ t('pages.dashboard.actions.approve', 'Approve') }}
                             </button>
-                            <button @click.stop="openPendingEdit(item)" class="pending-btn edit-btn"
-                                :title="t('pages.dashboard.actions.edit_approve', 'Edit & approve')">
-                                <svg style="width:14px;height:14px" fill="none" stroke="currentColor"
-                                    viewBox="0 0 24 24">
+                            <button type="button" @click.stop="openPendingEdit(item)"
+                                class="pending-btn edit-btn"
+                                :aria-label="t('pages.dashboard.actions.edit_approve', 'Edit & approve')"
+                                :data-tooltip="t('pages.dashboard.actions.edit_approve', 'Edit & approve')">
+                                <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                         d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
                                 </svg>
-                                {{ t('pages.dashboard.actions.edit', 'Edit') }}
                             </button>
-                            <button @click.stop="rejectPending(item.id)" class="pending-btn reject-btn"
-                                :title="t('pages.dashboard.actions.delete', 'Delete')">
-                                <svg style="width:14px;height:14px" fill="none" stroke="currentColor"
-                                    viewBox="0 0 24 24">
+                            <button type="button" @click.stop="rejectPending(item.id)"
+                                class="pending-btn reject-btn"
+                                :aria-label="t('pages.dashboard.actions.delete', 'Delete')"
+                                :data-tooltip="t('pages.dashboard.actions.delete', 'Delete')">
+                                <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                         d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                                 </svg>
-                                {{ t('pages.dashboard.actions.delete', 'Delete') }}
                             </button>
-                            <button @click.stop="rejectPending(item.id, true)" class="pending-btn reject-bl-btn"
-                                :title="t('pages.dashboard.actions.blacklist', 'Blacklist')">
-                                <svg style="width:14px;height:14px" fill="none" stroke="currentColor"
-                                    viewBox="0 0 24 24">
+                            <button type="button" @click.stop="rejectPending(item.id, true)"
+                                class="pending-btn reject-bl-btn"
+                                :aria-label="t('pages.dashboard.actions.blacklist', 'Blacklist')"
+                                :data-tooltip="t('pages.dashboard.actions.blacklist', 'Blacklist')">
+                                <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                         d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
                                 </svg>
-                                {{ t('pages.dashboard.actions.blacklist', 'Blacklist') }}
                             </button>
                         </div>
                     </div>
@@ -460,7 +469,7 @@ export const TEMPLATE = `
                 <div class="item-stats">
                     <div class="stat-row">
                         <span class="stat-name">{{ t('pages.dashboard.fields.category', 'Category') }}</span>
-                        <span class="stat-value">{{ previewItem?.category }}</span>
+                        <span class="stat-value">{{ getCategoryName(previewItem?.category) }}</span>
                     </div>
                     <div class="stat-row">
                         <span class="stat-name">{{ t('pages.dashboard.fields.scope', 'Scope') }}</span>

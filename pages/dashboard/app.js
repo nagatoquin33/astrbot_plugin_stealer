@@ -38,6 +38,7 @@ function hashToColor(hash) {
 createApp({
     setup() {
         const activeSection = ref('library');
+        const sidebarOpen = ref(false);
         const images = ref([]);
         const categories = ref([]);
         const stats = reactive({ total: 0, categories: 0, today: 0 });
@@ -51,6 +52,7 @@ createApp({
 
         const pendingImages = ref([]);
         const pendingTotal = ref(0);
+        const pendingCategoryTotal = ref(0);
         const pendingCategories = ref([]);
         const pendingStats = reactive({ pending: 0, capacity: 200, paused: false });
         const pendingLoading = ref(false);
@@ -293,6 +295,13 @@ createApp({
             return [];
         };
 
+        const getCategoryName = (key) => {
+            const categoryKey = String(key || '').trim();
+            const category = [...categories.value, ...pendingCategories.value]
+                .find((item) => item.key === categoryKey);
+            return category?.name || categoryKey;
+        };
+
         const emotionsOpen = ref(false);
         const newEmotion = reactive({ key: '', name: '', desc: '' });
         const addingEmotion = ref(false);
@@ -475,6 +484,9 @@ createApp({
                 for (const hash of Object.keys(imageDataUrls)) {
                     if (!currentHashes.has(hash)) delete imageDataUrls[hash];
                 }
+                for (const hash of Object.keys(originalDataUrls)) {
+                    if (!currentHashes.has(hash)) delete originalDataUrls[hash];
+                }
                 nextTick(() => observeImages());
                 if (selectedImages.value.size > 0) {
                     const visibleHashes = new Set(nextImages.map((img) => img.hash));
@@ -523,9 +535,16 @@ createApp({
                 });
                 const res = await apiFetch('api/pending?' + params.toString());
                 const data = await res.json();
-                if (!data.success) { pendingImages.value = []; pendingTotal.value = 0; return; }
+                if (!data.success) {
+                    pendingImages.value = [];
+                    pendingTotal.value = 0;
+                    pendingCategoryTotal.value = 0;
+                    return;
+                }
                 const nextImages = data.images || [];
                 const nextTotal = Number(data.total || 0);
+                const nextCategories = normalizeCategories(data.categories);
+                const nextCategoryTotal = Number(data.category_total);
                 const lastPage = Math.max(1, Math.ceil(nextTotal / pendingPageSize.value));
                 if (page > lastPage && nextTotal > 0) {
                     pendingFetchLock = false;
@@ -534,7 +553,10 @@ createApp({
                 pendingCurrentPage.value = page;
                 pendingImages.value = nextImages;
                 pendingTotal.value = nextTotal;
-                pendingCategories.value = normalizeCategories(data.categories);
+                pendingCategories.value = nextCategories;
+                pendingCategoryTotal.value = Number.isFinite(nextCategoryTotal)
+                    ? nextCategoryTotal
+                    : nextCategories.reduce((sum, category) => sum + category.count, 0);
                 nextImages.forEach(img => { if (img.hash) loadImageData(img.hash); });
             } catch (e) { console.error(e); }
             finally { pendingLoading.value = false; pendingFetchLock = false; }
@@ -542,12 +564,25 @@ createApp({
 
         const switchSection = (section) => {
             activeSection.value = section;
+            sidebarOpen.value = false;
             if (section === 'pending') {
                 fetchPendingStats();
                 fetchPendingImages(1);
             } else {
                 fetchImages(1);
             }
+        };
+
+        const selectLibraryCategory = (category) => {
+            selectedCategory.value = category;
+            sidebarOpen.value = false;
+            fetchImages(1);
+        };
+
+        const selectPendingCategory = (category) => {
+            pendingCategory.value = category;
+            sidebarOpen.value = false;
+            fetchPendingImages(1);
         };
 
         const pendingDebouncedSearch = () => {
@@ -1613,7 +1648,12 @@ createApp({
         let resizeTimer = null;
         const handleResize = () => {
             clearTimeout(resizeTimer);
-            resizeTimer = setTimeout(() => { updatePageSize(); fetchImages(1); }, 300);
+            resizeTimer = setTimeout(() => {
+                updatePageSize();
+                if (activeSection.value === 'library') {
+                    fetchImages(1);
+                }
+            }, 300);
         };
         onMounted(() => {
             updateDocumentMeta();
@@ -1648,6 +1688,7 @@ createApp({
 
         return {
             activeSection,
+            sidebarOpen,
             switchSection,
             images,
             categories,
@@ -1661,6 +1702,7 @@ createApp({
             total,
             pendingImages,
             pendingTotal,
+            pendingCategoryTotal,
             pendingCategories,
             pendingStats,
             pendingLoading,
@@ -1671,6 +1713,9 @@ createApp({
             pendingBatchMode,
             pendingSelectedImages,
             fetchPendingImages,
+            selectLibraryCategory,
+            selectPendingCategory,
+            getCategoryName,
             fetchPendingStats,
             pendingDebouncedSearch,
             approvePending,
@@ -1791,6 +1836,7 @@ createApp({
             PLACEHOLDER,
             imageDataUrls,
             originalDataUrls,
+            loadOriginalImage,
             downloadImage,
 
             favoriteCount,

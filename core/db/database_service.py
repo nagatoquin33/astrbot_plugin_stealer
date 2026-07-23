@@ -1222,10 +1222,19 @@ class DatabaseService:
                 f"SELECT COUNT(*) as cnt FROM emoji_pending p {where_sql}", params
             ).fetchone()["cnt"]
 
+            category_where_clauses = [
+                clause for clause in where_clauses if clause != "p.category = ?"
+            ]
+            category_params = params[1:] if category else params
+            category_where_sql = (
+                "WHERE " + " AND ".join(category_where_clauses)
+                if category_where_clauses
+                else ""
+            )
             cat_rows = conn.execute(
-                f"SELECT p.category, COUNT(*) as cnt FROM emoji_pending p {where_sql} "
+                f"SELECT p.category, COUNT(*) as cnt FROM emoji_pending p {category_where_sql} "
                 "GROUP BY p.category",
-                params,
+                category_params,
             ).fetchall()
             category_counts = {r["category"]: r["cnt"] for r in cat_rows}
 
