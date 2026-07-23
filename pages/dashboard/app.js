@@ -38,6 +38,7 @@ function hashToColor(hash) {
 createApp({
     setup() {
         const activeSection = ref('library');
+        const sidebarOpen = ref(false);
         const images = ref([]);
         const categories = ref([]);
         const stats = reactive({ total: 0, categories: 0, today: 0 });
@@ -293,6 +294,13 @@ createApp({
             return [];
         };
 
+        const getCategoryName = (key) => {
+            const categoryKey = String(key || '').trim();
+            const category = [...categories.value, ...pendingCategories.value]
+                .find((item) => item.key === categoryKey);
+            return category?.name || categoryKey;
+        };
+
         const emotionsOpen = ref(false);
         const newEmotion = reactive({ key: '', name: '', desc: '' });
         const addingEmotion = ref(false);
@@ -475,6 +483,9 @@ createApp({
                 for (const hash of Object.keys(imageDataUrls)) {
                     if (!currentHashes.has(hash)) delete imageDataUrls[hash];
                 }
+                for (const hash of Object.keys(originalDataUrls)) {
+                    if (!currentHashes.has(hash)) delete originalDataUrls[hash];
+                }
                 nextTick(() => observeImages());
                 if (selectedImages.value.size > 0) {
                     const visibleHashes = new Set(nextImages.map((img) => img.hash));
@@ -542,12 +553,25 @@ createApp({
 
         const switchSection = (section) => {
             activeSection.value = section;
+            sidebarOpen.value = false;
             if (section === 'pending') {
                 fetchPendingStats();
                 fetchPendingImages(1);
             } else {
                 fetchImages(1);
             }
+        };
+
+        const selectLibraryCategory = (category) => {
+            selectedCategory.value = category;
+            sidebarOpen.value = false;
+            fetchImages(1);
+        };
+
+        const selectPendingCategory = (category) => {
+            pendingCategory.value = category;
+            sidebarOpen.value = false;
+            fetchPendingImages(1);
         };
 
         const pendingDebouncedSearch = () => {
@@ -1648,6 +1672,7 @@ createApp({
 
         return {
             activeSection,
+            sidebarOpen,
             switchSection,
             images,
             categories,
@@ -1671,6 +1696,9 @@ createApp({
             pendingBatchMode,
             pendingSelectedImages,
             fetchPendingImages,
+            selectLibraryCategory,
+            selectPendingCategory,
+            getCategoryName,
             fetchPendingStats,
             pendingDebouncedSearch,
             approvePending,
