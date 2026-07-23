@@ -5,7 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.7.5] - 2026-07-21
+## [2.7.6] - 2026-07-23
+
+### changed
+- emoji→meme 命名统一：搜索/事件模块文件重命名，代码内全部引用同步更新
+- Main 新增 `__getattr__` 代理，自动将 `self.steal_meme` 等直接属性访问路由到 `plugin_config` (Pydantic)
+- 新增 `core/maintenance/` 维护服务模块，从 `main.py` 和 `event_handler.py` 重构抽出
+- 新增 `core/util/safe_io.py` 安全文件操作工具模块
+
+### fixed
+- 修复 `sync_index` 并发竞态：删除逻辑移除避免误删其他消息刚入库的条目，删除移交 `MaintenanceService` 孤儿扫描
+- 修复 VLM 分类失败后 raw 目录孤儿文件泄漏
+- 修复 `classification_parser` Unicode 转义比较死代码
+- 修复 `meme_send_delay_random`(bool) 被当 float 用、`meme_send_delay_max` 从未被引用的语义错误
+- 修复 `plugin_api` 调用不存在的 `cache.mark_dirty()` 静默空操作
+- 修复审核通过时间戳使用 VLM 识别时间而非审核入库时间
+- 添加 `super().initialize()` / `super().terminate()` 确保 SDK 生命周期兼容
+
+### added
+- 审核池批量模式「全选 / 取消全选」按钮
+- i18n 新增 `deselect_all` (zh-CN / en-US)
+
+### tests
+- 136/136 全部通过
 
 ### fixed
 - 修复 LLM `steal_meme` 工具传入相对路径（如 `./image.png`）时返回"图片文件不存在"的问题 (#88)
