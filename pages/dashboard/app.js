@@ -1637,7 +1637,12 @@ createApp({
         let resizeTimer = null;
         const handleResize = () => {
             clearTimeout(resizeTimer);
-            resizeTimer = setTimeout(() => { updatePageSize(); fetchImages(1); }, 300);
+            resizeTimer = setTimeout(() => {
+                updatePageSize();
+                if (activeSection.value === 'library') {
+                    fetchImages(1);
+                }
+            }, 300);
         };
         onMounted(() => {
             updateDocumentMeta();
