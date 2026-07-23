@@ -24,13 +24,13 @@ class IndexRebuildCommand:
             yield event.plain_result("🔄 开始重建索引，请稍候...")
 
             # 调用插件的重建索引方法（只重建基础索引，不保存到数据库）
-            rebuilt_index = await self.plugin._rebuild_index_from_files()
+            rebuilt_index = await self.plugin.index_manager.rebuild_index_from_files()
 
             if not rebuilt_index:
                 yield event.plain_result(
                     "⚠️ 未找到可重建的图片文件。\n"
                     f"请确保 categories 目录中存在图片文件:\n"
-                    f"{self.plugin.categories_dir}"
+                    f"{self.plugin.plugin_config.categories_dir}"
                 )
                 return
 
@@ -213,7 +213,7 @@ class IndexRebuildCommand:
                 await self.plugin.event_handler._enforce_capacity(final_index)
 
             # 保存合并后的索引
-            await self.plugin._save_index(final_index)
+            await self.plugin.index_manager.save_index(final_index)
 
             # 统计信息（容量控制后重新统计，只算最终保留的文件）
             new_count = len(final_index)

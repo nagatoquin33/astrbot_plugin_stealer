@@ -8,7 +8,7 @@ from astrbot.api import logger
 from .text_similarity import calculate_hybrid_similarity
 
 
-class EmojiSelectionStrategy:
+class MemeSelectionStrategy:
     """管理表情包选择的策略状态（最近使用记录等）。"""
 
     MAX_RECENT_USAGE = 10  # 最近使用记录最大数量

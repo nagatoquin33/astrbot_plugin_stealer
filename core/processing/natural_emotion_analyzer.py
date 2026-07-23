@@ -24,7 +24,8 @@ class NaturalEmotionAnalyzer:
 
     def __init__(self, plugin_instance: Any):
         self.plugin = plugin_instance
-        self.categories: list[str] = plugin_instance.categories
+        # v2.7.5+：配置统一通过 plugin_config 读取
+        self.categories: list[str] = plugin_instance.plugin_config.get_categories()
 
         # 缓存机制
         self.analysis_cache: dict[str, str] = {}
@@ -325,7 +326,7 @@ class NaturalEmotionAnalyzer:
     async def _get_text_provider(self, event: AstrMessageEvent) -> str | None:
         """获取文本模型提供商ID"""
         # 1. 优先使用插件配置的情绪分析专用模型
-        configured_provider = self.plugin.emotion_analysis_provider_id
+        configured_provider = self.plugin.plugin_config.emotion_analysis_provider_id
         if configured_provider:
             logger.debug(f"[情绪分析] 尝试使用配置的提供商: {configured_provider}")
             return configured_provider
@@ -484,7 +485,7 @@ class SmartEmotionMatcher:
             return None
 
         # 使用自然语言分析（主要方案）
-        if use_natural_analysis and self.plugin.enable_natural_emotion_analysis:
+        if use_natural_analysis and self.plugin.plugin_config.enable_natural_emotion_analysis:
             emotion = await self.natural_analyzer.analyze_emotion(
                 event,
                 text,

@@ -678,9 +678,9 @@ class EmbeddingService:
         # 加载索引元数据
         idx = {}
         try:
-            cs = getattr(self.plugin, "cache_service", None)
-            if cs:
-                idx = cs.get_index_cache_readonly() or {}
+            db = getattr(self.plugin, "db_service", None)
+            if db and db.count_total() > 0:
+                idx = db.get_index_cache_readonly()
         except Exception:
             pass
 

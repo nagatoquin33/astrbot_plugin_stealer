@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from typing import Any, ClassVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent
@@ -66,14 +66,18 @@ class PluginConfig(BaseModel):
     categories: list[str] = []
     category_info: dict[str, dict[str, str]] = {}
 
+    # === 待审核池 ===
+    # 自动偷取时是否进入待审核池等待人工通过。
+    # True：进入 pending，需在 WebUI 审核区通过后才入库（默认，安全）。
+    # False：跳过审核，自动入库（issue #89，方便"看到就收"的用户）。
+    audit_required: bool = True
+
     # === 内部状态 (不作为 Pydantic 字段) ===
     # 使用 PrivateAttr 或在 __init__ 中设置且不包含在 __annotations__ 中
     # 但 Pydantic v1/v2 处理方式不同。这里使用 __private_attributes__ 机制或直接忽略
 
-    # 忽略额外字段
-    class Config:
-        extra = "ignore"
-        arbitrary_types_allowed = True
+    # 忽略额外字段（Pydantic v2 model_config）
+    model_config = ConfigDict(extra="ignore", arbitrary_types_allowed=True)
 
     # === 常量 ===
     # 使用 ClassVar 标注，避免被 Pydantic 识别为字段
@@ -292,6 +296,17 @@ class PluginConfig(BaseModel):
         BaseModel.__setattr__(self, "category_info", merged_info)
         self.save_categories()
         self.save_category_info()
+
+    def get_categories(self) -> list[str]:
+        """返回当前分类列表；为空时回退到 DEFAULT_CATEGORIES。
+
+        各 service 读取分类时统一走这个方法，避免在多处重复
+        `self.categories or DEFAULT_CATEGORIES` 模板。
+        """
+        cats = list(self.categories or [])
+        if not cats:
+            cats = list(self.DEFAULT_CATEGORIES)
+        return cats
 
     def _migrate_category_config(self) -> None:
         if not isinstance(self._data, dict):

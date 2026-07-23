@@ -31,6 +31,10 @@ async def _send_qq_image_as_sticker(
         return False
     if not file_path or not os.path.exists(file_path):
         return False
+    # 尝试以 QQ 贴纸格式发送（平台专属优化）。
+    # 注意：_parse_onebot_json / event.bot / message_obj 为 SDK 内部 API，
+    # 若未来版本变更此处可能失败；已包裹 try/except，
+    # 失败时自动回退到调用方 send_emoji_message 的标准 event.send() 路径。
     try:
         file_source: str = file_path
         if plugin and getattr(plugin, "send_meme_as_gif", False):
@@ -48,7 +52,7 @@ async def _send_qq_image_as_sticker(
         return False
 
 
-class _EmojiTurnState:
+class _MemeTurnState:
     """封装单次会话中的表情包发送状态。"""
 
     def __init__(self) -> None:
@@ -116,7 +120,7 @@ class _EmojiTurnState:
         self._auto_send_meme_claimed = False
 
 
-class EmojiSenderEngine:
+class MemeSenderEngine:
     """负责表情包自动发送决策、情绪注入和响应处理。"""
 
     AUTO_EMOJI_COOLDOWN_SECONDS = 20  # 同一会话自动发表情的最短间隔
@@ -130,14 +134,14 @@ class EmojiSenderEngine:
 
     # --- 状态管理 ---
 
-    def emoji_turn_state(self, event: AstrMessageEvent) -> _EmojiTurnState:
+    def emoji_turn_state(self, event: AstrMessageEvent) -> _MemeTurnState:
         """获取或创建当前会话的 EmojiTurnState。"""
         key = self.get_auto_emoji_session_key(event)
         if not hasattr(event, "_emoji_turn_state"):
             event._emoji_turn_state = {}  # type: ignore[attr-defined]
         turn_states = event._emoji_turn_state  # type: ignore[attr-defined]
         if key not in turn_states:
-            turn_states[key] = _EmojiTurnState()
+            turn_states[key] = _MemeTurnState()
             turn_states[key]._event = event
         return turn_states[key]
 
@@ -177,7 +181,7 @@ class EmojiSenderEngine:
         task = self._pending_auto_emoji_tasks.pop(key, None)
         if task and not task.done():
             task.cancel()
-            logger.debug(f"[EmojiSenderEngine] 取消待发送自动表情: session={key}, reason={reason}")
+            logger.debug(f"[MemeSenderEngine] 取消待发送自动表情: session={key}, reason={reason}")
             return True
         return False
 
@@ -328,25 +332,14 @@ class EmojiSenderEngine:
     async def try_send_emoji(
         self, event: AstrMessageEvent, emotions: list[str], cleaned_text: str
     ) -> bool:
-        """尝试发送表情包。"""
+        """尝试发送表情包（委托给 MemeSelector）。"""
         try:
-            selector = getattr(self.plugin, "emoji_selector", None)
+            selector = getattr(self.plugin, "meme_selector", None)
             if selector is None:
                 return False
-            if hasattr(selector, "try_send_emoji"):
-                return await selector.try_send_emoji(event, emotions, cleaned_text)
-
-
-            # 提取情绪
-            emotion = emotions[0] if emotions else "default"
-            emoji_path = await selector.select_emoji(emotion, cleaned_text, event)
-            if not emoji_path:
-                return False
-
-            # 发送
-            return await self.send_explicit_emojis(event, [emoji_path], cleaned_text)
+            return await selector.try_send_emoji(event, emotions, cleaned_text)
         except Exception as e:
-            logger.debug(f"[EmojiSenderEngine] 尝试发送表情包失败: {e}")
+            logger.debug(f"[MemeSenderEngine] 尝试发送表情包失败: {e}")
             return False
 
     async def send_explicit_emojis(
@@ -363,7 +356,7 @@ class EmojiSenderEngine:
                     await event.send(Image(file=path))
                 sent = True
             except Exception as e:
-                logger.warning(f"[EmojiSenderEngine] 发送表情包失败: {e}")
+                logger.warning(f"[MemeSenderEngine] 发送表情包失败: {e}")
         return sent
 
     def get_meme_send_delay(self, text: str = "", task_start: float = 0.0) -> float:
@@ -376,17 +369,20 @@ class EmojiSenderEngine:
                 return max(0.0, desired - elapsed)
             return desired
         delay = getattr(self.plugin, "meme_send_delay", 0.5)
-        delay_random = getattr(self.plugin, "meme_send_delay_random", 0.0)
         try:
             base = float(delay)
         except (TypeError, ValueError):
             base = 0.5
-        try:
-            rand = float(delay_random)
-        except (TypeError, ValueError):
-            rand = 0.0
-        if rand > 0:
-            return base + random.random() * rand
+        # meme_send_delay_random (bool) 开启时在 [base, base+max] 之间随机
+        use_random = bool(getattr(self.plugin, "meme_send_delay_random", False))
+        if use_random:
+            delay_max = getattr(self.plugin, "meme_send_delay_max", 8.0)
+            try:
+                rand_max = float(delay_max)
+            except (TypeError, ValueError):
+                rand_max = 8.0
+            if rand_max > 0:
+                return base + random.random() * rand_max
         return base
 
     async def async_analyze_and_send_emoji(
@@ -424,7 +420,7 @@ class EmojiSenderEngine:
 
             result = event.get_result()
             if result and not result.get_plain_text().strip():
-                logger.debug("[EmojiSenderEngine] 主回复已被置空，跳过自动表情")
+                logger.debug("[MemeSenderEngine] 主回复已被置空，跳过自动表情")
                 return
 
             delay = self.get_meme_send_delay(text, task_start)
@@ -436,10 +432,10 @@ class EmojiSenderEngine:
                 await self.mark_auto_emoji_sent(event)
                 self.emoji_turn_state(event).mark_active_sent()
         except asyncio.CancelledError:
-            logger.debug("[EmojiSenderEngine] 自动表情任务已取消")
+            logger.debug("[MemeSenderEngine] 自动表情任务已取消")
             raise
         except Exception as e:
-            logger.debug(f"[EmojiSenderEngine] 异步分析发送表情包失败: {e}")
+            logger.debug(f"[MemeSenderEngine] 异步分析发送表情包失败: {e}")
 
     # --- 结果处理 ---
 
@@ -461,4 +457,4 @@ class EmojiSenderEngine:
                     comp.text = cleaned_text
                     break
         except Exception as e:
-            logger.debug(f"[EmojiSenderEngine] 更新结果文本失败: {e}")
+            logger.debug(f"[MemeSenderEngine] 更新结果文本失败: {e}")

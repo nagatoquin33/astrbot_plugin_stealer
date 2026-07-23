@@ -2884,6 +2884,17 @@ input, select, textarea {
     gap: 6px;
 }
 
+.select-all-btn {
+    border-color: var(--text-muted) !important;
+    color: var(--text-muted) !important;
+    font-size: 0.8rem;
+}
+
+.select-all-btn:hover {
+    border-color: var(--text-primary) !important;
+    color: var(--text-primary) !important;
+}
+
 .approve-batch-btn {
     border-color: var(--success) !important;
     color: var(--success) !important;

@@ -303,6 +303,9 @@ export const TEMPLATE = `
                     </div>
 
                     <div v-if="pendingBatchMode" class="toolbar-group pending-batch-actions">
+                        <button @click="toggleSelectAllPending" class="codex-btn select-all-btn">
+                            {{ allPendingSelected ? '☐ ' + t('pages.dashboard.actions.deselect_all', 'Deselect All') : '☑ ' + t('pages.dashboard.actions.select_all', 'Select All') }}
+                        </button>
                         <button @click="approvePendingBatch" class="codex-btn approve-batch-btn">✅ {{ t('pages.dashboard.actions.approve_all', 'Approve All') }}</button>
                         <button @click="rejectPendingBatch(false)" class="codex-btn reject-batch-btn">🗑 {{ t('pages.dashboard.actions.delete_all', 'Delete All') }}</button>
                         <button @click="rejectPendingBatch(true)" class="codex-btn reject-bl-batch-btn">🚫 {{ t('pages.dashboard.actions.delete_blacklist', 'Delete + Blacklist') }}</button>

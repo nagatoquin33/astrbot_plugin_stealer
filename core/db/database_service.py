@@ -752,7 +752,11 @@ class DatabaseService:
         await self.insert_batch(emojis)
 
     async def sync_index(self, idx: dict[str, Any]) -> None:
-        """Synchronize the database to match a full index snapshot."""
+        """增量同步索引到数据库（仅插入/更新，不删除）。
+
+        删除已移交 MaintenanceService 通过孤儿扫描处理，
+        避免并发 on_message 时误删其他消息刚入库的条目。
+        """
         async with self._write_lock:
             await asyncio.to_thread(self._sync_index_sync, idx)
 
@@ -795,9 +799,6 @@ class DatabaseService:
 
                 desired_paths = set(desired_index.keys())
                 existing_paths = set(current_index.keys())
-
-                for stale_path in existing_paths - desired_paths:
-                    conn.execute("DELETE FROM emoji WHERE path = ?", (stale_path,))
 
                 for path in desired_paths - existing_paths:
                     meta = desired_index[path]

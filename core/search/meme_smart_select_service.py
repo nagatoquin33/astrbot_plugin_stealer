@@ -8,7 +8,7 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 from astrbot.core.agent.run_context import ContextWrapper
 
-from ..events.emoji_sender_engine import _send_qq_image_as_sticker
+from ..events.meme_sender_engine import _send_qq_image_as_sticker
 
 from .text_similarity import calculate_hybrid_similarity, calculate_simple_similarity, tokenize_for_bm25, _extract_words
 from .embedding_service import EmbeddingService
@@ -26,10 +26,10 @@ def _unwrap_event(event: AstrMessageEvent) -> AstrMessageEvent:
     return event
 
 
-class EmojiSmartSelectService:
+class MemeSmartSelectService:
     """负责智能选择表情包。"""
 
-    # 从 EmojiSelector 同步的常量（供内部方法直接使用，避免通过 _selector 委托）
+    # 从 MemeSelector 同步的常量（供内部方法直接使用，避免通过 _selector 委托）
     SMART_FAST_PREFILTER_MIN_CANDIDATES = 48
     SMART_FAST_PREFILTER_TOP_K = 120
     SMART_FAST_PREFILTER_FUZZY_RESERVE = 24
@@ -44,7 +44,7 @@ class EmojiSmartSelectService:
         self._embedding_service = EmbeddingService(plugin_instance) if plugin_instance else None
 
     def __getattr__(self, name: str):
-        """将缺失的属性/方法委托给 EmojiSelector。"""
+        """将缺失的属性/方法委托给 MemeSelector。"""
         if self._selector is not None:
             return getattr(self._selector, name)
         raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
@@ -432,7 +432,7 @@ class EmojiSmartSelectService:
         idx: dict | None = None,
         event: AstrMessageEvent | None = None,
     ) -> list[tuple[str, str, str, str]]:
-        """委托给 EmojiSearchEngine。"""
+        """委托给 MemeSearchEngine。"""
         return await self._search_engine._search_images_fallback(query, limit, idx, event)
 
     def _score_entry(
@@ -445,7 +445,7 @@ class EmojiSmartSelectService:
         max_str_len: int,
         tag_words: frozenset[str] | None = None,
     ) -> int:
-        """委托给 EmojiSearchEngine。"""
+        """委托给 MemeSearchEngine。"""
         return self._search_engine._score_entry(
             query_lower, query_tokens, category, desc, tags, max_str_len, tag_words
         )
@@ -494,11 +494,11 @@ class EmojiSmartSelectService:
         return results
 
     def _find_best_category_match(self, query: str, threshold: float = 0.4) -> str | None:
-        """委托给 EmojiSearchEngine。"""
+        """委托给 MemeSearchEngine。"""
         return self._search_engine._find_best_category_match(query, threshold)
 
     def find_similar_categories(self, query: str, top_n: int = 3) -> list[str]:
-        """委托给 EmojiSearchEngine。"""
+        """委托给 MemeSearchEngine。"""
         return self._search_engine.find_similar_categories(query, top_n)
 
     async def _encode_emoji(self, emoji_path: str) -> str | None:
@@ -733,7 +733,7 @@ class EmojiSmartSelectService:
 
         # 遍历情绪列表，第一个能选到表情包的就发送
         for emotion in emotions:
-            emoji_path = await self.plugin.emoji_selector.select_emoji(emotion, cleaned_text, event=event)
+            emoji_path = await self.plugin.meme_selector.select_emoji(emotion, cleaned_text, event=event)
             if emoji_path:
                 sent = await self.send_emoji_with_text(event, emoji_path, cleaned_text)
                 if not sent:

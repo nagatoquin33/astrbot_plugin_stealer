@@ -14,7 +14,7 @@ from .text_similarity import (
 )
 
 
-class EmojiSearchEngine:
+class MemeSearchEngine:
     """负责 BM25 索引构建、搜索签名和条目打分。"""
 
     SIMILARITY_THRESHOLD = 0.45

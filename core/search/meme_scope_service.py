@@ -6,7 +6,7 @@ from typing import Any
 from astrbot.api.event import AstrMessageEvent
 
 
-class EmojiScopeService:
+class MemeScopeService:
     """负责检查表情包是否对当前事件可用。"""
 
     def __init__(self, plugin_instance: Any = None) -> None:
@@ -68,27 +68,8 @@ class EmojiScopeService:
                 return False
             return self._is_entry_allowed_for_event(data, event)
 
-        # 兼容旧版 CacheService
-        cache_service = getattr(self.plugin, "cache_service", None)
-        if not cache_service:
-            return False
-
-        try:
-            idx = cache_service.get_index_cache_readonly() or {}
-            data = idx.get(path)
-            if data is None:
-                target_path = self._canon_path(path)
-                for stored_path, stored_meta in idx.items():
-                    if self._canon_path(stored_path) == target_path:
-                        data = stored_meta
-                        break
-
-            if data is None:
-                return False
-
-            return self._is_entry_allowed_for_event(data, event)
-        except Exception:
-            return False
+        # DB 不可用时直接拒绝（不再回退到 cache）
+        return False
 
     def _canon_path(self, path: str) -> str:
         """规范化路径用于比较去重（仅大小写规范化，不转换斜杠）。"""

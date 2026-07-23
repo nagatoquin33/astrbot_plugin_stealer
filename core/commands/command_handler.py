@@ -18,7 +18,7 @@ class CommandHandler:
         self._cleaned = False  # 清理标志位
 
     def _apply_config_updates(self, updates: dict) -> None:
-        self.plugin._update_config_from_dict(updates)
+        self.plugin.update_config(updates)
 
     async def meme_on(self, event: AstrMessageEvent):
         """开启偷表情包功能。"""
@@ -107,7 +107,7 @@ class CommandHandler:
     async def toggle_natural_analysis(self, event: AstrMessageEvent, action: str = ""):
         """启用/禁用自然语言情绪分析。"""
         if action not in ["on", "off"]:
-            current_status = "启用" if self.plugin.enable_natural_emotion_analysis else "禁用"
+            current_status = "启用" if self.plugin.plugin_config.enable_natural_emotion_analysis else "禁用"
             yield event.plain_result(
                 f"当前自然语言分析状态: {current_status}\n用法: /meme natural_analysis <on|off>"
             )
@@ -128,11 +128,11 @@ class CommandHandler:
         """显示情绪分析统计信息。"""
         try:
             # 显示当前模式
-            mode = "智能模式" if self.plugin.enable_natural_emotion_analysis else "被动模式"
+            mode = "智能模式" if self.plugin.plugin_config.enable_natural_emotion_analysis else "被动模式"
 
             status_text = f"🧠 情绪分析模式: {mode}\n\n"
 
-            if self.plugin.enable_natural_emotion_analysis:
+            if self.plugin.plugin_config.enable_natural_emotion_analysis:
                 # 智能模式：显示轻量模型分析统计
                 stats = self.plugin.smart_emotion_matcher.get_analyzer_stats()
 
@@ -159,9 +159,9 @@ class CommandHandler:
                 status_text += "- 依赖LLM遵循格式要求\n"
 
             status_text += "\n⚙️ 配置状态:\n"
-            status_text += f"自动发送: {'启用' if self.plugin.auto_send_meme else '禁用'}\n"
+            status_text += f"自动发送: {'启用' if self.plugin.plugin_config.auto_send_meme else '禁用'}\n"
             status_text += (
-                f"分析模型: {self.plugin.emotion_analysis_provider_id or '使用当前会话模型'}\n"
+                f"分析模型: {self.plugin.plugin_config.emotion_analysis_provider_id or '使用当前会话模型'}\n"
             )
 
             yield event.plain_result(status_text)
@@ -178,28 +178,28 @@ class CommandHandler:
 
     async def status(self, event: AstrMessageEvent):
         """显示插件状态和详细的表情包统计信息。"""
-        stealing_status = "开启" if self.plugin.steal_meme else "关闭"
-        auto_send_meme_status = "开启" if self.plugin.auto_send_meme else "关闭"
+        stealing_status = "开启" if self.plugin.plugin_config.steal_meme else "关闭"
+        auto_send_meme_status = "开启" if self.plugin.plugin_config.auto_send_meme else "关闭"
 
-        image_index = await self.plugin._load_index()
+        image_index = await self.plugin.index_manager.load_index()
         total_count = len(image_index)
 
         # 添加视觉模型信息
-        vision_model = self.plugin.vision_provider_id or "未设置（将使用当前会话默认模型）"
+        vision_model = self.plugin._load_vision_provider_id() or "未设置（将使用当前会话默认模型）"
 
         # 基础状态信息
-        steal_mode = self.plugin.steal_mode
+        steal_mode = self.plugin.plugin_config.steal_mode
         if steal_mode == "probability":
-            mode_desc = f"概率模式 (概率={self.plugin.steal_chance})"
+            mode_desc = f"概率模式 (概率={self.plugin.plugin_config.steal_chance})"
         else:
-            mode_desc = f"冷却模式 (冷却={self.plugin.image_processing_cooldown}秒)"
+            mode_desc = f"冷却模式 (冷却={self.plugin.plugin_config.image_processing_cooldown}秒)"
 
         status_text = "🔧 插件状态:\n"
         status_text += f"偷取: {stealing_status}\n"
         status_text += f"偷图模式: {mode_desc}\n"
         status_text += f"自动发送: {auto_send_meme_status}\n"
-        status_text += f"发送概率: {self.plugin.meme_chance}\n"
-        status_text += f"审核: {self.plugin.content_filtration}\n"
+        status_text += f"发送概率: {self.plugin.plugin_config.meme_chance}\n"
+        status_text += f"审核: {self.plugin.plugin_config.content_filtration}\n"
         status_text += f"视觉模型: {vision_model}\n\n"
 
         # 后台任务状态
@@ -220,7 +220,7 @@ class CommandHandler:
 
             # 构建统计信息
             status_text += "📊 表情包统计:\n"
-            status_text += f"总数量: {total_count}/{self.plugin.max_reg_num} ({total_count / self.plugin.max_reg_num * 100:.1f}%)\n\n"
+            status_text += f"总数量: {total_count}/{self.plugin.plugin_config.max_reg_num} ({total_count / self.plugin.plugin_config.max_reg_num * 100:.1f}%)\n\n"
 
             # 分类统计 - 只显示前5个最多的分类
             status_text += "📂 分类统计 (前5):\n"
@@ -267,10 +267,10 @@ class CommandHandler:
         """手动执行容量控制，删除最旧的表情包以控制总数量。"""
         try:
             # 加载图片索引
-            image_index = await self.plugin._load_index()
+            image_index = await self.plugin.index_manager.load_index()
 
             current_count = len(image_index)
-            max_count = self.plugin.max_reg_num
+            max_count = self.plugin.plugin_config.max_reg_num
 
             if current_count <= max_count:
                 yield event.plain_result(
@@ -280,7 +280,7 @@ class CommandHandler:
 
             # 执行容量控制
             await self.plugin.event_handler._enforce_capacity(image_index)
-            await self.plugin._save_index(image_index)
+            await self.plugin.index_manager.save_index(image_index)
 
             # 重新统计
             new_count = len(image_index)

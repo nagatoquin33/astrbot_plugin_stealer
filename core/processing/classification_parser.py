@@ -37,7 +37,7 @@ class ClassificationParser:
         if (
             approved is False
             or str(approved).strip().lower() in {"false", "0", "no", "rejected"}
-            or "\u5ba1\u6838\u4e0d\u901a\u8fc7" in reason.encode("unicode_escape").decode("ascii")
+            or "\u5ba1\u6838\u4e0d\u901a\u8fc7" in reason
         ):
             logger.warning(f"Image moderation rejected: {file_path}")
             return self.CATEGORY_FILTERED, [], "", self.CATEGORY_FILTERED, []

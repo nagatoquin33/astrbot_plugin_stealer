@@ -9,15 +9,15 @@ from typing import Any
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
-from .emoji_search_engine import EmojiSearchEngine
-from .emoji_selection_strategy import EmojiSelectionStrategy
+from .meme_search_engine import MemeSearchEngine
+from .meme_selection_strategy import MemeSelectionStrategy
 
 from .text_similarity import (
     _extract_words,
 )
 
 
-class EmojiSelector:
+class MemeSelector:
     """表情包选择器，负责查找、筛选和选择表情包。"""
 
     # 正则表达式模式常量
@@ -43,23 +43,23 @@ class EmojiSelector:
         self._selection_lock = asyncio.Lock()
 
         # 子服务（职责拆分）
-        from .emoji_smart_select_service import EmojiSmartSelectService
+        from .meme_smart_select_service import MemeSmartSelectService
 
-        self._search_engine = EmojiSearchEngine(plugin_instance, self)
-        self._selection_strategy = EmojiSelectionStrategy(plugin_instance, self)
-        self._smart_select_service = EmojiSmartSelectService(plugin_instance)
+        self._search_engine = MemeSearchEngine(plugin_instance, self)
+        self._selection_strategy = MemeSelectionStrategy(plugin_instance, self)
+        self._smart_select_service = MemeSmartSelectService(plugin_instance)
         self._smart_select_service._search_engine = self._search_engine
         self._smart_select_service._selector = self
         self._recent_usage = self._selection_strategy._recent_usage
 
     def __getattr__(self, name: str):
-        """向后兼容：将 BM25 属性委托给 EmojiSearchEngine。"""
+        """向后兼容：将 BM25 属性委托给 MemeSearchEngine。"""
         if name in ("_bm25_dirty", "_bm25_doc_paths", "_bm25_signature", "_bm25_documents"):
             return getattr(self._search_engine, name)
         raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
     def __setattr__(self, name: str, value) -> None:
-        """向后兼容：将 BM25 属性设置委托给 EmojiSearchEngine。"""
+        """向后兼容：将 BM25 属性设置委托给 MemeSearchEngine。"""
         if name in ("_bm25_dirty", "_bm25_doc_paths", "_bm25_signature", "_bm25_documents"):
             if hasattr(self, "_search_engine"):
                 setattr(self._search_engine, name, value)
@@ -69,35 +69,28 @@ class EmojiSelector:
     def _get_index(self) -> dict[str, Any]:
         db_service = getattr(self.plugin, "db_service", None)
         if db_service:
-            idx = db_service.get_index_cache_readonly()
-            if idx:
-                return idx
-        cache_service = getattr(self.plugin, "cache_service", None)
-        if cache_service:
-            idx = cache_service.get_index_cache_readonly()
-            if idx:
-                return idx
+            return db_service.get_index_cache_readonly()
         return {}
 
     @staticmethod
     def _search_signature_from_index(idx: dict[str, Any]) -> str:
-        """委托给 EmojiSearchEngine。"""
-        return EmojiSearchEngine._search_signature_from_index(idx)
+        """委托给 MemeSearchEngine。"""
+        return MemeSearchEngine._search_signature_from_index(idx)
 
     def _compute_bm25_signature(
         self, idx: dict[str, Any], *, prefer_db_signature: bool = True
     ) -> str:
-        """委托给 EmojiSearchEngine。"""
+        """委托给 MemeSearchEngine。"""
         return self._search_engine._compute_bm25_signature(
             idx, prefer_db_signature=prefer_db_signature
         )
 
     async def _build_bm25_index(self, idx: dict | None = None) -> None:
-        """委托给 EmojiSearchEngine。"""
+        """委托给 MemeSearchEngine。"""
         await self._search_engine._build_bm25_index(idx)
 
     def _invalidate_bm25_index(self) -> None:
-        """委托给 EmojiSearchEngine。"""
+        """委托给 MemeSearchEngine。"""
         self._search_engine._invalidate_bm25_index()
 
     def _check_group_allowed(self, event: AstrMessageEvent) -> bool:
@@ -111,36 +104,36 @@ class EmojiSelector:
         """
         return self.plugin.is_send_enabled_for_event(event)
 
-    # ===== 门面委托：EmojiScopeService =====
+    # ===== 门面委托：MemeScopeService =====
 
     def _get_event_target_entry(self, event: AstrMessageEvent | None) -> str:
-        """获取事件目标条目（已迁移到 EmojiScopeService）。"""
-        from .emoji_scope_service import EmojiScopeService
+        """获取事件目标条目（已迁移到 MemeScopeService）。"""
+        from .meme_scope_service import MemeScopeService
 
-        return EmojiScopeService(self.plugin)._get_event_target_entry(event)
+        return MemeScopeService(self.plugin)._get_event_target_entry(event)
 
     def _is_entry_allowed_for_event(
         self, data: dict | None, event: AstrMessageEvent | None
     ) -> bool:
-        """检查条目是否允许（已迁移到 EmojiScopeService）。"""
-        from .emoji_scope_service import EmojiScopeService
+        """检查条目是否允许（已迁移到 MemeScopeService）。"""
+        from .meme_scope_service import MemeScopeService
 
-        return EmojiScopeService(self.plugin)._is_entry_allowed_for_event(data, event)
+        return MemeScopeService(self.plugin)._is_entry_allowed_for_event(data, event)
 
     def is_path_allowed_for_event(self, path: str, event: AstrMessageEvent | None) -> bool:
-        """检查路径是否允许（已迁移到 EmojiScopeService）。"""
-        from .emoji_scope_service import EmojiScopeService
+        """检查路径是否允许（已迁移到 MemeScopeService）。"""
+        from .meme_scope_service import MemeScopeService
 
-        return EmojiScopeService(self.plugin).is_path_allowed_for_event(path, event)
+        return MemeScopeService(self.plugin).is_path_allowed_for_event(path, event)
 
     def _canon_path(self, path: str) -> str:
-        """规范化路径（已迁移到 EmojiScopeService）。"""
-        from .emoji_scope_service import EmojiScopeService
+        """规范化路径（已迁移到 MemeScopeService）。"""
+        from .meme_scope_service import MemeScopeService
 
-        return EmojiScopeService(self.plugin)._canon_path(path)
+        return MemeScopeService(self.plugin)._canon_path(path)
 
     def find_similar_categories(self, query: str, top_n: int = 3) -> list[str]:
-        """找到与查询词最相似的分类（委托给 EmojiSearchEngine）。"""
+        """找到与查询词最相似的分类（委托给 MemeSearchEngine）。"""
         return self._search_engine.find_similar_categories(query, top_n)
 
     def _get_category_from_data(self, data: dict | None) -> str:
@@ -158,10 +151,10 @@ class EmojiSelector:
 
     @staticmethod
     def _parse_tags(raw_tags: Any) -> list[str]:
-        """解析标签/场景为列表（委托给 EmojiSmartSelectService）。"""
-        from .emoji_smart_select_service import EmojiSmartSelectService
+        """解析标签/场景为列表（委托给 MemeSmartSelectService）。"""
+        from .meme_smart_select_service import MemeSmartSelectService
 
-        return EmojiSmartSelectService._parse_tags(raw_tags)
+        return MemeSmartSelectService._parse_tags(raw_tags)
 
     @staticmethod
     @lru_cache(maxsize=4096)
@@ -180,8 +173,8 @@ class EmojiSelector:
         scenes: tuple[str, ...] = (),
     ) -> tuple[str, frozenset[str], frozenset[str], frozenset[str], str]:
         desc_lower = str(desc or "").lower()
-        tag_words = EmojiSelector._collect_phrase_words(tags)
-        scene_words = EmojiSelector._collect_phrase_words(scenes)
+        tag_words = MemeSelector._collect_phrase_words(tags)
+        scene_words = MemeSelector._collect_phrase_words(scenes)
         all_text = " ".join(
             part for part in [str(category or ""), desc_lower, " ".join(tags)] if part
         )
@@ -189,61 +182,40 @@ class EmojiSelector:
         return desc_lower, tag_words, scene_words, all_words, all_text
 
     def _get_recent_usage(self, category: str) -> list[str]:
-        """委托给 EmojiSelectionStrategy。"""
+        """委托给 MemeSelectionStrategy。"""
         return self._selection_strategy._get_recent_usage(category)
 
     def _set_recent_usage(self, category: str, recent_usage: list[str]) -> None:
-        """委托给 EmojiSelectionStrategy。"""
+        """委托给 MemeSelectionStrategy。"""
         self._selection_strategy._set_recent_usage(category, recent_usage)
 
     def _update_recent_usage(self, category: str, path: str) -> None:
-        """委托给 EmojiSelectionStrategy。"""
+        """委托给 MemeSelectionStrategy。"""
         self._selection_strategy._update_recent_usage(category, path)
 
     def _calculate_recent_penalty(self, category: str, path: str) -> float:
-        """委托给 EmojiSelectionStrategy。"""
+        """委托给 MemeSelectionStrategy。"""
         return self._selection_strategy._calculate_recent_penalty(category, path)
 
     def _get_candidate_categories(self, category: str, limit: int = 3) -> list[str]:
-        """委托给 EmojiSelectionStrategy。"""
+        """委托给 MemeSelectionStrategy。"""
         return self._selection_strategy._get_candidate_categories(category, limit)
 
     async def record_emoji_usage(self, emoji_path: str, trigger: str = "auto") -> None:
         """记录表情包使用次数。
 
-        优先使用数据库服务进行增量更新，fallback 到 cache_service。
+        优先使用数据库服务进行增量更新。
         """
         if not emoji_path:
             return
 
         db_service = getattr(self.plugin, "db_service", None)
-        cache_service = getattr(self.plugin, "cache_service", None)
+        if db_service is None:
+            return
 
-        if db_service:
-            # 使用数据库增量更新
-            target_path = self._canon_path(emoji_path)
-            # 尝试直接更新
-            db_service.increment_usage_sync(target_path)
-        elif cache_service:
-            # fallback 到旧版 cache_service
-            target_path = self._canon_path(emoji_path)
-            now = int(time.time())
-
-            def _updater(current: dict) -> None:
-                for stored_path, meta in current.items():
-                    if self._canon_path(stored_path) != target_path:
-                        continue
-                    if not isinstance(meta, dict):
-                        continue
-
-                    meta["use_count"] = int(meta.get("use_count", 0) or 0) + 1
-                    meta["last_used_at"] = now
-                    break
-
-            try:
-                await cache_service.update_index(_updater)
-            except Exception as e:
-                logger.debug(f"[Stealer] 更新表情使用统计失败: {e}")
+        # 使用数据库增量更新
+        target_path = self._canon_path(emoji_path)
+        db_service.increment_usage_sync(target_path)
 
     def normalize_category(self, category: str) -> str:
         """归一化分类名称，返回有效分类或空字符串。"""
@@ -325,7 +297,7 @@ class EmojiSelector:
     ) -> str | None:
         """选择表情包（智能或随机）。"""
         async with self._selection_lock:
-            use_smart = self.plugin.smart_meme_selection
+            use_smart = self.plugin.plugin_config.smart_meme_selection
             candidate_categories = self._get_candidate_categories(category)
 
             if use_smart and context_text and len(context_text.strip()) > 5:
@@ -452,12 +424,12 @@ class EmojiSelector:
             logger.error(f"随机选择表情包失败: {e}")
             return None
 
-    # ===== 门面委托：EmojiSmartSelectService =====
+    # ===== 门面委托：MemeSmartSelectService =====
 
     async def _select_emoji_smart_impl(
         self, category: str, context_text: str, candidate_categories=None, event=None
     ):
-        """智能选择表情包（已迁移到 EmojiSmartSelectService）。"""
+        """智能选择表情包（已迁移到 MemeSmartSelectService）。"""
         return await self._smart_select_service._select_emoji_smart_impl(
             category, context_text, candidate_categories, event
         )
@@ -465,7 +437,7 @@ class EmojiSelector:
     async def search_images(
         self, query: str, *, limit: int = 10, idx: dict | None = None, event=None
     ):
-        """搜索表情包（已迁移到 EmojiSmartSelectService）。"""
+        """搜索表情包（已迁移到 MemeSmartSelectService）。"""
         return await self._smart_select_service.search_images(
             query, limit=limit, idx=idx, event=event
         )
@@ -473,29 +445,29 @@ class EmojiSelector:
     async def _search_images_fallback(
         self, query: str, *, limit: int = 10, idx: dict | None = None
     ):
-        """降级搜索（已迁移到 EmojiSmartSelectService）。"""
+        """降级搜索（已迁移到 MemeSmartSelectService）。"""
         return await self._smart_select_service._search_images_fallback(query, limit=limit, idx=idx)
 
     async def smart_search(
         self, query: str, *, limit: int = 10, idx: dict | None = None, event=None
     ):
-        """智能搜索（已迁移到 EmojiSmartSelectService）。"""
+        """智能搜索（已迁移到 MemeSmartSelectService）。"""
         return await self._smart_select_service.smart_search(
             query, limit=limit, idx=idx, event=event
         )
 
     async def send_emoji_message(self, event: AstrMessageEvent, path: str):
-        """发送表情包消息（已迁移到 EmojiSmartSelectService）。"""
+        """发送表情包消息（已迁移到 MemeSmartSelectService）。"""
         return await self._smart_select_service.send_emoji_message(event, path)
 
     async def send_emoji_with_text(self, event: AstrMessageEvent, path: str, text: str):
-        """带文本发送表情包（已迁移到 EmojiSmartSelectService）。"""
+        """带文本发送表情包（已迁移到 MemeSmartSelectService）。"""
         return await self._smart_select_service.send_emoji_with_text(event, path, text)
 
     async def send_explicit_emojis(self, event: AstrMessageEvent, paths: list[str], text: str):
-        """发送指定表情包列表（已迁移到 EmojiSmartSelectService）。"""
+        """发送指定表情包列表（已迁移到 MemeSmartSelectService）。"""
         return await self._smart_select_service.send_explicit_emojis(event, paths, text)
 
     async def try_send_emoji(self, event: AstrMessageEvent, emotions: list[str], text: str) -> bool:
-        """尝试发送表情包（已迁移到 EmojiSmartSelectService）。"""
+        """尝试发送表情包（已迁移到 MemeSmartSelectService）。"""
         return await self._smart_select_service.try_send_emoji(event, emotions, text)

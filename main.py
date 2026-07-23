@@ -23,15 +23,17 @@ from .cache_service import CacheService
 from .core.commands.command_handler import CommandHandler
 from .core.config.config import PluginConfig
 from .core.db.database_service import DatabaseService
-from .core.search.emoji_selector import EmojiSelector
+from .core.search.meme_selector import MemeSelector
 from .core.events.event_handler import EventHandler
-from .core.events.emoji_sender_engine import EmojiSenderEngine
+from .core.events.meme_sender_engine import MemeSenderEngine
 from .core.db.index_manager import IndexManager
 from .core.processing.natural_emotion_analyzer import SmartEmotionMatcher
 from .core.processing.image_processor_service import ImageProcessorService
+from .core.maintenance.service import MaintenanceService
+from .core.util.safe_io import safe_remove_file
 from .task_scheduler import TaskScheduler
 from .plugin_api import PluginAPI
-from .core.search.emoji_smart_select_service import _unwrap_event
+from .core.search.meme_smart_select_service import _unwrap_event
 
 try:
     import aiofiles  # type: ignore
@@ -76,8 +78,8 @@ class Main(Star):
         self.categories_dir: Path = self.plugin_config.categories_dir
         self.cache_dir: Path = self.plugin_config.cache_dir
 
-        # 同步配置到实例属性（纯属性赋值，无IO）
-        self._sync_all_config()
+        # 配置统一通过 self.plugin_config 读取（pydantic 模型）。
+        # v2.7.5+ 删除了 _sync_all_config() 实例属性镜像。
 
         # 初始化核心服务类
         self.cache_service = CacheService(self.cache_dir)
@@ -89,49 +91,42 @@ class Main(Star):
 
         self.event_handler = EventHandler(self)
         self.image_processor_service = ImageProcessorService(self)
-        self.emoji_selector = EmojiSelector(self)
+        self.meme_selector = MemeSelector(self)
         self.task_scheduler = TaskScheduler()
 
         # 初始化自然语言情绪分析器（新增）
         self.smart_emotion_matcher = SmartEmotionMatcher(self)
 
         self.index_manager = IndexManager(self)
-        self._emoji_sender_engine = EmojiSenderEngine(self)
+        self._emoji_sender_engine = MemeSenderEngine(self)
+        self.maintenance = MaintenanceService(self)
 
         # 运行时属性
         self._terminated: bool = False  # 终止标志位，防止重复清理
         # 强制捕获窗口已迁移到 EventHandler
 
-    def _sync_all_config(self) -> None:
-        """从配置服务同步所有配置到实例属性。"""
-        self.auto_send_meme = self.plugin_config.auto_send_meme
-        self.meme_chance = self.plugin_config.meme_chance
-        self.steal_mode = self.plugin_config.steal_mode
-        self.steal_chance = self.plugin_config.steal_chance
-        self.send_meme_as_gif = self.plugin_config.send_meme_as_gif
-        self.meme_send_delay = self.plugin_config.meme_send_delay
-        self.meme_send_delay_random = self.plugin_config.meme_send_delay_random
-        self.meme_send_delay_max = self.plugin_config.meme_send_delay_max
-        self.meme_send_char_delay = self.plugin_config.meme_send_char_delay
-        self.max_reg_num = self.plugin_config.max_reg_num
-        self.content_filtration = self.plugin_config.content_filtration
-        self.content_filtration_fail_open = self.plugin_config.content_filtration_fail_open
-        self.storage_cleanup_strategy = self.plugin_config.storage_cleanup_strategy
-        self.smart_meme_selection = self.plugin_config.smart_meme_selection
-        self.steal_meme = self.plugin_config.steal_meme
-        self.auto_meme_intent_gate = self.plugin_config.auto_meme_intent_gate
-        self.auto_meme_cancel_on_new_message = self.plugin_config.auto_meme_cancel_on_new_message
-        self.categories = list(self.plugin_config.categories or []) or list(
-            self.plugin_config.DEFAULT_CATEGORIES
+    def __getattr__(self, name: str):
+        """将未定义的属性访问自动代理到 plugin_config。
+
+        v2.7.5+ 配置统一通过 plugin_config (Pydantic 模型) 管理，
+        但 core/ 中部分代码仍直接访问 plugin_instance.steal_meme 等。
+        通过 __getattr__ 自动代理，无需逐个修改调用方。
+        """
+        if name == "plugin_config":
+            raise AttributeError(f"'{type(self).__name__}' object has no attribute 'plugin_config'")
+        cfg = self.__dict__.get("plugin_config")
+        if cfg is not None and hasattr(cfg, name):
+            return getattr(cfg, name)
+        # 区分：plugin_config 未初始化 vs. 属性完全不存在
+        if cfg is None:
+            raise AttributeError(
+                f"'{type(self).__name__}' object has no attribute '{name}' "
+                f"(plugin_config 尚未初始化)"
+            )
+        raise AttributeError(
+            f"'{type(self).__name__}' object has no attribute '{name}' "
+            f"(plugin_config 中也不存在该属性)"
         )
-        self.vision_provider_id = self._load_vision_provider_id()
-        self.enable_natural_emotion_analysis = self.plugin_config.enable_natural_emotion_analysis
-        self.emotion_analysis_provider_id = self.plugin_config.emotion_analysis_provider_id
-        self.image_processing_cooldown = self.plugin_config.image_processing_cooldown
-        # 待审核池 / 嵌入检索（steal_pool_capacity 调整后即时生效：护栏每次 on_message 读此属性）
-        self.steal_pool_capacity = self.plugin_config.steal_pool_capacity
-        self.enable_embedding_search = self.plugin_config.enable_embedding_search
-        self.embedding_provider_id = str(self.plugin_config.embedding_provider_id or "").strip()
 
     def _load_vision_provider_id(self) -> str:
         """加载视觉模型提供商ID。"""
@@ -166,7 +161,7 @@ class Main(Star):
             if default_filter_prompt:
                 updates["custom_meme_classification_with_filter_prompt"] = default_filter_prompt
         if updates:
-            self._update_config_from_dict(updates)
+            self.update_config(updates)
             logger.info(f"已将默认提示词写入配置: {list(updates.keys())}")
 
     def _auto_merge_existing_categories(self) -> None:
@@ -206,8 +201,6 @@ class Main(Star):
                 if self.db_service.count_total() > 0
                 else {}
             )
-            if not index:
-                index = self.cache_service.get_index_cache_readonly()
             for meta in index.values():
                 if not isinstance(meta, dict):
                     continue
@@ -227,37 +220,33 @@ class Main(Star):
         if not to_add:
             return
         merged_categories = current + to_add
-        self._update_config_from_dict({"categories": merged_categories})
+        self.update_config({"categories": merged_categories})
         self.plugin_config.ensure_category_dirs(to_add)
 
     def _validate_config(self) -> bool:
         """验证配置参数的有效性。"""
+        cfg = self.plugin_config
         errors = []
         fixed = []
         fixed_values = {}
-        if not isinstance(self.max_reg_num, int) or self.max_reg_num <= 0:
+        if not isinstance(cfg.max_reg_num, int) or cfg.max_reg_num <= 0:
             errors.append("最大表情数量必须大于0的整数")
-            self.max_reg_num = 100
             fixed.append("最大表情数量已重置为100")
             fixed_values["max_reg_num"] = 100
-        if not isinstance(self.meme_chance, (int, float)) or not (0 <= self.meme_chance <= 1):
+        if not isinstance(cfg.meme_chance, (int, float)) or not (0 <= cfg.meme_chance <= 1):
             errors.append("表情发送概率必须在0-1之间")
-            self.meme_chance = 0.4
             fixed.append("表情发送概率已重置为0.4")
             fixed_values["meme_chance"] = 0.4
-        if self.steal_mode not in ("probability", "cooldown"):
-            errors.append(f"偷图模式 '{self.steal_mode}' 无效，必须为 probability 或 cooldown")
-            self.steal_mode = "probability"
+        if cfg.steal_mode not in ("probability", "cooldown"):
+            errors.append(f"偷图模式 '{cfg.steal_mode}' 无效，必须为 probability 或 cooldown")
             fixed.append("偷图模式已重置为 probability")
             fixed_values["steal_mode"] = "probability"
-        if not isinstance(self.steal_chance, (int, float)) or not (0 <= self.steal_chance <= 1):
+        if not isinstance(cfg.steal_chance, (int, float)) or not (0 <= cfg.steal_chance <= 1):
             errors.append("偷图概率必须在0-1之间")
-            self.steal_chance = 0.6
             fixed.append("偷图概率已重置为0.6")
             fixed_values["steal_chance"] = 0.6
-        if not isinstance(self.steal_pool_capacity, int) or self.steal_pool_capacity < 10:
+        if not isinstance(cfg.steal_pool_capacity, int) or cfg.steal_pool_capacity < 10:
             errors.append("待审核池容量必须是不小于10的整数")
-            self.steal_pool_capacity = 200
             fixed.append("待审核池容量已重置为200")
             fixed_values["steal_pool_capacity"] = 200
         if errors:
@@ -265,7 +254,7 @@ class Main(Star):
         if fixed:
             logger.info(f"配置已自动修复: {'; '.join(fixed)}")
             try:
-                self._update_config_from_dict(fixed_values)
+                self.update_config(fixed_values)
             except Exception as e:
                 logger.error(f"持久化配置修复失败: {e}")
         return True
@@ -373,7 +362,8 @@ class Main(Star):
             setattr(self.plugin_config, k, v)
 
     def _sync_image_processor_from_runtime(self) -> None:
-        final_prompts = self.plugin_config.get_prompts(
+        cfg = self.plugin_config
+        final_prompts = cfg.get_prompts(
             {
                 "EMOJI_CLASSIFICATION_PROMPT": getattr(self, "EMOJI_CLASSIFICATION_PROMPT", None),
                 "EMOJI_CLASSIFICATION_WITH_FILTER_PROMPT": getattr(
@@ -382,33 +372,35 @@ class Main(Star):
             }
         )
         self.image_processor_service.update_config(
-            categories=self.categories,
-            content_filtration=self.content_filtration,
-            vision_provider_id=self.vision_provider_id,
+            categories=list(cfg.categories or []) or list(cfg.DEFAULT_CATEGORIES),
+            content_filtration=cfg.content_filtration,
+            vision_provider_id=self._load_vision_provider_id(),
             emoji_classification_prompt=final_prompts.get("emoji_classification_prompt"),
             emoji_classification_with_filter_prompt=final_prompts.get(
                 "emoji_classification_with_filter_prompt"
             ),
         )
 
-    def _update_config_from_dict(self, config_dict: dict):
+    def update_config(self, config_dict: dict):
         """从配置字典更新插件配置。"""
         if not config_dict:
             return
         try:
             if self.plugin_config:
                 self._apply_plugin_config_updates(config_dict)
-                self._sync_all_config()
                 self._sync_image_processor_from_runtime()
                 try:
-                    self.plugin_config.ensure_category_dirs(self.categories)
+                    cats = list(self.plugin_config.categories or []) or list(
+                        self.plugin_config.DEFAULT_CATEGORIES
+                    )
+                    self.plugin_config.ensure_category_dirs(cats)
                 except Exception as e:
                     logger.warning(f"[Config] 创建分类目录失败: {e}")
                 logger.debug("[Config] 配置已更新，下次 LLM 请求将使用新分类")
         except Exception as e:
             logger.error(f"更新配置失败: {e}")
 
-    # ===== 门面委托：EmojiSenderEngine =====
+    # ===== 门面委托：MemeSenderEngine =====
     _emoji_turn_state = lambda self, event: self._emoji_sender_engine.emoji_turn_state(event)  # noqa: E731
     _send_explicit_emojis = (  # noqa: E731
         lambda self, event, paths, text: self._emoji_sender_engine.send_explicit_emojis(
@@ -613,21 +605,19 @@ class Main(Star):
         limit: int = 5,
         idx: dict | None = None,
     ):
-        """委托给 EmojiSelector.smart_search。"""
+        """委托给 MemeSelector.smart_search。"""
         if idx is None:
             idx = (
                 self.db_service.get_index_cache_readonly()
                 if self.db_service.count_total() > 0
                 else {}
             )
-            if not idx:
-                idx = self.cache_service.get_index_cache_readonly()
 
-        return await self.emoji_selector.smart_search(query, limit=limit, idx=idx, event=event)
+        return await self.meme_selector.smart_search(query, limit=limit, idx=idx, event=event)
 
     def _find_similar_categories(self, query: str, top_n: int = 3) -> list[str]:
-        """找到与查询词最相似的多个分类，委托给 EmojiSelector。"""
-        return self.emoji_selector.find_similar_categories(query, top_n)
+        """找到与查询词最相似的多个分类，委托给 MemeSelector。"""
+        return self.meme_selector.find_similar_categories(query, top_n)
 
     @filter.llm_tool(name="search_meme")
     async def search_emoji(self, event: AstrMessageEvent, query: str):
@@ -666,11 +656,9 @@ class Main(Star):
 
             if self.db_service.count_total() > 0:
                 idx = self.db_service.get_index_cache_readonly()
-            elif self.cache_service.get_index_cache_readonly():
-                idx = self.cache_service.get_index_cache_readonly()
             else:
                 logger.debug("索引未加载，正在加载...")
-                await self._load_index()
+                await self.index_manager.load_index()
                 idx = self.db_service.get_index_cache_readonly()
 
             # smart_search 已内置关键词映射和模糊匹配（阈值0.4）
@@ -683,9 +671,10 @@ class Main(Star):
                 suggestion = f"未找到与'{query}'匹配的表情包。"
                 if similar:
                     suggestion += "\n\n您是否想找以下分类？\n- " + "\n- ".join(similar)
-                suggestion += "\n\n可用分类：" + ", ".join(self.categories[:10])
-                if len(self.categories) > 10:
-                    suggestion += f" 等共{len(self.categories)}个分类"
+                cats = self.plugin_config.get_categories()
+                suggestion += "\n\n可用分类：" + ", ".join(cats[:10])
+                if len(cats) > 10:
+                    suggestion += f" 等共{len(cats)}个分类"
                 logger.warning(f"[Tool] 未找到匹配: {query}, 推荐: {similar}")
                 yield suggestion
                 return
@@ -800,18 +789,18 @@ class Main(Star):
                 yield f"发送失败：reason=file_missing。表情包文件已丢失。\n你选择的是：编号 {emoji_id}，分类 {emotion}，描述 {desc}\n请重新搜索并选择其他表情包。"
                 return
 
-            if not self.emoji_selector.is_path_allowed_for_event(path, event):
+            if not self.meme_selector.is_path_allowed_for_event(path, event):
                 yield "发送失败：reason=scope_denied。该表情包被限制为仅来源会话可发送，请选择 public 表情或重新搜索。"
                 return
 
             logger.info(f"[Tool] 发送选中的表情包: {path} (emotion={emotion})")
-            send_mode = await self.emoji_selector.send_emoji_message(event, path)
+            send_mode = await self.meme_selector.send_emoji_message(event, path)
             if not send_mode:
                 yield "发送失败：reason=send_failed。表情包编码或平台发送失败，请重新搜索或选择其他候选。"
                 return
             sent_as_sticker = send_mode == "telegram_sticker"
 
-            await self.emoji_selector.record_emoji_usage(path, trigger="llm_tool")
+            await self.meme_selector.record_emoji_usage(path, trigger="llm_tool")
             await self._mark_auto_emoji_sent(event)
             turn_state.mark_active_sent()
 
@@ -849,7 +838,7 @@ class Main(Star):
         """
         event = _unwrap_event(event)
         try:
-            if not self.steal_meme:
+            if not self.plugin_config.steal_meme:
                 yield "偷取失败：表情包偷取功能未开启，请先在插件配置中启用"
                 return
 
@@ -905,12 +894,12 @@ class Main(Star):
             precheck_ok, precheck_reason = self._precheck_image_file(temp_path)
             if not precheck_ok:
                 if is_temp:
-                    await self._safe_remove_file(temp_path)
+                    await safe_remove_file(temp_path)
                 yield f"偷取失败：{precheck_reason}"
                 return
 
             # 记下入库存前已有的路径，之后 diff 找出 VLM 分析结果
-            idx_before = await self._load_index()
+            idx_before = await self.index_manager.load_index()
             before_paths = set(idx_before.keys()) if idx_before else set()
 
             # 统一走 VLM 流水线
@@ -932,7 +921,7 @@ class Main(Star):
                 return
 
             if merged_idx:
-                await self._save_index(merged_idx)
+                await self.index_manager.save_index(merged_idx)
                 new_paths = set(merged_idx.keys()) - before_paths
                 if new_paths:
                     new_entry = next((merged_idx[p] for p in new_paths if isinstance(merged_idx.get(p), dict)), None)
@@ -1106,19 +1095,6 @@ class Main(Star):
             extra_meta["source"] = source
         return extra_meta or None
 
-    async def _save_index(self, idx: dict[str, Any]):
-        """将当前权威索引同步到数据库与缓存。"""
-        await self.db_service.sync_index(idx)
-        await self.cache_service.set_cache("index_cache", idx, persist=False)
-        try:
-            self.emoji_selector._invalidate_bm25_index()
-        except Exception:
-            pass
-
-    async def _rebuild_index_from_files(self) -> dict[str, Any]:
-        """从文件重建基础索引（不保存到数据库，等待合并后保存）。"""
-        return await self.cache_service.rebuild_index_from_files(self.base_dir, self.categories_dir)
-
     async def _process_image(
         self,
         event: AstrMessageEvent | None,
@@ -1137,8 +1113,8 @@ class Main(Star):
                     file_path=file_path,
                     is_temp=is_temp,
                     idx=idx,
-                    categories=self.categories,
-                    content_filtration=self.content_filtration,
+                    categories=self.plugin_config.get_categories(),
+                    content_filtration=self.plugin_config.content_filtration,
                     is_platform_emoji=is_platform_emoji,
                     extra_meta=extra_meta,
                     to_pending=to_pending,
@@ -1146,35 +1122,27 @@ class Main(Star):
                 timeout=self.IMAGE_PROCESSING_TIMEOUT_SECONDS,
             )
             if idx is None and updated_idx is not None and not to_pending:
-                full_idx = await self._load_index()
+                full_idx = await self.index_manager.load_index()
                 full_idx.update(updated_idx)
                 return success, full_idx
             return success, updated_idx
         except asyncio.TimeoutError:
             logger.warning(f"图片处理超时: {file_path}")
             if is_temp:
-                await self._safe_remove_file(file_path)
+                await safe_remove_file(file_path)
             return False, idx if idx is not None else {}
         except Exception as e:
             logger.error(f"处理图片失败: {e}")
             if is_temp:
-                await self._safe_remove_file(file_path)
+                await safe_remove_file(file_path)
             return False, idx if idx is not None else {}
-
-    async def _safe_remove_file(self, file_path: str) -> bool:
-        """安全删除文件。"""
-        try:
-            return await self.image_processor_service.safe_remove_file(file_path)
-        except Exception as e:
-            logger.error(f"安全删除文件失败: {e}")
-            return False
 
     async def _extract_emotions_from_text(
         self, event: AstrMessageEvent | None, text: str
     ) -> tuple[list[str], str]:
         """从文本中提取情绪关键词。"""
         try:
-            return await self.emoji_selector.extract_emotions_from_text(event, text)
+            return await self.meme_selector.extract_emotions_from_text(event, text)
         except Exception as e:
             logger.error(f"提取文本情绪失败: {e}")
             return [], text
@@ -1206,7 +1174,7 @@ class Main(Star):
         破坏 LLM 提供商的提示词缓存。
         """
         try:
-            if not self.auto_send_meme:
+            if not self.plugin_config.auto_send_meme:
                 return
 
             turn_state = self._emoji_turn_state(event)
@@ -1219,13 +1187,14 @@ class Main(Star):
             if not await self._resolve_auto_emoji_turn_permission(event):
                 return
 
-            if self.enable_natural_emotion_analysis:
+            if self.plugin_config.enable_natural_emotion_analysis:
                 return
 
-            if not self.categories:
+            cats = self.plugin_config.get_categories()
+            if not cats:
                 return
 
-            categories_str = ", ".join(self.categories)
+            categories_str = ", ".join(cats)
 
             emotion_instruction = f"""
 {self._persona_marker}
@@ -1274,7 +1243,7 @@ class Main(Star):
 
         emotions = []
         cleaned_text = text_without_explicit
-        if not self.enable_natural_emotion_analysis:
+        if not self.plugin_config.enable_natural_emotion_analysis:
             emotions, cleaned_text = await self._extract_emotions_from_text(event, text_without_explicit)
             if cleaned_text != text:
                 self._update_result_with_cleaned_text_safe(event, result, cleaned_text)
@@ -1295,7 +1264,7 @@ class Main(Star):
             return cleaned_text != text
         if self._should_skip_auto_emoji_by_gate(text_without_explicit):
             return cleaned_text != text
-        if not self.enable_natural_emotion_analysis and not emotions:
+        if not self.plugin_config.enable_natural_emotion_analysis and not emotions:
             return cleaned_text != text
 
         if not self._claim_auto_emoji_turn(event):
@@ -1318,6 +1287,7 @@ class Main(Star):
         加载情绪映射和提示词等运行时需要的资源。
         __init__ 仅做属性赋值，IO/目录/密码等操作统一在此执行。
         """
+        await super().initialize()
         try:
             self._validate_config()
             if (
@@ -1328,9 +1298,12 @@ class Main(Star):
                 is None
             ):
                 raise RuntimeError("event_handler 未初始化")
-            self._sync_all_config()
             self.plugin_config.ensure_base_dirs()
-            self.plugin_config.ensure_category_dirs(self.categories)
+            self.plugin_config.ensure_category_dirs(
+                list(self.plugin_config.categories or []) or list(
+                    self.plugin_config.DEFAULT_CATEGORIES
+                )
+            )
             await self.image_processor_service._auto_migrate_categories()
             self._auto_merge_existing_categories()
             try:
@@ -1348,19 +1321,16 @@ class Main(Star):
                     self._ensure_default_prompts_in_config(prompts)
             except Exception as e:
                 logger.error(f"初始化提示词失败: {e}")
-            await self._load_index()
+            await self.index_manager.load_index()
             await self._migrate_blacklist_to_db()
-            await self._clean_legacy_files()
-            await self._cleanup_orphans()  # §4.2：清理无文件索引 / 无索引文件
-            self._sync_all_config()
+            await self.maintenance.run_startup_cleanup()
             self._sync_image_processor_from_runtime()
-            self.task_scheduler.create_task("raw_cleanup_loop", self._raw_cleanup_loop())
-            self.task_scheduler.create_task("capacity_control_loop", self._capacity_control_loop())
+            self.maintenance.start_periodic_tasks()
 
             # 初始化嵌入向量服务 + 回填旧数据（仅在开启嵌入检索时）
-            if self.enable_embedding_search:
+            if self.plugin_config.enable_embedding_search:
                 try:
-                    smart_service = getattr(self.emoji_selector, "_smart_select_service", None)
+                    smart_service = getattr(self.meme_selector, "_smart_select_service", None)
                     if smart_service and smart_service._embedding_service:
                         await smart_service._embedding_service.initialize()
                         # 同步回填旧数据（分批处理，每批 20 条）
@@ -1397,7 +1367,7 @@ class Main(Star):
                 pass
         # 关闭嵌入向量服务
         try:
-            smart_service = getattr(self.emoji_selector, "_smart_select_service", None)
+            smart_service = getattr(self.meme_selector, "_smart_select_service", None)
             if smart_service and smart_service._embedding_service:
                 await smart_service._embedding_service.close()
         except Exception:
@@ -1422,21 +1392,8 @@ class Main(Star):
                 self.event_handler.cleanup()
             except Exception:
                 pass
+        await super().terminate()
         logger.info("[Stealer] 插件资源清理完成")
-
-    async def _load_index(self) -> dict[str, Any]:
-        """加载索引，优先从数据库加载。"""
-        try:
-            idx: dict[str, Any] = {}
-            db_count = self.db_service.count_total()
-            if db_count > 0:
-                idx = self.db_service.get_index_cache_readonly()
-            if idx:
-                await self.cache_service.set_cache("index_cache", idx, persist=False)
-            return idx
-        except Exception as e:
-            logger.error(f"加载索引失败: {e}")
-            return {}
 
     async def _migrate_blacklist_to_db(self) -> None:
         """将旧的 blacklist_cache.json 迁移到数据库 blacklist 表。
@@ -1462,159 +1419,3 @@ class Main(Star):
                 logger.info(f"[DB] 黑名单从缓存迁移完成，新增 {imported} 条")
         except Exception as e:
             logger.warning(f"[DB] 黑名单迁移失败: {e}")
-
-    async def _cleanup_orphans(self) -> None:
-        """§4.2 孤儿扫描：清理无文件索引 + 无索引文件。
-
-        - emoji 表有记录但物理文件缺失 → 删 DB 行（CASCADE tag/scene/embedding）
-        - emoji_pending 表有记录但物理文件缺失 → 删 pending 行
-        - categories/ 下有文件但 emoji 表无对应 → 删孤儿文件
-        - pending/ 下有文件但 emoji_pending 表无对应 → 删孤儿文件
-        """
-        try:
-            db = self.db_service
-            if not db:
-                return
-
-            all_paths = db.get_all_paths()
-
-            # ── 1. DB 有记录但文件缺失 ──
-            if all_paths:
-                stale_paths = [p for p in all_paths if p and not os.path.isfile(str(p))]
-                if stale_paths:
-                    await db.delete_paths(stale_paths)
-                    logger.info(f"[Orphan] 清除 {len(stale_paths)} 条失效索引（文件已丢失）")
-
-                # pending 表
-                pending_rows = db.get_pending_paginated(page=1, page_size=100000)
-                if pending_rows and pending_rows[0]:
-                    stale_ids = [
-                        r["id"] for r in pending_rows[0]
-                        if r.get("path") and not os.path.isfile(str(r.get("path")))
-                    ]
-                    if stale_ids:
-                        db.delete_pending_batch(stale_ids)
-                        logger.info(f"[Orphan] 清除 {len(stale_ids)} 条失效待审核记录")
-
-                # ── 2. 文件存在但 DB 无记录（仅在 DB 有数据时执行，避免误删新实例） ──
-                db_count = db.count_total()
-                if db_count == 0:
-                    return  # 空库不删文件
-
-                db_paths = set(all_paths)
-                pending_db_paths = set(
-                    r.get("path") for r in (pending_rows[0] if pending_rows else [])
-                    if r.get("path")
-                )
-
-                # 扫 categories/
-                categories_dir = str(self.plugin_config.categories_dir)
-                if os.path.isdir(categories_dir):
-                    for root, _dirs, files in os.walk(categories_dir):
-                        for fname in files:
-                            fpath = os.path.join(root, fname)
-                            if fpath not in db_paths:
-                                await self._safe_remove_file(fpath)
-
-                # 扫 pending/
-                pending_dir = str(self.plugin_config.pending_dir)
-                if os.path.isdir(pending_dir):
-                    for fname in os.listdir(pending_dir):
-                        fpath = os.path.join(pending_dir, fname)
-                        if os.path.isfile(fpath) and fpath not in pending_db_paths:
-                            await self._safe_remove_file(fpath)
-
-        except Exception as e:
-            logger.debug(f"[Orphan] 孤儿扫描异常（不阻塞）: {e}")
-
-    async def _clean_legacy_files(self) -> None:
-        """删除迁移残留文件：.backup / .migrated / categories/*/index.json / cache/index_cache.json 等。
-
-        仅在数据库已有数据时执行（避免误删尚未迁移的新实例的旧索引）。
-        活跃缓存文件（image_cache / bm25_cache / desc_cache 等）不会被删除。
-        """
-        try:
-            db_count = self.db_service.count_total()
-            if db_count <= 0:
-                return
-            keep_cache_names = {
-                "image_cache.json", "text_cache.json", "bm25_cache.json",
-                "desc_cache.json", "blacklist_cache.json",
-            }
-            keep_root_names = {
-                "categories.json", "category_info.json", "prompts.json",
-            }
-            deleted = 0
-
-            def _safe_unlink(p: Path) -> bool:
-                try:
-                    p.unlink()
-                    return True
-                except Exception:
-                    return False
-
-            # 1) cache_dir 下的 .backup / .migrated / index_cache.json / index.json
-            if self.cache_dir.is_dir():
-                for child in self.cache_dir.iterdir():
-                    name = child.name
-                    if name in keep_cache_names:
-                        continue
-                    if child.is_dir():
-                        continue
-                    if name.endswith(".wal") or name.endswith(".shm") or name == "emoji.db":
-                        continue
-                    if name.endswith(".backup") or name.endswith(".migrated") or name in {
-                        "index_cache.json", "index.json",
-                    }:
-                        if _safe_unlink(child):
-                            deleted += 1
-
-            # 2) categories/*/index.json
-            if self.categories_dir.is_dir():
-                for cat_dir in self.categories_dir.iterdir():
-                    if not cat_dir.is_dir():
-                        continue
-                    legacy_idx = cat_dir / "index.json"
-                    if legacy_idx.is_file():
-                        if _safe_unlink(legacy_idx):
-                            deleted += 1
-
-            # 3) base_dir 下的 index.json / image_index.json
-            for name in ("index.json", "image_index.json"):
-                if name in keep_root_names:
-                    continue
-                candidate = self.base_dir / name
-                if candidate.is_file():
-                    if _safe_unlink(candidate):
-                        deleted += 1
-
-            if deleted > 0:
-                logger.info(f"[清理] 已删除 {deleted} 个遗留文件")
-        except Exception as e:
-            logger.warning(f"[清理] 遗留文件删除失败: {e}")
-
-    async def _raw_cleanup_loop(self):
-        """raw目录清理循环。"""
-        while True:
-            try:
-                await asyncio.sleep(self.RAW_CLEANUP_INTERVAL_SECONDS)
-                if self.event_handler:
-                    await self.event_handler._clean_raw_directory()
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"raw清理循环出错: {e}")
-
-    async def _capacity_control_loop(self):
-        """容量控制循环。"""
-        while True:
-            try:
-                await asyncio.sleep(self.CAPACITY_CONTROL_INTERVAL_SECONDS)
-                idx = await self._load_index()
-                if len(idx) > self.max_reg_num:
-                    await self.event_handler._enforce_capacity(idx)
-                    await self._save_index(idx)
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"容量控制循环出错: {e}")

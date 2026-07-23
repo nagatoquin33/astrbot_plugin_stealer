@@ -1,21 +1,23 @@
 import asyncio
 import copy
 import hashlib
-import inspect
 import json
 import threading
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from astrbot.api import logger
 
-IndexCache = dict[str, Any]
-IndexUpdater = Callable[[IndexCache], Any | Awaitable[Any]]
-
 
 class CacheService:
-    """缓存服务，负责管理内存缓存与可选的 JSON 持久化。"""
+    """缓存服务，负责管理内存缓存与可选的 JSON 持久化。
+
+    历史说明：早期版本中 `index_cache` 与数据库并存维护，造成写入路径需要
+    双写并多次「修复某路径未失效 BM25 / 未更新索引」。v2.7.5+ 起数据库为唯一
+    持久化来源，本服务只剩 image_cache / text_cache / bm25_cache / desc_cache /
+    blacklist_cache，以及旧 JSON → 新 DB 的一次性迁移辅助。
+    """
 
     _CACHE_MAX_SIZE = 100
 
@@ -34,13 +36,12 @@ class CacheService:
         self._caches: dict[str, OrderedDict[str, Any]] = {
             "image_cache": OrderedDict(),
             "text_cache": OrderedDict(),
-            "index_cache": OrderedDict(),
             "bm25_cache": OrderedDict(),
             "desc_cache": OrderedDict(),
             "blacklist_cache": OrderedDict(),
         }
-        self._no_persist_caches: set[str] = {"index_cache"}
-        self._unbounded_caches: set[str] = {"index_cache"}
+        self._no_persist_caches: set[str] = set()
+        self._unbounded_caches: set[str] = set()
         self._lock = threading.RLock()
 
         self._load_caches()
@@ -184,9 +185,6 @@ class CacheService:
     def get_cache(self, cache_name: str) -> dict[str, Any]:
         return self._get_cache_copy_sync(cache_name)
 
-    def get_index_cache_readonly(self) -> dict[str, Any]:
-        return self._get_cache_copy_sync("index_cache")
-
     def get_cache_size(self, cache_name: str) -> int:
         with self._lock:
             return len(self._caches.get(cache_name, OrderedDict()))
@@ -195,42 +193,6 @@ class CacheService:
         if isinstance(data, str):
             data = data.encode("utf-8")
         return hashlib.sha256(data).hexdigest()
-
-    async def load_index(self) -> dict[str, Any]:
-        """读取索引缓存。"""
-        return await asyncio.to_thread(self._get_cache_copy_sync, "index_cache")
-
-    async def save_index(self, idx: IndexCache) -> None:
-        """保存索引缓存。"""
-        await self.set_cache("index_cache", idx, persist=True)
-
-    async def update_index(
-        self, updater: IndexUpdater, persist: bool = True
-    ) -> IndexCache:
-        """以原子方式更新索引缓存。支持同步和异步 updater。"""
-
-        async def _update_async() -> IndexCache:
-            with self._lock:
-                current = copy.deepcopy(
-                    self._caches.get("index_cache", OrderedDict())
-                )
-                result = updater(current)
-                if inspect.isawaitable(result):
-                    await result
-
-                self._caches["index_cache"].clear()
-                self._caches["index_cache"].update(current)
-                self._clean_cache("index_cache", self._caches["index_cache"])
-                return current
-
-        try:
-            updated = await _update_async()
-            if persist:
-                await asyncio.to_thread(self._save_cache_sync, "index_cache")
-            return updated
-        except Exception as e:
-            logger.error(f"Failed to update index cache: {e}", exc_info=True)
-            return await self.load_index()
 
     async def persist_all(self) -> None:
         for cache_name in self._caches:
@@ -337,7 +299,10 @@ class CacheService:
         return merged_data, loaded_paths
 
     async def migrate_legacy_data(self, base_dir) -> dict[str, Any]:
-        """将旧版 JSON 索引合并进当前缓存。"""
+        """加载旧版 JSON 索引（一次性 DB 迁移辅助），返回合并后的数据。
+
+        调用方负责将返回结果写入数据库。
+        """
         try:
             import shutil
 
@@ -363,55 +328,10 @@ class CacheService:
                         f"Failed to back up legacy index file: {backup_err}"
                     )
 
-            current_index = self._get_cache_copy_sync("index_cache")
-            if not current_index:
-                # 数据库/缓存为空时，直接采用旧索引，保证新环境也能恢复。
-                logger.info(
-                    f"Cache is empty, using {len(migrated_data)} legacy records directly"
-                )
-                await self.save_index(migrated_data)
-                return migrated_data
-
-            current_hash_map = {}
-            for path, meta in current_index.items():
-                if isinstance(meta, dict) and meta.get("hash"):
-                    current_hash_map[meta["hash"]] = path
-
-            merged_count = 0
-            for old_path, old_info in migrated_data.items():
-                if not isinstance(old_info, dict):
-                    continue
-
-                target_path = None
-                if old_path in current_index:
-                    target_path = old_path
-                elif old_info.get("hash") in current_hash_map:
-                    target_path = current_hash_map[old_info["hash"]]
-
-                if not target_path:
-                    continue
-
-                target_info = current_index[target_path]
-                updated = False
-                # 旧数据只用于补充缺失 metadata，不覆盖当前已有内容。
-                if old_info.get("desc") and not target_info.get("desc"):
-                    target_info["desc"] = old_info["desc"]
-                    updated = True
-                if old_info.get("tags") and not target_info.get("tags"):
-                    target_info["tags"] = old_info["tags"]
-                    updated = True
-                if old_info.get("scenes") and not target_info.get("scenes"):
-                    target_info["scenes"] = old_info["scenes"]
-                    updated = True
-
-                if updated:
-                    merged_count += 1
-
             logger.info(
-                f"Recovered metadata for {merged_count} records from legacy data"
+                f"Loaded {len(migrated_data)} legacy records (caller persists to DB)"
             )
-            await self.save_index(current_index)
-            return current_index
+            return migrated_data
         except Exception as e:
             logger.error(f"Legacy data migration failed: {e}", exc_info=True)
             return {}

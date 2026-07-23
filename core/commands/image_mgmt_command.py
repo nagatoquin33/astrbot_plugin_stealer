@@ -7,6 +7,8 @@ from typing import Any
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
+from ..util.safe_io import safe_remove_file
+
 
 class ImageManagementCommand:
     """负责表情包的列表、删除、拉黑和作用域管理。"""
@@ -127,7 +129,7 @@ class ImageManagementCommand:
 
         else:
             # 兜底：旧的全量加载方式
-            image_index = await self.plugin._load_index()
+            image_index = await self.plugin.index_manager.load_index()
 
             if not image_index:
                 yield event.plain_result("暂无表情包数据")
@@ -266,7 +268,7 @@ class ImageManagementCommand:
             )
             return
 
-        image_index = await self.plugin._load_index()
+        image_index = await self.plugin.index_manager.load_index()
 
         if not image_index:
             yield event.plain_result("暂无表情包数据")
@@ -291,7 +293,7 @@ class ImageManagementCommand:
                     target_hash and isinstance(meta, dict) and meta.get("hash") == target_hash
                 ):
                     del image_index[path]
-            await self.plugin._save_index(image_index)
+            await self.plugin.index_manager.save_index(image_index)
 
             yield event.plain_result(
                 f"✅ 已删除表情包:\n文件: {target_image['name']}\n分类: {target_image['category']}"
@@ -307,7 +309,7 @@ class ImageManagementCommand:
             )
             return
 
-        image_index = await self.plugin._load_index()
+        image_index = await self.plugin.index_manager.load_index()
 
         if not image_index:
             yield event.plain_result("暂无表情包数据")
@@ -339,7 +341,7 @@ class ImageManagementCommand:
                 target_hash and isinstance(meta, dict) and meta.get("hash") == target_hash
             ):
                 del image_index[path]
-        await self.plugin._save_index(image_index)
+        await self.plugin.index_manager.save_index(image_index)
 
         logger.info(f"已加入黑名单: {target_hash}")
 
@@ -362,7 +364,7 @@ class ImageManagementCommand:
             )
             return
 
-        image_index = await self.plugin._load_index()
+        image_index = await self.plugin.index_manager.load_index()
         if not image_index:
             yield event.plain_result("暂无表情包数据")
             return
@@ -393,7 +395,7 @@ class ImageManagementCommand:
             return
 
         meta["scope_mode"] = normalized_mode
-        await self.plugin._save_index(image_index)
+        await self.plugin.index_manager.save_index(image_index)
 
         origin_target = str(meta.get("origin_target", "") or "").strip() or "未知"
         scope_text = "公开" if normalized_mode == "public" else "仅来源群"
@@ -456,20 +458,20 @@ class ImageManagementCommand:
 
             # 删除主文件（通常在raw目录）
             if Path(img_path).exists():
-                if await self.plugin._safe_remove_file(img_path):
+                if await safe_remove_file(img_path):
                     deleted_files.append(img_path)
                 logger.info(f"已删除主文件: {img_path}")
 
             # 查找并删除categories目录中的对应文件
-            if hasattr(self.plugin, "categories_dir") and self.plugin.categories_dir:
+            if hasattr(self.plugin, "categories_dir") and self.plugin.plugin_config.categories_dir:
                 img_name = Path(img_path).name
 
                 # 遍历所有分类目录
-                for category_dir in self.plugin.categories_dir.iterdir():
+                for category_dir in self.plugin.plugin_config.categories_dir.iterdir():
                     if category_dir.is_dir():
                         category_file = category_dir / img_name
                         if category_file.exists():
-                            if await self.plugin._safe_remove_file(str(category_file)):
+                            if await safe_remove_file(str(category_file)):
                                 deleted_files.append(str(category_file))
                             logger.info(f"已删除分类文件: {category_file}")
 

@@ -9,6 +9,7 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain
 from astrbot.api.message_components import Image, Plain
 
+from ..util.safe_io import safe_remove_file
 from .platform_detector import PlatformDetector
 from .image_download_service import ImageDownloadService
 
@@ -97,7 +98,7 @@ class EventHandler:
         - probability 模式：每次收到图片按 steal_chance 概率决定
         - cooldown 模式：两次偷取之间至少间隔 image_processing_cooldown 秒
         """
-        steal_mode = self.plugin.steal_mode
+        steal_mode = self.plugin.plugin_config.steal_mode
 
         if steal_mode == "cooldown":
             return self._check_cooldown()
@@ -106,7 +107,7 @@ class EventHandler:
 
     def _check_cooldown(self) -> bool:
         """冷却模式：两次处理之间至少间隔 N 秒。"""
-        cooldown = self.plugin.image_processing_cooldown
+        cooldown = self.plugin.plugin_config.image_processing_cooldown
         try:
             cooldown = int(cooldown)
         except Exception:
@@ -125,7 +126,7 @@ class EventHandler:
 
     def _check_probability(self) -> bool:
         """概率模式：每次按 steal_chance 概率决定是否偷取。"""
-        steal_chance = self.plugin.steal_chance
+        steal_chance = self.plugin.plugin_config.steal_chance
         try:
             steal_chance = float(steal_chance)
         except Exception:
@@ -153,7 +154,7 @@ class EventHandler:
             需要移除的 (file_path, created_at) 列表；若无需移除则返回空列表。
         """
         try:
-            max_reg = int(self.plugin.max_reg_num)
+            max_reg = int(self.plugin.plugin_config.max_reg_num)
         except (TypeError, ValueError):
             max_reg = 500  # 默认值
 
@@ -292,16 +293,15 @@ class EventHandler:
                     seen_paths.add(file_path)
 
                     if Path(file_path).exists():
-                        if hasattr(self.plugin, "_safe_remove_file"):
-                            try:
-                                removed = await self.plugin._safe_remove_file(file_path)
-                                if removed:
-                                    files_actually_deleted.append(file_path)
-                                    file_gone = True
-                                else:
-                                    logger.warning(f"[容量控制] 删除文件失败: {file_path}")
-                            except Exception as e:
-                                logger.warning(f"[容量控制] 删除文件异常 {file_path}: {e}")
+                        try:
+                            removed = await safe_remove_file(file_path)
+                            if removed:
+                                files_actually_deleted.append(file_path)
+                                file_gone = True
+                            else:
+                                logger.warning(f"[容量控制] 删除文件失败: {file_path}")
+                        except Exception as e:
+                            logger.warning(f"[容量控制] 删除文件异常 {file_path}: {e}")
                     else:
                         # Alternate candidates may be absent; only remove the index
                         # after the primary indexed file is confirmed gone.
@@ -456,6 +456,11 @@ class EventHandler:
             return
         if not plugin_instance.steal_meme and not force_active:
             return
+        # audit_required=True → 自动偷取进 pending 池（issue #89：默认）
+        # audit_required=False → 跳过审核，直接入库
+        cfg = getattr(plugin_instance, "plugin_config", None)
+        audit_required = bool(getattr(cfg, "audit_required", True)) if cfg else True
+        to_pending = audit_required
         imgs: list[Image] = [comp for comp in event.get_messages() if isinstance(comp, Image)]
         store_urls = self._extract_store_emoji_urls(event)
         if not imgs and not store_urls:
@@ -584,7 +589,7 @@ class EventHandler:
                         is_temp=True,
                         is_platform_emoji=True,
                         extra_meta=extra_meta,
-                        to_pending=True,
+                        to_pending=to_pending,
                     )
                 )
             if process_tasks:
@@ -629,7 +634,7 @@ class EventHandler:
                         is_temp=True,
                         is_platform_emoji=True,
                         extra_meta=extra_meta,
-                        to_pending=True,
+                        to_pending=to_pending,
                     )
                 )
             if store_process_tasks:
@@ -641,7 +646,7 @@ class EventHandler:
                     if success and isinstance(idx, dict):
                         merge_result_idx(idx)
         if merged_idx:
-            await plugin_instance._save_index(merged_idx)
+            await plugin_instance.index_manager.save_index(merged_idx)
 
     async def _handle_force_capture(
         self,
@@ -674,7 +679,7 @@ class EventHandler:
                     event, temp_path, is_temp=True, is_platform_emoji=True
                 )
                 if success and isinstance(idx, dict):
-                    await plugin_instance._save_index(idx)
+                    await plugin_instance.index_manager.save_index(idx)
                     await event.send(MessageChain([Plain(text="✅ 已收录并自动分类入库")]))
                 else:
                     await event.send(

@@ -733,6 +733,22 @@ createApp({
             pendingSelectedImages.value = s;
         };
 
+        const allPendingSelected = Vue.computed(() => {
+            const imgs = pendingImages.value;
+            if (!imgs.length) return false;
+            const selected = pendingSelectedImages.value;
+            return imgs.every(img => selected.has(img.id));
+        });
+
+        const toggleSelectAllPending = () => {
+            const currentIds = new Set(pendingImages.value.map(img => img.id));
+            if (allPendingSelected.value) {
+                pendingSelectedImages.value = new Set();
+            } else {
+                pendingSelectedImages.value = currentIds;
+            }
+        };
+
         const loadAll = async () => {
             await fetchStats();
             await fetchEmotions();
@@ -1663,6 +1679,8 @@ createApp({
             rejectPendingBatch,
             togglePendingBatchMode,
             togglePendingSelection,
+            allPendingSelected,
+            toggleSelectAllPending,
 
             // issue #87：审核区编辑
             pendingEditOpen,

@@ -210,6 +210,7 @@
                 "confirm_move": "确认移动",
                 "confirm_set": "确认设置",
                 "select_all": "全选",
+                "deselect_all": "取消全选",
                 "move": "移动",
                 "repair_origin": "修复来源",
                 "confirm": "确认"

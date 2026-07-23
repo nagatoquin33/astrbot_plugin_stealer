@@ -19,6 +19,8 @@ except ImportError:
 
 from astrbot.api import logger
 
+from .core.util.safe_io import safe_remove_file
+
 PLUGIN_NAME = "astrbot_plugin_stealer"
 
 
@@ -92,45 +94,18 @@ class PluginAPI:
         return self.plugin.plugin_config
 
     def _get_index(self) -> dict[str, Any]:
+        """从数据库读取完整索引；DB 不存在时返回空 dict。"""
         db = self._db
         if db:
-            idx = db.get_index_cache_readonly()
-            if idx:
-                return idx
-        return self._cache.get_index_cache_readonly()
-
-    async def _sync_index(self) -> bool:
-        db = self._db
-        if not db:
-            return True
-        try:
-            idx = self._cache.get_index_cache_readonly()
-            if hasattr(db, "sync_index"):
-                await db.sync_index(idx)
-                return True
-            if hasattr(db, "save_index"):
-                await db.save_index(idx)
-                return True
-        except Exception as e:
-            logger.error(f"同步索引失败: {e}")
-        return False
-
-    async def _update_index(self, updater) -> dict:
-        current = dict(self._get_index())
-        result = updater(current)
-        if hasattr(result, "__await__"):
-            await result
-        await self._cache.set_cache("index_cache", current, persist=False)
-        await self._sync_index()
-        return current
+            return db.get_index_cache_readonly()
+        return {}
 
     def _build_full_index_snapshot(self) -> dict[str, Any]:
-        index: dict[str, Any] = {}
+        """获取完整索引快照。"""
         db = self._db
         if db:
-            index.update(db.get_index_cache_readonly())
-        index.update(self._cache.get_index_cache_readonly())
-        return index
+            return db.get_index_cache_readonly()
+        return {}
 
     def _find_index_entry_by_hash(self, img_hash: str) -> tuple[str, dict[str, Any]] | None:
         db = self._db
@@ -143,19 +118,12 @@ class PluginAPI:
                 return path, dict(meta)
         return None
 
-    async def _refresh_index_cache_from_db(self) -> None:
-        db = self._db
-        if db:
-            await self._cache.set_cache(
-                "index_cache", db.get_index_cache_readonly(), persist=False
-            )
-
     def _invalidate_bm25(self) -> None:
         """写入操作后使 BM25 索引失效，下次搜索时强制重建。
         防止批量导入/删除/更新后 BM25 仍使用旧语料，导致新表情无法被检索到。
         """
         try:
-            selector = getattr(self.plugin, "emoji_selector", None)
+            selector = getattr(self.plugin, "meme_selector", None)
             if selector is not None:
                 selector._invalidate_bm25_index()
         except Exception as e:
@@ -178,38 +146,22 @@ class PluginAPI:
             return False
 
     async def _delete_index_paths(self, paths: list[str]) -> None:
+        """通过 db_service 删除索引条目。"""
         db = self._db
-        if db and hasattr(db, "delete_paths"):
-            await db.delete_paths(paths)
-            await self._refresh_index_cache_from_db()
-            self._invalidate_bm25()
+        if db is None or not hasattr(db, "delete_paths"):
+            logger.warning("[PluginAPI] DB 不可用，跳过索引删除")
             return
-        index = self._build_full_index_snapshot()
-        for path in paths:
-            index.pop(path, None)
-        await self._cache.set_cache("index_cache", index, persist=False)
-        await self._sync_index()
+        await db.delete_paths(paths)
         self._invalidate_bm25()
 
     async def _update_index_path(self, path: str, updates: dict[str, Any]) -> bool:
         db = self._db
-        if db and hasattr(db, "update_path"):
-            ok = await db.update_path(path, updates)
-            if ok:
-                await self._refresh_index_cache_from_db()
-                self._invalidate_bm25()
-            return ok
-
-        index = self._build_full_index_snapshot()
-        meta = index.get(path)
-        if not isinstance(meta, dict):
+        if db is None or not hasattr(db, "update_path"):
             return False
-        meta.update(updates)
-        index[path] = meta
-        await self._cache.set_cache("index_cache", index, persist=False)
-        await self._sync_index()
-        self._invalidate_bm25()
-        return True
+        ok = await db.update_path(path, updates)
+        if ok:
+            self._invalidate_bm25()
+        return ok
 
     async def _move_index_path(
         self,
@@ -219,26 +171,12 @@ class PluginAPI:
         updates: dict[str, Any] | None = None,
     ) -> bool:
         db = self._db
-        if db and hasattr(db, "move_path"):
-            ok = await db.move_path(old_path, new_path, category, updates or {})
-            if ok:
-                await self._refresh_index_cache_from_db()
-                self._invalidate_bm25()
-            return ok
-
-        index = self._build_full_index_snapshot()
-        meta = index.pop(old_path, None)
-        if not isinstance(meta, dict):
+        if db is None or not hasattr(db, "move_path"):
             return False
-        meta["path"] = new_path
-        meta["category"] = category
-        if updates:
-            meta.update(updates)
-        index[new_path] = meta
-        await self._cache.set_cache("index_cache", index, persist=False)
-        await self._sync_index()
-        self._invalidate_bm25()
-        return True
+        ok = await db.move_path(old_path, new_path, category, updates or {})
+        if ok:
+            self._invalidate_bm25()
+        return ok
 
     @staticmethod
     def _unique_path(target_dir: Path, filename: str) -> Path:
@@ -445,7 +383,7 @@ class PluginAPI:
                 continue
             try:
                 if path.is_file():
-                    ok = await self.plugin._safe_remove_file(str(path))
+                    ok = await safe_remove_file(str(path))
                     if ok:
                         removed += 1
             except Exception as e:
@@ -552,16 +490,13 @@ class PluginAPI:
             inserted = await db.insert_batch([data])
             if inserted <= 0:
                 try:
-                    await self.plugin._safe_remove_file(str(file_path))
+                    await safe_remove_file(str(file_path))
                 finally:
                     raise RuntimeError("insert image metadata failed")
-            await self._refresh_index_cache_from_db()
             self._invalidate_bm25()
         else:
-            index = self._build_full_index_snapshot()
-            index[str(file_path)] = data
-            await self._cache.set_cache("index_cache", index, persist=False)
-            self._invalidate_bm25()
+            logger.warning("[PluginAPI] DB 不可用，无法插入图片元数据")
+            raise RuntimeError("db_service unavailable for insert_batch")
         return {"hash": img_hash, "category": final_cat}
 
     # ── Image serving ─────────────────────────────────────────
@@ -899,7 +834,7 @@ class PluginAPI:
                 "source": str(row.get("source", "") or ""),
                 "origin_target": str(row.get("origin_target", "") or ""),
                 "scope_mode": str(row.get("scope_mode", "public") or "public"),
-                "created_at": int(row.get("created_at", 0) or int(time.time())),
+                "created_at": int(time.time()),
                 "use_count": 0,
                 "last_used_at": 0,
                 "tags": list(row.get("tags", []) or []),
@@ -913,7 +848,7 @@ class PluginAPI:
             # 审核通过后写入嵌入向量（仅在开启嵌入检索时，失败不阻塞）
             if getattr(self.plugin, "enable_embedding_search", True):
                 try:
-                    smart_service = getattr(getattr(self.plugin, "emoji_selector", None), "_smart_select_service", None)
+                    smart_service = getattr(getattr(self.plugin, "meme_selector", None), "_smart_select_service", None)
                     if smart_service and smart_service._embedding_service:
                         await smart_service._embedding_service.insert_emoji(cat_path, emoji_entry)
                         smart_service._invalidate_embedding_index()
@@ -952,12 +887,9 @@ class PluginAPI:
                 elif msg and msg not in ("pending not found",):
                     errors.append(f"id={pending_id}: {msg}")
 
-            # 审核通过后刷新缓存索引（从 DB 重载，而非 sync_index 的反向覆盖）
+            # 审核通过后刷新 BM25 缓存索引
             try:
-                cache = getattr(self.plugin, "cache_service", None)
-                if cache and hasattr(cache, "mark_dirty"):
-                    cache.mark_dirty()
-                selector = getattr(self.plugin, "emoji_selector", None)
+                selector = getattr(self.plugin, "meme_selector", None)
                 if selector and hasattr(selector, "_invalidate_bm25_index"):
                     selector._invalidate_bm25_index()
             except Exception as e:
@@ -995,7 +927,7 @@ class PluginAPI:
                 h = str(r.get("hash", "") or "")
                 if p:
                     try:
-                        if await self.plugin._safe_remove_file(p):
+                        if await safe_remove_file(p):
                             deleted += 1
                     except Exception as e:
                         logger.warning(f"拒绝时删除文件失败 {p}: {e}")
@@ -1124,7 +1056,8 @@ class PluginAPI:
                 origin_target=metadata["origin_target"],
             )
             if not self._db:
-                await self._sync_index()
+                logger.warning("[PluginAPI] DB 不可用，无法上传图片")
+                return jsonify({"success": False, "error": "db_service unavailable"}), 503
             return jsonify({"success": True, "image": image, "hash": image["hash"]})
         except Exception as e:
             logger.error(f"上传图片失败: {e}", exc_info=True)
@@ -1210,7 +1143,7 @@ class PluginAPI:
                 deleted_paths: list[str] = []
                 for target in removed:
                     try:
-                        if await self.plugin._safe_remove_file(target):
+                        if await safe_remove_file(target):
                             deleted_paths.append(target)
                     except Exception as e:
                         logger.warning(f"删除文件失败: {e}")
@@ -1240,7 +1173,7 @@ class PluginAPI:
             deleted_paths: list[str] = []
             for p in removed_paths:
                 try:
-                    if await self.plugin._safe_remove_file(p):
+                    if await safe_remove_file(p):
                         deleted_paths.append(p)
                 except Exception as e:
                     logger.warning(f"删除文件失败 {p}: {e}")
@@ -1469,7 +1402,9 @@ class PluginAPI:
                 task["processed"] += 1
                 task["updated_at"] = self._task_now()
             if not self._db:
-                await self._sync_index()
+                task["status"] = "failed"
+                task["error"] = "db_service unavailable"
+                return
             task["status"] = "completed"
             task["completed_at"] = self._task_now()
             task["updated_at"] = task["completed_at"]
@@ -1748,12 +1683,7 @@ class PluginAPI:
             if not keys:
                 return jsonify({"success": False, "error": "分类列表无效"})
 
-            if hasattr(self.plugin, "_update_config_from_dict"):
-                self.plugin._update_config_from_dict({"categories": keys})
-            else:
-                self._cfg.categories = keys
-                if hasattr(self.plugin, "categories"):
-                    self.plugin.categories = keys
+            self.plugin.update_config({"categories": keys})
 
             cur_info = dict(getattr(self._cfg, "category_info", {}) or {})
             self._cfg.category_info = {k: cur_info.get(k, {}) for k in keys}
@@ -1788,7 +1718,7 @@ class PluginAPI:
                     continue
                 old = Path(p)
                 try:
-                    if not old.exists() or await self.plugin._safe_remove_file(str(old)):
+                    if not old.exists() or await safe_remove_file(str(old)):
                         deleted_paths.append(p)
                         deleted += 1
                         h = m.get("hash")
@@ -1811,12 +1741,7 @@ class PluginAPI:
                 del self._cfg.category_info[key]
                 self._cfg.save_category_info()
 
-            if hasattr(self.plugin, "_update_config_from_dict"):
-                self.plugin._update_config_from_dict({"categories": updated})
-            else:
-                self._cfg.categories = updated
-                if hasattr(self.plugin, "categories"):
-                    self.plugin.categories = updated
+            self.plugin.update_config({"categories": updated})
 
             return jsonify(
                 {"success": True, "deleted": key, "categories": updated, "deleted_files": deleted}

@@ -210,6 +210,7 @@
                 "confirm_move": "Confirm Move",
                 "confirm_set": "Confirm Set",
                 "select_all": "Select All",
+                "deselect_all": "Deselect All",
                 "move": "Move",
                 "repair_origin": "Repair Origin",
                 "confirm": "Confirm"

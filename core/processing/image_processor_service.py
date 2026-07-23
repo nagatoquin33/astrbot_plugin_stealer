@@ -10,6 +10,8 @@ from typing import Any
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
+from ..util.safe_io import safe_remove_file
+
 try:
     from PIL import Image as PILImage
     from PIL import ImageDraw as PILImageDraw
@@ -313,7 +315,7 @@ class ImageProcessorService:
         # 立即删除raw目录中的原始文件
         try:
             if os.path.exists(raw_path):
-                await self.plugin._safe_remove_file(raw_path)
+                await safe_remove_file(raw_path)
                 logger.debug(f"已删除已分类的原始文件: {raw_path}")
         except Exception as e:
             logger.warning(f"删除已分类的原始文件失败: {raw_path}, 错误: {e}")
@@ -348,7 +350,7 @@ class ImageProcessorService:
         # 入库后写入嵌入向量（失败不阻塞）
         try:
             smart_service = getattr(
-                getattr(self.plugin, "emoji_selector", None),
+                getattr(self.plugin, "meme_selector", None),
                 "_smart_select_service", None
             )
             if smart_service and smart_service._embedding_service:
@@ -392,19 +394,19 @@ class ImageProcessorService:
             if db.get_emoji_by_hash(hash_val):
                 logger.debug(f"pending: 哈希已存在于正式库，跳过: {hash_val}")
                 if is_temp and os.path.exists(file_path):
-                    await self.plugin._safe_remove_file(file_path)
+                    await safe_remove_file(file_path)
                 return False, None
             # 查待审核池
             if db.get_pending_by_hash(hash_val):
                 logger.debug(f"pending: 哈希已在待审核池中，跳过: {hash_val}")
                 if is_temp and os.path.exists(file_path):
-                    await self.plugin._safe_remove_file(file_path)
+                    await safe_remove_file(file_path)
                 return False, None
             # 查黑名单
             if hasattr(db, "blacklisted_hashes") and hash_val in db.blacklisted_hashes():
                 logger.debug(f"pending: 哈希已在黑名单中，跳过: {hash_val}")
                 if is_temp and os.path.exists(file_path):
-                    await self.plugin._safe_remove_file(file_path)
+                    await safe_remove_file(file_path)
                 return False, None
 
         pending_dir = self.plugin_config.ensure_pending_dir()
@@ -450,13 +452,13 @@ class ImageProcessorService:
             pending_id = await self.plugin.db_service.insert_pending(meta)
         except Exception as e:
             logger.error(f"pending: 写 emoji_pending 失败，回滚删除 pending 文件: {e}")
-            await self.plugin._safe_remove_file(pending_path)
+            await safe_remove_file(pending_path)
             return False, None
 
         if pending_id is None:
             # 同 path 已在 pending（UNIQUE 冲突）：删除本次落盘的多余文件，保持池内唯一
             logger.debug(f"pending: 已存在同路径记录，移除重复文件: {pending_path}")
-            await self.plugin._safe_remove_file(pending_path)
+            await safe_remove_file(pending_path)
             return False, None
 
         logger.info(
@@ -501,6 +503,8 @@ class ImageProcessorService:
         if not base_path.exists():
             logger.warning(f"图片文件不存在: {file_path}")
             return False, None
+
+        raw_path: str | None = None  # 在异常处理中用于清理孤儿 raw 文件
 
         # 1. 并行计算 SHA256 和感知哈希（锁外）
         hash_val, phash_val = await asyncio.gather(
@@ -583,8 +587,12 @@ class ImageProcessorService:
         except Exception as e:
             logger.error(f"处理图片失败 [{file_path}]: {e}")
             # 清理临时文件
-            if is_temp and os.path.exists(file_path):
-                await self.plugin._safe_remove_file(file_path)
+            if is_temp:
+                if os.path.exists(file_path):
+                    await safe_remove_file(file_path)
+                # 如果已移入 raw 目录，原路径可能已不存在，同时清理 raw 路径
+                if raw_path is not None and raw_path != file_path and os.path.exists(raw_path):
+                    await safe_remove_file(raw_path)
             raise
         finally:
             # 8. 清理处理中标记（确保总是清理）
@@ -609,7 +617,7 @@ class ImageProcessorService:
 
         async def _cleanup_temp():
             if is_temp and os.path.exists(file_path):
-                await self.plugin._safe_remove_file(file_path)
+                await safe_remove_file(file_path)
 
         # 持久化索引
         if hasattr(self.plugin, "cache_service"):
@@ -741,18 +749,18 @@ class ImageProcessorService:
         if category == self.CATEGORY_FILTERED or emotion == self.CATEGORY_FILTERED:
             logger.debug(f"图片过滤不通过（{source}）: {hash_val}")
             if is_temp and os.path.exists(file_path):
-                await self.plugin._safe_remove_file(file_path)
+                await safe_remove_file(file_path)
             elif not from_cache and os.path.exists(file_path):
-                await self.plugin._safe_remove_file(file_path)
+                await safe_remove_file(file_path)
             return False, None
 
         # 非表情包
         if category == self.CATEGORY_NOT_EMOJI or emotion == self.CATEGORY_NOT_EMOJI:
             logger.debug(f"非表情包（{source}）: {hash_val}")
             if is_temp and os.path.exists(file_path):
-                await self.plugin._safe_remove_file(file_path)
+                await safe_remove_file(file_path)
             elif not from_cache and os.path.exists(file_path):
-                await self.plugin._safe_remove_file(file_path)
+                await safe_remove_file(file_path)
             return False, None
 
         # 有效分类
@@ -788,7 +796,7 @@ class ImageProcessorService:
         # 无效分类
         logger.warning(f"分类无效（{source}）: {category!r}，清理文件")
         if os.path.exists(file_path):
-            await self.plugin._safe_remove_file(file_path)
+            await safe_remove_file(file_path)
         return False, None
 
     async def steal_image_direct(
@@ -829,7 +837,7 @@ class ImageProcessorService:
             normalized_desc = f"来自群聊的{cat_display}表情包"
 
         # 1. 加载完整索引（避免覆盖已有数据）
-        full_idx = await self.plugin._load_index()
+        full_idx = await self.plugin.index_manager.load_index()
 
         # 2. 计算哈希
         hash_val = await self._compute_hash(file_path)
@@ -863,7 +871,7 @@ class ImageProcessorService:
             )
 
             if success and merged_idx is not None:
-                await self.plugin._save_index(merged_idx)
+                await self.plugin.index_manager.save_index(merged_idx)
                 tag_hint = f"，标签: {', '.join(normalized_tags)}" if normalized_tags else ""
                 scene_hint = f"，场景: {', '.join(normalized_scenes)}" if normalized_scenes else ""
                 return True, f"偷取成功！已入库到分类 '{category}'{tag_hint}{scene_hint}"
@@ -1066,33 +1074,6 @@ class ImageProcessorService:
     async def _file_to_gif_base64(self, file_path: str) -> str:
         """将文件转换为 GIF 格式的 base64 编码（门面方法，委托给 ImageRenderService）。"""
         return await self._render_service.file_to_gif_base64(file_path)
-
-    async def safe_remove_file(self, file_path: str) -> bool:
-        """安全删除文件。
-
-        Args:
-            file_path: 文件路径
-
-        Returns:
-            bool: 是否删除成功
-        """
-        try:
-            if os.path.exists(file_path):
-                await asyncio.to_thread(os.remove, file_path)
-                logger.debug(f"已删除文件: {file_path}")
-                return True
-            logger.debug(f"文件不存在，无需删除: {file_path}")
-            return True
-        except FileNotFoundError:
-            # 文件可能被其他进程删除，属于正常情况
-            logger.debug(f"文件已被删除: {file_path}")
-            return True
-        except PermissionError as e:
-            logger.warning(f"删除文件权限不足: {file_path}, 错误: {e}")
-            return False
-        except Exception as e:
-            logger.error(f"删除文件失败: {file_path}, 错误: {e}")
-            return False
 
     async def _resolve_vision_provider(self, event=None) -> str | None:
         """统一的视觉模型 provider 解析逻辑。
