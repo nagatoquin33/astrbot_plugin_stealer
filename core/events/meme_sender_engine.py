@@ -7,9 +7,10 @@ import re
 from typing import Any
 
 from astrbot.api.message_components import Image
+from astrbot.core.message.message_event_result import MessageChain
 
 from astrbot.api import logger
-from astrbot.api.event import AstrMessageEvent, MessageChain
+from astrbot.api.event import AstrMessageEvent
 from astrbot.api.message_components import Plain
 
 
