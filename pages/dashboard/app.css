@@ -321,7 +321,8 @@ h2 {
 }
 
 .category-count {
-    font-family: 'Cinzel', serif;
+    font-family: inherit;
+    font-variant-numeric: tabular-nums;
     font-size: 0.75rem;
     color: var(--text-secondary);
     background: var(--bg-base);
