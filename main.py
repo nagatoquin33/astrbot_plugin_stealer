@@ -17,6 +17,7 @@ from astrbot.api.event.filter import (
 )
 from astrbot.api.message_components import Image as MessageImage
 from astrbot.api.star import Context, Star
+from astrbot.core.agent.message import TextPart
 
 from .cache_service import CacheService
 from .core.commands.command_handler import CommandHandler
@@ -1211,7 +1212,7 @@ class Main(Star):
 {self._persona_marker}
 """
 
-            req.system_prompt += emotion_instruction
+            req.extra_user_content_parts.append(TextPart(text=emotion_instruction))
 
         except Exception as e:
             logger.error(f"[Stealer] 注入情绪选择指令失败: {e}", exc_info=True)
