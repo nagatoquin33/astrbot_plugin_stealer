@@ -366,41 +366,41 @@ export const TEMPLATE = `
                             <span v-for="tag in item.tags" :key="tag" class="tag pending-tag">{{ tag }}</span>
                         </div>
                         <div class="pending-actions" v-if="!pendingBatchMode">
-                            <button @click.stop="approvePending(item.id)" class="pending-btn approve-btn"
-                                :title="t('pages.dashboard.actions.approve', 'Approve')">
-                                <svg style="width:14px;height:14px" fill="none" stroke="currentColor"
-                                    viewBox="0 0 24 24">
+                            <button type="button" @click.stop="approvePending(item.id)"
+                                class="pending-btn approve-btn"
+                                :aria-label="t('pages.dashboard.actions.approve', 'Approve')"
+                                :data-tooltip="t('pages.dashboard.actions.approve', 'Approve')">
+                                <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"
                                         d="M5 13l4 4L19 7" />
                                 </svg>
-                                {{ t('pages.dashboard.actions.approve', 'Approve') }}
                             </button>
-                            <button @click.stop="openPendingEdit(item)" class="pending-btn edit-btn"
-                                :title="t('pages.dashboard.actions.edit_approve', 'Edit & approve')">
-                                <svg style="width:14px;height:14px" fill="none" stroke="currentColor"
-                                    viewBox="0 0 24 24">
+                            <button type="button" @click.stop="openPendingEdit(item)"
+                                class="pending-btn edit-btn"
+                                :aria-label="t('pages.dashboard.actions.edit_approve', 'Edit & approve')"
+                                :data-tooltip="t('pages.dashboard.actions.edit_approve', 'Edit & approve')">
+                                <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                         d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
                                 </svg>
-                                {{ t('pages.dashboard.actions.edit', 'Edit') }}
                             </button>
-                            <button @click.stop="rejectPending(item.id)" class="pending-btn reject-btn"
-                                :title="t('pages.dashboard.actions.delete', 'Delete')">
-                                <svg style="width:14px;height:14px" fill="none" stroke="currentColor"
-                                    viewBox="0 0 24 24">
+                            <button type="button" @click.stop="rejectPending(item.id)"
+                                class="pending-btn reject-btn"
+                                :aria-label="t('pages.dashboard.actions.delete', 'Delete')"
+                                :data-tooltip="t('pages.dashboard.actions.delete', 'Delete')">
+                                <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                         d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                                 </svg>
-                                {{ t('pages.dashboard.actions.delete', 'Delete') }}
                             </button>
-                            <button @click.stop="rejectPending(item.id, true)" class="pending-btn reject-bl-btn"
-                                :title="t('pages.dashboard.actions.blacklist', 'Blacklist')">
-                                <svg style="width:14px;height:14px" fill="none" stroke="currentColor"
-                                    viewBox="0 0 24 24">
+                            <button type="button" @click.stop="rejectPending(item.id, true)"
+                                class="pending-btn reject-bl-btn"
+                                :aria-label="t('pages.dashboard.actions.blacklist', 'Blacklist')"
+                                :data-tooltip="t('pages.dashboard.actions.blacklist', 'Blacklist')">
+                                <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                         d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
                                 </svg>
-                                {{ t('pages.dashboard.actions.blacklist', 'Blacklist') }}
                             </button>
                         </div>
                     </div>
