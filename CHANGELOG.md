@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.7] - 2026-07-23
+
+### changed
+- `TextPart` 对齐 livingmemory 新版本用法 (`req.extra_user_content_parts`)
+- `MessageChain` 改用公共 re-export 路径 `astrbot.api.event`
+- `_conf_schema.json` 修正为 UTF-8 编码
+
 ## [2.7.6] - 2026-07-23
 
 ### changed
