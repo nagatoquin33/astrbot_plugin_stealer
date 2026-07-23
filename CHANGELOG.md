@@ -26,13 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 审核池批量模式「全选 / 取消全选」按钮
 - i18n 新增 `deselect_all` (zh-CN / en-US)
 
-### tests
-- 136/136 全部通过
+## [2.7.5] - 2026-07-21
 
 ### fixed
 - 修复 LLM `steal_meme` 工具传入相对路径（如 `./image.png`）时返回"图片文件不存在"的问题 (#88)
-  - `_resolve_steal_image_ref` 现在对非 URL 形式的 `image_ref` 先在当前消息的 `Image` 组件中按 basename / 绝对路径 / `convert_to_file_path()` 解析，再回退到原值
-  - 解析失败时错误提示附带"请从当前消息的 Image URL 中选择"提示，便于 LLM 自纠
 
 ### added
 - WebUI 审核区信息编辑功能 (#87)：在每张待审核卡片上新增 ✏️ 编辑按钮，弹窗可修改分类 / 作用域 / 描述 / 标签 / 场景
