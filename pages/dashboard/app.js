@@ -52,6 +52,7 @@ createApp({
 
         const pendingImages = ref([]);
         const pendingTotal = ref(0);
+        const pendingCategoryTotal = ref(0);
         const pendingCategories = ref([]);
         const pendingStats = reactive({ pending: 0, capacity: 200, paused: false });
         const pendingLoading = ref(false);
@@ -534,9 +535,16 @@ createApp({
                 });
                 const res = await apiFetch('api/pending?' + params.toString());
                 const data = await res.json();
-                if (!data.success) { pendingImages.value = []; pendingTotal.value = 0; return; }
+                if (!data.success) {
+                    pendingImages.value = [];
+                    pendingTotal.value = 0;
+                    pendingCategoryTotal.value = 0;
+                    return;
+                }
                 const nextImages = data.images || [];
                 const nextTotal = Number(data.total || 0);
+                const nextCategories = normalizeCategories(data.categories);
+                const nextCategoryTotal = Number(data.category_total);
                 const lastPage = Math.max(1, Math.ceil(nextTotal / pendingPageSize.value));
                 if (page > lastPage && nextTotal > 0) {
                     pendingFetchLock = false;
@@ -545,7 +553,10 @@ createApp({
                 pendingCurrentPage.value = page;
                 pendingImages.value = nextImages;
                 pendingTotal.value = nextTotal;
-                pendingCategories.value = normalizeCategories(data.categories);
+                pendingCategories.value = nextCategories;
+                pendingCategoryTotal.value = Number.isFinite(nextCategoryTotal)
+                    ? nextCategoryTotal
+                    : nextCategories.reduce((sum, category) => sum + category.count, 0);
                 nextImages.forEach(img => { if (img.hash) loadImageData(img.hash); });
             } catch (e) { console.error(e); }
             finally { pendingLoading.value = false; pendingFetchLock = false; }
@@ -1691,6 +1702,7 @@ createApp({
             total,
             pendingImages,
             pendingTotal,
+            pendingCategoryTotal,
             pendingCategories,
             pendingStats,
             pendingLoading,

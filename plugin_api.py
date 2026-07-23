@@ -752,7 +752,15 @@ class PluginAPI:
         try:
             db = self._db
             if not db or not hasattr(db, "get_pending_paginated"):
-                return jsonify({"success": True, "images": [], "total": 0, "categories": {}})
+                return jsonify(
+                    {
+                        "success": True,
+                        "images": [],
+                        "total": 0,
+                        "category_total": 0,
+                        "categories": {},
+                    }
+                )
 
             page = request.args.get("page", 1, type=int)
             page_size = request.args.get("size", 50, type=int)
@@ -771,6 +779,7 @@ class PluginAPI:
                     "success": True,
                     "images": images,
                     "total": total,
+                    "category_total": sum(int(count) for count in cat_counts.values()),
                     "categories": self._build_categories_list(cat_counts),
                 }
             )

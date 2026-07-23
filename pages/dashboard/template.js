@@ -109,7 +109,7 @@ export const TEMPLATE = `
                 <div class="category-item" :class="{ active: pendingCategory === '' }"
                     @click="selectPendingCategory('')">
                     <span class="category-name">{{ t('pages.dashboard.categories.all', 'All') }}</span>
-                    <span class="category-count">{{ pendingTotal }}</span>
+                    <span class="category-count">{{ pendingCategoryTotal }}</span>
                 </div>
                 <div v-for="cat in pendingCategories" :key="cat.key" class="category-item"
                     :class="{ active: pendingCategory === cat.key }"
