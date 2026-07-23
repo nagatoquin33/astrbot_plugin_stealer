@@ -1248,8 +1248,6 @@ select.codex-input {
         padding: 8px 6px;
     }
 
-    .sidebar:hover { width: var(--sidebar-expanded); }
-
     .item-stats {
         width: 100%;
         border-left: none;
@@ -1267,6 +1265,12 @@ select.codex-input {
 
     .item-preview img {
         max-height: 350px;
+    }
+}
+
+@media (hover: hover) and (min-width: 769px) and (max-width: 1024px) {
+    .sidebar:hover {
+        width: var(--sidebar-expanded);
     }
 }
 
