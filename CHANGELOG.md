@@ -8,9 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.7.7] - 2026-07-23
 
 ### changed
-- `TextPart` 对齐 livingmemory 新版本用法 (`req.extra_user_content_parts`)
-- `MessageChain` 改用公共 re-export 路径 `astrbot.api.event`
-- `_conf_schema.json` 修正为 UTF-8 编码
+- 优化代码规范
+- 修正部分编码错误
 
 ## [2.7.6] - 2026-07-23
 
