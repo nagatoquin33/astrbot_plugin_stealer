@@ -8,7 +8,6 @@ import re
 from astrbot.api import logger
 
 from .semantic_schema import (
-    CATEGORY_OTHER,
     MAX_DESC_CHARS,
     MAX_EMOTIONS,
     MAX_OVERLAY_CHARS,
@@ -64,6 +63,25 @@ class ClassificationParser:
                 break
         return result
 
+    def sanitize_scenes(self, values: Any, overlay_text: str = "") -> list[str]:
+        """scenes 保留适用对话句，最多 40 字；优先放入图上文字。"""
+        overlay_scene = clip_chars(str(overlay_text or "").strip(), 40)
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        for item in self.normalize_label_list(values, MAX_SCENES + 2):
+            if len(item) > 40:
+                continue
+            if item in seen:
+                continue
+            seen.add(item)
+            cleaned.append(item)
+            if len(cleaned) >= MAX_SCENES:
+                break
+        if overlay_scene and overlay_scene not in seen:
+            cleaned.insert(0, overlay_scene)
+            cleaned = cleaned[:MAX_SCENES]
+        return cleaned
+
     def _normalize_category(self, raw: str, *, fallback_other: bool = True) -> str:
         """将 VLM 返回的分类文本规范化为有效分类名（委托到 ImageProcessorService）。"""
         if self.plugin and hasattr(self.plugin, "image_processor_service"):
@@ -77,11 +95,17 @@ class ClassificationParser:
                     result = normalizer(raw)
                     if result:
                         return result
-                    return CATEGORY_OTHER if fallback_other else ""
+                    return self._fallback_category() if fallback_other else ""
         text = str(raw or "").strip().lower()
         if not text:
-            return CATEGORY_OTHER if fallback_other else ""
+            return self._fallback_category() if fallback_other else ""
         return text
+
+    def _fallback_category(self) -> str:
+        cfg = getattr(self.plugin, "plugin_config", None) if self.plugin else None
+        if cfg and hasattr(cfg, "closest_category"):
+            return cfg.closest_category("")
+        return "confused"
 
     def _parse_classification_response(
         self, response: str, file_path: str
@@ -122,7 +146,7 @@ class ClassificationParser:
 
         normalized_category = self._normalize_category(category, fallback_other=True)
         tags = self.normalize_label_list(tags, MAX_TAGS)
-        scenes = self.normalize_label_list(scenes, MAX_SCENES)
+        scenes = self.sanitize_scenes(scenes, overlay_text)
 
         extra_emotions = self.normalize_label_list(
             data.get("emotions", data.get("emotion_labels", [])),
@@ -223,7 +247,7 @@ class ClassificationParser:
             self.normalize_label_list(tags_result, MAX_TAGS),
             desc_result,
             category,
-            self.normalize_label_list(scenes_result, MAX_SCENES),
+            self.sanitize_scenes(scenes_result, overlay_text),
             overlay_text,
             emotions,
         )

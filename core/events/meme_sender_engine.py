@@ -415,8 +415,7 @@ class MemeSenderEngine:
                     user_message=user_message,
                 )
                 if isinstance(analyzed, EmotionQuery):
-                    if not analyzed.should_send:
-                        return
+                    # 是否发送仍由概率/冷却/意图门控决定，小模型只提供检索词和情绪先验。
                     if analyzed.emotion_priors:
                         final_emotions = analyzed.emotion_priors
                     if analyzed.search_query:

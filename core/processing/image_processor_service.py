@@ -11,7 +11,7 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
 from ..util.safe_io import safe_remove_file
-from .semantic_schema import CATEGORY_OTHER, MAX_DESC_CHARS, clip_chars
+from .semantic_schema import MAX_DESC_CHARS, clip_chars
 
 try:
     from PIL import Image as PILImage
@@ -46,7 +46,6 @@ class ImageProcessorService:
     # 分类结果常量
     CATEGORY_FILTERED = "过滤不通过"
     CATEGORY_NOT_EMOJI = "非表情包"
-    CATEGORY_OTHER = CATEGORY_OTHER
 
     # 缓存常量
     IMAGE_CACHE_MAX_SIZE = 500  # 最大缓存条目数
@@ -76,17 +75,17 @@ class ImageProcessorService:
         # 提示词配置：正常运行时由 prompts.json 加载并通过 update_config 注入，
         # 以下仅为 prompts.json 缺失时的最小化 fallback
         _FALLBACK_PROMPT = (
-            "分析表情包：从 `{emotion_list}` 中选择情绪分类。"
-            '返回JSON格式：{"category": "分类名", "tags": ["标签1", "标签2", "标签3", "标签4"], '
-            '"description": "画面描述", "scenes": ["场景1", "场景2"]}'
-            "tags 输出 2~4 个、scenes 输出 1~2 个，不要重复。"
+            "分析表情包：从 `{emotion_list}` 中选择情绪分类，每个分类机会均等。"
+            '返回JSON格式：{"category": "分类名", "tags": [], '
+            '"description": "画面描述", "overlay_text": "", "scenes": []}'
+            "tags 没有则 []。"
         )
         _FALLBACK_FILTER_PROMPT = (
             '审核图片是否含不当内容，不当则返回{"approved": false, "reason": "审核不通过"}。'
-            "否则从 `{emotion_list}` 中选择情绪分类。"
-            '返回JSON格式：{"approved": true, "category": "分类名", "tags": ["标签1", "标签2", "标签3", "标签4"], '
-            '"description": "画面描述", "scenes": ["场景1", "场景2"]}'
-            "tags 输出 2~4 个、scenes 输出 1~2 个，不要重复。"
+            "否则从 `{emotion_list}` 中选择情绪分类，每个分类机会均等。"
+            '返回JSON格式：{"approved": true, "category": "分类名", "tags": [], '
+            '"description": "画面描述", "overlay_text": "", "scenes": []}'
+            "tags 没有则 []。"
         )
 
         self.emoji_classification_prompt = getattr(
@@ -831,11 +830,14 @@ class ImageProcessorService:
                 await safe_remove_file(file_path)
             return False, None
 
-        if not category or (
-            category not in self.categories and category != self.CATEGORY_OTHER
-        ):
-            logger.info(f"分类无效（{source}）: {category!r}，归入 {self.CATEGORY_OTHER}")
-            category = self.CATEGORY_OTHER
+        if not category or category == "other" or category not in self.categories:
+            fallback = (
+                self.plugin_config.closest_category(category)
+                if self.plugin_config
+                else "confused"
+            )
+            logger.info(f"分类无效（{source}）: {category!r}，归入 {fallback}")
+            category = fallback
 
         semantic_meta = dict(extra_meta) if isinstance(extra_meta, dict) else {}
         if overlay_text:
@@ -901,7 +903,7 @@ class ImageProcessorService:
 
         if not category:
             return False, "分类为空"
-        if category not in self.categories and category != self.CATEGORY_OTHER:
+        if category == "other" or category not in self.categories:
             return False, f"分类 '{category}' 不在可用分类列表中"
 
         normalized_tags = [str(t).strip() for t in (tags or []) if t and str(t).strip()]
@@ -1019,15 +1021,22 @@ class ImageProcessorService:
     def _normalize_category(self, raw: str, *, fallback_other: bool = True) -> str:
         """将 VLM 返回的分类文本规范化为有效分类名。
 
-        无法识别时默认归入 other，避免因闭集分类失败丢图。
+        无法识别时收到最接近的已有情绪类，不再使用 other。
         支持处理带前缀的格式（如 "审核通过：surprised"），提取冒号后的内容。
         """
         raw = self._sanitize_model_scalar(raw).lower()
+        allowed = [key for key in (self.categories or []) if key != "other"]
 
-        if not raw or raw == "unknown":
+        def _fallback() -> str:
+            if self.plugin_config:
+                return self.plugin_config.closest_category(raw)
+            return "confused"
+
+        if not raw or raw == "unknown" or raw == "other":
             if fallback_other:
-                logger.debug("[分类规范化] 空分类，归入 other")
-                return self.CATEGORY_OTHER
+                mapped = _fallback()
+                logger.debug(f"[分类规范化] {raw!r} 归入 {mapped}")
+                return mapped
             logger.debug(f"[分类规范化] 分类失败: {raw!r}")
             return ""
 
@@ -1040,21 +1049,19 @@ class ImageProcessorService:
         if self.plugin_config:
             try:
                 normalized = self.plugin_config.normalize_category_strict(raw)
-                if normalized:
-                    if normalized in self.categories or normalized == self.CATEGORY_OTHER:
-                        return normalized
-                    defaults = getattr(self.plugin_config, "DEFAULT_CATEGORIES", []) or []
-                    if normalized in defaults:
+                if normalized and normalized != "other":
+                    if normalized in allowed:
                         return normalized
             except Exception as e:
                 logger.debug(f"[分类规范化] 异常: {e}")
 
-        if raw in self.categories or raw == self.CATEGORY_OTHER:
+        if raw in allowed:
             return raw
 
         if fallback_other:
-            logger.info(f"无法识别情绪分类: {raw!r}，归入 {self.CATEGORY_OTHER}")
-            return self.CATEGORY_OTHER
+            mapped = _fallback()
+            logger.info(f"无法识别情绪分类: {raw!r}，归入 {mapped}")
+            return mapped
         logger.debug(f"无法识别情绪分类: {raw!r}")
         return ""
 

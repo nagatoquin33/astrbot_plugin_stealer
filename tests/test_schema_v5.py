@@ -200,14 +200,12 @@ def test_parser_label_normalization():
         "震惊",
         "瞪眼",
         "卧槽",
-        "无语",
-        "傻眼",
     ]
     # 字符串（中文逗号/顿号/分号分隔）+ 去重 + 截断
     assert n("开心，猫、猫；大笑", MAX_TAGS) == ["开心", "猫", "大笑"]
     # 超过上限截断
-    assert n(["a", "b", "c", "d", "e", "f", "g"], MAX_TAGS) == ["a", "b", "c", "d", "e", "f"]
-    assert n(["s1", "s2", "s3", "s4"], MAX_SCENES) == ["s1", "s2", "s3"]
+    assert n(["a", "b", "c", "d", "e", "f", "g"], MAX_TAGS) == ["a", "b", "c"]
+    assert n(["s1", "s2", "s3", "s4"], MAX_SCENES) == ["s1", "s2"]
     # 空/非列表
     assert n(None, MAX_TAGS) == []
     assert n(123, MAX_TAGS) == []

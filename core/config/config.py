@@ -50,15 +50,52 @@ class PluginConfig(BaseModel):
     enable_embedding_search: bool = True  # 启用嵌入向量检索；不可用时降级 BM25
     embedding_provider_id: str = ""  # 嵌入模型；留空则尝试框架首个 embedding provider
 
-    # === 智能选择：文字距离融合权重（见 _conf_schema.json _smart_section）===
-    sim_weight_ngram: float = 0.28  # n-gram Jaccard（语义词组重叠）
-    sim_weight_cosine: float = 0.25  # n-gram 词频余弦
-    sim_weight_substring: float = 0.12  # 子串包含匹配
-    sim_weight_char: float = 0.08  # 中文字符级 Jaccard（兜底）
-    sim_weight_edit: float = 0.27  # 编辑距离相似度
-    sim_negation_penalty: float = 0.25  # 否定词语义反转惩罚系数
+    # === 智能选择：文字距离融合权重（预设见 _conf_schema.json _smart_section）===
+    sim_weight_preset: str = "balanced"  # balanced / keyword / semantic / strict
+    sim_weight_ngram: float = 0.28  # 兼容旧配置保留，不再单独暴露
+    sim_weight_cosine: float = 0.25
+    sim_weight_substring: float = 0.12
+    sim_weight_char: float = 0.08
+    sim_weight_edit: float = 0.27
+    sim_negation_penalty: float = 0.25
 
-    # === 自定义提示词 ===
+    # 文字距离融合权重预设（键名对齐 configure_similarity）
+    SIM_WEIGHT_PRESETS: ClassVar[dict[str, dict[str, float]]] = {
+        "balanced": {
+            "ngram": 0.28,
+            "cosine": 0.25,
+            "substring": 0.12,
+            "char": 0.08,
+            "edit": 0.27,
+            "negation": 0.25,
+        },
+        "keyword": {
+            "ngram": 0.15,
+            "cosine": 0.10,
+            "substring": 0.35,
+            "char": 0.15,
+            "edit": 0.25,
+            "negation": 0.20,
+        },
+        "semantic": {
+            "ngram": 0.35,
+            "cosine": 0.35,
+            "substring": 0.05,
+            "char": 0.05,
+            "edit": 0.20,
+            "negation": 0.30,
+        },
+        "strict": {
+            "ngram": 0.20,
+            "cosine": 0.10,
+            "substring": 0.20,
+            "char": 0.20,
+            "edit": 0.30,
+            "negation": 0.35,
+        },
+    }
+
+    # === 自定义提示词（VLM 分类 + LLM 小模型情绪分析） ===
     custom_meme_classification_prompt: str = ""
     custom_meme_classification_with_filter_prompt: str = ""
     emotion_analysis_prompt: str = ""
@@ -113,7 +150,6 @@ class PluginConfig(BaseModel):
         "sigh",
         "thank",
         "dumb",
-        "other",
     ]
 
     DEFAULT_CATEGORY_INFO: ClassVar[dict[str, dict[str, str]]] = {
@@ -134,7 +170,6 @@ class PluginConfig(BaseModel):
         "sigh": {"name": "无奈", "desc": "叹气、摆烂、算了、心累"},
         "thank": {"name": "感谢", "desc": "道谢、感恩、收到、爱了"},
         "dumb": {"name": "无语", "desc": "呆住、傻眼、离谱、沉默"},
-        "other": {"name": "其他", "desc": "文字梗、模板图、角色图、无法归入明确情绪"},
     }
 
     DEFAULT_CATEGORY_ALIASES: ClassVar[dict[str, str]] = {
@@ -206,12 +241,6 @@ class PluginConfig(BaseModel):
         "傻眼": "dumb",
         "离谱": "dumb",
         "沉默": "dumb",
-        "其它": "other",
-        "其他": "other",
-        "其他表情": "other",
-        "其他情绪": "other",
-        "文字梗": "other",
-        "模板": "other",
     }
 
     def __init__(self, config: AstrBotConfig | None, context: Context | None = None):
@@ -329,6 +358,33 @@ class PluginConfig(BaseModel):
             cats = list(self.DEFAULT_CATEGORIES)
         return cats
 
+    def get_vlm_categories(self) -> list[str]:
+        """给 VLM 的分类列表，不含 other。"""
+        return [key for key in self.get_categories() if key != "other"]
+
+    def closest_category(self, raw: str) -> str:
+        """把无法识别的分类名收到最接近的已有情绪类，不再使用 other。"""
+        known = self.get_vlm_categories()
+        if not known:
+            known = [key for key in self.DEFAULT_CATEGORIES if key != "other"]
+        raw_l = str(raw or "").strip().lower()
+        if not raw_l:
+            return "confused" if "confused" in known else known[0]
+        strict = self.normalize_category_strict(raw_l)
+        if strict and strict != "other" and strict in known:
+            if strict != "other":
+                return strict
+        info_map = self.category_info or self.DEFAULT_CATEGORY_INFO
+        for key in known:
+            info = info_map.get(key) or {}
+            name = str(info.get("name") or "").strip().lower()
+            desc = str(info.get("desc") or "").strip().lower()
+            if name and (raw_l == name or raw_l in name or name in raw_l):
+                return key
+            if raw_l and raw_l in desc:
+                return key
+        return "confused" if "confused" in known else known[0]
+
     def _migrate_category_config(self) -> None:
         if not isinstance(self._data, dict):
             return
@@ -369,15 +425,23 @@ class PluginConfig(BaseModel):
             bool: 是否更新成功
         """
         try:
+            fields = getattr(type(self), "model_fields", None)
+            if fields is None:
+                fields = getattr(type(self), "__fields__", {})
+            valid_updates: dict[str, Any] = {}
             for key, value in updates.items():
+                if fields is not None and key not in fields:
+                    logger.debug(f"[Config] 忽略已移除的配置键: {key}")
+                    continue
+                valid_updates[key] = value
                 setattr(self, key, value)
 
             # 回写到 AstrBotConfig
             if hasattr(self, "_data") and self._data is not None:
                 if hasattr(self._data, "save_config"):
-                    self._data.save_config(updates)
+                    self._data.save_config(valid_updates)
                 elif isinstance(self._data, dict):
-                    self._data.update(updates)
+                    self._data.update(valid_updates)
             return True
         except Exception as e:
             logger.error(f"更新配置失败: {e}")
@@ -520,35 +584,28 @@ class PluginConfig(BaseModel):
         return self.DEFAULT_CATEGORY_ALIASES
 
     def get_prompts(self, default_prompts: dict[str, str] | None = None) -> dict[str, str]:
-        """获取提示词配置。
-
-        Args:
-            default_prompts: 默认提示词字典，用于在配置为空时回退
-
-        Returns:
-            dict: 包含两个提示词的字典
-        """
+        """获取 VLM 分类提示词；用户自定义非空时优先，为空回退到插件自带 prompts.json。"""
         custom_prompt = getattr(self, "custom_meme_classification_prompt", "")
         custom_filter_prompt = getattr(self, "custom_meme_classification_with_filter_prompt", "")
+        default_prompts = default_prompts or {}
 
         result = {
             "emoji_classification_prompt": "",
             "emoji_classification_with_filter_prompt": "",
         }
 
-        # 配置值优先
-        if custom_prompt and custom_prompt.strip():
-            result["emoji_classification_prompt"] = custom_prompt.strip()
+        if custom_prompt and str(custom_prompt).strip():
+            result["emoji_classification_prompt"] = str(custom_prompt).strip()
         elif default_prompts:
-            result["emoji_classification_prompt"] = default_prompts.get(
-                "EMOJI_CLASSIFICATION_PROMPT", ""
+            result["emoji_classification_prompt"] = str(
+                default_prompts.get("EMOJI_CLASSIFICATION_PROMPT", "") or ""
             )
 
-        if custom_filter_prompt and custom_filter_prompt.strip():
-            result["emoji_classification_with_filter_prompt"] = custom_filter_prompt.strip()
+        if custom_filter_prompt and str(custom_filter_prompt).strip():
+            result["emoji_classification_with_filter_prompt"] = str(custom_filter_prompt).strip()
         elif default_prompts:
-            result["emoji_classification_with_filter_prompt"] = default_prompts.get(
-                "EMOJI_CLASSIFICATION_WITH_FILTER_PROMPT", ""
+            result["emoji_classification_with_filter_prompt"] = str(
+                default_prompts.get("EMOJI_CLASSIFICATION_WITH_FILTER_PROMPT", "") or ""
             )
 
         return result

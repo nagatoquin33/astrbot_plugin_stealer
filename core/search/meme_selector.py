@@ -162,12 +162,23 @@ class MemeSelector:
         desc: str,
         tags: tuple[str, ...],
         scenes: tuple[str, ...] = (),
+        overlay: str = "",
+        character: str = "",
     ) -> tuple[str, frozenset[str], frozenset[str], frozenset[str], str]:
         desc_lower = str(desc or "").lower()
         tag_words = MemeSelector._collect_phrase_words(tags)
         scene_words = MemeSelector._collect_phrase_words(scenes)
         all_text = " ".join(
-            part for part in [str(category or ""), desc_lower, " ".join(tags)] if part
+            part
+            for part in [
+                str(category or ""),
+                desc_lower,
+                " ".join(tags),
+                " ".join(scenes),
+                str(overlay or ""),
+                str(character or ""),
+            ]
+            if part
         )
         all_words = _extract_words(all_text)
         return desc_lower, tag_words, scene_words, all_words, all_text

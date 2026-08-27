@@ -1,7 +1,7 @@
 """PR #91: NaturalEmotionAnalyzer / SmartEmotionMatcher unit tests.
 
 Covers:
-- emotion_analysis_prompt template loading (default fallback / custom)
+- emotion analysis template is the bundled default (user config is ignored)
 - {emotion_list} / {llm_reply} / {user_message} placeholders
 - model "none" abstain behavior (_EMOTION_ABSTAIN / last_analysis_abstained)
 - _parse_emotion_result parsing
@@ -23,14 +23,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 # 避免 categories.json 等状态在不同测试间互相污染。
 _star_module = sys.modules.get("astrbot.api.star")
 if _star_module is not None:
-    _dir_counter = 0
-
     def _unique_data_dir(name):
-        global _dir_counter
-        _dir_counter += 1
-        return os.path.join(
-            tempfile.gettempdir(), "astrbot_stealer_cfg_test", f"run{_dir_counter}", name
-        )
+        # 每个 PluginConfig 实例都使用全新的临时目录，避免上次运行残留的
+        # categories.json / category_info.json 污染本次测试的初始状态。
+        return os.path.join(tempfile.mkdtemp(prefix="astrbot_stealer_cfg_test_"), name)
 
     _star_module.StarTools = types.SimpleNamespace(get_data_dir=_unique_data_dir)
     _star_module.Context = object
@@ -70,24 +66,28 @@ class TestTemplateLoading:
         analyzer = _build_analyzer(PluginConfig(None))
         assert analyzer._emotion_analysis_template == _EMOTION_ANALYSIS_DEFAULT_TEMPLATE
 
+    def test_default_template_has_required_placeholders(self):
+        for key in ("{emotion_list}", "{llm_reply}", "{user_message}"):
+            assert key in _EMOTION_ANALYSIS_DEFAULT_TEMPLATE
+
+    def test_default_template_is_category_neutral(self):
+        text = _EMOTION_ANALYSIS_DEFAULT_TEMPLATE
+        assert "每个分类机会均等" in text
+        assert "不要把某一类当默认" in text
+        assert "troll 仅" not in text
+        assert "无法判断" not in text
+
     def test_custom_template_is_loaded_and_stripped(self):
         cfg = PluginConfig(
             {"emotion_analysis_prompt": "  {emotion_list} | {llm_reply} | {user_message}  "}
         )
         analyzer = _build_analyzer(cfg)
-        assert (
-            analyzer._emotion_analysis_template
-            == "{emotion_list} | {llm_reply} | {user_message}"
-        )
+        assert analyzer._emotion_analysis_template == "{emotion_list} | {llm_reply} | {user_message}"
         assert analyzer._emotion_analysis_template != _EMOTION_ANALYSIS_DEFAULT_TEMPLATE
 
     def test_whitespace_only_prompt_falls_back_to_default(self):
         analyzer = _build_analyzer(PluginConfig({"emotion_analysis_prompt": "   "}))
         assert analyzer._emotion_analysis_template == _EMOTION_ANALYSIS_DEFAULT_TEMPLATE
-
-    def test_default_template_has_required_placeholders(self):
-        for key in ("{emotion_list}", "{llm_reply}", "{user_message}"):
-            assert key in _EMOTION_ANALYSIS_DEFAULT_TEMPLATE
 
     def test_analyzer_tracks_last_analysis_abstained_flag(self):
         analyzer = _build_analyzer()
@@ -120,6 +120,29 @@ class TestEmotionListText:
         cfg = PluginConfig({"categories": ["alpha", "beta"], "category_info": {}})
         analyzer = _build_analyzer(cfg)
         assert analyzer._build_emotion_list_text() == "alpha(alpha), beta(beta)"
+
+
+def test_closest_category_stays_within_configured_categories():
+    cfg = PluginConfig({"categories": ["alpha", "beta"], "category_info": {}})
+    for raw in ("", "happy", "other", "unknown", "beta"):
+        assert cfg.closest_category(raw) in {"alpha", "beta"}
+
+
+def test_update_config_keeps_all_custom_prompts():
+    cfg = PluginConfig({})
+    ok = cfg.update_config(
+        {
+            "custom_meme_classification_prompt": "custom vlm a",
+            "custom_meme_classification_with_filter_prompt": "custom vlm b",
+            "emotion_analysis_prompt": "custom emotion",
+            "steal_meme": True,
+        }
+    )
+    assert ok
+    assert cfg.steal_meme is True
+    assert cfg.custom_meme_classification_prompt == "custom vlm a"
+    assert cfg.custom_meme_classification_with_filter_prompt == "custom vlm b"
+    assert cfg.emotion_analysis_prompt == "custom emotion"
 
 
 class TestParseEmotionResult:

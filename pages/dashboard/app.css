@@ -1048,10 +1048,17 @@ h2 {
 
 .fo-boot,
 .fo-chassis,
-.fo-vaultboy,
 .fo-title,
 .fo-pip-tabs,
 .fo-hud { display: none; }
+
+.fo-vaultboy {
+    display: none;
+    background-image: url("./vaultboy.png");
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center center;
+}
 
 .theme-save-hint {
     margin: 0 0 8px;
@@ -4430,7 +4437,7 @@ html[data-theme="minecraft"],
     right: 12px;
     bottom: 8px;
     width: 108px;
-    height: auto;
+    aspect-ratio: 307 / 454;
     opacity: 0.88;
     pointer-events: none;
     z-index: 1;

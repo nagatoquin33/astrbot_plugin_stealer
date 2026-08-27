@@ -30,7 +30,7 @@ export const TEMPLATE = `
                     d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
             </svg>
         </div>
-        <img class="fo-vaultboy fo-vaultboy-header" src="./vaultboy.png" alt="" width="48" height="72">
+        <div class="fo-vaultboy fo-vaultboy-header" role="img" aria-label="Vault Boy"></div>
         <div class="header-text">
             <h1>{{ t('pages.dashboard.header.brand', 'Henry\\'s Spoils') }}</h1>
             <p>{{ t('pages.dashboard.header.subtitle', 'Sticker Manager') }}</p>
@@ -315,7 +315,7 @@ export const TEMPLATE = `
             </div>
 
             <div v-else-if="images.length === 0" class="empty-state">
-                <img class="fo-vaultboy fo-vaultboy-empty" src="./vaultboy.png" alt="" width="140" height="210">
+                <div class="fo-vaultboy fo-vaultboy-empty" role="img" aria-label="Vault Boy"></div>
                 <svg class="empty-state-icon" style="width:64px;height:64px;opacity:0.3;margin-bottom:16px" fill="none" stroke="currentColor"
                     viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
@@ -465,7 +465,7 @@ export const TEMPLATE = `
             </div>
 
             <div v-else-if="pendingImages.length === 0" class="empty-state">
-                <img class="fo-vaultboy fo-vaultboy-empty" src="./vaultboy.png" alt="" width="140" height="210">
+                <div class="fo-vaultboy fo-vaultboy-empty" role="img" aria-label="Vault Boy"></div>
                 <svg class="empty-state-icon" style="width:64px;height:64px;opacity:0.3;margin-bottom:16px" fill="none" stroke="currentColor"
                     viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 13l4 4L19 7" />
@@ -572,7 +572,7 @@ export const TEMPLATE = `
     </main>
 </div>
 
-<img class="fo-vaultboy fo-vaultboy-mascot" src="./vaultboy.png" alt="">
+<div class="fo-vaultboy fo-vaultboy-mascot" role="img" aria-label="Vault Boy"></div>
 <footer class="fo-hud" aria-hidden="true">
     <div class="fo-hud-group">
         <span class="fo-hud-k">HP</span>
@@ -690,9 +690,9 @@ export const TEMPLATE = `
                         <span class="stat-name">{{ t('pages.dashboard.fields.character', '角色') }}</span>
                         <span class="stat-value">{{ characterLabel(previewItem?.character) }}{{ previewItem?.character && previewItem?.category ? ' : ' + previewItem.category : '' }}</span>
                     </div>
-                    <div v-if="previewItem?.overlay_text" class="stat-row">
+                    <div class="stat-row">
                         <span class="stat-name">{{ t('pages.dashboard.fields.overlay_text', '图上文字') }}</span>
-                        <span class="stat-value">{{ previewItem.overlay_text }}</span>
+                        <span class="stat-value">{{ previewItem?.overlay_text || t('pages.dashboard.messages.no_overlay_text', '无') }}</span>
                     </div>
                     <div class="stat-row">
                         <span class="stat-name">{{ t('pages.dashboard.fields.tags', 'Tags') }}</span>
@@ -1420,6 +1420,12 @@ export const TEMPLATE = `
                             <option value="">{{ t('pages.dashboard.characters.unassigned', '未分配') }}</option>
                             <option v-for="item in characters" :key="item.key" :value="item.key">{{ item.name }}</option>
                         </select>
+                    </div>
+
+                    <div style="margin-bottom:16px">
+                        <label class="form-label sm">{{ t('pages.dashboard.fields.overlay_text', '图上文字') }}</label>
+                        <input v-model="pendingEditForm.overlay_text" type="text" class="codex-input"
+                            :placeholder="t('pages.dashboard.placeholders.overlay_text', '图上印的字')">
                     </div>
 
                     <div style="margin-bottom:16px">

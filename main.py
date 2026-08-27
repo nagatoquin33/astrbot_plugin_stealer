@@ -144,37 +144,6 @@ class Main(Star):
             ),
         )
 
-    def _ensure_default_prompts_in_config(self, prompts: dict) -> None:
-        """如果配置中的提示词字段为空，将 prompts.json 内容写入配置作为默认显示值。"""
-        updates = {}
-        current_prompt = getattr(self.plugin_config, "custom_meme_classification_prompt", "")
-        default_prompt = prompts.get("EMOJI_CLASSIFICATION_PROMPT", "")
-        if default_prompt and (
-            not current_prompt
-            or not current_prompt.strip()
-            or ("15字以内" in current_prompt and "overlay_text" not in current_prompt)
-        ):
-            updates["custom_meme_classification_prompt"] = default_prompt
-        current_filter_prompt = getattr(
-            self.plugin_config, "custom_meme_classification_with_filter_prompt", ""
-        )
-        default_filter_prompt = prompts.get("EMOJI_CLASSIFICATION_WITH_FILTER_PROMPT", "")
-        if default_filter_prompt and (
-            not current_filter_prompt
-            or not current_filter_prompt.strip()
-            or (
-                "15字以内" in current_filter_prompt
-                and "overlay_text" not in current_filter_prompt
-            )
-        ):
-            updates["custom_meme_classification_with_filter_prompt"] = default_filter_prompt
-        current_emotion_prompt = getattr(self.plugin_config, "emotion_analysis_prompt", "")
-        if current_emotion_prompt and "只能输出一个英文分类名" in current_emotion_prompt:
-            updates["emotion_analysis_prompt"] = ""
-        if updates:
-            self.update_config(updates)
-            logger.info(f"已将默认提示词写入配置: {list(updates.keys())}")
-
     def _auto_merge_existing_categories(self) -> None:
         """自动合并已存在的分类目录到配置中。
 
@@ -368,8 +337,14 @@ class Main(Star):
         event_handler.consume_force_capture(event)
 
     def _apply_plugin_config_updates(self, config_dict: dict) -> None:
-        """将更新字典写回 PluginConfig。"""
+        """将更新字典写回 PluginConfig，跳过已从 schema 移除的旧键。"""
+        fields = getattr(type(self.plugin_config), "model_fields", None)
+        if fields is None:
+            fields = getattr(type(self.plugin_config), "__fields__", {})
         for k, v in config_dict.items():
+            if fields is not None and k not in fields:
+                logger.debug(f"[Config] 忽略已移除的配置键: {k}")
+                continue
             setattr(self.plugin_config, k, v)
         self._sync_similarity_weights()
 
@@ -379,15 +354,18 @@ class Main(Star):
             from .core.search import text_similarity
 
             cfg = self.plugin_config
+            preset = cfg.SIM_WEIGHT_PRESETS.get(
+                getattr(cfg, "sim_weight_preset", "balanced"), cfg.SIM_WEIGHT_PRESETS["balanced"]
+            )
             text_similarity.configure_similarity(
                 weights={
-                    "ngram": cfg.sim_weight_ngram,
-                    "cosine": cfg.sim_weight_cosine,
-                    "substring": cfg.sim_weight_substring,
-                    "char": cfg.sim_weight_char,
-                    "edit": cfg.sim_weight_edit,
+                    "ngram": preset["ngram"],
+                    "cosine": preset["cosine"],
+                    "substring": preset["substring"],
+                    "char": preset["char"],
+                    "edit": preset["edit"],
                 },
-                negation_penalty=cfg.sim_negation_penalty,
+                negation_penalty=preset["negation"],
             )
         except Exception as e:
             logger.warning(f"[Config] 同步相似度权重失败: {e}")
@@ -659,23 +637,22 @@ class Main(Star):
 
     @filter.llm_tool(name="search_meme")
     async def search_emoji(self, event: AstrMessageEvent, query: str):
-        """按当前语气、场景或图上可能出现的文字搜索表情包。
+        """按当前语气、图上文字、角色名或画面描述搜索表情包。
 
         Args:
-            query(string): 检索句。优先写场景或原话，例如「被安排加班算了」「无语」「谢谢」。不要只写英文分类名。
+            query(string): 检索句。优先写图上可能出现的字、角色名或画面，不要只写英文分类名。
 
         使用建议：
-        - 用一句中文描述此刻适合发什么图，或直接用图上可能出现的字
-        - 心情词、场景词、梗词都可以
-        - 若无结果，换更具体的使用场景再搜
+        - 用图上文字、角色名、画面关键词来搜
+        - 若无结果，换更具体的原文或角色名再搜
 
         返回值：
         返回候选表情包列表，每个包含：
         - 编号：用于调用 send_emoji_by_id
         - 分类：浏览分区，仅供参考
-        - 描述 / 图上文字 / 场景：选图时优先看这些
+        - 角色 / 图上文字 / 描述：选图时优先看这些
 
-        请根据候选的描述和图上文字选择最贴合当前语气的一张，不要只看分类名。
+        请根据候选的图上文字、角色和描述选择最贴合的一张，不要只看分类名。
         """
         event = _unwrap_event(event)
         query = str(query or "").strip()
@@ -729,6 +706,14 @@ class Main(Star):
 
                     scenes_items = PluginAPI._split_scenes(raw_scenes)
                     scenes_str = ", ".join(scenes_items)
+                    overlay_text = str(meta.get("overlay_text", "") or "") if isinstance(meta, dict) else ""
+                    character_key = str(meta.get("character", "") or "") if isinstance(meta, dict) else ""
+                    character_name = character_key
+                    if character_key:
+                        info_map = getattr(self.plugin_config, "character_info", None) or {}
+                        info = info_map.get(character_key) if isinstance(info_map, dict) else None
+                        if isinstance(info, dict) and info.get("name"):
+                            character_name = str(info.get("name"))
                     source = str(meta.get("source", "") or "") if isinstance(meta, dict) else ""
                     scope_mode = str(meta.get("scope_mode", "public") or "public") if isinstance(meta, dict) else "public"
                     origin_target = str(meta.get("origin_target", "") or "") if isinstance(meta, dict) else ""
@@ -743,6 +728,8 @@ class Main(Star):
                             "emotion": emotion,
                             "tags": tags,
                             "scenes": scenes_str,
+                            "overlay_text": overlay_text,
+                            "character": character_key,
                             "source": source,
                             "scope_mode": scope_mode,
                             "origin_target": origin_target,
@@ -750,12 +737,14 @@ class Main(Star):
                         }
                     )
                     result_lines.append(f"\n[{i + 1}] 分类：{emotion}")
+                    if character_name:
+                        result_lines.append(f"    角色：{character_name}")
+                    if overlay_text:
+                        result_lines.append(f"    图上文字：{overlay_text}")
                     if tags:
                         result_lines.append(f"    标签：{tags}")
                     if scenes_str:
-                        result_lines.append(f"    场景：{scenes_str}")
-                    else:
-                        result_lines.append("    场景：无")
+                        result_lines.append(f"    画面短语：{scenes_str}")
                     result_lines.append(f"    作用域：{scope_mode}")
                     if use_count:
                         result_lines.append(f"    使用次数：{use_count}")
@@ -1309,7 +1298,6 @@ class Main(Star):
                         with open(prompts_path, encoding="utf-8-sig") as f:
                             prompts = json.loads(f.read().lstrip("\ufeff"))
                     self._apply_prompts(prompts)
-                    self._ensure_default_prompts_in_config(prompts)
             except Exception as e:
                 logger.error(f"初始化提示词失败: {e}")
             await self.index_manager.load_index()

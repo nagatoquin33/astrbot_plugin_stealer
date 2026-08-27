@@ -99,7 +99,8 @@ def test_fallout_theme_avoids_fullpage_compositing():
     assert ".fo-chassis" in css
     assert ".fo-pip-tabs" in css
     assert ".fo-hud" in css
-    assert "vaultboy.png" in template
+    assert "vaultboy.png" in css
+    assert "fo-vaultboy" in template
     assert "PIP-BOY 3000 MK IV" in template
     assert "ROBCO INDUSTRIES" in template
     assert "loadDashboardPrefs" in (DASHBOARD_DIR / "app.js").read_text(encoding="utf-8")

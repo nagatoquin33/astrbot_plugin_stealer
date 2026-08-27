@@ -9,8 +9,10 @@ from astrbot.api.event import AstrMessageEvent
 
 try:
     from PIL import Image as PILImage
+    from PIL import ImageDraw as PILImageDraw
 except Exception:
     PILImage = None
+    PILImageDraw = None
 
 try:
     import numpy as np
@@ -123,10 +125,12 @@ class VLMCallService:
             actual_prompt = prompt
             if is_animated:
                 animated_prefix = (
-                    "[动图帧序列] 这是一个动态图表情包，每一帧从左到右按时间顺序展示了动画过程。"
+                    "[动图帧序列] 这不是多人并排的静态场景，而是一个动态表情包的多帧连续截图。"
+                    "图片从左到右按时间顺序展示同一角色/同一画面的不同时刻；帧之间有分隔线，左上角数字是帧序号。"
                     "黑色背景代表透明区域。"
-                    "请理解这些帧是连贯的动画，分析整体动作和情绪变化，从互联网梗/meme的角度分析。"
-                    "请特别识别并理解画面中的文字（字幕、弹幕、对话框、贴纸文字），不要忽略文字语义。\n\n"
+                    "请以动图/动画的角度理解：这个表情包在表达什么连续动作、表情或情绪变化？"
+                    "不要描述成“并排站立”“多人同时出现”或“几个人站在一起”。"
+                    "如果画面中有文字（字幕、弹幕、对话框、贴纸文字），请逐字识别并理解语义。\n\n"
                 )
                 actual_prompt = animated_prefix + prompt
 
@@ -233,6 +237,15 @@ class VLMCallService:
 
                 for i, frame in enumerate(frames):
                     combined.paste(frame, (i * frame_width, 0), frame)  # 使用帧的 alpha 通道
+
+                # 画帧分隔线和帧序号，帮助 VLM 理解这是时间序列而不是多人并排。
+                if PILImageDraw is not None:
+                    draw = PILImageDraw.Draw(combined)
+                    for i in range(len(frames)):
+                        x = i * frame_width
+                        if i > 0:
+                            draw.line([(x, 0), (x, frame_height)], fill=(255, 255, 255, 160), width=2)
+                        draw.text((x + 4, 4), str(i + 1), fill=(255, 255, 255, 255))
 
                 # 如果拼接图超出 VLM 输入限制，等比缩放到限制内
                 if total_width > MAX_VLM_DIMENSION or frame_height > MAX_VLM_DIMENSION:

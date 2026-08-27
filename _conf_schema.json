@@ -35,28 +35,11 @@
     },
     "hint": "设为 0 时从不偷取，设为 1 时每次都偷取。建议 0.2~0.5。仅概率模式生效。"
   },
-  "image_processing_cooldown": {
-    "description": "偷图冷却时间（秒）",
-    "type": "int",
-    "default": 30,
-    "slider": {
-      "min": 0,
-      "max": 120,
-      "step": 5
-    },
-    "hint": "两次偷取之间的最小间隔。设为 0 时不限制。仅冷却模式生效。"
-  },
   "content_filtration": {
     "description": "内容审核",
     "type": "bool",
     "default": false,
     "hint": "开启后使用 VLM 审核图片内容，过滤不当图片。开启后会增加单张图片的处理时间。"
-  },
-  "content_filtration_fail_open": {
-    "description": "审核异常时允许入库",
-    "type": "bool",
-    "default": false,
-    "hint": "仅作为审核服务异常时的策略提示。明确审核不通过的图片仍不会入库。"
   },
   "_model_section": {
     "description": "=== 模型配置（视觉 / 情绪分析 / 嵌入检索）===",
@@ -70,10 +53,10 @@
     "_special": "select_provider"
   },
   "enable_natural_emotion_analysis": {
-    "description": "智能检索改写",
+    "description": "智能提取检索词",
     "type": "bool",
     "default": true,
-    "hint": "开启后用轻量模型生成检索句并判断这轮该不该跟表情，不修改回复。关闭后为被动检索：不向回复注入标签，直接用回复原文检索表情包。"
+    "hint": "开启后用轻量模型从 AI 回复中提取检索词和情绪先验，增强表情包匹配；是否发送仍由概率/冷却等原有门控决定。关闭后直接用 AI 回复原文检索。"
   },
   "emotion_analysis_provider_id": {
     "description": "情绪分析专用模型",
@@ -105,12 +88,6 @@
     "default": true,
     "hint": "开启后 Bot 会在聊天中自动发送表情包。"
   },
-  "auto_meme_intent_gate": {
-    "description": "自动表情意图门控",
-    "type": "bool",
-    "default": true,
-    "hint": "开启后自动跳过命令、严肃错误回复、过短回复和连续提问等不适合自动发图的场景。"
-  },
   "auto_meme_cancel_on_new_message": {
     "description": "新消息取消待发送表情",
     "type": "bool",
@@ -134,39 +111,11 @@
     "default": false,
     "hint": "开启后始终以 GIF 输出，更接近真表情包样式。关闭时按原文件格式发送（png/jpg/gif 等）。开启后高频发送大图/动图场景会有较高瞬时内存占用。"
   },
-  "meme_send_char_delay": {
-    "description": "按字延迟（秒/字）",
-    "type": "float",
-    "default": 0.3,
-    "slider": {
-      "min": 0.0,
-      "max": 2.0,
-      "step": 0.05
-    },
-    "hint": "按 LLM 回复文本的字数计算延迟总时长（字数 × 每字延迟）。设为 0 时不按字延迟，改由下方的固定延迟与随机延迟控制。"
-  },
   "meme_send_delay": {
     "description": "固定延迟（秒）",
     "type": "float",
     "default": 5.0,
     "hint": "等待此时间后发送表情包，避免与分段插件冲突。建议 5.0 秒以上，让分段先发完。设为 0 则立即发送。"
-  },
-  "meme_send_delay_random": {
-    "description": "启用随机延迟",
-    "type": "bool",
-    "default": false,
-    "hint": "开启后在固定延迟 ~ 最大随机延迟之间随机取值，让表情包发送时机更自然。关闭则使用固定延迟。"
-  },
-  "meme_send_delay_max": {
-    "description": "最大随机延迟（秒）",
-    "type": "float",
-    "default": 8.0,
-    "slider": {
-      "min": 0.0,
-      "max": 15.0,
-      "step": 0.5
-    },
-    "hint": "开启随机延迟时生效，实际延迟在固定延迟 ~ 此值之间随机。"
   },
   "smart_meme_selection": {
     "description": "智能表情包选择",
@@ -175,75 +124,9 @@
     "hint": "开启后使用综合评分（多样性 + 匹配度 + 相似度）选出最合适的表情包。关闭则随机选择（仍会避免短期重复）。"
   },
   "_smart_section": {
-    "description": "=== 智能选择：文字距离融合权重 ===",
+    "description": "=== 智能选择：文字距离融合权重预设 ===",
     "type": "text",
     "invisible": true
-  },
-  "sim_weight_ngram": {
-    "description": "相似度-词组重叠权重（ngram）",
-    "type": "float",
-    "default": 0.28,
-    "slider": {
-      "min": 0.0,
-      "max": 1.0,
-      "step": 0.01
-    },
-    "hint": "混合相似度中 n-gram Jaccard（语义词组重叠）的融合权重。调大则更看重词组重叠，调小则更依赖其他策略。"
-  },
-  "sim_weight_cosine": {
-    "description": "相似度-词频余弦权重",
-    "type": "float",
-    "default": 0.25,
-    "slider": {
-      "min": 0.0,
-      "max": 1.0,
-      "step": 0.01
-    },
-    "hint": "混合相似度中 n-gram 词频余弦的融合权重。"
-  },
-  "sim_weight_substring": {
-    "description": "相似度-子串匹配权重",
-    "type": "float",
-    "default": 0.12,
-    "slider": {
-      "min": 0.0,
-      "max": 1.0,
-      "step": 0.01
-    },
-    "hint": "混合相似度中子串包含匹配的融合权重。"
-  },
-  "sim_weight_char": {
-    "description": "相似度-字符级权重",
-    "type": "float",
-    "default": 0.08,
-    "slider": {
-      "min": 0.0,
-      "max": 1.0,
-      "step": 0.01
-    },
-    "hint": "混合相似度中中文字符级 Jaccard（兜底召回）的融合权重。"
-  },
-  "sim_weight_edit": {
-    "description": "相似度-编辑距离权重",
-    "type": "float",
-    "default": 0.27,
-    "slider": {
-      "min": 0.0,
-      "max": 1.0,
-      "step": 0.01
-    },
-    "hint": "混合相似度中编辑距离的融合权重。短情绪词匹配场景建议保持较高。"
-  },
-  "sim_negation_penalty": {
-    "description": "否定词惩罚系数",
-    "type": "float",
-    "default": 0.25,
-    "slider": {
-      "min": 0.0,
-      "max": 1.0,
-      "step": 0.01
-    },
-    "hint": "关键词前带否定词（如「不开心」）时语义反转，最终分数乘以该系数。设为 1 表示不惩罚。"
   },
   "_group_section": {
     "description": "=== 目标过滤 ===",
@@ -318,22 +201,6 @@
     },
     "hint": "表情包存储上限。达到上限后自动按清理策略淘汰旧表情包。"
   },
-  "storage_cleanup_strategy": {
-    "description": "存储清理策略",
-    "type": "string",
-    "default": "balanced",
-    "options": [
-      "conservative",
-      "balanced",
-      "aggressive"
-    ],
-    "labels": [
-      "保守清理",
-      "平衡清理",
-      "激进清理"
-    ],
-    "hint": "保守清理：仅清理失效索引和临时文件。平衡清理：额外清理孤儿文件和缩略图缓存。激进清理：额外清理 raw 原始图片目录。"
-  },
   "steal_pool_capacity": {
     "description": "待审核池容量上限",
     "type": "int",
@@ -384,19 +251,37 @@
   "custom_meme_classification_prompt": {
     "description": "VLM 分类提示词",
     "type": "text",
-    "default": "<role>\n你是中文互联网表情包标注专家。\n</role>\n\n<task>\n给这张表情包写一份「什么时候该发」的短档案。分类只是浏览分区，重点是图上文字和使用场景。\n</task>\n\n<categories>\n{emotion_list}\n</categories>\n\n<classification_guide>\n- happy/sad/angry/cry/fear: 表达明确的情绪状态\n- surprised/confused: 对某事感到意外或不解\n- shy/embarrassed: 社交场合的羞涩或窘迫\n- love/thank: 正向情感表达\n- tired/sigh: 疲惫、无奈、摆烂\n- troll: 阴阳怪气、刻意搞怪、发癫\n- dumb: 真的无语、傻眼、被震惊到说不出话\n- excitement: 激动、亢奋\n- disgust: 嫌弃、厌恶\n- other: 纯文字梗、模板图、角色图，或无法判断核心情绪\n</classification_guide>\n\n<important>\n1. overlay_text 必须逐字抄出图上可见的中文或英文；没有文字则输出空字符串。这是检索最重要的字段。\n2. description 写画面主体，40字以内，不要只重复分类名。\n3. scenes 写 1~3 句「适合回复什么样的话」，像群友原话，不要写「惊讶时刻」这种空标签。\n4. troll 不是搞笑表情的默认分类。dumb 不是看起来有点呆。\n5. 无法判断情绪时 category 用 other，不要编造。\n6. emotions 给 1~3 个相关分类，按相关度排序，第一个应与 category 一致。\n</important>\n\n<output_format>\n只输出JSON，不要有任何其他文字。格式如下：\n{\"category\": \"分类名称\", \"emotions\": [\"分类1\", \"分类2\"], \"tags\": [\"标签1\", \"标签2\"], \"description\": \"画面描述\", \"overlay_text\": \"图上原文\", \"scenes\": [\"适用对话1\", \"适用对话2\"]}\ntags 输出 2~6 个短中文词，不要重复；emotions 1~3 个分类名；scenes 1~3 个使用句；overlay_text 为图上原文，没有则 \"\"。\n</output_format>\n\n<example>\n{\"category\": \"sigh\", \"emotions\": [\"sigh\", \"tired\"], \"tags\": [\"熊猫头\", \"躺平\"], \"description\": \"熊猫头平躺闭眼一脸放弃\", \"overlay_text\": \"算了\", \"scenes\": [\"又被安排加班\", \"算了不想干了\"]}\n</example>",
+    "default": "<role>\n你是中文互联网表情包标注专家。\n</role>\n\n<task>\n给这张表情包写检索档案。分类只是浏览分区，重点是图上文字和画面本身。\n</task>\n\n<categories>\n{emotion_list}\n</categories>\n\n<classification_guide>\n只按画面选择一个最贴合的分类，每个分类机会均等，不要把某一类当默认。\n- happy: 开心、愉悦\n- sad: 难过、失落\n- angry: 生气、恼火\n- shy: 害羞、腼腆\n- surprised: 惊讶、意外\n- troll: 整活、搞怪\n- cry: 哭、委屈\n- confused: 困惑、疑惑\n- embarrassed: 尴尬、窘迫\n- love: 喜欢、心动\n- disgust: 嫌弃、厌恶\n- fear: 害怕、紧张\n- excitement: 兴奋、激动\n- tired: 困倦、疲惫\n- sigh: 无奈、叹气\n- thank: 感谢、道谢\n- dumb: 无语、傻眼\n</classification_guide>\n\n<important>\n1. overlay_text 必须逐字抄出图上可见的中文或英文；没有文字则输出空字符串。这是检索最重要的字段。\n2. description 写画面主体，40字以内，不要只重复分类名。\n3. scenes 只写图里能看见的信息，1~2 个短词或短语，优先复述 overlay_text。不要编造发图时的对话情境。\n4. tags 给 0~3 个画面关键词，没有就输出空数组。不要为了凑数硬编标签。\n5. emotions 给 1~3 个相关分类，必须来自给定分类，第一个应与 category 一致。\n</important>\n\n<output_format>\n只输出JSON，不要有任何其他文字。格式如下：\n{\"category\": \"分类名称\", \"emotions\": [\"分类1\"], \"tags\": [], \"description\": \"画面描述\", \"overlay_text\": \"图上原文\", \"scenes\": [\"短语1\"]}\noverlay_text 为图上原文，没有则 \"\"；tags 没有则 []。\n</output_format>\n\n<example>\n{\"category\": \"confused\", \"emotions\": [\"confused\"], \"tags\": [], \"description\": \"卡通脸瞪大眼睛\", \"overlay_text\": \"啊？\", \"scenes\": [\"啊？\"]}\n</example>",
     "hint": "支持占位符：{emotion_list}（分类列表）。为空时使用默认提示词。"
   },
   "custom_meme_classification_with_filter_prompt": {
     "description": "VLM 分类提示词（带审核）",
     "type": "text",
-    "default": "<role>\n你是中文互联网表情包审核与标注专家。\n</role>\n\n<task>\n第一步审核内容是否合规，第二步写「什么时候该发」的短档案。分类只是浏览分区，重点是图上文字和使用场景。\n</task>\n\n<content_filter>\n裸露色情、暴力血腥、政治敏感、广告营销时，只输出：{\"approved\": false, \"reason\": \"审核不通过\"}\n</content_filter>\n\n<categories>\n{emotion_list}\n</categories>\n\n<classification_guide>\n- happy/sad/angry/cry/fear: 表达明确的情绪状态\n- surprised/confused: 对某事感到意外或不解\n- shy/embarrassed: 社交场合的羞涩或窘迫\n- love/thank: 正向情感表达\n- tired/sigh: 疲惫、无奈、摆烂\n- troll: 阴阳怪气、刻意搞怪、发癫\n- dumb: 真的无语、傻眼、被震惊到说不出话\n- excitement: 激动、亢奋\n- disgust: 嫌弃、厌恶\n- other: 纯文字梗、模板图、角色图，或无法判断核心情绪\n</classification_guide>\n\n<important>\n1. overlay_text 必须逐字抄出图上可见的中文或英文；没有文字则输出空字符串。这是检索最重要的字段。\n2. description 写画面主体，40字以内，不要只重复分类名。\n3. scenes 写 1~3 句「适合回复什么样的话」，像群友原话，不要写「惊讶时刻」这种空标签。\n4. troll 不是搞笑表情的默认分类。dumb 不是看起来有点呆。\n5. 无法判断情绪时 category 用 other，不要编造。\n6. emotions 给 1~3 个相关分类，按相关度排序，第一个应与 category 一致。\n7. 无论审核是否通过，都只能输出一个 JSON 对象，不要添加“审核通过：”“结果：”或 markdown 代码块。\n</important>\n\n<output_format>\n只输出 JSON，不要有任何其他文字。格式如下：\n审核通过：{\"approved\": true, \"category\": \"分类名称\", \"emotions\": [\"分类1\", \"分类2\"], \"tags\": [\"标签1\", \"标签2\"], \"description\": \"画面描述\", \"overlay_text\": \"图上原文\", \"scenes\": [\"适用对话1\", \"适用对话2\"]}\n审核不通过：{\"approved\": false, \"reason\": \"审核不通过\"}\n请注意，上面两行只是说明审核通过和不通过时各自应该输出的 JSON 结构，实际回复时不要输出“审核通过：”或“审核不通过：”这几个字。\ntags 输出 2~6 个短中文词；emotions 1~3 个分类名；scenes 1~3 个使用句；overlay_text 为图上原文，没有则 \"\"。\n</output_format>\n\n<example>\n{\"approved\": true, \"category\": \"sigh\", \"emotions\": [\"sigh\", \"tired\"], \"tags\": [\"熊猫头\", \"躺平\"], \"description\": \"熊猫头平躺闭眼一脸放弃\", \"overlay_text\": \"算了\", \"scenes\": [\"又被安排加班\", \"算了不想干了\"]}\n</example>",
+    "default": "<role>\n你是中文互联网表情包审核与标注专家。\n</role>\n\n<task>\n第一步审核内容是否合规，第二步写检索档案。分类只是浏览分区，重点是图上文字和画面本身。\n</task>\n\n<content_filter>\n裸露色情、暴力血腥、政治敏感、广告营销时，只输出：{\"approved\": false, \"reason\": \"审核不通过\"}\n</content_filter>\n\n<categories>\n{emotion_list}\n</categories>\n\n<classification_guide>\n只按画面选择一个最贴合的分类，每个分类机会均等，不要把某一类当默认。\n- happy: 开心、愉悦\n- sad: 难过、失落\n- angry: 生气、恼火\n- shy: 害羞、腼腆\n- surprised: 惊讶、意外\n- troll: 整活、搞怪\n- cry: 哭、委屈\n- confused: 困惑、疑惑\n- embarrassed: 尴尬、窘迫\n- love: 喜欢、心动\n- disgust: 嫌弃、厌恶\n- fear: 害怕、紧张\n- excitement: 兴奋、激动\n- tired: 困倦、疲惫\n- sigh: 无奈、叹气\n- thank: 感谢、道谢\n- dumb: 无语、傻眼\n</classification_guide>\n\n<important>\n1. overlay_text 必须逐字抄出图上可见的中文或英文；没有文字则输出空字符串。这是检索最重要的字段。\n2. description 写画面主体，40字以内，不要只重复分类名。\n3. scenes 只写图里能看见的信息，1~2 个短词或短语，优先复述 overlay_text。不要编造发图时的对话情境。\n4. tags 给 0~3 个画面关键词，没有就输出空数组。不要为了凑数硬编标签。\n5. emotions 给 1~3 个相关分类，必须来自给定分类，第一个应与 category 一致。\n6. 无论审核是否通过，都只能输出一个 JSON 对象，不要添加“审核通过：”“结果：”或 markdown 代码块。\n</important>\n\n<output_format>\n只输出 JSON，不要有任何其他文字。格式如下：\n审核通过：{\"approved\": true, \"category\": \"分类名称\", \"emotions\": [\"分类1\"], \"tags\": [], \"description\": \"画面描述\", \"overlay_text\": \"图上原文\", \"scenes\": [\"短语1\"]}\n审核不通过：{\"approved\": false, \"reason\": \"审核不通过\"}\n请注意，上面两行只是说明审核通过和不通过时各自应该输出的 JSON 结构，实际回复时不要输出“审核通过：”或“审核不通过：”这几个字。\noverlay_text 为图上原文，没有则 \"\"；tags 没有则 []。\n</output_format>\n\n<example>\n{\"approved\": true, \"category\": \"confused\", \"emotions\": [\"confused\"], \"tags\": [], \"description\": \"卡通脸瞪大眼睛\", \"overlay_text\": \"啊？\", \"scenes\": [\"啊？\"]}\n</example>",
     "hint": "开启内容审核时使用的 VLM 分类提示词。支持占位符：{emotion_list}（分类列表）。为空时使用默认提示词。"
   },
   "emotion_analysis_prompt": {
     "description": "情绪分析提示词",
     "type": "text",
-    "default": "你是表情包检索查询生成器。根据对话判断是否该发表情，并生成检索词。\n可选情绪分类：{emotion_list}\n\n任务边界：\n1. 只分析回复的语气与意图，用户消息仅作语境。\n2. 无明显表情意图时输出 {\"should_send\": false}\n3. 需要表情时只输出一个 JSON 对象。\n\n分类规则：\n1. 负面情绪优先细分：愤怒→angry，无奈/叹气→sigh，震惊到无语→dumb，悲伤→sad，不解→confused。\n2. `troll` 仅用于明显阴阳怪气、挑衅、嘲讽、故意拱火语气。\n3. 普通吐槽、拒绝、抱怨、冷淡，不要判为 `troll`。\n4. query 用中文写「适合发什么图」，可包含图上可能出现的字或使用场景，不要只写分类名。\n5. emotions 给 1~3 个分类，按相关度排序，必须来自给定分类。\n\n用户消息：{user_message}\n回复：{llm_reply}\n\n输出示例：\n{\"should_send\": true, \"query\": \"被安排加班后的摆烂无奈\", \"emotions\": [\"sigh\", \"tired\"]}\n或 {\"should_send\": false}",
-    "hint": "生成检索句和 1~3 个情绪先验，决定发什么表情包。支持占位符：{emotion_list}、{llm_reply}、{user_message}。为空时使用默认提示词。兼容旧的单分类名输出。"
+    "default": "你是表情包检索词提取器。根据对话从 AI 回复中提取能搜到表情包的关键词或短句，并给出 1~3 个情绪先验。\n可选情绪分类：{emotion_list}\n\n任务：\n1. 只从回复里摘录关键词或短句，不要总结成抽象概念。\n2. 如果没有明显关键词，就用回复原文。\n3. emotions 从给定分类里选 1~3 个，按相关度排序。每个分类机会均等，不要把某一类当默认。\n\n用户消息：{user_message}\n回复：{llm_reply}\n\n输出示例：\n{\"query\": \"摸鱼 下班 辛苦了\", \"emotions\": [\"tired\", \"sigh\"]}\n",
+    "hint": "生成检索词和 1~3 个情绪先验。支持占位符：{emotion_list}、{llm_reply}、{user_message}。为空时使用默认提示词。兼容旧的单分类名输出。"
+  },
+  "sim_weight_preset": {
+    "description": "文字距离融合预设",
+    "type": "string",
+    "default": "balanced",
+    "options": [
+      "balanced",
+      "keyword",
+      "semantic",
+      "strict"
+    ],
+    "labels": [
+      "均衡",
+      "关键词优先",
+      "语义优先",
+      "严格匹配"
+    ],
+    "hint": "预设决定多个相似度算法的融合权重：均衡（默认）、关键词优先（子串/字符重叠更敏感）、语义优先（n-gram/余弦更重）、严格匹配（编辑距离和字符级更重，减少误发）。"
   }
 }

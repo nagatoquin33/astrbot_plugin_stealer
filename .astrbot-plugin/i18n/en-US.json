@@ -25,10 +25,6 @@
             "description": "Storage Management",
             "hint": ""
         },
-        "_advanced_section": {
-            "description": "Advanced Settings",
-            "hint": ""
-        },
         "steal_meme": {
             "description": "Enable emoji stealing",
             "hint": "Monitors and saves images from chat. A vision model must be configured, otherwise images cannot be classified."
@@ -41,25 +37,13 @@
             "description": "Steal probability",
             "hint": "Set to 0 to never steal, set to 1 to steal every image. Recommended 0.2~0.5. Only takes effect in probability mode."
         },
-        "image_processing_cooldown": {
-            "description": "Steal cooldown (seconds)",
-            "hint": "Minimum interval between two collections. Set to 0 for no limit. Only takes effect in cooldown mode."
-        },
         "content_filtration": {
             "description": "Content moderation",
             "hint": "Uses VLM to review image content and block inappropriate images. May increase processing time per image."
         },
-        "content_filtration_fail_open": {
-            "description": "Allow import on audit service errors",
-            "hint": "Policy hint for audit-service failures only. Images explicitly rejected by moderation will still not be imported."
-        },
         "auto_send_meme": {
             "description": "Auto-send stickers in chat",
             "hint": "Bot will automatically send stickers during conversation. Disable to only collect without storing, or send manually via commands."
-        },
-        "auto_meme_intent_gate": {
-            "description": "Auto-send intent gate",
-            "hint": "Skips commands, serious/error replies, very short replies, and question-heavy messages where auto-sending is inappropriate."
         },
         "auto_meme_cancel_on_new_message": {
             "description": "Cancel pending auto-send on new message",
@@ -73,37 +57,21 @@
             "description": "Send as GIF",
             "hint": "When enabled, always output as GIF for a native sticker feel. When disabled, send in original format (png/jpg/gif etc.). High-frequency sending of large GIFs may cause high memory usage."
         },
-        "meme_send_char_delay": {
-            "description": "Per-character delay (sec/char)",
-            "hint": "Total delay = reply text length × this value. Set to 0 to disable per-character delay and use the fixed/random delay settings below instead."
-        },
         "meme_send_delay": {
             "description": "Fixed delay (seconds)",
             "hint": "Delay before sending emoji to avoid conflicts with message-segmentation plugins. Recommended 5.0 s or more. Set to 0 to send immediately."
-        },
-        "meme_send_delay_random": {
-            "description": "Enable random delay",
-            "hint": "When enabled, randomly picks a delay between the fixed delay and max random delay for more natural timing. When disabled, uses fixed delay."
-        },
-        "meme_send_delay_max": {
-            "description": "Max random delay (seconds)",
-            "hint": "Only applies when random delay is enabled. Actual delay is randomly chosen between the fixed delay and this value."
         },
         "smart_meme_selection": {
             "description": "Smart emoji selection",
             "hint": "When enabled, uses composite scoring (diversity + relevance + similarity) to pick the best emoji. When disabled, picks randomly (still avoids short-term repeats)."
         },
         "enable_natural_emotion_analysis": {
-            "description": "Smart retrieval rewrite",
-            "hint": "When enabled, a lightweight model writes a search query and decides whether to send a sticker, without changing the reply. When disabled, passive retrieval uses the reply text directly and does not inject tags."
+            "description": "Smart keyword extraction",
+            "hint": "When enabled, a lightweight model extracts search keywords and emotion priors from the AI reply to improve sticker matching. Whether to send is still controlled by the existing probability/cooldown gates. When disabled, the reply text is used directly."
         },
         "emotion_analysis_provider_id": {
             "description": "Emotion analysis model",
             "hint": "Leave blank to use the current session model. A small-parameter model is sufficient; a lightweight free model is recommended to reduce latency and cost."
-        },
-        "emotion_analysis_prompt": {
-            "description": "Emotion analysis prompt",
-            "hint": "Generates a search query and 1-3 emotion priors. Placeholders: {emotion_list}, {llm_reply}, {user_message}. Leave blank to use the default prompt. Legacy single-label output is still accepted."
         },
         "vision_provider_id": {
             "description": "Vision model",
@@ -137,10 +105,6 @@
             "description": "Maximum emoji count",
             "hint": "Storage limit. When the limit is reached, old emoji are automatically removed per the cleanup strategy."
         },
-        "storage_cleanup_strategy": {
-            "description": "Storage cleanup strategy",
-            "hint": "Conservative: clean stale indexes and temp files only. Balanced: also clean orphan files and thumbnail cache. Aggressive: also clean raw image directory."
-        },
         "steal_pool_capacity": {
             "description": "Pending pool capacity",
             "hint": "Auto-stolen images go to the pending pool first. When this limit is reached, stealing pauses until items are reviewed (approved or deleted) in the WebUI. Changes take effect immediately, no restart needed."
@@ -157,40 +121,8 @@
             "description": "Embedding model ID",
             "hint": "The embedding model used to generate semantic vectors for emoji. Leave blank to auto-use AstrBot's first available Embedding Provider. Check AstrBot Admin → LLM Config for configured embedding model IDs (typically ending in _embedding, e.g. openai_embedding, qwen_embedding). This is the embedding model ID, not the chat or vision model ID."
         },
-        "custom_meme_classification_prompt": {
-            "description": "VLM classification prompt",
-            "hint": "Supports placeholder: {emotion_list} (category list). Leave blank to use the default prompt."
-        },
-        "custom_meme_classification_with_filter_prompt": {
-            "description": "VLM classification prompt (with filtering)",
-            "hint": "Used when content moderation is enabled. Supports placeholder: {emotion_list} (category list). Leave blank to use the default prompt."
-        },
-        "sim_weight_ngram": {
-            "description": "Similarity: ngram weight",
-            "hint": "ngram Jaccard fusion weight"
-        },
-        "sim_weight_cosine": {
-            "description": "Similarity: cosine weight",
-            "hint": "ngram-frequency cosine fusion weight"
-        },
-        "sim_weight_substring": {
-            "description": "Similarity: substring weight",
-            "hint": "substring containment fusion weight"
-        },
-        "sim_weight_char": {
-            "description": "Similarity: char weight",
-            "hint": "Chinese char-level Jaccard fallback weight"
-        },
-        "sim_weight_edit": {
-            "description": "Similarity: edit weight",
-            "hint": "Levenshtein fusion weight"
-        },
-        "sim_negation_penalty": {
-            "description": "Negation penalty",
-            "hint": "final score multiplier on negation"
-        },
         "_smart_section": {
-            "description": "Smart selection: text-distance fusion weights",
+            "description": "Smart selection: text-distance fusion presets",
             "hint": ""
         },
         "_webui_section": {
@@ -200,6 +132,26 @@
         "webui_theme": {
             "description": "Default WebUI theme",
             "hint": "Theme used when opening the sticker manager. Picking a theme in the page is remembered and takes priority over this setting."
+        },
+        "_advanced_section": {
+            "description": "Advanced Settings",
+            "hint": ""
+        },
+        "custom_meme_classification_prompt": {
+            "description": "VLM classification prompt",
+            "hint": "Supports placeholder: {emotion_list} (category list). Leave blank to use the default prompt."
+        },
+        "custom_meme_classification_with_filter_prompt": {
+            "description": "VLM classification prompt (with filtering)",
+            "hint": "Used when content moderation is enabled. Supports placeholder: {emotion_list} (category list). Leave blank to use the default prompt."
+        },
+        "emotion_analysis_prompt": {
+            "description": "Emotion analysis prompt",
+            "hint": "Generates a search query and 1-3 emotion priors. Placeholders: {emotion_list}, {llm_reply}, {user_message}. Leave blank to use the default prompt. Legacy single-label output is still accepted."
+        },
+        "sim_weight_preset": {
+            "description": "Text-distance fusion preset",
+            "hint": "Preset controls how multiple similarity algorithms are fused: Balanced (default), Keyword-first (substring/character overlap), Semantic-first (n-gram/cosine), Strict (edit distance & character-level, reduces false sends)."
         }
     },
     "pages": {
@@ -330,7 +282,7 @@
                 "origin": "Origin",
                 "description": "Description",
                 "tags": "Tags",
-                "scenes": "Scenes",
+                "scenes": "When to send",
                 "created_at": "Added At",
                 "target_category": "Target Category",
                 "target_scope": "Target Scope",
@@ -362,7 +314,8 @@
                 "favorited": "Favorited",
                 "not_favorited": "Not favorited",
                 "no_tags": "No tags",
-                "no_scenes": "No scenes",
+                "no_scenes": "No usage lines",
+                "no_overlay_text": "None",
                 "no_preview": "No preview",
                 "scene_separator_hint": "comma separated",
                 "tag_separator_hint": "comma separated",
@@ -372,10 +325,10 @@
                 "hash": "Hash"
             },
             "placeholders": {
-                "edit_scene": "Example: celebration, happy",
+                "edit_scene": "Example: 算了, 躺平",
                 "edit_tags": "Example: cute, funny, rare",
                 "select_category": "Select a category...",
-                "upload_scene": "Example: office, chat window, late night",
+                "upload_scene": "Example: 算了, 躺平",
                 "upload_tags": "Example: cute, funny",
                 "upload_desc": "Describe this sticker...",
                 "category_key": "Key (e.g. happy)",
@@ -390,8 +343,8 @@
                 "click_to_upload": "Click to upload an image"
             },
             "analysis": {
-                "scenes_title": "Detected scenes",
-                "scenes_hint": "Click a tag to add or remove it from the scene field."
+                "scenes_title": "Detected usage lines",
+                "scenes_hint": "Click to add or remove a chat line this sticker can reply to."
             },
             "batch": {
                 "include_subfolders": "Include subfolders",

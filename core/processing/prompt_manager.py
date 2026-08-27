@@ -9,15 +9,17 @@ class PromptManager:
     _PROMPT_PLACEHOLDER = "{emotion_list}"
 
     _FALLBACK_PROMPT = (
-        "分析表情包：从 `{emotion_list}` 中选择情绪分类。"
-        '返回JSON格式：{"category": "分类名", "tags": ["标签1", "标签2"], '
-        '"description": "画面描述", "scenes": ["场景1", "场景2"]}'
+        "分析表情包：从 `{emotion_list}` 中选择情绪分类，每个分类机会均等。"
+        '返回JSON格式：{"category": "分类名", "tags": [], '
+        '"description": "画面描述", "overlay_text": "", "scenes": []}'
+        "tags 没有则 []。"
     )
     _FALLBACK_FILTER_PROMPT = (
         '审核图片是否含不当内容，不当则返回{"approved": false, "reason": "审核不通过"}。'
-        "否则从 `{emotion_list}` 中选择情绪分类。"
-        '返回JSON格式：{"approved": true, "category": "分类名", "tags": ["标签1"], '
-        '"description": "画面描述", "scenes": ["场景1"]}'
+        "否则从 `{emotion_list}` 中选择情绪分类，每个分类机会均等。"
+        '返回JSON格式：{"approved": true, "category": "分类名", "tags": [], '
+        '"description": "画面描述", "overlay_text": "", "scenes": []}'
+        "tags 没有则 []。"
     )
 
     def __init__(self, plugin_instance: Any) -> None:
@@ -51,6 +53,12 @@ class PromptManager:
         self, *, use_filter: bool = False, categories: list[str] | None = None
     ) -> str:
         """根据当前配置构建完整的 VLM 分类提示词。"""
+        if categories is None and self.plugin_config and hasattr(
+            self.plugin_config, "get_vlm_categories"
+        ):
+            categories = self.plugin_config.get_vlm_categories()
+        elif categories:
+            categories = [item for item in categories if item != "other"]
         emotion_list = self._build_emotion_list_str(categories)
         template = (
             self.emoji_classification_with_filter_prompt

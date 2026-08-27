@@ -932,6 +932,7 @@ class PluginAPI:
                 "add_method": row.get("add_method"),
                 "source_url": row.get("source_url"),
                 "original_name": row.get("original_name"),
+                "overlay_text": str(row.get("overlay_text", "") or ""),
                 "character": str(row.get("character", "") or ""),
             }
         except (ValueError, TypeError):
@@ -1024,9 +1025,9 @@ class PluginAPI:
             return False, "pending file missing"
 
         category = str(row.get("category", "") or "").strip()
-        known = set(self._cfg.categories or [])
-        if not category or (category not in known and category != "other"):
-            category = "other"
+        known = set(self._cfg.get_vlm_categories() if hasattr(self._cfg, "get_vlm_categories") else (self._cfg.categories or []))
+        if not category or category == "other" or category not in known:
+            category = self._cfg.closest_category(category) if hasattr(self._cfg, "closest_category") else "confused"
 
         cat_dir = self._cfg.ensure_category_dir(category)
         cat_path = str(cat_dir / os.path.basename(src_path))

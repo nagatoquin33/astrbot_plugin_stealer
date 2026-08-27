@@ -25,10 +25,6 @@
             "description": "存储管理",
             "hint": ""
         },
-        "_advanced_section": {
-            "description": "高级配置",
-            "hint": ""
-        },
         "steal_meme": {
             "description": "开启表情包偷取功能",
             "hint": "开启后会监听并保存聊天中的图片。需确保已配置视觉模型，否则无法分类入库。"
@@ -41,25 +37,13 @@
             "description": "偷图概率",
             "hint": "设为 0 时从不偷取，设为 1 时每次都偷取。建议 0.2~0.5。仅概率模式生效。"
         },
-        "image_processing_cooldown": {
-            "description": "偷图冷却时间（秒）",
-            "hint": "两次偷取之间的最小间隔。设为 0 时不限制。仅冷却模式生效。"
-        },
         "content_filtration": {
             "description": "内容审核",
             "hint": "开启后使用 VLM 审核图片内容，过滤不当图片。开启后会增加单张图片的处理时间。"
         },
-        "content_filtration_fail_open": {
-            "description": "审核异常时允许入库",
-            "hint": "仅作为审核服务异常时的策略提示。明确审核不通过的图片仍不会入库。"
-        },
         "auto_send_meme": {
             "description": "自动随聊发送表情包",
             "hint": "开启后 Bot 会在聊天中自动发送表情包。关闭后仅收集不入库，或仅通过指令手动发送。"
-        },
-        "auto_meme_intent_gate": {
-            "description": "自动表情意图门控",
-            "hint": "开启后自动跳过命令、严肃错误回复、过短回复和连续提问等不适合自动发图的场景。"
         },
         "auto_meme_cancel_on_new_message": {
             "description": "新消息取消待发送表情",
@@ -73,37 +57,21 @@
             "description": "以 GIF 格式发送",
             "hint": "开启后始终以 GIF 输出，更接近真表情包样式。关闭时按原文件格式发送（png/jpg/gif 等）。开启后高频发送大图/动图场景会有较高瞬时内存占用。"
         },
-        "meme_send_char_delay": {
-            "description": "按字延迟（秒/字）",
-            "hint": "按 LLM 回复文本的字数计算延迟总时长（字数 × 每字延迟）。设为 0 时不按字延迟，改由下方的固定延迟与随机延迟控制。"
-        },
         "meme_send_delay": {
             "description": "固定延迟（秒）",
             "hint": "等待此时间后发送表情包，避免与分段插件冲突。建议 5.0 秒以上，让分段先发完。设为 0 则立即发送。"
-        },
-        "meme_send_delay_random": {
-            "description": "启用随机延迟",
-            "hint": "开启后在固定延迟 ~ 最大随机延迟之间随机取值，让表情包发送时机更自然。关闭则使用固定延迟。"
-        },
-        "meme_send_delay_max": {
-            "description": "最大随机延迟（秒）",
-            "hint": "开启随机延迟时生效，实际延迟在固定延迟 ~ 此值之间随机。"
         },
         "smart_meme_selection": {
             "description": "智能表情包选择",
             "hint": "开启后使用综合评分（多样性 + 匹配度 + 相似度）选出最合适的表情包。关闭则随机选择（仍会避免短期重复）。"
         },
         "enable_natural_emotion_analysis": {
-            "description": "智能检索改写",
-            "hint": "开启后用轻量模型生成检索句并判断这轮该不该跟表情，不修改回复。关闭后为被动检索：不向回复注入标签，直接用回复原文检索表情包。"
+            "description": "智能提取检索词",
+            "hint": "开启后用轻量模型从 AI 回复中提取检索词和情绪先验，增强表情包匹配；是否发送仍由概率/冷却等原有门控决定。关闭后直接用 AI 回复原文检索。"
         },
         "emotion_analysis_provider_id": {
             "description": "情绪分析专用模型",
             "hint": "留空则使用当前会话模型。小参数量模型即可胜任，建议使用轻量免费模型以降低延迟和消耗。"
-        },
-        "emotion_analysis_prompt": {
-            "description": "情绪分析提示词",
-            "hint": "生成检索句和 1~3 个情绪先验。支持占位符：{emotion_list}、{llm_reply}、{user_message}。为空时使用默认提示词。兼容旧的单分类名输出。"
         },
         "vision_provider_id": {
             "description": "视觉模型",
@@ -137,10 +105,6 @@
             "description": "最大表情包数量",
             "hint": "表情包存储上限。达到上限后自动按清理策略淘汰旧表情包。"
         },
-        "storage_cleanup_strategy": {
-            "description": "存储清理策略",
-            "hint": "保守清理：仅清理失效索引和临时文件。平衡清理：额外清理孤儿文件和缩略图缓存。激进清理：额外清理 raw 原始图片目录。"
-        },
         "steal_pool_capacity": {
             "description": "待审核池容量上限",
             "hint": "自动偷取的图片先进「待审核池」。达到此数量后暂停自动偷取，待人工在 WebUI 审核区处理（通过入库或删除）腾出空间后自动恢复。调整后即时生效，无需重启。"
@@ -157,41 +121,9 @@
             "description": "嵌入模型 ID",
             "hint": "用于生成表情包语义向量的嵌入模型。留空则自动使用 AstrBot 首个可用的 Embedding Provider。在 AstrBot 管理后台 → LLM 配置中可查看已配置的 Embedding 模型 ID（通常以 _embedding 结尾，如 openai_embedding、qwen_embedding 等）。此字段填写的是 Embedding 模型 ID，不是聊天模型或视觉模型 ID。"
         },
-        "custom_meme_classification_prompt": {
-            "description": "VLM 分类提示词",
-            "hint": "支持占位符：{emotion_list}（分类列表）。为空时使用默认提示词。"
-        },
-        "custom_meme_classification_with_filter_prompt": {
-            "description": "VLM 分类提示词（带审核）",
-            "hint": "开启内容审核时使用的 VLM 分类提示词。支持占位符：{emotion_list}（分类列表）。为空时使用默认提示词。"
-        },
         "_smart_section": {
-            "description": "智能选择：文字距离融合权重",
+            "description": "智能选择：文字距离融合权重预设",
             "hint": ""
-        },
-        "sim_weight_ngram": {
-            "description": "相似度-词组重叠权重（ngram）",
-            "hint": "混合相似度中 n-gram Jaccard 的融合权重"
-        },
-        "sim_weight_cosine": {
-            "description": "相似度-词频余弦权重",
-            "hint": "混合相似度中词频余弦的融合权重"
-        },
-        "sim_weight_substring": {
-            "description": "相似度-子串匹配权重",
-            "hint": "混合相似度中子串包含的融合权重"
-        },
-        "sim_weight_char": {
-            "description": "相似度-字符级权重",
-            "hint": "中文字符级 Jaccard 兜底召回权重"
-        },
-        "sim_weight_edit": {
-            "description": "相似度-编辑距离权重",
-            "hint": "编辑距离融合权重，短情绪词建议较高"
-        },
-        "sim_negation_penalty": {
-            "description": "否定词惩罚系数",
-            "hint": "否定词语义反转时最终分数乘以此系数"
         },
         "_webui_section": {
             "description": "WebUI",
@@ -200,6 +132,26 @@
         "webui_theme": {
             "description": "WebUI 默认主题",
             "hint": "打开「表情管理」时使用的主题。在页面里切换也会记住上次选择，优先于这项。"
+        },
+        "_advanced_section": {
+            "description": "高级配置",
+            "hint": ""
+        },
+        "custom_meme_classification_prompt": {
+            "description": "VLM 分类提示词",
+            "hint": "支持占位符：{emotion_list}（分类列表）。为空时使用默认提示词。"
+        },
+        "custom_meme_classification_with_filter_prompt": {
+            "description": "VLM 分类提示词（带审核）",
+            "hint": "开启内容审核时使用的 VLM 分类提示词。支持占位符：{emotion_list}（分类列表）。为空时使用默认提示词。"
+        },
+        "emotion_analysis_prompt": {
+            "description": "情绪分析提示词",
+            "hint": "生成检索词和 1~3 个情绪先验。支持占位符：{emotion_list}、{llm_reply}、{user_message}。为空时使用默认提示词。兼容旧的单分类名输出。"
+        },
+        "sim_weight_preset": {
+            "description": "文字距离融合预设",
+            "hint": "预设决定多个相似度算法的融合权重：均衡（默认）、关键词优先（子串/字符重叠更敏感）、语义优先（n-gram/余弦更重）、严格匹配（编辑距离和字符级更重，减少误发）。"
         }
     },
     "pages": {
@@ -330,7 +282,7 @@
                 "origin": "来源",
                 "description": "描述",
                 "tags": "标签",
-                "scenes": "场景",
+                "scenes": "适用对话",
                 "created_at": "添加时间",
                 "target_category": "目标分类",
                 "target_scope": "目标作用域",
@@ -362,7 +314,8 @@
                 "favorited": "已收藏",
                 "not_favorited": "未收藏",
                 "no_tags": "无标签",
-                "no_scenes": "无场景",
+                "no_scenes": "暂无适用对话",
+                "no_overlay_text": "无",
                 "no_preview": "无预览",
                 "scene_separator_hint": "逗号分隔",
                 "tag_separator_hint": "逗号分隔",
@@ -372,10 +325,10 @@
                 "hash": "哈希"
             },
             "placeholders": {
-                "edit_scene": "例如: 庆祝, 表达开心",
+                "edit_scene": "例如: 算了, 躺平",
                 "edit_tags": "例如: 可爱, 搞怪, 稀有",
                 "select_category": "请选择分类...",
-                "upload_scene": "例如: 办公室, 聊天窗口, 深夜",
+                "upload_scene": "例如: 算了, 躺平",
                 "upload_tags": "例如: 可爱, 搞怪",
                 "upload_desc": "关于此表情包的描述...",
                 "category_key": "标识 (如: happy)",
@@ -390,8 +343,8 @@
                 "click_to_upload": "点击上传图片"
             },
             "analysis": {
-                "scenes_title": "识别到的场景",
-                "scenes_hint": "点击标签可添加或移除到“场景”输入框。"
+                "scenes_title": "识别到的适用对话",
+                "scenes_hint": "点击可添加或移除到「适用对话」输入框。写成群友会说的话，不是空标签。"
             },
             "batch": {
                 "include_subfolders": "包含子文件夹",

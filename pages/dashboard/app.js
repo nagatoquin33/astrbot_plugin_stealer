@@ -161,6 +161,7 @@ createApp({
             desc: '',
             tagsText: '',
             scenesText: '',
+            overlay_text: '',
             character: '',
         });
 
@@ -914,6 +915,7 @@ createApp({
             pendingEditForm.desc = item.desc || '';
             pendingEditForm.tagsText = (item.tags || []).join(', ');
             pendingEditForm.scenesText = (item.scenes || []).join(', ');
+            pendingEditForm.overlay_text = item.overlay_text || '';
             pendingEditForm.character = item.character || '';
             pendingEditOpen.value = true;
             if (item.hash && !imageDataUrls[item.hash]) {
@@ -936,6 +938,7 @@ createApp({
                     desc: pendingEditForm.desc,
                     tags: parseListField(pendingEditForm.tagsText),
                     scenes: parseListField(pendingEditForm.scenesText),
+                    overlay_text: pendingEditForm.overlay_text || '',
                     character: pendingEditForm.character || '',
                 };
                 const res = await apiFetch('api/pending/update', {

@@ -5,29 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-验证通过后再发 2.9.0。当前版本仍为 2.8.5。
+## [2.8.6] - 2026-08-27
 
 ### added
-- 角色库：WebUI 可新建角色、按角色筛选、单张/批量/审核/导入时手工归档。角色与情绪分类独立，VLM 不填写角色
-- 图库工具栏下方增加角色芯片条；卡片显示角色标记
-- 详情展示 `角色:情绪`（例如 Neuro-sama : happy），文件仍按情绪目录存放
-- VLM 标注增加 `overlay_text`（图上文字）和多情绪 `emotions`；场景改为「适合回复什么样的话」
-- 新分类 `other`：文字梗 / 模板图 / 无法判断情绪时入库，不再因闭集分类失败丢图
-- 自动发送改为查询改写：生成检索句 + 1~3 个情绪先验，而不是只输出一个分类名
-- DB schema v6：`emoji` / `emoji_pending` 增加 `overlay_text`、`emotions_json`、`character`（未发版，不另开 v7）
+- VLM 分类提示词与 LLM 小模型情绪分析提示词恢复为配置项：非空覆盖内置，留空回退内置模板
+- 文字距离融合权重改为预设选择：均衡 / 关键词优先 / 语义优先 / 严格匹配，移除 5 个手动权重滑块
+- 智能选择新增角色召回、适用对话（scenes）召回；BM25 对图上文字 / 角色 / scenes 加权
+- 动图 VLM 分析提示词强化；拼接图增加帧分隔线与帧序号
+- WebUI 编辑 / 上传 / 待审核表单支持 `overlay_text`（图上文字）
 
 ### changed
-- 被动模式不再向 LLM 注入 `&&emotion&&` 标签，改为用回复原文做语义检索
-- 删除角色只去掉角色标记，不删除表情包文件
-- 自动发送检索：图上文字命中 → 远程文本嵌入 top48 → BM25 → 分类桶兜底；分类只加分，不再硬过滤
-- 嵌入文档改为「图上文字 + 使用句 + 画面 + 多情绪」，升级后自动按 `embedding_text_version=v2` 重建文本向量
-- LLM 工具 `search_meme` 改为按场景/原话搜索，不再强迫先锁心情词
-- WebUI 角色筛选从左侧分类栏移到主栏芯片条，避免侧栏过挤
+- 移除 `other` 分类：无法判断时归入最接近的已有情绪类
+- VLM 提示词中立化：每个分类机会均等；tags 0~3、scenes 1~2 句；即使图上无文字也要求写适用对话
+- LLM 小模型不再决定是否发送表情，只负责从 AI 回复提取检索词与情绪先验
+- 被动模式不再向 LLM 注入 `&&emotion&&` 标签，改为直接用回复原文做语义匹配
+- 自动发送匹配改为：图上文字 / 角色 / 适用对话 → 嵌入 → BM25 → 分类兜底；分类只作弱先验
+- 配置面板收起普通用户难懂的参数：意图门控、字间延迟、随机延迟、偷图冷却、审核异常策略、存储清理策略等
+- README / i18n 同步更新
 
-### notes
-- 不引入本地 CLIP / 视觉向量。2C2G 上只多一次短 JSON 文本模型调用，以及最多对 48 条候选打分。
+### fixed
+- 辐射 4 避难所小子图片在 AstrBot 实际页面因资产 token 缺失无法加载：由 JS 模板中的 `<img>` 改为 CSS `background-image`，走框架资源重写
 
 ## [2.8.5] - 2026-08-27
 

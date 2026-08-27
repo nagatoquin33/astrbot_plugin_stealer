@@ -110,14 +110,14 @@ class CommandHandler:
         if action not in ["on", "off"]:
             current_status = "启用" if self.plugin.plugin_config.enable_natural_emotion_analysis else "禁用"
             yield event.plain_result(
-                f"当前自然语言分析状态: {current_status}\n用法: /meme natural_analysis <on|off>"
+                f"当前智能检索状态: {current_status}\n用法: /meme natural_analysis <on|off>"
             )
             return
 
         if action == "on":
             self._apply_config_updates({"enable_natural_emotion_analysis": True})
             yield event.plain_result(
-                "✅ 已启用自然语言情绪分析（LLM模式）\n\n轻量模型会改写检索句并判断这轮该不该跟表情。"
+                "✅ 已启用自然语言情绪分析（LLM模式）\n\n轻量模型会从 AI 回复里提取检索词，是否发送仍由概率/冷却等门控决定。"
             )
         else:
             self._apply_config_updates({"enable_natural_emotion_analysis": False})
@@ -129,9 +129,9 @@ class CommandHandler:
         """显示情绪分析统计信息。"""
         try:
             # 显示当前模式
-            mode = "智能模式" if self.plugin.plugin_config.enable_natural_emotion_analysis else "被动模式"
+            mode = "智能检索" if self.plugin.plugin_config.enable_natural_emotion_analysis else "原文检索"
 
-            status_text = f"🧠 情绪分析模式: {mode}\n\n"
+            status_text = f"🧠 表情匹配模式: {mode}\n\n"
 
             if self.plugin.plugin_config.enable_natural_emotion_analysis:
                 # 智能模式：显示轻量模型分析统计
@@ -147,12 +147,12 @@ class CommandHandler:
                     status_text += f"平均响应时间: {stats['avg_response_time']}\n"
                     status_text += f"缓存大小: {stats['cache_size']}\n"
 
-                status_text += "\n💡 智能模式说明:\n"
+                status_text += "\n💡 智能检索说明:\n"
                 status_text += "- 不向LLM注入提示词\n"
-                status_text += "- 使用轻量模型分析回复语义\n"
-                status_text += "- 自动识别情绪并发送表情包\n"
+                status_text += "- 从 AI 回复中提取检索词\n"
+                status_text += "- 提供情绪先验增强匹配，不决定是否发送\n"
             else:
-                status_text += "📋 被动检索模式说明:\n"
+                status_text += "📋 原文检索说明:\n"
                 status_text += "- 不向 LLM 注入提示词，不改回复\n"
                 status_text += "- 用回复原文做图上文字 / BM25 / 嵌入检索\n"
                 status_text += "- 仍受概率、冷却和意图门控约束\n"

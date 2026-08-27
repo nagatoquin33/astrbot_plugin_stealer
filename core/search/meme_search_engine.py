@@ -48,12 +48,14 @@ class MemeSearchEngine:
             desc = str(data.get("desc", "") or "")
             category = str(data.get("category", "") or "")
             overlay = str(data.get("overlay_text", "") or "")
+            character = str(data.get("character", "") or "")
             payload = "\x1f".join(
                 [
                     str(file_path),
                     category,
                     desc,
                     overlay,
+                    character,
                     "\x1e".join(tags),
                     "\x1e".join(scenes),
                     "\x1e".join(emotions),
@@ -98,7 +100,11 @@ class MemeSearchEngine:
         if cache_service:
             try:
                 cached = cache_service.get_cache("bm25_cache")
-                if isinstance(cached, dict) and cached.get("signature") == signature:
+                if (
+                    isinstance(cached, dict)
+                    and cached.get("signature") == signature
+                    and cached.get("version") == 3
+                ):
                     cached_documents = cached.get("documents")
                     cached_doc_paths = cached.get("doc_paths")
                     if isinstance(cached_documents, list) and isinstance(cached_doc_paths, list):
@@ -122,7 +128,7 @@ class MemeSearchEngine:
         for file_path, data in idx.items():
             if not isinstance(data, dict):
                 continue
-            text_content = build_meme_search_text(data)
+            text_content = build_meme_search_text(data, bm25=True)
             tokens = tokenize_for_bm25(text_content)
             if tokens:
                 documents.append(tokens)
@@ -143,7 +149,7 @@ class MemeSearchEngine:
                             "signature": signature,
                             "documents": [list(doc) for doc in documents],
                             "doc_paths": doc_paths,
-                            "version": 1,
+                            "version": 3,
                         },
                         persist=True,
                     )
@@ -164,17 +170,26 @@ class MemeSearchEngine:
         tags: list[str],
         max_str_len: int,
         tag_words: frozenset[str] | None = None,
+        overlay: str = "",
+        character: str = "",
     ) -> int:
         """计算单条索引条目与查询的匹配得分。"""
-        # 精确匹配分类
-        if query_lower == category:
+        overlay_l = str(overlay or "").strip().lower()
+        character_l = str(character or "").strip().lower()
+        if overlay_l and len(overlay_l) >= 2 and overlay_l in query_lower:
+            return 22
+        if character_l and len(character_l) >= 2 and character_l in query_lower:
             return 20
+
+        # 精确匹配分类（只作弱信号，图上文字/角色/描述优先）
+        if query_lower == category:
+            return 8
 
         score = 0
 
         # 包含匹配分类
         if query_lower in category or category in query_lower:
-            score = 10
+            score = 4
 
         # 描述匹配
         if query_lower == desc:
@@ -224,8 +239,15 @@ class MemeSearchEngine:
                     score = max(score, tag_word_score)
 
         # 模糊匹配（使用多策略融合相似度）
+        if overlay_l:
+            if query_lower in overlay_l:
+                score = max(score, 16)
+            elif query_tokens:
+                matched = sum(1 for t in query_tokens if t in overlay_l)
+                score = max(score, matched * 4)
+
         if score < 10:
-            for target in [category, desc] + tags[:2]:
+            for target in [category, desc, overlay_l, character_l] + tags[:2]:
                 if len(target) > 1 and len(query_lower) > 1:
                     sim = calculate_hybrid_similarity(
                         query_lower[:max_str_len], target[:max_str_len]
@@ -317,12 +339,19 @@ class MemeSearchEngine:
 
                 tags = self.selector._parse_tags(data.get("tags", []))
                 scenes = self.selector._parse_tags(data.get("scenes", []))
+                overlay = str(data.get("overlay_text", "") or "")
+                character = str(data.get("character", "") or "")
                 tags_for_score = tags + scenes
                 tags_str = ", ".join(tags)
                 category = self.selector._get_category_from_data(data)
                 desc, tag_words, _, all_words, all_text = (
                     self.selector._prepare_entry_text_features(
-                        category, str(data.get("desc", "")), tuple(tags_for_score)
+                        category,
+                        str(data.get("desc", "")),
+                        tuple(tags_for_score),
+                        tuple(scenes),
+                        overlay,
+                        character,
                     )
                 )
 
@@ -340,6 +369,8 @@ class MemeSearchEngine:
                     tags_for_score,
                     MAX_STR_LENGTH,
                     tag_words=tag_words,
+                    overlay=overlay,
+                    character=character,
                 )
 
                 if score > 0:

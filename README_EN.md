@@ -37,7 +37,7 @@ This plugin is fully open-source and free. Issues and PRs are welcome.
 | **Semantic Search** | FaissVecDB vector embedding matches emojis by meaning, not just keywords; auto-degrades to BM25 when unavailable |
 | **Emotion Matching** | Analyze the emotion of Bot replies and append a matching emoji |
 | **LLM Proactive Selection** | LLM can search and send the best emoji via tool calls during conversation |
-| **Dual-Mode Emotion Analysis** | LLM mode (lightweight post-reply analysis, doesn't modify the reply) / Passive tag mode (LLM directly tags emotion) |
+| **Dual-Mode Emotion Analysis** | Smart keyword extraction (a lightweight model extracts keywords and emotion priors from the reply; it does not decide whether to send) / Raw-text retrieval (directly uses the reply text, no tags injected) |
 | **WebUI Dual-Section** | Review Queue: manually approve/reject pending emojis / Library: browse, sort, batch manage |
 | **Sort & Filter** | Most used / Recently used / Newest / Oldest — all via SQL ORDER BY |
 | **Group Filtering** | Whitelist/blacklist control over which groups allow stealing/sending |
@@ -148,6 +148,7 @@ All settings can be modified in the AstrBot admin panel.
 |:---|:---|:---|
 | **Emotion recognition mode** | `true` | `true` = LLM mode (recommended, doesn't pollute chat) / `false` = passive tag mode |
 | **Emotion analysis model** | `""` | Lightweight model for LLM mode; leave blank to use the current session default |
+| **Emotion analysis prompt** | `""` | Custom prompt for the lightweight emotion-analysis model; leave blank to use the built-in template |
 
 ### Model Configuration
 
@@ -179,9 +180,8 @@ All settings can be modified in the AstrBot admin panel.
 | Setting | Default | Description |
 |:---|:---|:---|
 | **Max emoji count** | `100` | Storage limit; oldest emojis are cleaned when exceeded |
-| **Storage cleanup strategy** | `balanced` | `conservative` cleans stale index/temp files; `balanced` also cleans orphan files and thumbnails; `aggressive` also cleans raw files |
-| **VLM classification prompt** | `""` | Custom prompt for VLM emotion classification |
-| **VLM classification prompt (with filtration)** | `""` | Prompt used when content filtration is enabled |
+| **VLM classification prompt** | `""` | Custom prompt for VLM emotion classification; leave blank to use bundled `prompts.json` |
+| **VLM classification prompt (with filtration)** | `""` | Prompt used when content filtration is enabled; leave blank to use bundled `prompts.json` |
 
 ### WebUI
 
@@ -191,9 +191,9 @@ The management page is served through the AstrBot Dashboard plugin page system. 
 
 | | LLM mode (recommended) | Passive retrieval |
 |:---|:---|:---|
-| **How it works** | A lightweight model rewrites a search query and decides whether to send a sticker | No tags are injected; the reply text is used as the search query |
+| **How it works** | A lightweight model extracts search keywords and emotion priors from the reply; sending is still gated by probability/cooldown/intent rules | No tags are injected; the reply text is used as the search query |
 | **Effect on replies** | ✅ Does not modify the LLM reply | ✅ Does not modify the LLM reply |
-| **Best for** | Enough tokens, want a `should_send` gate | Tight token budget, skip the extra model call |
+| **Best for** | Want stronger emoji matching and can afford one extra lightweight model call | Tight token budget, skip the extra model call |
 
 Character archives are assigned by hand in the WebUI and are independent of emotion categories. VLM only writes semantics; you pick the character (for example neurosama).
 
@@ -246,7 +246,7 @@ All commands use the `/meme` prefix.
 
 Since `v2.4.5+`, the core classification prompt uses a **strict JSON output format** for more stable and accurate parsing.
 
-If you customized the prompt in an earlier version, clear the `VLM classification prompt` field in the plugin config panel and reload the plugin.
+Starting with v2.9.0, the VLM classification prompts and the lightweight LLM emotion-analysis prompt are configurable again: a non-empty custom value overrides the bundled prompt, while leaving it blank uses the built-in template.
 
 The old pipe-delimited format is still compatible, but the JSON format is more reliable.
 

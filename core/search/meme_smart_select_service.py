@@ -84,6 +84,83 @@ class MemeSmartSelectService:
                     break
         return hits
 
+    def _scene_recall_paths(
+        self,
+        idx: dict[str, Any],
+        context_text: str,
+        event: AstrMessageEvent | None,
+        limit: int = 16,
+    ) -> list[str]:
+        """适用对话命中：把 VLM 写的 scenes 当成「适合回复什么话」来匹配。"""
+        ctx = (context_text or "").lower()
+        if len(ctx) < 2:
+            return []
+        hits: list[str] = []
+        for file_path, data in idx.items():
+            if not isinstance(data, dict):
+                continue
+            if not self._is_entry_allowed_for_event(data, event):
+                continue
+            for scene in self._parse_tags(data.get("scenes", [])):
+                scene_l = str(scene or "").strip().lower()
+                if len(scene_l) < 2:
+                    continue
+                matched = scene_l in ctx
+                if not matched:
+                    for piece in re.split(r"[\s,，。！？!?、~～]+", scene_l):
+                        if len(piece) >= 2 and piece in ctx:
+                            matched = True
+                            break
+                if matched:
+                    hits.append(file_path)
+                    break
+            if len(hits) >= limit:
+                break
+        return hits
+
+    def _character_names(self, data: dict[str, Any]) -> list[str]:
+        key = str(data.get("character") or "").strip()
+        if not key:
+            return []
+        names = [key.lower()]
+        cfg = getattr(self.plugin, "plugin_config", None)
+        info = (getattr(cfg, "character_info", None) or {}).get(key) if cfg else None
+        if isinstance(info, dict):
+            name = str(info.get("name") or "").strip()
+            if name:
+                names.append(name.lower())
+        return names
+
+    def _character_match_score(self, query_lower: str, data: dict[str, Any]) -> float:
+        if not query_lower:
+            return 0.0
+        for name in self._character_names(data):
+            if len(name) >= 2 and name in query_lower:
+                return 1.0
+        return 0.0
+
+    def _character_recall_paths(
+        self,
+        idx: dict[str, Any],
+        context_text: str,
+        event: AstrMessageEvent | None,
+        limit: int = 16,
+    ) -> list[str]:
+        ctx = (context_text or "").lower()
+        if len(ctx) < 2:
+            return []
+        hits: list[str] = []
+        for file_path, data in idx.items():
+            if not isinstance(data, dict):
+                continue
+            if not self._is_entry_allowed_for_event(data, event):
+                continue
+            if self._character_match_score(ctx, data) >= 1.0:
+                hits.append(file_path)
+                if len(hits) >= limit:
+                    break
+        return hits
+
     async def _recall_candidate_paths(
         self,
         idx: dict[str, Any],
@@ -110,6 +187,8 @@ class MemeSmartSelectService:
                 recalled.append(path)
 
         _add(self._overlay_recall_paths(idx, context_text, event, self.SMART_OVERLAY_RECALL_LIMIT))
+        _add(self._character_recall_paths(idx, context_text, event, self.SMART_OVERLAY_RECALL_LIMIT))
+        _add(self._scene_recall_paths(idx, context_text, event, self.SMART_OVERLAY_RECALL_LIMIT))
 
         if self._is_embedding_ready() and context_text.strip():
             try:
@@ -217,7 +296,12 @@ class MemeSmartSelectService:
 
             for file_path, data, entry_category, tags, scenes, _, fast_score in prefiltered_entries:
                 desc, tag_words, scene_words, _, _ = self._prepare_entry_text_features(
-                    entry_category, str(data.get("desc", "")), tuple(tags), tuple(scenes)
+                    entry_category,
+                    str(data.get("desc", "")),
+                    tuple(tags),
+                    tuple(scenes),
+                    str(data.get("overlay_text") or ""),
+                    str(data.get("character") or ""),
                 )
                 desc_score = calculate_hybrid_similarity(context_text, desc)
                 if desc_score < 0.25:
@@ -262,20 +346,22 @@ class MemeSmartSelectService:
                 if not entry_emotions and entry_category:
                     entry_emotions = {entry_category}
                 if entry_category in allowed_categories or (entry_emotions & allowed_categories):
-                    category_bonus = 0.12
+                    category_bonus = 0.04
                 else:
                     category_bonus = 0.0
                 use_count_bonus = min(0.08, int(data.get("use_count", 0) or 0) * 0.01)
                 bm25_bonus = fast_score * self.SMART_BM25_BONUS_WEIGHT
                 favorite_bonus = 0.3 if data.get("is_favorite") else 0.0
+                character_score = self._character_match_score(context_lower, data)
                 embedding_bonus = embedding_paths.get(
                     self._canon_path(file_path), 0.0
                 ) * 0.25
                 base_score = (
                     overlay_score * 0.28
-                    + desc_score * 0.22
-                    + tag_score * 0.15
-                    + scene_score * 0.18
+                    + desc_score * 0.18
+                    + tag_score * 0.05
+                    + scene_score * 0.25
+                    + character_score * 0.24
                     + category_bonus
                     + use_count_bonus
                     + bm25_bonus
@@ -383,37 +469,51 @@ class MemeSmartSelectService:
         idx: dict | None = None,
         event: AstrMessageEvent | None = None,
     ) -> list[tuple[str, str, str, str]]:
-        """根据查询词搜索图片（嵌入优先 → BM25 降级）。"""
+        """根据查询词搜索图片（图上文字/角色 → 嵌入 → BM25）。"""
         try:
+            if idx is None:
+                idx = self._get_index()
+            results: list[tuple[str, str, str, str]] = []
+            seen_paths: set[str] = set()
+
+            def _append_path(file_path: str) -> bool:
+                if not file_path or file_path in seen_paths:
+                    return len(results) >= limit
+                data = idx.get(file_path, {}) if idx else {}
+                if not isinstance(data, dict):
+                    return False
+                if not self._is_entry_allowed_for_event(data, event):
+                    return False
+                seen_paths.add(file_path)
+                desc = str(data.get("desc", "") or "")
+                category = self._get_category_from_data(data)
+                tags = self._parse_tags(data.get("tags", []))
+                results.append((file_path, desc, category, ", ".join(tags)))
+                return len(results) >= limit
+
+            if idx and query.strip():
+                for path in self._overlay_recall_paths(idx, query, event, self.SMART_OVERLAY_RECALL_LIMIT):
+                    if _append_path(path):
+                        return results
+                for path in self._character_recall_paths(idx, query, event, self.SMART_OVERLAY_RECALL_LIMIT):
+                    if _append_path(path):
+                        return results
+
             # ── 嵌入检索路径 ──
             if self._is_embedding_ready():
                 embedding_results = await self._embedding_service.search(query, limit * 5)
                 if embedding_results:
-                    if idx is None:
-                        idx = self._get_index()
 
                     recently_used_paths: set[str] = set()
                     for cat_paths in self._recent_usage.values():
                         recently_used_paths.update(cat_paths)
 
-                    results: list[tuple[str, str, str, str]] = []
-                    seen_paths: set[str] = set()
                     for file_path, _cos_sim in embedding_results:
-                        if file_path in seen_paths:
-                            continue
                         if file_path in recently_used_paths:
                             continue
-                        if not self._is_entry_allowed_for_event(idx.get(file_path) if idx else None, event):
-                            continue
-                        seen_paths.add(file_path)
-                        data = idx.get(file_path, {}) if idx else {}
-                        desc = str(data.get("desc", "") or "")
-                        category = self._get_category_from_data(data)
-                        tags = self._parse_tags(data.get("tags", []))
-                        tags_str = ", ".join(tags)
-                        results.append((file_path, desc, category, tags_str))
-                        if len(results) >= limit:
-                            break
+                        if _append_path(file_path):
+                            logger.debug(f"[Embedding] 嵌入检索命中 {len(results)} 条, query='{query}'")
+                            return results
                     if results:
                         logger.debug(f"[Embedding] 嵌入检索命中 {len(results)} 条, query='{query}'")
                         return results
@@ -463,28 +563,13 @@ class MemeSmartSelectService:
             for cat_paths in self._recent_usage.values():
                 recently_used_paths.update(cat_paths)
 
-            results: list[tuple[str, str, str, str]] = []
-            seen_paths: set[str] = set()
-
             for doc_idx, bm25_score in bm25_results:
                 if doc_idx >= len(self._search_engine._bm25_doc_paths):
                     continue
                 file_path = self._search_engine._bm25_doc_paths[doc_idx]
-                if file_path in seen_paths:
-                    continue
                 if file_path in recently_used_paths:
                     continue
-                if not self._is_entry_allowed_for_event(idx.get(file_path) if idx else None, event):
-                    continue
-                seen_paths.add(file_path)
-
-                data = idx.get(file_path, {}) if idx else {}
-                desc = str(data.get("desc", "") or "")
-                category = self._get_category_from_data(data)
-                tags = self._parse_tags(data.get("tags", []))
-                tags_str = ", ".join(tags)
-                results.append((file_path, desc, category, tags_str))
-                if len(results) >= limit:
+                if _append_path(file_path):
                     break
 
             if results:
@@ -812,7 +897,14 @@ class MemeSmartSelectService:
         if emoji_path:
             sent = await self.send_emoji_with_text(event, emoji_path, cleaned_text)
             if sent:
-                logger.debug(f"已发送表情包 (先验={priors})")
+                if priors:
+                    logger.debug(
+                        "已发送表情包：情绪先验=["
+                        + ", ".join(priors)
+                        + "]，按文本/图上文字/角色/BM25 综合匹配"
+                    )
+                else:
+                    logger.debug("已发送表情包：情绪先验=无，按文本/图上文字/角色/BM25 匹配")
                 return True
 
         logger.debug("[Stealer] 未匹配到表情包")

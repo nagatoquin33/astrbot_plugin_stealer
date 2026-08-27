@@ -22,27 +22,19 @@ from ..search.text_similarity import calculate_hybrid_similarity, _has_negation_
 _EMOTION_ABSTAIN = object()
 
 _EMOTION_ANALYSIS_DEFAULT_TEMPLATE = (
-    "你是表情包检索查询生成器。根据对话判断是否该发表情，并生成检索词。\n"
+    "你是表情包检索词提取器。根据对话从 AI 回复中提取能搜到表情包的关键词或短句，并给出 1~3 个情绪先验。\n"
     "可选情绪分类：{emotion_list}\n"
     "\n"
-    "任务边界：\n"
-    "1. 只分析回复的语气与意图，用户消息仅作语境。\n"
-    "2. 无明显表情意图时输出 {\"should_send\": false}\n"
-    "3. 需要表情时只输出一个 JSON 对象。\n"
-    "\n"
-    "分类规则：\n"
-    "1. 负面情绪优先细分：愤怒→angry，无奈/叹气→sigh，震惊到无语→dumb，悲伤→sad，不解→confused。\n"
-    "2. `troll` 仅用于明显阴阳怪气、挑衅、嘲讽、故意拱火语气。\n"
-    "3. 普通吐槽、拒绝、抱怨、冷淡，不要判为 `troll`。\n"
-    "4. query 用中文写「适合发什么图」，可包含图上可能出现的字或使用场景，不要只写分类名。\n"
-    "5. emotions 给 1~3 个分类，按相关度排序，必须来自给定分类。\n"
+    "任务：\n"
+    "1. 只从回复里摘录关键词或短句，不要总结成抽象概念。\n"
+    "2. 如果没有明显关键词，就用回复原文。\n"
+    "3. emotions 从给定分类里选 1~3 个，按相关度排序。每个分类机会均等，不要把某一类当默认。\n"
     "\n"
     "用户消息：{user_message}\n"
     "回复：{llm_reply}\n"
     "\n"
     "输出示例：\n"
-    "{\"should_send\": true, \"query\": \"被安排加班后的摆烂无奈\", \"emotions\": [\"sigh\", \"tired\"]}\n"
-    "或 {\"should_send\": false}"
+    "{\"query\": \"摸鱼 下班 辛苦了\", \"emotions\": [\"tired\", \"sigh\"]}\n"
 )
 
 
@@ -114,9 +106,11 @@ class NaturalEmotionAnalyzer:
         self._emotion_analysis_template = self._load_emotion_analysis_template()
 
     def _load_emotion_analysis_template(self) -> str:
-        """从插件配置加载情绪分析提示词模板，无配置时使用默认模板。"""
-        custom = self.plugin_config.emotion_analysis_prompt or ""
-        return custom.strip() if custom.strip() else _EMOTION_ANALYSIS_DEFAULT_TEMPLATE
+        """从配置加载情绪分析提示词；为空时回退到内置模板。"""
+        custom = getattr(self.plugin_config, "emotion_analysis_prompt", "") or ""
+        if custom.strip():
+            return str(custom).strip()
+        return _EMOTION_ANALYSIS_DEFAULT_TEMPLATE
 
     def _build_emotion_list_text(self) -> str:
         """构建分类描述文本（紧凑格式，供模板中 {emotion_list} 替换用）"""
@@ -163,10 +157,8 @@ class NaturalEmotionAnalyzer:
                 self.stats["cache_hits"] += 1
                 logger.debug(f"[情绪分析] 缓存命中: {cleaned_reply[:30]}...")
                 cached = EmotionQuery.from_cache(self.analysis_cache[cache_key])
-                if cached and not cached.should_send:
-                    self.last_analysis_abstained = True
-                    return None
-                return cached
+                if cached:
+                    return cached
 
         # 本地预匹配：先用分词匹配关键词映射（快速路径）
         local_match = self._local_keyword_match(cleaned_reply)
@@ -196,11 +188,6 @@ class NaturalEmotionAnalyzer:
         query = parsed if isinstance(parsed, EmotionQuery) else None
         if query is None and isinstance(parsed, str):
             query = EmotionQuery(True, cleaned_reply, [parsed])
-        if query and not query.should_send:
-            self.last_analysis_abstained = True
-            self._update_stats(response_time, True)
-            return None
-
         if query is None:
             fallback = self._local_keyword_match(cleaned_reply, fallback=True)
             if fallback:
@@ -400,11 +387,7 @@ class NaturalEmotionAnalyzer:
 
         data = self._extract_json_object(stripped)
         if isinstance(data, dict):
-            should_raw = data.get("should_send", True)
-            should = str(should_raw).strip().lower() not in {"false", "0", "no"}
-            if not should:
-                logger.info("[情绪分析] 模型判断不该发表情")
-                return EmotionQuery(False, "", [])
+            # 旧输出可能带 should_send，但小模型不再负责“是否发表情”，这里忽略该字段。
             query = str(data.get("query") or data.get("search_query") or "").strip()
             raw_emotions = data.get("emotions") or data.get("emotion") or []
             if isinstance(raw_emotions, str):

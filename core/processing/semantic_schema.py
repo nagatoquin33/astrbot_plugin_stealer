@@ -8,11 +8,10 @@ from __future__ import annotations
 
 from typing import Any
 
-CATEGORY_OTHER = "other"
 EMBEDDING_TEXT_VERSION = "v2"
 
-MAX_TAGS = 6
-MAX_SCENES = 3
+MAX_TAGS = 3
+MAX_SCENES = 2
 MAX_EMOTIONS = 3
 MAX_OVERLAY_CHARS = 80
 MAX_DESC_CHARS = 80
@@ -39,11 +38,15 @@ def build_meme_search_text(
     *,
     category_info: dict[str, Any] | None = None,
     character_info: dict[str, Any] | None = None,
+    bm25: bool = False,
 ) -> str:
     """拼一条给文本嵌入 / BM25 用的检索文档。
 
     图上文字和使用句权重大于英文分类名，以便对话查询对得上中文梗。
     角色名只来自用户归档，不由 VLM 填写。
+
+    bm25=True 时用于 BM25 底层兜底：重复叠加图上文字和角色名，让 BM25
+    更偏重画面/原文信号；分类只保留 key 一次，不把分类描述当主要匹配依据。
     """
     overlay = clip_chars(str(entry.get("overlay_text") or ""), MAX_OVERLAY_CHARS)
     desc = clip_chars(str(entry.get("desc") or ""), MAX_DESC_CHARS)
@@ -78,6 +81,20 @@ def build_meme_search_text(
             char_name = str(char_meta.get("name") or "").strip()
             if char_name:
                 character_bits.append(char_name)
+
+    if bm25:
+        # 底层兜底：图上文字/角色名/适用对话重复出现以提高 BM25 权重；分类只保留 key 一次。
+        weighted: list[str] = []
+        if overlay:
+            weighted.extend([overlay] * 3)
+        weighted.extend(character_bits * 2)
+        if desc:
+            weighted.append(desc)
+        weighted.extend(tags)
+        weighted.extend(scenes * 2)
+        if category:
+            weighted.append(category)
+        return " ".join(str(part).strip() for part in weighted if str(part).strip())
 
     parts: list[str] = []
     if overlay:
