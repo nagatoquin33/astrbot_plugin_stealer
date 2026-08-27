@@ -32,6 +32,11 @@ class PluginConfig(BaseModel):
     steal_target_filter_mode: str = "whitelist_first"
     send_target_filter_mode: str = "whitelist_first"
 
+    # === QQ 官方平台 ===
+    # QQ 官方（官方机器人 API）消息中的大表情/表情包是普通图片附件，
+    # 无 OneBot 的 sub_type 标记；开启后该平台消息中的图片附件全部按表情收录。
+    qqofficial_steal_all_images: bool = False
+
     # === 模型配置 ===
     vision_provider_id: str = ""
 
@@ -80,6 +85,9 @@ class PluginConfig(BaseModel):
     # True：进入 pending，需在 WebUI 审核区通过后才入库（默认，安全）。
     # False：跳过审核，自动入库（issue #89，方便"看到就收"的用户）。
     audit_required: bool = True
+
+    # WebUI 默认主题：auto/dark/light/minecraft/fallout。页面内切换后写入 KV，优先于该项。
+    webui_theme: str = "auto"
 
     # === 内部状态 (不作为 Pydantic 字段) ===
     # 使用 PrivateAttr 或在 __init__ 中设置且不包含在 __annotations__ 中
