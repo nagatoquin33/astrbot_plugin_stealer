@@ -10,12 +10,6 @@
     "default": false,
     "hint": "开启后会监听并保存聊天中的图片。需确保已配置视觉模型，否则无法分类入库。"
   },
-  "qqofficial_steal_all_images": {
-    "description": "QQ 官方平台：所有图片按表情收录",
-    "type": "bool",
-    "default": false,
-    "hint": "QQ 官方（官方机器人 API）消息中的大表情/表情包是普通图片附件，无 OneBot 的 sub_type 标记，插件默认只收录带表情 CDN 特征的图片（如商城表情）。开启后该平台消息中的图片附件全部按表情收录（普通图片也会被收）。"
-  },
   "steal_mode": {
     "description": "偷图模式",
     "type": "string",
@@ -223,6 +217,12 @@
     "type": "bool",
     "default": true,
     "hint": "开启后自动偷取的图片进入「待审核池」，需在 WebUI 审核区人工通过后才正式入库。关闭后跳过审核，自动偷取的图片直接入库分类，请配合内容审核开关使用以避免低质量图片污染图库。"
+  },
+  "qqofficial_steal_all_images": {
+    "description": "QQ 官方平台：所有图片按表情收录",
+    "type": "bool",
+    "default": false,
+    "hint": "QQ 官方（官方机器人 API）消息中的大表情/表情包是普通图片附件，无 OneBot 的 sub_type 标记，插件默认只收录带表情 CDN 特征的图片（如商城表情）。开启后该平台消息中的图片附件全部按表情收录（普通图片也会被收）。"
   },
   "_webui_section": {
     "description": "=== WebUI ===",
