@@ -218,13 +218,13 @@
     "default": true,
     "hint": "开启后自动偷取的图片进入「待审核池」，需在 WebUI 审核区人工通过后才正式入库。关闭后跳过审核，自动偷取的图片直接入库分类，请配合内容审核开关使用以避免低质量图片污染图库。"
   },
-  "qqofficial_steal_modes": {
-    "description": "QQ_Official：额外收录模式（多选）",
-    "type": "list",
-    "default": [],
-    "options": ["all_images", "gif_only"],
-    "labels": ["所有图片按表情收录", "仅收录 GIF 格式"],
-    "hint": "QQ_Official（QQ 官方机器人平台）消息中的大表情/表情包是普通图片附件，无 OneBot 的 sub_type 标记，插件默认只收录带表情 CDN 特征的图片（如商城表情）。勾选「所有图片按表情收录」：该平台图片附件全部按表情收录（普通图片也会被收）；勾选「仅收录 GIF 格式」：只收录 GIF 格式的图片（QQ 表情包多为 GIF，可过滤静态图/普通图；基于 URL 后缀判断，个别不带 .gif 后缀的动态表情可能漏收）。"
+  "qqofficial_steal_mode": {
+    "description": "QQ_Official：表情收录模式",
+    "type": "string",
+    "default": "cdn_only",
+    "options": ["cdn_only", "all_images", "gif_only"],
+    "labels": ["仅收录表情 CDN 特征", "所有图片按表情收录", "仅收录 GIF 格式"],
+    "hint": "QQ_Official 平台的大表情/表情包是普通图片附件，无 OneBot 的 sub_type 标记。默认仅收录带表情 CDN 特征的图片（如商城表情）；可选全部收录，或仅收录 GIF（QQ 表情包多为 GIF，基于 URL 后缀判断）。"
   },
   "_webui_section": {
     "description": "=== WebUI ===",

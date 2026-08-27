@@ -98,29 +98,28 @@ class PlatformDetector:
                     getattr(img, "url", "")
                 )
                 try:
-                    modes = list(
-                        getattr(
-                            self.plugin.plugin_config,
-                            "qqofficial_steal_modes",
-                            [],
-                        )
-                        or []
+                    mode = str(
+                        getattr(self.plugin.plugin_config, "qqofficial_steal_mode", "cdn_only")
+                        or "cdn_only"
                     )
                 except Exception:
-                    modes = []
-                # gif_only：仅收录 GIF 格式（基于 URL 后缀的尽力过滤），命中即收
-                if "gif_only" in modes:
+                    mode = "cdn_only"
+                if mode == "gif_only":
+                    # 仅收录 GIF 格式（基于 URL 后缀的尽力过滤），命中即收
                     url_path = str(img_ref or "").lower().split("?", 1)[0]
                     if url_path.endswith(".gif"):
                         logger.debug("QQ_Official gif_only 模式：收录 GIF 图片")
                         return True
                     logger.debug("QQ_Official gif_only 模式：跳过非 GIF 图片")
                     return False
+                if mode == "all_images":
+                    if img_ref:
+                        logger.debug("QQ_Official：已开启『所有图片按表情收录』，收录该图片")
+                        return True
+                    return False
+                # cdn_only（默认）：仅收录带表情 CDN 特征的图片
                 if self._is_qq_emoji_url(img_ref):
                     logger.debug(f"检测到 QQ_Official 表情包（CDN 特征）: {img_ref[:80]}")
-                    return True
-                if "all_images" in modes and img_ref:
-                    logger.debug("QQ_Official：已开启『所有图片按表情收录』，收录该图片")
                     return True
                 return False
 

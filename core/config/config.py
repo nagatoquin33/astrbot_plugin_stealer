@@ -34,10 +34,11 @@ class PluginConfig(BaseModel):
 
     # === QQ 官方平台 ===
     # QQ_Official（QQ 官方机器人平台）消息中的大表情/表情包是普通图片附件，
-    # 无 OneBot 的 sub_type 标记。额外收录模式（多选）：
+    # 无 OneBot 的 sub_type 标记。收录模式（单选）：
+    # - cdn_only：仅收录带表情 CDN 特征的图片（默认）
     # - all_images：该平台消息中的图片附件全部按表情收录（普通图片也会被收）
     # - gif_only：仅收录 GIF 格式的图片（QQ 表情包多为 GIF，可过滤静态图/普通图）
-    qqofficial_steal_modes: list[str] = []
+    qqofficial_steal_mode: str = "cdn_only"
 
     # === 模型配置 ===
     vision_provider_id: str = ""

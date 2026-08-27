@@ -14,8 +14,8 @@ from astrbot_plugin_stealer.core.events.platform_detector import PlatformDetecto
 class _FakePlugin:
     """模拟插件实例（仅提供 plugin_config）。"""
 
-    def __init__(self, steal_modes: list[str] | None = None):
-        self.plugin_config = SimpleNamespace(qqofficial_steal_modes=list(steal_modes or []))
+    def __init__(self, steal_mode: str = "cdn_only"):
+        self.plugin_config = SimpleNamespace(qqofficial_steal_mode=steal_mode)
 
 
 class _FakeEvent:
@@ -36,8 +36,8 @@ class _FakeImage:
         self.url = url
 
 
-def _detector(steal_modes: list[str] | None = None) -> PlatformDetector:
-    return PlatformDetector(_FakePlugin(steal_modes))
+def _detector(steal_mode: str = "cdn_only") -> PlatformDetector:
+    return PlatformDetector(_FakePlugin(steal_mode))
 
 
 class TestQQOfficialEmojiDetection:
@@ -56,46 +56,38 @@ class TestQQOfficialEmojiDetection:
         assert det.check_platform_emoji_metadata(img, _FakeEvent()) is True
 
     def test_plain_image_without_modes(self):
-        """普通图片 URL + 未勾选模式 → 判定非表情"""
+        """普通图片 URL + cdn_only（默认）→ 判定非表情"""
         det = _detector()
         img = _FakeImage(file="https://example.com/a.png")
         assert det.check_platform_emoji_metadata(img, _FakeEvent()) is False
 
     def test_plain_image_with_all_images(self):
-        """普通图片 URL + 勾选 all_images → 判定为表情"""
-        det = _detector(steal_modes=["all_images"])
+        """普通图片 URL + all_images → 判定为表情"""
+        det = _detector(steal_mode="all_images")
         img = _FakeImage(file="https://example.com/a.png")
         assert det.check_platform_emoji_metadata(img, _FakeEvent()) is True
 
     def test_gif_only_accepts_gif(self):
         """gif_only：.gif URL → 判定为表情"""
-        det = _detector(steal_modes=["gif_only"])
+        det = _detector(steal_mode="gif_only")
         img = _FakeImage(file="https://example.com/a.gif")
         assert det.check_platform_emoji_metadata(img, _FakeEvent()) is True
 
     def test_gif_only_rejects_non_gif(self):
         """gif_only：非 .gif URL（含 CDN 特征）→ 判定非表情"""
-        det = _detector(steal_modes=["gif_only"])
+        det = _detector(steal_mode="gif_only")
         img = _FakeImage(file="https://gxh.vip.qq.com/xxx/parcel.jpg")
         assert det.check_platform_emoji_metadata(img, _FakeEvent()) is False
 
-    def test_all_images_plus_gif_only_filters(self):
-        """all_images + gif_only：非 gif 仍被过滤，gif 收录"""
-        det = _detector(steal_modes=["all_images", "gif_only"])
-        img_png = _FakeImage(file="https://example.com/a.png")
-        assert det.check_platform_emoji_metadata(img_png, _FakeEvent()) is False
-        img_gif = _FakeImage(file="https://example.com/a.gif")
-        assert det.check_platform_emoji_metadata(img_gif, _FakeEvent()) is True
-
     def test_gif_only_with_query_params(self):
         """gif_only：URL 带查询参数仍按后缀判断"""
-        det = _detector(steal_modes=["gif_only"])
+        det = _detector(steal_mode="gif_only")
         img = _FakeImage(file="https://example.com/a.gif?sign=abc")
         assert det.check_platform_emoji_metadata(img, _FakeEvent()) is True
 
     def test_empty_ref(self):
         """无 file/url → 判定非表情"""
-        det = _detector(steal_modes=["all_images"])
+        det = _detector(steal_mode="all_images")
         img = _FakeImage()
         assert det.check_platform_emoji_metadata(img, _FakeEvent()) is False
 
