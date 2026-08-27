@@ -55,7 +55,7 @@
       "所有图片按表情收录",
       "仅收录 GIF 格式"
     ],
-    "hint": "QQ_Official 平台的大表情/表情包是普通图片附件，无 OneBot 的 sub_type 标记。默认仅收录带表情 CDN 特征的图片（如商城表情）；可选全部收录，或仅收录 GIF（QQ 表情包多为 GIF，基于 URL 后缀判断）。"
+    "hint": "QQ_Official 平台的大表情/表情包是普通图片附件，无 OneBot 的 sub_type 标记。默认仅收录带表情 CDN 特征的图片（如商城表情）；可选全部收录，或仅收录 GIF。"
   },
   "_model_section": {
     "description": "=== 模型配置（视觉 / 情绪分析 / 嵌入检索）===",
