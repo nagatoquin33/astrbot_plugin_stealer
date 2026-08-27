@@ -398,7 +398,9 @@ createApp({
                 const data = await bridge.apiGet('prefs');
                 if (!data || data.success === false) return;
                 const hasQueryTheme = Boolean(new URLSearchParams(location.search).get('theme'));
-                if (!hasQueryTheme && data.theme) {
+                // 本地已记住主题时不覆盖（刷新保持上次选择）；
+                // 仅首次（localStorage 为空）才用后端配置/KV 的值。
+                if (!hasQueryTheme && data.theme && !readStored(THEME_STORAGE_KEY)) {
                     setThemeMode(resolveThemeValue(data.theme), false);
                 }
                 if (data.view === 'list' || data.view === 'grid') {
