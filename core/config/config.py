@@ -32,6 +32,11 @@ class PluginConfig(BaseModel):
     steal_target_filter_mode: str = "whitelist_first"
     send_target_filter_mode: str = "whitelist_first"
 
+    # === QQ 官方平台 ===
+    # QQ 官方（官方机器人 API）消息中的大表情/表情包是普通图片附件，
+    # 无 OneBot 的 sub_type 标记；开启后该平台消息中的图片附件全部按表情收录。
+    qqofficial_steal_all_images: bool = False
+
     # === 模型配置 ===
     vision_provider_id: str = ""
 
