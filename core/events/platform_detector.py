@@ -5,6 +5,12 @@ from typing import Any
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
+# QQ 官方商城表情 CDN 特征（用于 qq_official 平台的表情判定）
+_QQ_EMOJI_URL_MARKERS = (
+    "vip.qq.com/club/item/parcel",
+    "gxh.vip.qq.com",
+)
+
 
 class PlatformDetector:
     """负责检测消息来源平台并提取表情包相关的元信息。"""
@@ -48,6 +54,21 @@ class PlatformDetector:
         platform_name = self.get_platform_name(event)
         return platform_name == "telegram"
 
+    def is_qqofficial_event(self, event: AstrMessageEvent | None = None) -> bool:
+        """判断事件是否来自 QQ 官方平台（qq_official）。
+
+        QQ 官方（官方机器人 API）的 raw_message 是 botpy SDK 对象，不是
+        OneBot 的 dict 段列表，消息组件链与 NapCat/OneBot 差异较大。
+        """
+        platform_name = self.get_platform_name(event)
+        return platform_name == "qq_official"
+
+    @staticmethod
+    def _is_qq_emoji_url(url: str) -> bool:
+        """判断图片 URL 是否带有 QQ 官方表情 CDN 特征。"""
+        u = str(url or "").lower()
+        return any(marker in u for marker in _QQ_EMOJI_URL_MARKERS)
+
     def check_platform_emoji_metadata(
         self,
         img: object,
@@ -70,6 +91,29 @@ class PlatformDetector:
             bool: 是否为平台标记的表情包
         """
         try:
+            # QQ 官方（botpy）兼容：raw_message 是 SDK 对象而非 OneBot dict 段列表，
+            # 无法提取 sub_type/summary 等段标记，改为按图片 URL 特征 / 配置判定。
+            if self.is_qqofficial_event(event):
+                img_ref = self._normalize_str(getattr(img, "file", "")) or self._normalize_str(
+                    getattr(img, "url", "")
+                )
+                if self._is_qq_emoji_url(img_ref):
+                    logger.debug(f"检测到 QQ 官方表情包（CDN 特征）: {img_ref[:80]}")
+                    return True
+                try:
+                    steal_all = bool(
+                        getattr(
+                            self.plugin.plugin_config,
+                            "qqofficial_steal_all_images",
+                            False,
+                        )
+                    )
+                except Exception:
+                    steal_all = False
+                if steal_all and img_ref:
+                    logger.debug("QQ 官方平台：已开启『所有图片按表情收录』，收录该图片")
+                    return True
+                return False
 
             def is_emoji_summary(summary: object) -> bool:
                 s = self._normalize_str(summary)
