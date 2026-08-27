@@ -756,12 +756,16 @@ class PluginAPI:
 
     def _config_default_theme(self) -> str:
         cfg = getattr(self.plugin, "plugin_config", None)
-        raw = getattr(cfg, "webui_theme", None) if cfg is not None else None
-        if raw is None and cfg is not None:
-            data = getattr(cfg, "_data", None)
-            if isinstance(data, dict):
-                raw = data.get("webui_theme")
-        return self._normalize_theme(raw)
+        if cfg is None:
+            return "auto"
+        # 优先读 AstrBotConfig 实时值（_data 随配置保存立即更新），
+        # PluginConfig 是插件初始化时的快照，改配置后不会自动刷新。
+        data = getattr(cfg, "_data", None)
+        if data is not None and hasattr(data, "get"):
+            raw = data.get("webui_theme")
+            if raw:
+                return self._normalize_theme(raw)
+        return self._normalize_theme(getattr(cfg, "webui_theme", "auto"))
 
     async def _await_maybe(self, value: Any) -> Any:
         if inspect.isawaitable(value):
