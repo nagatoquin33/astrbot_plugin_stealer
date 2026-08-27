@@ -14,8 +14,8 @@ from astrbot_plugin_stealer.core.events.platform_detector import PlatformDetecto
 class _FakePlugin:
     """模拟插件实例（仅提供 plugin_config）。"""
 
-    def __init__(self, steal_all_images: bool = False):
-        self.plugin_config = SimpleNamespace(qqofficial_steal_all_images=steal_all_images)
+    def __init__(self, steal_modes: list[str] | None = None):
+        self.plugin_config = SimpleNamespace(qqofficial_steal_modes=list(steal_modes or []))
 
 
 class _FakeEvent:
@@ -36,8 +36,8 @@ class _FakeImage:
         self.url = url
 
 
-def _detector(steal_all_images: bool = False) -> PlatformDetector:
-    return PlatformDetector(_FakePlugin(steal_all_images))
+def _detector(steal_modes: list[str] | None = None) -> PlatformDetector:
+    return PlatformDetector(_FakePlugin(steal_modes))
 
 
 class TestQQOfficialEmojiDetection:
@@ -45,7 +45,7 @@ class TestQQOfficialEmojiDetection:
 
     def test_emoji_cdn_url_detected(self):
         """URL 带 QQ 表情 CDN 特征 → 判定为表情"""
-        det = _detector(steal_all_images=False)
+        det = _detector()
         img = _FakeImage(file="https://gxh.vip.qq.com/xxx/parcel.jpg")
         assert det.check_platform_emoji_metadata(img, _FakeEvent()) is True
 
@@ -55,21 +55,47 @@ class TestQQOfficialEmojiDetection:
         img = _FakeImage(file="https://vip.qq.com/club/item/parcel/123/abc.png")
         assert det.check_platform_emoji_metadata(img, _FakeEvent()) is True
 
-    def test_plain_image_without_steal_all(self):
-        """普通图片 URL + 未开启全收 → 判定非表情"""
-        det = _detector(steal_all_images=False)
+    def test_plain_image_without_modes(self):
+        """普通图片 URL + 未勾选模式 → 判定非表情"""
+        det = _detector()
         img = _FakeImage(file="https://example.com/a.png")
         assert det.check_platform_emoji_metadata(img, _FakeEvent()) is False
 
-    def test_plain_image_with_steal_all(self):
-        """普通图片 URL + 开启全收 → 判定为表情"""
-        det = _detector(steal_all_images=True)
+    def test_plain_image_with_all_images(self):
+        """普通图片 URL + 勾选 all_images → 判定为表情"""
+        det = _detector(steal_modes=["all_images"])
         img = _FakeImage(file="https://example.com/a.png")
+        assert det.check_platform_emoji_metadata(img, _FakeEvent()) is True
+
+    def test_gif_only_accepts_gif(self):
+        """gif_only：.gif URL → 判定为表情"""
+        det = _detector(steal_modes=["gif_only"])
+        img = _FakeImage(file="https://example.com/a.gif")
+        assert det.check_platform_emoji_metadata(img, _FakeEvent()) is True
+
+    def test_gif_only_rejects_non_gif(self):
+        """gif_only：非 .gif URL（含 CDN 特征）→ 判定非表情"""
+        det = _detector(steal_modes=["gif_only"])
+        img = _FakeImage(file="https://gxh.vip.qq.com/xxx/parcel.jpg")
+        assert det.check_platform_emoji_metadata(img, _FakeEvent()) is False
+
+    def test_all_images_plus_gif_only_filters(self):
+        """all_images + gif_only：非 gif 仍被过滤，gif 收录"""
+        det = _detector(steal_modes=["all_images", "gif_only"])
+        img_png = _FakeImage(file="https://example.com/a.png")
+        assert det.check_platform_emoji_metadata(img_png, _FakeEvent()) is False
+        img_gif = _FakeImage(file="https://example.com/a.gif")
+        assert det.check_platform_emoji_metadata(img_gif, _FakeEvent()) is True
+
+    def test_gif_only_with_query_params(self):
+        """gif_only：URL 带查询参数仍按后缀判断"""
+        det = _detector(steal_modes=["gif_only"])
+        img = _FakeImage(file="https://example.com/a.gif?sign=abc")
         assert det.check_platform_emoji_metadata(img, _FakeEvent()) is True
 
     def test_empty_ref(self):
         """无 file/url → 判定非表情"""
-        det = _detector(steal_all_images=True)
+        det = _detector(steal_modes=["all_images"])
         img = _FakeImage()
         assert det.check_platform_emoji_metadata(img, _FakeEvent()) is False
 
@@ -85,7 +111,7 @@ class TestQQOfficialEmojiDetection:
                     raw_message={"message": [{"type": "image", "data": {"sub_type": 1}}]}
                 )
 
-        det = _detector(steal_all_images=False)
+        det = _detector()
         img = _FakeImage(file="https://example.com/a.png")
         # OneBot sub_type=1 仍是表情（与 event_handler 一致：传 img_index 匹配原始段）
         assert det.check_platform_emoji_metadata(img, _OneBotEvent(), img_index=0) is True
