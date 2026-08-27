@@ -55,6 +55,12 @@ createApp({
         const pendingCategoryTotal = ref(0);
         const pendingCategories = ref([]);
         const pendingStats = reactive({ pending: 0, capacity: 200, paused: false });
+        const hudHpPct = computed(() => `${Math.max(12, Math.min(100, Number(stats.total || 0)))}%`);
+        const hudApPct = computed(() => {
+            const cap = Number(pendingStats.capacity || 200) || 200;
+            return `${Math.max(8, Math.min(100, (Number(pendingStats.pending || 0) / cap) * 100))}%`;
+        });
+        const hudXpPct = computed(() => `${Math.max(8, Math.min(100, Number(stats.today || 0) * 12))}%`);
         const pendingLoading = ref(false);
         const pendingSearchQuery = ref('');
         const pendingCategory = ref('');
@@ -350,19 +356,40 @@ createApp({
         const applyTheme = () => {
             document.documentElement.setAttribute('data-theme', effectiveTheme.value);
         };
-        const setThemeMode = (mode) => {
+        const persistPrefs = async (patch) => {
+            try {
+                await bridge.apiPost('prefs', patch);
+            } catch (e) { /* 无后端时仍走 localStorage */ }
+        };
+        const setThemeMode = (mode, persist = true) => {
             if (!THEME_OPTIONS.some((o) => o.value === mode)) return;
             themeMode.value = mode;
             writeStored(THEME_STORAGE_KEY, mode);
             applyTheme();
+            if (persist) persistPrefs({ theme: mode });
         };
         const themePickerOpen = ref(false);
         const closeThemePicker = () => { themePickerOpen.value = false; };
 
         const viewMode = ref(readStored(VIEW_STORAGE_KEY) === 'list' ? 'list' : 'grid');
-        const setViewMode = (mode) => {
+        const setViewMode = (mode, persist = true) => {
             viewMode.value = mode === 'list' ? 'list' : 'grid';
             writeStored(VIEW_STORAGE_KEY, viewMode.value);
+            if (persist) persistPrefs({ view: viewMode.value });
+        };
+        const loadDashboardPrefs = async () => {
+            try {
+                const data = await bridge.apiGet('prefs');
+                if (!data || data.success === false) return;
+                const hasQueryTheme = Boolean(new URLSearchParams(location.search).get('theme'));
+                if (!hasQueryTheme && data.theme) {
+                    setThemeMode(resolveThemeValue(data.theme), false);
+                }
+                if (data.view === 'list' || data.view === 'grid') {
+                    viewMode.value = data.view;
+                    writeStored(VIEW_STORAGE_KEY, data.view);
+                }
+            } catch (e) { /* 保留 localStorage */ }
         };
 
         // 分类 accent 色：内置情绪各分配固定色相，自定义分类按 key 哈希
@@ -506,26 +533,79 @@ createApp({
                 slot.classList.add('tooltip-end');
             }
         };
-        const onItemSlotEnter = (event, img) => {
+        const onItemSlotEnter = (event) => {
             placeMcTooltip(event);
-            if (img?.hash) loadOriginalImage(img.hash);
+        };
+
+        const originalCache = createLRUCache(4);
+        const inflightOriginals = new Map();
+        const previewLoading = ref(false);
+
+        const pruneOriginalUrls = (keepHash = '') => {
+            for (const hash of Object.keys(originalDataUrls)) {
+                if (hash !== keepHash && !originalCache.has(hash)) delete originalDataUrls[hash];
+            }
         };
 
         const loadOriginalImage = async (hash) => {
-            if (!hash || originalDataUrls[hash]) return;
-            try {
-                const data = await bridge.apiGet('image-data', { hash });
-                if (data && data.url) {
-                    originalDataUrls[hash] = data.url;
-                }
-            } catch (e) {
-                console.error('Failed to load original image:', hash, e);
+            if (!hash) return null;
+            const cached = originalCache.get(hash);
+            if (cached) {
+                originalDataUrls[hash] = cached;
+                return cached;
             }
+            if (originalDataUrls[hash]) return originalDataUrls[hash];
+            if (inflightOriginals.has(hash)) {
+                const pending = await inflightOriginals.get(hash);
+                if (pending?.url) {
+                    originalCache.set(hash, pending.url);
+                    originalDataUrls[hash] = pending.url;
+                }
+                return pending?.url || null;
+            }
+            const request = (async () => {
+                try {
+                    return await bridge.apiGet('image-data', { hash });
+                } catch (e) {
+                    console.error('Failed to load original image:', hash, e);
+                    return null;
+                } finally {
+                    inflightOriginals.delete(hash);
+                }
+            })();
+            inflightOriginals.set(hash, request);
+            const data = await request;
+            if (data && data.url) {
+                originalCache.set(hash, data.url);
+                originalDataUrls[hash] = data.url;
+                pruneOriginalUrls(hash);
+                return data.url;
+            }
+            return null;
+        };
+
+        const requestOriginalForPreview = (hash) => {
+            if (!hash) {
+                previewLoading.value = false;
+                return;
+            }
+            if (originalDataUrls[hash] || originalCache.has(hash)) {
+                loadOriginalImage(hash);
+                previewLoading.value = false;
+                return;
+            }
+            previewLoading.value = true;
+            loadOriginalImage(hash).finally(() => {
+                if (previewItem.value?.hash === hash) previewLoading.value = false;
+            });
         };
 
         const downloadImage = async (item) => {
             if (!item?.hash) return;
-            const dataUrl = originalDataUrls[item.hash] || imageDataUrls[item.hash];
+            if (!originalDataUrls[item.hash] && !originalCache.has(item.hash)) {
+                await loadOriginalImage(item.hash);
+            }
+            const dataUrl = originalDataUrls[item.hash] || originalCache.get(item.hash) || imageDataUrls[item.hash];
             if (!dataUrl) return;
             const a = document.createElement('a');
             a.href = dataUrl;
@@ -810,7 +890,7 @@ createApp({
             pendingEditForm.scenesText = (item.scenes || []).join(', ');
             pendingEditOpen.value = true;
             if (item.hash && !imageDataUrls[item.hash]) {
-                loadOriginalImage(item.hash);
+                loadImageData(item.hash);
             }
         };
 
@@ -987,19 +1067,16 @@ createApp({
             previewItem.value = img;
             previewOpen.value = true;
             resetPreviewZoom();
-            if (img?.hash) {
-                loadOriginalImage(img.hash);
-            }
+            requestOriginalForPreview(img?.hash);
         };
 
         const closePreview = () => {
             previewOpen.value = false;
             previewItem.value = null;
             isEditing.value = false;
+            previewLoading.value = false;
             resetPreviewZoom();
-            for (const hash of Object.keys(originalDataUrls)) {
-                delete originalDataUrls[hash];
-            }
+            pruneOriginalUrls();
         };
 
         const navigateImage = (direction) => {
@@ -1009,7 +1086,7 @@ createApp({
             if (nextIdx >= 0 && nextIdx < images.value.length) {
                 previewItem.value = images.value[nextIdx];
                 resetPreviewZoom();
-                loadOriginalImage(previewItem.value.hash);
+                requestOriginalForPreview(previewItem.value.hash);
             }
         };
         const prevImage = () => navigateImage(-1);
@@ -1919,6 +1996,7 @@ createApp({
                 });
             }, { rootMargin: '200px' });
             checkHealth();
+            loadDashboardPrefs();
             loadAll();
         });
 
@@ -2085,6 +2163,7 @@ createApp({
             originalDataUrls,
             loadOriginalImage,
             onItemSlotEnter,
+            previewLoading,
             downloadImage,
 
             favoriteCount,
@@ -2117,6 +2196,9 @@ createApp({
             gameThemeOptions,
             setThemeMode,
             themePickerOpen,
+            hudHpPct,
+            hudApPct,
+            hudXpPct,
             viewMode,
             setViewMode,
             catAccent,

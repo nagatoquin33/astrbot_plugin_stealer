@@ -145,6 +145,7 @@ class PreviewState:
         self.pending: list[dict] = []
         self.blacklist: set[str] = set()
         self.batch_tasks: dict[str, dict] = {}
+        self.prefs: dict[str, str] = {"theme": "auto", "view": "grid"}
         self._next_pending_id = 1
         self._now = int(time.time())
         if seed:
@@ -331,6 +332,7 @@ class PreviewServer:
         r.add_get("/index.html", self.handle_index)
         r.add_get("/mock/bridge.js", self.handle_bridge_js)
         r.add_get("/logo.png", self.handle_logo)
+        r.add_get("/vaultboy.png", self.handle_vaultboy)
         for filename in ("app.js", "app.css", "template.js"):
             r.add_get("/" + filename, self._make_static_handler(filename))
         r.add_route("*", PLUGIN_BASE + "/{endpoint:.+}", self.handle_api)
@@ -340,6 +342,12 @@ class PreviewServer:
         path = DASHBOARD_DIR / "logo.png"
         if not path.is_file():
             return web.Response(status=404, text="missing logo.png")
+        return web.Response(body=path.read_bytes(), content_type="image/png")
+
+    async def handle_vaultboy(self, request: web.Request) -> web.Response:
+        path = DASHBOARD_DIR / "vaultboy.png"
+        if not path.is_file():
+            return web.Response(status=404, text="missing vaultboy.png")
         return web.Response(body=path.read_bytes(), content_type="image/png")
 
     async def handle_index(self, request: web.Request) -> web.Response:
@@ -421,6 +429,17 @@ class PreviewServer:
 
     def api_health(self, request, payload):
         return {"success": True, "status": "ok", "service": "emoji-manager-webui-mock"}
+
+    def api_prefs(self, request, payload):
+        valid_themes = {"auto", "dark", "light", "minecraft", "fallout"}
+        aliases = {"midnight": "dark", "sakura": "light"}
+        if request.method == "POST":
+            theme = aliases.get(str(payload.get("theme") or ""), str(payload.get("theme") or "").strip())
+            if theme in valid_themes:
+                self.state.prefs["theme"] = theme
+            if "view" in payload:
+                self.state.prefs["view"] = "list" if payload.get("view") == "list" else "grid"
+        return {"success": True, **self.state.prefs}
 
     def api_stats(self, request, payload):
         st = self.state

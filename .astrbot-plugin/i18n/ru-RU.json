@@ -205,7 +205,8 @@
                 "edit_pending": "Изменить стикер на модерации"
             },
             "messages": {
-                "no_preview": "Нет предпросмотра"
+                "no_preview": "Нет предпросмотра",
+                "loading_original": "Загрузка оригинала…"
             },
             "labels": {
                 "hash": "Хеш"
@@ -221,7 +222,9 @@
                 "minecraft": "Minecraft",
                 "fallout": "Fallout 4",
                 "group_original": "Оригинал",
-                "group_game": "Игровой инвентарь"
+                "group_game": "Игровой инвентарь",
+                "save_hint": "Выбор сохранится как тема по умолчанию.",
+                "saved_default": "По умолчанию"
             },
             "fields": {
                 "category": "Категория",

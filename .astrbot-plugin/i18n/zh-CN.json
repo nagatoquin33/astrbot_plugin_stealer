@@ -340,6 +340,7 @@
                 "unknown_error": "未知错误",
                 "unknown": "未知",
                 "no_description": "暂无描述",
+                "loading_original": "正在加载原图…",
                 "never_used": "从未使用",
                 "favorited": "已收藏",
                 "not_favorited": "未收藏",
@@ -454,7 +455,9 @@
                 "minecraft": "我的世界",
                 "fallout": "辐射4",
                 "group_original": "原版",
-                "group_game": "游戏背包"
+                "group_game": "游戏背包",
+                "save_hint": "点选后会保存为下次打开的默认主题。",
+                "saved_default": "默认"
             },
             "view": {
                 "grid": "网格视图",

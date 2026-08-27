@@ -351,6 +351,31 @@
     "default": true,
     "hint": "开启后自动偷取的图片进入「待审核池」，需在 WebUI 审核区人工通过后才正式入库。关闭后跳过审核，自动偷取的图片直接入库分类，请配合内容审核开关使用以避免低质量图片污染图库。"
   },
+  "_webui_section": {
+    "description": "=== WebUI ===",
+    "type": "text",
+    "invisible": true
+  },
+  "webui_theme": {
+    "description": "WebUI 默认主题",
+    "type": "string",
+    "default": "auto",
+    "options": [
+      "auto",
+      "dark",
+      "light",
+      "minecraft",
+      "fallout"
+    ],
+    "labels": [
+      "跟随宿主",
+      "暗色鎏金",
+      "亮色",
+      "我的世界",
+      "辐射 4"
+    ],
+    "hint": "打开「表情管理」时使用的主题。在页面里切换也会记住上次选择，优先于这项。"
+  },
   "_advanced_section": {
     "description": "=== 高级配置 ===",
     "type": "text",

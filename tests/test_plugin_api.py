@@ -6,6 +6,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import pytest
+
 from astrbot_plugin_stealer.plugin_api import PluginAPI
 
 
@@ -61,3 +63,37 @@ class TestBuildCategoriesList:
             {"key": "a", "name": "a", "count": 2},
             {"key": "b", "name": "b", "count": 1},
         ]
+
+
+class TestDashboardPrefs:
+    @pytest.mark.asyncio
+    async def test_config_used_when_kv_empty_then_kv_wins(self):
+        store: dict = {}
+
+        async def get_kv(key, default=None):
+            return store.get(key, default)
+
+        async def put_kv(key, value):
+            store[key] = value
+
+        plugin = types.SimpleNamespace(
+            plugin_config=types.SimpleNamespace(webui_theme="minecraft"),
+            get_kv_data=get_kv,
+            put_kv_data=put_kv,
+        )
+        api = PluginAPI(plugin)
+        loaded = await api._load_dashboard_prefs()
+        assert loaded["theme"] == "minecraft"
+        assert loaded["view"] == "grid"
+
+        await api._save_dashboard_prefs({"theme": "fallout", "view": "list"})
+        loaded = await api._load_dashboard_prefs()
+        assert loaded == {"theme": "fallout", "view": "list"}
+        assert store[api.DASHBOARD_PREFS_KEY]["theme"] == "fallout"
+
+    def test_normalize_theme_aliases_and_unknown(self):
+        api = _build_api([])
+        assert api._normalize_theme("midnight") == "dark"
+        assert api._normalize_theme("nope") == "auto"
+        assert api._normalize_view("list") == "list"
+        assert api._normalize_view("other") == "grid"

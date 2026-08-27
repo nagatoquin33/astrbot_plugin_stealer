@@ -9,7 +9,7 @@ import io
 
 import pytest
 
-from tests.web.test_server import PLUGIN_BASE, PreviewState, create_app
+from tests.web.test_server import DASHBOARD_DIR, PLUGIN_BASE, PreviewState, create_app
 
 try:
     from aiohttp.test_utils import TestClient, TestServer
@@ -67,6 +67,65 @@ async def test_bridge_js_and_static_assets_served():
         assert logo.status == 200
         assert logo.content_type == "image/png"
         assert await logo.read()
+
+        vaultboy = await client.get("/vaultboy.png")
+        assert vaultboy.status == 200
+        assert vaultboy.content_type == "image/png"
+        assert await vaultboy.read()
+
+
+def test_grid_does_not_prefetch_originals_on_hover():
+    """issue #101：列表只渲染缩略图，hover 不得预取原图（大 GIF 会卡死）。"""
+    template = (DASHBOARD_DIR / "template.js").read_text(encoding="utf-8")
+    app_js = (DASHBOARD_DIR / "app.js").read_text(encoding="utf-8")
+    assert '@mouseenter="loadOriginalImage' not in template
+    assert "originalDataUrls[img.hash] || imageDataUrls[img.hash]" not in template
+    assert "originalDataUrls[item.hash] || imageDataUrls[item.hash]" not in template
+    assert "originalDataUrls[previewItem?.hash]" in template
+    assert "if (img?.hash) loadOriginalImage(img.hash)" not in app_js
+    assert "requestOriginalForPreview" in app_js
+
+
+def test_fallout_theme_avoids_fullpage_compositing():
+    """辐射 4 主题不得用全屏 mix-blend / 图片 filter，避免详情弹窗合成卡死。"""
+    css = (DASHBOARD_DIR / "app.css").read_text(encoding="utf-8")
+    template = (DASHBOARD_DIR / "template.js").read_text(encoding="utf-8")
+    start = css.find('[data-theme="fallout"]')
+    assert start != -1
+    fallout = css[start:]
+    assert "mix-blend-mode" not in fallout
+    assert "filter: contrast" not in fallout
+    assert "html[data-theme=\"fallout\"]::after" not in css
+    assert ".fo-chassis" in css
+    assert ".fo-pip-tabs" in css
+    assert ".fo-hud" in css
+    assert "vaultboy.png" in template
+    assert "PIP-BOY 3000 MK IV" in template
+    assert "ROBCO INDUSTRIES" in template
+    assert "loadDashboardPrefs" in (DASHBOARD_DIR / "app.js").read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_prefs_persist_theme_and_view():
+    state = PreviewState(seed=False)
+    async with _client(state) as client:
+        before = await (await client.get(f"{PLUGIN_BASE}/prefs")).json()
+        assert before["success"] is True
+        assert before["theme"] == "auto"
+
+        saved = await (await client.post(
+            f"{PLUGIN_BASE}/prefs", json={"theme": "fallout", "view": "list"}
+        )).json()
+        assert saved == {"success": True, "theme": "fallout", "view": "list"}
+
+        again = await (await client.get(f"{PLUGIN_BASE}/prefs")).json()
+        assert again["theme"] == "fallout"
+        assert again["view"] == "list"
+
+        ignored = await (await client.post(
+            f"{PLUGIN_BASE}/prefs", json={"theme": "not-a-theme"}
+        )).json()
+        assert ignored["theme"] == "fallout"
 
 
 @pytest.mark.asyncio

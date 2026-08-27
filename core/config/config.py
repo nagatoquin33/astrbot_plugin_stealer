@@ -81,6 +81,9 @@ class PluginConfig(BaseModel):
     # False：跳过审核，自动入库（issue #89，方便"看到就收"的用户）。
     audit_required: bool = True
 
+    # WebUI 默认主题：auto/dark/light/minecraft/fallout。页面内切换后写入 KV，优先于该项。
+    webui_theme: str = "auto"
+
     # === 内部状态 (不作为 Pydantic 字段) ===
     # 使用 PrivateAttr 或在 __init__ 中设置且不包含在 __annotations__ 中
     # 但 Pydantic v1/v2 处理方式不同。这里使用 __private_attributes__ 机制或直接忽略

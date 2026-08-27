@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import binascii
+import inspect
 import os
 import shutil
 import time
@@ -29,6 +30,9 @@ class PluginAPI:
 
     ALLOWED_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
     BATCH_TASK_TTL_SECONDS = 30 * 60
+    DASHBOARD_PREFS_KEY = "dashboard_prefs"
+    VALID_THEMES = frozenset({"auto", "dark", "light", "minecraft", "fallout"})
+    _THEME_ALIASES = {"midnight": "dark", "sakura": "light"}
 
     def __init__(self, plugin: Any) -> None:
         self.plugin = plugin
@@ -65,6 +69,7 @@ class PluginAPI:
             ("/categories/delete", "handle_delete_category", ["POST"]),
             ("/emotions", "handle_get_emotions", ["GET"]),
             ("/health", "handle_health_check", ["GET"]),
+            ("/prefs", "handle_prefs", ["GET", "POST"]),
         ]
         for route, handler_name, methods in routes:
             handler = getattr(self, handler_name)
@@ -569,10 +574,18 @@ class PluginAPI:
 
         def _create() -> str:
             with Image.open(file_path) as img:
+                try:
+                    img.seek(0)
+                except EOFError:
+                    pass
                 img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
-                if img.mode in ("RGBA", "P"):
+                if img.mode in ("RGBA", "LA"):
+                    canvas = Image.new("RGB", img.size, (16, 16, 16))
+                    canvas.paste(img, mask=img.split()[-1])
+                    img = canvas
+                elif img.mode != "RGB":
                     img = img.convert("RGB")
-                img.save(thumb_path, "JPEG", quality=85)
+                img.save(thumb_path, "JPEG", quality=82, optimize=True)
             return str(thumb_path)
 
         return await asyncio.to_thread(_create)
@@ -581,6 +594,10 @@ class PluginAPI:
         """返回缩略图的 base64 data URL，用于列表展示。"""
         img_hash = request.args.get("hash", "").strip()
         max_size = request.args.get("size", 300, type=int)
+        try:
+            max_size = max(32, min(int(max_size or 300), 400))
+        except (TypeError, ValueError):
+            max_size = 300
 
         if not img_hash:
             return jsonify({"success": False, "error": "缺少 hash"}), 400
@@ -613,11 +630,7 @@ class PluginAPI:
             return jsonify({"success": True, "hash": img_hash, "url": data_url})
         except Exception as e:
             logger.warning(f"生成缩略图失败: {e}")
-            try:
-                data_url = self._file_base64(file_path)
-                return jsonify({"success": True, "hash": img_hash, "url": data_url})
-            except Exception as e2:
-                return jsonify({"success": False, "error": str(e2)}), 500
+            return jsonify({"success": False, "error": "缩略图生成失败"}), 500
 
     # ── List / Stats / Health ─────────────────────────────────
 
@@ -732,6 +745,78 @@ class PluginAPI:
 
     async def handle_health_check(self):
         return jsonify({"success": True, "status": "ok", "service": "emoji-manager-webui"})
+
+    def _normalize_theme(self, raw: Any) -> str:
+        mapped = self._THEME_ALIASES.get(str(raw or "").strip(), str(raw or "").strip())
+        return mapped if mapped in self.VALID_THEMES else "auto"
+
+    @staticmethod
+    def _normalize_view(raw: Any) -> str:
+        return "list" if str(raw or "").strip() == "list" else "grid"
+
+    def _config_default_theme(self) -> str:
+        cfg = getattr(self.plugin, "plugin_config", None)
+        raw = getattr(cfg, "webui_theme", None) if cfg is not None else None
+        if raw is None and cfg is not None:
+            data = getattr(cfg, "_data", None)
+            if isinstance(data, dict):
+                raw = data.get("webui_theme")
+        return self._normalize_theme(raw)
+
+    async def _await_maybe(self, value: Any) -> Any:
+        if inspect.isawaitable(value):
+            return await value
+        return value
+
+    async def _load_dashboard_prefs(self) -> dict[str, str]:
+        stored: Any = None
+        getter = getattr(self.plugin, "get_kv_data", None)
+        if callable(getter):
+            try:
+                stored = await self._await_maybe(getter(self.DASHBOARD_PREFS_KEY, {}))
+            except Exception as e:
+                logger.debug(f"读取 WebUI 偏好失败: {e}")
+                stored = None
+        if not isinstance(stored, dict):
+            stored = getattr(self.plugin, "_dashboard_prefs", {}) or {}
+        if not isinstance(stored, dict):
+            stored = {}
+        theme = stored.get("theme") or self._config_default_theme()
+        return {
+            "theme": self._normalize_theme(theme),
+            "view": self._normalize_view(stored.get("view")),
+        }
+
+    async def _save_dashboard_prefs(self, prefs: dict[str, str]) -> None:
+        setattr(self.plugin, "_dashboard_prefs", prefs)
+        setter = getattr(self.plugin, "put_kv_data", None)
+        if not callable(setter):
+            return
+        try:
+            await self._await_maybe(setter(self.DASHBOARD_PREFS_KEY, prefs))
+        except Exception as e:
+            logger.warning(f"保存 WebUI 偏好失败: {e}")
+
+    async def handle_prefs(self):
+        """WebUI 主题 / 视图偏好：KV 持久化，配置项作初次默认。"""
+        if request.method == "GET":
+            prefs = await self._load_dashboard_prefs()
+            return jsonify({"success": True, **prefs})
+
+        payload = {}
+        try:
+            payload = await request.get_json() or {}
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        current = await self._load_dashboard_prefs()
+        if "theme" in payload:
+            current["theme"] = self._normalize_theme(payload.get("theme"))
+        if "view" in payload:
+            current["view"] = self._normalize_view(payload.get("view"))
+        await self._save_dashboard_prefs(current)
+        return jsonify({"success": True, **current})
 
     # ── Pending (待审核池) ────────────────────────────────────
 

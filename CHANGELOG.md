@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.5] - 2026-08-27
+
+### added
+- WebUI 主题选择会保存为默认：写入插件 KV（`/prefs`），配置项 `webui_theme` 作为初次默认
+- 辐射 4 主题使用 FO4 支线任务图标作为避难所小子素材（`pages/dashboard/vaultboy.png`）
+
+### changed
+- WebUI 辐射 4 主题改成 Pip-Boy 腕机外壳 + RobCo 终端内屏：STAT/INV/DATA 页签、底部 HP/AP/LVL、终端菜单；分类栏改进行内网格，避免被外壳/顶栏挡住
+- 详情弹窗才加载原图（LRU 4 张）；网格 / 审核区始终用 JPEG 缩略图，hover 不再预取原图（issue #101）
+- 辐射 4 主题去掉全屏 `mix-blend-mode` 扫描层与图片 CSS filter，避免大 GIF 解码时整页卡死
+
+### fixed
+- 缩略图生成失败时不再回退发送原图（大 GIF 会把列表卡死）；改为返回错误，列表保留占位色块
+
 ## [2.8.4] - 2026-08-24
 
 ### added

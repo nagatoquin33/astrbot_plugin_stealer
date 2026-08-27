@@ -928,6 +928,47 @@ h2 {
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
 }
 
+.preview-loading {
+    position: absolute;
+    bottom: 14px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 4px 10px;
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    color: var(--text-secondary);
+    background: var(--bar-solid);
+    border: 1px solid var(--glass-border);
+    pointer-events: none;
+    z-index: 4;
+}
+
+.fo-boot,
+.fo-chassis,
+.fo-vaultboy,
+.fo-title,
+.fo-pip-tabs,
+.fo-hud { display: none; }
+
+.theme-save-hint {
+    margin: 0 0 8px;
+    padding: 0 10px 8px;
+    font-size: 0.72rem;
+    line-height: 1.4;
+    color: var(--text-tertiary);
+    border-bottom: 1px solid var(--glass-border);
+}
+.theme-default-tag {
+    margin-left: auto;
+    font-size: 0.62rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--gold-primary);
+    border: 1px solid var(--gold-dim);
+    padding: 1px 5px;
+    border-radius: 999px;
+}
+
 .nav-btn {
     position: absolute;
     top: 50%;
@@ -3219,11 +3260,7 @@ input, select, textarea {
     color: var(--gold-primary);
     font-weight: 600;
 }
-.theme-option.active::after {
-    content: '✓';
-    margin-left: auto;
-    font-size: 0.9rem;
-}
+.theme-option.active::after { display: none; }
 .theme-swatch {
     width: 20px;
     height: 20px;
@@ -3696,6 +3733,14 @@ html[data-theme="minecraft"],
     box-shadow: var(--mc-inset), 0 0 0 2px #ffffa0;
     outline: none;
 }
+[data-theme="minecraft"] select.codex-input {
+    background-color: #000;
+    background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath fill='%23ffffa0' d='M0 0l6 8 6-8z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 10px auto;
+    color: #fff;
+}
 [data-theme="minecraft"] .view-toggle-group {
     background: #8b8b8b;
     border: 0;
@@ -4029,34 +4074,35 @@ html[data-theme="minecraft"],
     display: none;
 }
 
-/* ─────────────── Fallout 4：Pip-Boy 3000 仓库 ─────────────── */
+/* ─────────────── Fallout 4：Pip-Boy 外壳 + RobCo 终端 + 避难所小子 ───────────────
+   外圈是军绿腕机，内屏才是磷光终端。不用全屏 mix-blend。 */
 
 [data-theme="fallout"] {
-    --bg-base: #010604;
-    --bg-elevated: #03110a;
-    --bg-card: #02140c;
-    --bg-card-hover: #052418;
-    --gold-primary: #1bff80;
-    --gold-bright: #7dffb4;
-    --gold-dim: #0b8f48;
-    --gold-glow: rgba(27, 255, 128, 0.18);
-    --success: #1bff80;
-    --warning: #ffe14a;
-    --danger: #ff4a4a;
-    --favorite: #ffe14a;
-    --text-primary: #1bff80;
-    --text-secondary: #12995a;
-    --text-tertiary: #0b6b3e;
+    --bg-base: #02140c;
+    --bg-elevated: #03180f;
+    --bg-card: #041c12;
+    --bg-card-hover: #062818;
+    --gold-primary: #39ff88;
+    --gold-bright: #b6ffd0;
+    --gold-dim: #0e8a4c;
+    --gold-glow: rgba(57, 255, 136, 0.16);
+    --success: #39ff88;
+    --warning: #ffd15a;
+    --danger: #ff5a5a;
+    --favorite: #ffd15a;
+    --text-primary: #39ff88;
+    --text-secondary: #148a54;
+    --text-tertiary: #0b5e38;
     --text-main: var(--text-primary);
-    --text-muted: #12995a;
+    --text-muted: #148a54;
     --glass-bg: rgba(2, 16, 10, 0.88);
-    --glass-border: rgba(27, 255, 128, 0.28);
-    --accent-rgb: 27, 255, 128;
-    --accent-soft-rgb: 125, 255, 180;
+    --glass-border: rgba(57, 255, 136, 0.34);
+    --accent-rgb: 57, 255, 136;
+    --accent-soft-rgb: 182, 255, 208;
     --toolbar-gradient: transparent;
     --pager-gradient: transparent;
     --btn-gradient: transparent;
-    --btn-gradient-hover: #1bff80;
+    --btn-gradient-hover: #39ff88;
     --panel-gradient: rgba(1, 12, 8, 0.94);
     --panel-header-gradient: transparent;
     --preview-gradient: #000;
@@ -4064,46 +4110,50 @@ html[data-theme="minecraft"],
     --bar-solid: rgba(1, 10, 6, 0.96);
     --fo-font: 'Roboto Condensed', 'Noto Sans SC', sans-serif;
     --fo-mono: 'Share Tech Mono', 'Roboto Condensed', ui-monospace, monospace;
+    --fo-line: rgba(57, 255, 136, 0.4);
+    --fo-chassis: #3c3328;
+    --fo-chassis-dark: #1a1612;
+    --fo-brass: #c4a056;
+    --header-height: auto;
+    --sidebar-width: 210px;
     color-scheme: dark;
 }
 
-html[data-theme="fallout"]::before {
-    content: '';
-    position: fixed;
-    inset: 0;
-    z-index: 0;
-    pointer-events: none;
-    background:
-        radial-gradient(ellipse at 50% 40%, rgba(27, 255, 128, 0.08), transparent 58%),
-        radial-gradient(ellipse at 50% 50%, transparent 42%, rgba(0, 0, 0, 0.62) 100%);
-}
-html[data-theme="fallout"]::after {
-    content: '';
-    position: fixed;
-    inset: 0;
-    z-index: 9998;
-    pointer-events: none;
-    background: repeating-linear-gradient(
-        to bottom,
-        rgba(0, 0, 0, 0) 0px,
-        rgba(0, 0, 0, 0) 2px,
-        rgba(0, 0, 0, 0.18) 3px
-    );
-    animation: fo-flicker 9s steps(2, end) infinite;
-    mix-blend-mode: multiply;
-    opacity: 0.55;
-}
-@keyframes fo-flicker {
-    0%, 100% { opacity: 0.5; }
-    93% { opacity: 0.5; }
-    94% { opacity: 0.28; }
-    95% { opacity: 0.58; }
-}
 [data-theme="fallout"] body {
-    background-color: #010604;
-    background-image: none;
     color: var(--text-primary);
-    font-family: var(--fo-font);
+    font-family: var(--fo-mono);
+    background-color: #2b241c;
+    background-image:
+        radial-gradient(circle at 18% 20%, rgba(196, 160, 86, 0.12), transparent 28%),
+        radial-gradient(circle at 82% 80%, rgba(0, 0, 0, 0.35), transparent 36%),
+        repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.18) 0 1px, transparent 1px 7px),
+        linear-gradient(180deg, #4a4034 0%, #2b241c 38%, #171410 100%);
+    text-shadow: none;
+}
+[data-theme="fallout"] #app {
+    position: relative;
+    display: grid;
+    grid-template-columns: var(--sidebar-width) 1fr;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    margin: 12px 54px 14px;
+    min-height: calc(100vh - 26px);
+    background:
+        repeating-linear-gradient(
+            to bottom,
+            rgba(57, 255, 136, 0.035) 0 1px,
+            transparent 1px 4px
+        ),
+        radial-gradient(ellipse at 50% 0%, rgba(18, 80, 48, 0.28), transparent 52%),
+        #02140c;
+    border: 2px solid #120f0c;
+    border-radius: 18px 18px 10px 10px;
+    box-shadow:
+        inset 0 0 70px rgba(0, 0, 0, 0.35),
+        0 0 0 7px #4a4034,
+        0 0 0 9px var(--fo-brass),
+        0 0 0 18px #2b241c,
+        0 18px 40px rgba(0, 0, 0, 0.45);
+    overflow: hidden;
 }
 [data-theme="fallout"] h1,
 [data-theme="fallout"] h2,
@@ -4111,247 +4161,410 @@ html[data-theme="fallout"]::after {
     font-family: var(--fo-font);
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.18em;
-    text-shadow: 0 0 10px rgba(27, 255, 128, 0.55);
-    color: #1bff80;
+    letter-spacing: 0.16em;
+    text-shadow: 0 0 8px rgba(57, 255, 136, 0.35);
+    color: #39ff88;
     border-bottom: none;
 }
-[data-theme="fallout"] .codex-header {
-    background: transparent;
-    backdrop-filter: none;
-    border-bottom: 1px solid #1bff80;
+
+[data-theme="fallout"] .fo-chassis {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 3;
+    pointer-events: none;
 }
-[data-theme="fallout"] .header-icon {
-    background: transparent;
-    border: 1px solid #1bff80;
-    border-radius: 0;
-    box-shadow: none;
+[data-theme="fallout"] .fo-bezel-l,
+[data-theme="fallout"] .fo-bezel-r {
+    position: absolute;
+    top: 18%;
+    width: 46px;
+    height: 64%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-evenly;
 }
-[data-theme="fallout"] .header-icon svg { color: #1bff80; }
-[data-theme="fallout"] .header-text h1 {
-    font-size: 1.05rem;
-    letter-spacing: 0.22em;
+[data-theme="fallout"] .fo-bezel-l { left: 4px; }
+[data-theme="fallout"] .fo-bezel-r { right: 4px; }
+[data-theme="fallout"] .fo-thumbwheel {
+    width: 28px;
+    height: 86px;
+    border-radius: 6px;
+    background:
+        repeating-linear-gradient(180deg, #6a5a44 0 6px, #2a241c 6px 10px);
+    box-shadow: inset 0 0 0 1px #c4a056, 4px 6px 10px rgba(0, 0, 0, 0.4);
 }
-[data-theme="fallout"] .header-text p {
-    color: #12995a;
-    letter-spacing: 0.28em;
+[data-theme="fallout"] .fo-radio-knob {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: conic-gradient(from 210deg, #8a7860, #2a241c, #c4a056, #3c3328);
+    box-shadow: inset 0 0 0 2px #1a1612, 0 4px 8px rgba(0, 0, 0, 0.45);
+    position: relative;
+}
+[data-theme="fallout"] .fo-radio-knob::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 6px;
+    width: 2px;
+    height: 10px;
+    background: #c4a056;
+    transform: translateX(-50%);
+}
+[data-theme="fallout"] .fo-screw {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #e6d09a, #8a7040);
+    box-shadow: inset 0 0 0 1px #5a4828;
+}
+[data-theme="fallout"] .fo-bezel-b {
+    position: absolute;
+    left: 54px;
+    right: 54px;
+    bottom: 4px;
+    height: 8px;
+    border-radius: 0 0 8px 8px;
+    background: linear-gradient(180deg, #3c3328, #1a1612);
+}
+
+[data-theme="fallout"] .fo-boot {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    grid-column: 1 / -1;
+    padding: 6px 4px 5px;
+    border-bottom: 1px solid var(--fo-line);
+    font-family: var(--fo-mono);
+    font-size: 0.58rem;
+    letter-spacing: 0.16em;
+    color: #0e8a4c;
     text-transform: uppercase;
+    white-space: nowrap;
+    overflow: hidden;
 }
-[data-theme="fallout"] .stats-bar {
-    background: transparent;
-    border: 1px solid rgba(27, 255, 128, 0.35);
-    border-radius: 0;
+[data-theme="fallout"] .fo-boot span:last-child { opacity: 0.75; }
+[data-theme="fallout"] .codex-header {
+    position: relative;
+    top: auto;
+    left: auto;
+    right: auto;
+    display: grid;
+    grid-column: 1 / -1;
+    grid-row: 1;
+    grid-template-columns: 1fr auto;
+    grid-template-rows: auto auto auto;
+    align-items: center;
+    gap: 0 10px;
+    background: rgba(1, 10, 6, 0.92);
+    backdrop-filter: none;
+    border-bottom: 0;
+    box-shadow: none;
+    padding: 0 14px 0;
+    height: auto;
+    min-height: 0;
+    z-index: 2;
+}
+[data-theme="fallout"] .header-title { grid-column: 1; grid-row: 2; min-width: 0; }
+[data-theme="fallout"] .stats-bar { display: none; }
+[data-theme="fallout"] .header-right { grid-column: 2; grid-row: 2; }
+[data-theme="fallout"] .header-icon { display: none; }
+[data-theme="fallout"] .header-text { display: none; }
+[data-theme="fallout"] .fo-vaultboy {
+    display: block;
+    object-fit: contain;
+    filter: none;
+}
+[data-theme="fallout"] .fo-vaultboy-header {
+    width: 40px;
+    height: 60px;
+    flex-shrink: 0;
+}
+[data-theme="fallout"] .fo-vaultboy-mascot {
+    grid-column: 2;
+    grid-row: 2;
+    justify-self: end;
+    align-self: end;
+    position: relative;
+    right: 12px;
+    bottom: 8px;
+    width: 108px;
+    height: auto;
+    opacity: 0.88;
+    pointer-events: none;
+    z-index: 1;
+}
+[data-theme="fallout"] .fo-title {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+[data-theme="fallout"] .fo-title-os {
+    font-family: var(--fo-font);
+    font-size: 1.02rem;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    color: #39ff88;
+    text-shadow: 0 0 8px rgba(57, 255, 136, 0.4);
+}
+[data-theme="fallout"] .fo-title-sub {
+    font-size: 0.62rem;
+    letter-spacing: 0.18em;
+    color: #148a54;
+}
+[data-theme="fallout"] .fo-pip-tabs {
+    display: flex;
+    grid-column: 1 / -1;
+    grid-row: 3;
     gap: 0;
-    padding: 0;
+    margin: 6px 0 0;
+    border-top: 2px solid #39ff88;
+    border-bottom: 2px solid #39ff88;
 }
-[data-theme="fallout"] .stat-item {
+[data-theme="fallout"] .fo-pip-tab {
+    flex: 1;
+    appearance: none;
     background: transparent;
     border: 0;
-    border-right: 1px solid rgba(27, 255, 128, 0.35);
-    border-radius: 0;
-    min-width: 72px;
-}
-[data-theme="fallout"] .stat-item:last-child { border-right: 0; }
-[data-theme="fallout"] .stat-value {
-    font-family: var(--fo-mono);
-    color: #1bff80;
-    text-shadow: 0 0 8px rgba(27, 255, 128, 0.55);
-    font-size: 1.2rem;
-}
-[data-theme="fallout"] .stat-label {
-    color: #12995a;
-    letter-spacing: 0.16em;
-}
-[data-theme="fallout"] .health-indicator { color: #12995a; }
-[data-theme="fallout"] .health-dot { border-radius: 0; }
-[data-theme="fallout"] .sidebar {
-    background: transparent;
-    border-right: 1px solid rgba(27, 255, 128, 0.28);
-}
-[data-theme="fallout"] .sidebar-title {
+    color: #0e8a4c;
     font-family: var(--fo-font);
-    color: #1bff80;
-    letter-spacing: 0.2em;
-    text-shadow: none;
-    border-bottom: 1px solid #1bff80;
-    text-align: left;
-    padding-left: 8px;
-}
-[data-theme="fallout"] .section-tab {
-    border-radius: 0;
-    color: #12995a;
-    border: 1px solid transparent;
-    letter-spacing: 0.08em;
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-align: center;
+    padding: 7px 4px 5px;
+    cursor: pointer;
     text-transform: uppercase;
 }
-[data-theme="fallout"] .section-tab:hover {
-    background: rgba(27, 255, 128, 0.08);
-    color: #7dffb4;
-    border-color: transparent;
+[data-theme="fallout"] .fo-pip-tab.is-chrome {
+    cursor: default;
+    opacity: 0.55;
 }
-[data-theme="fallout"] .section-tab.active {
-    background: #1bff80;
-    color: #021408;
-    border-color: #1bff80;
-    box-shadow: none;
+[data-theme="fallout"] .fo-pip-tab.active {
+    color: #02140c;
+    background: #39ff88;
     text-shadow: none;
 }
-[data-theme="fallout"] .section-tab.active .section-tab-icon { color: #021408; }
-[data-theme="fallout"] .section-badge {
-    border-radius: 0;
-    background: #ff4a4a;
-    color: #021408;
+
+[data-theme="fallout"] .health-indicator {
+    color: #148a54;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    font-size: 0.68rem;
 }
+[data-theme="fallout"] .health-dot { border-radius: 0; box-shadow: 0 0 6px currentColor; }
+
+[data-theme="fallout"] .main-container {
+    display: contents;
+    padding: 0;
+    gap: 0;
+    max-width: none;
+    flex: unset;
+}
+[data-theme="fallout"] .sidebar {
+    grid-column: 1;
+    grid-row: 2;
+    position: relative;
+    top: auto;
+    left: auto;
+    bottom: auto;
+    width: auto;
+    height: auto;
+    background: #02140c;
+    border-right: 1px solid var(--fo-line);
+    padding: 10px 8px 8px;
+    z-index: 2;
+    overflow-y: auto;
+}
+[data-theme="fallout"] .sidebar:hover {
+    width: auto;
+}
+[data-theme="fallout"] .section-switcher { display: none; }
+[data-theme="fallout"] .sidebar-title {
+    font-family: var(--fo-mono);
+    color: #39ff88;
+    letter-spacing: 0.14em;
+    text-shadow: none;
+    border-bottom: 1px solid #39ff88;
+    text-align: left;
+    padding: 2px 4px 6px;
+}
+[data-theme="fallout"] .sidebar-title::before { content: '> '; }
 [data-theme="fallout"] .category-item {
     border-radius: 0;
     border-left: 0;
-    padding: 8px 10px;
-    color: #1bff80;
+    padding: 5px 8px;
+    color: #39ff88;
+    min-height: 32px;
+    gap: 8px;
+    font-family: var(--fo-mono);
 }
 [data-theme="fallout"] .category-item + .category-item::before { display: none; }
-[data-theme="fallout"] .category-item:hover {
-    background: rgba(27, 255, 128, 0.08);
-}
+[data-theme="fallout"] .category-item:hover { background: rgba(57, 255, 136, 0.08); }
 [data-theme="fallout"] .category-item.active {
-    background: #1bff80;
-    color: #021408;
+    background: #39ff88;
+    color: #02140c;
+    text-shadow: none;
 }
-[data-theme="fallout"] .category-name { color: inherit; }
-[data-theme="fallout"] .category-item.active .category-name { color: #021408; }
+[data-theme="fallout"] .category-item.active .category-name,
+[data-theme="fallout"] .category-item.active .category-count { color: #02140c; }
+[data-theme="fallout"] .category-name {
+    color: inherit;
+    font-size: 0.78rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    display: flex;
+    align-items: baseline;
+}
+[data-theme="fallout"] .category-name::after {
+    content: '';
+    flex: 1;
+    border-bottom: 1px dotted currentColor;
+    margin: 0 6px 0.25em;
+    opacity: 0.45;
+    min-width: 10px;
+}
 [data-theme="fallout"] .category-count {
     font-family: var(--fo-mono);
     background: transparent;
     color: inherit;
     border: 0;
     border-radius: 0;
+    padding: 0;
+    min-width: 1.5em;
+    text-align: right;
 }
-[data-theme="fallout"] .cat-dot { border-radius: 0; box-shadow: 0 0 6px currentColor; }
+[data-theme="fallout"] .cat-dot { border-radius: 0; box-shadow: 0 0 6px currentColor; width: 6px; height: 6px; }
+
 [data-theme="fallout"] .inventory-panel {
-    background: rgba(1, 10, 6, 0.55);
-    border: 1px solid #1bff80;
+    grid-column: 2;
+    grid-row: 2;
+    min-width: 0;
+    min-height: 0;
+    background: transparent;
+    border: 1px solid #39ff88;
+    border-left: 0;
+    box-shadow: none;
 }
 [data-theme="fallout"] .inventory-panel::before,
 [data-theme="fallout"] .inventory-panel::after {
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
     border-width: 2px;
-    border-color: #1bff80;
+    border-color: #b6ffd0;
 }
 [data-theme="fallout"] .modal-panel-corner-bl,
 [data-theme="fallout"] .modal-panel-corner-br {
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
     border-width: 2px;
-    border-color: #1bff80;
+    border-color: #b6ffd0;
 }
 [data-theme="fallout"] .inventory-toolbar {
     background: transparent;
-    border-bottom: 1px solid rgba(27, 255, 128, 0.28);
+    border-bottom: 1px solid var(--fo-line);
 }
 [data-theme="fallout"] .toolbar-search input,
 [data-theme="fallout"] .codex-input {
     background: transparent;
     border: 0;
-    border-bottom: 1px solid #1bff80;
+    border-bottom: 1px solid #39ff88;
     border-radius: 0;
-    color: #1bff80;
-    font-family: var(--fo-font);
+    color: #39ff88;
+    font-family: var(--fo-mono);
     box-shadow: none;
 }
 [data-theme="fallout"] .toolbar-search input:focus,
 [data-theme="fallout"] .codex-input:focus {
-    box-shadow: 0 1px 0 #7dffb4;
-    border-color: #7dffb4;
+    box-shadow: 0 1px 0 #b6ffd0;
+    border-color: #b6ffd0;
     outline: none;
 }
 [data-theme="fallout"] select.codex-input {
-    background-color: transparent;
-    background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath fill='%231bff80' d='M0 0l6 8 6-8z'/%3E%3C/svg%3E");
+    background-color: #02140c;
+    background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath fill='%2339ff88' d='M0 0l6 8 6-8z'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-position: right 10px center;
     background-size: 10px auto;
-}
-[data-theme="minecraft"] select.codex-input {
-    background-color: #000;
-    background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath fill='%23ffffa0' d='M0 0l6 8 6-8z'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 10px center;
-    background-size: 10px auto;
-    color: #fff;
 }
 [data-theme="fallout"] .view-toggle-group {
     background: transparent;
-    border: 1px solid #1bff80;
+    border: 1px solid #39ff88;
     border-radius: 0;
 }
-[data-theme="fallout"] .view-toggle-btn { border-radius: 0; color: #12995a; }
+[data-theme="fallout"] .view-toggle-btn { border-radius: 0; color: #148a54; }
 [data-theme="fallout"] .view-toggle-btn.active {
-    background: #1bff80;
-    color: #021408;
+    background: #39ff88;
+    color: #02140c;
 }
+
 [data-theme="fallout"] .inventory-grid:not(.list-mode) {
     columns: unset;
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(var(--slot-size), 1fr));
-    gap: 10px;
-    padding: 14px;
+    gap: 8px;
+    padding: 12px;
     align-content: start;
 }
 [data-theme="fallout"] .inventory-grid:not(.list-mode) .item-slot {
     margin-bottom: 0;
-    background: transparent;
-    border: 1px solid rgba(27, 255, 128, 0.28);
+    background: rgba(0, 10, 6, 0.4);
+    border: 1px solid rgba(57, 255, 136, 0.28);
     border-radius: 0;
     box-shadow: none;
     overflow: hidden;
     animation: none;
+    contain: layout style;
 }
 [data-theme="fallout"] .inventory-grid:not(.list-mode) .item-slot:hover {
     transform: none;
-    border-color: #1bff80;
-    background: rgba(27, 255, 128, 0.08);
-    box-shadow: 0 0 16px rgba(27, 255, 128, 0.18);
+    border-color: #39ff88;
+    background: rgba(57, 255, 136, 0.08);
+    box-shadow: inset 3px 0 0 #39ff88;
 }
 [data-theme="fallout"] .inventory-grid:not(.list-mode) .item-slot.selected {
-    border-color: #7dffb4;
-    box-shadow: 0 0 0 1px #1bff80;
+    border-color: #b6ffd0;
+    box-shadow: inset 3px 0 0 #b6ffd0, 0 0 0 1px #39ff88;
 }
 [data-theme="fallout"] .inventory-grid:not(.list-mode) .item-image {
     background: #000;
-    min-height: calc(var(--slot-size) * 0.72);
-}
-[data-theme="fallout"] .inventory-grid:not(.list-mode) .item-image img {
-    filter: contrast(1.05) saturate(0.85);
+    min-height: calc(var(--slot-size) * 0.7);
 }
 [data-theme="fallout"] .inventory-grid:not(.list-mode) .item-info {
-    background: transparent;
-    border-top: 1px solid rgba(27, 255, 128, 0.28);
+    background: rgba(1, 10, 6, 0.78);
+    border-top: 1px solid rgba(57, 255, 136, 0.28);
     transform: none;
-    min-height: 44px;
+    min-height: 42px;
 }
 [data-theme="fallout"] .inventory-grid:not(.list-mode) .item-slot:hover .item-info {
     transform: none;
-    background: rgba(27, 255, 128, 0.06);
-    border-top-color: #1bff80;
+    background: rgba(57, 255, 136, 0.12);
+    border-top-color: #39ff88;
 }
 [data-theme="fallout"] .item-category {
-    color: #1bff80;
-    letter-spacing: 0.06em;
+    color: #39ff88;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
+    font-size: 0.7rem;
+    font-family: var(--fo-mono);
 }
 [data-theme="fallout"] .scope-pill {
     border-radius: 0;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
+    font-size: 0.6rem;
 }
 [data-theme="fallout"] .scope-pill.local {
     color: #ff8a8a;
-    border-color: rgba(255, 74, 74, 0.5);
+    border-color: rgba(255, 90, 90, 0.5);
     background: transparent;
 }
 [data-theme="fallout"] .scope-pill.public {
-    color: #1bff80;
-    border-color: rgba(27, 255, 128, 0.45);
+    color: #39ff88;
+    border-color: rgba(57, 255, 136, 0.45);
     background: transparent;
 }
 [data-theme="fallout"] .item-stack-count {
@@ -4363,139 +4576,120 @@ html[data-theme="fallout"]::after {
     z-index: 8;
     font-family: var(--fo-mono);
     font-size: 0.78rem;
-    color: #1bff80;
-    text-shadow: 0 0 6px rgba(27, 255, 128, 0.7);
+    color: #39ff88;
     pointer-events: none;
 }
+[data-theme="fallout"] .item-stack-count::before { content: 'x'; }
 [data-theme="fallout"] .favorite-btn {
     border-radius: 0;
     background: transparent;
-    border: 1px solid rgba(27, 255, 128, 0.4);
+    border: 1px solid rgba(57, 255, 136, 0.4);
 }
-[data-theme="fallout"] .favorite-btn.active {
-    background: transparent;
-    border-color: #ffe14a;
-}
-[data-theme="fallout"] .favorite-btn.active svg {
-    fill: #ffe14a;
-    stroke: #ffe14a;
-    filter: drop-shadow(0 0 6px #ffe14a);
-}
+[data-theme="fallout"] .favorite-btn.active { background: transparent; border-color: #ffd15a; }
+[data-theme="fallout"] .favorite-btn.active svg { fill: #ffd15a; stroke: #ffd15a; }
+
 [data-theme="fallout"] .codex-btn {
     background: transparent;
-    border: 1px solid #1bff80;
+    border: 1px solid #39ff88;
     border-radius: 0;
-    color: #1bff80;
+    color: #39ff88;
     font-family: var(--fo-font);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.12em;
     box-shadow: none;
-    min-height: 38px;
+    min-height: 36px;
 }
 [data-theme="fallout"] .codex-btn::before { display: none; }
 [data-theme="fallout"] .codex-btn:hover {
-    background: #1bff80;
-    color: #021408;
-    border-color: #1bff80;
+    background: #39ff88;
+    color: #02140c;
+    border-color: #39ff88;
     transform: none;
-    box-shadow: 0 0 16px rgba(27, 255, 128, 0.35);
+    box-shadow: none;
     text-shadow: none;
 }
 [data-theme="fallout"] .codex-btn.primary {
-    background: #1bff80;
-    color: #021408;
-    border-color: #7dffb4;
+    background: #39ff88;
+    color: #02140c;
+    border-color: #b6ffd0;
     text-shadow: none;
 }
-[data-theme="fallout"] .codex-btn.primary:hover {
-    background: #7dffb4;
-    color: #021408;
-}
-[data-theme="fallout"] .codex-btn.danger {
-    color: #ff8a8a;
-    border-color: #ff4a4a;
-}
-[data-theme="fallout"] .codex-btn.danger:hover {
-    background: #ff4a4a;
-    color: #021408;
-}
+[data-theme="fallout"] .codex-btn.primary:hover { background: #b6ffd0; color: #02140c; }
+[data-theme="fallout"] .codex-btn.danger { color: #ff8a8a; border-color: #ff5a5a; }
+[data-theme="fallout"] .codex-btn.danger:hover { background: #ff5a5a; color: #02140c; }
+
 [data-theme="fallout"] .pagination-bar {
     background: transparent;
-    border-top: 1px solid rgba(27, 255, 128, 0.28);
+    border-top: 1px solid var(--fo-line);
 }
 [data-theme="fallout"] .page-info {
     font-family: var(--fo-mono);
-    color: #1bff80;
-    letter-spacing: 0.12em;
+    color: #39ff88;
+    letter-spacing: 0.14em;
 }
-[data-theme="fallout"] .modal-overlay {
-    background: rgba(0, 8, 4, 0.78);
-    backdrop-filter: none;
-}
+
+[data-theme="fallout"] .modal-overlay { background: rgba(0, 8, 4, 0.82); backdrop-filter: none; }
 [data-theme="fallout"] .modal-panel {
     background: #02140c;
-    border: 1px solid #1bff80;
+    border: 2px solid #39ff88;
     border-radius: 0;
-    box-shadow: 0 0 40px rgba(27, 255, 128, 0.12);
+    box-shadow: inset 0 0 40px rgba(0, 20, 10, 0.4);
 }
 [data-theme="fallout"] .modal-header {
     background: transparent;
-    border-bottom: 1px solid #1bff80;
+    border-bottom: 2px solid #39ff88;
     border-radius: 0;
 }
-[data-theme="fallout"] .modal-close {
-    border-radius: 0;
-    border-color: #1bff80;
-    color: #1bff80;
+[data-theme="fallout"] .modal-header h2::before { content: '> '; }
+[data-theme="fallout"] .modal-close { border-radius: 0; border-color: #39ff88; color: #39ff88; }
+[data-theme="fallout"] .item-preview {
+    background:
+        repeating-linear-gradient(to bottom, rgba(57, 255, 136, 0.05) 0 1px, transparent 1px 4px),
+        #000;
 }
-[data-theme="fallout"] .item-preview { background: #000; }
-[data-theme="fallout"] .item-stats {
-    background: #010a06;
-    border-left: 1px solid rgba(27, 255, 128, 0.28);
-}
-[data-theme="fallout"] .stat-row { border-bottom-color: rgba(27, 255, 128, 0.18); }
-[data-theme="fallout"] .stat-name {
-    color: #12995a;
-    letter-spacing: 0.14em;
-}
-[data-theme="fallout"] .item-stats .stat-value {
+[data-theme="fallout"] .item-preview img { border-radius: 0; box-shadow: none; border: 1px solid rgba(57, 255, 136, 0.28); }
+[data-theme="fallout"] .item-stats { background: #010a06; border-left: 1px solid var(--fo-line); }
+[data-theme="fallout"] .stat-row { border-bottom-color: rgba(57, 255, 136, 0.16); }
+[data-theme="fallout"] .stat-name { color: #148a54; letter-spacing: 0.14em; text-transform: uppercase; }
+[data-theme="fallout"] .item-stats .stat-value { font-family: var(--fo-mono); color: #39ff88; }
+[data-theme="fallout"] .preview-loading {
     font-family: var(--fo-mono);
-    color: #1bff80;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    border-radius: 0;
+    color: #39ff88;
+    border-color: #39ff88;
+    background: #02140c;
 }
 [data-theme="fallout"] .nav-btn {
     border-radius: 0;
     background: rgba(1, 10, 6, 0.85);
-    border: 1px solid #1bff80;
-    color: #1bff80;
+    border: 1px solid #39ff88;
+    color: #39ff88;
 }
-[data-theme="fallout"] .nav-btn:hover {
-    background: #1bff80;
-    color: #021408;
-}
+[data-theme="fallout"] .nav-btn:hover { background: #39ff88; color: #02140c; }
 [data-theme="fallout"] .tag {
     border-radius: 0;
     background: transparent;
-    color: #1bff80;
-    border-color: rgba(27, 255, 128, 0.4);
+    color: #39ff88;
+    border-color: rgba(57, 255, 136, 0.4);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
 }
-[data-theme="fallout"] .upload-area {
-    border: 1px dashed #1bff80;
-    border-radius: 0;
-    background: transparent;
-}
+[data-theme="fallout"] .upload-area { border: 1px dashed #39ff88; border-radius: 0; background: transparent; }
 [data-theme="fallout"] .batch-bar {
     background: rgba(1, 10, 6, 0.96);
-    border: 1px solid #1bff80;
+    border: 1px solid #39ff88;
     border-radius: 0;
-    box-shadow: 0 0 24px rgba(27, 255, 128, 0.18);
+    box-shadow: none;
 }
 [data-theme="fallout"] .toast-notification {
     font-family: var(--fo-font);
     background: #02140c;
-    border: 1px solid #1bff80;
+    border: 1px solid #39ff88;
     border-radius: 0;
-    color: #1bff80;
+    color: #39ff88;
     letter-spacing: 0.08em;
     text-transform: uppercase;
 }
@@ -4503,87 +4697,146 @@ html[data-theme="fallout"]::after {
     columns: unset;
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(var(--slot-size), 1fr));
-    gap: 10px;
+    gap: 8px;
 }
 [data-theme="fallout"] .skeleton-card {
     border-radius: 0;
     background: #02140c;
-    border: 1px solid rgba(27, 255, 128, 0.2);
+    border: 1px solid rgba(57, 255, 136, 0.2);
     margin-bottom: 0;
 }
 [data-theme="fallout"] .pending-card {
     border-radius: 0;
     background: transparent;
-    border: 1px solid rgba(27, 255, 128, 0.28);
+    border: 1px solid rgba(57, 255, 136, 0.28);
 }
 [data-theme="fallout"] .pending-card:hover,
 [data-theme="fallout"] .pending-card.kbd-focused {
-    border-color: #1bff80;
-    box-shadow: 0 0 16px rgba(27, 255, 128, 0.18);
+    border-color: #39ff88;
+    box-shadow: inset 3px 0 0 #39ff88;
 }
 [data-theme="fallout"] .pending-capacity-bar,
 [data-theme="fallout"] .progress-track {
     border-radius: 0;
     background: #03150c;
     box-shadow: none;
-    height: 4px;
-    border: 1px solid rgba(27, 255, 128, 0.35);
+    height: 6px;
+    border: 1px solid rgba(57, 255, 136, 0.35);
 }
 [data-theme="fallout"] .capacity-fill,
 [data-theme="fallout"] .progress-fill {
     border-radius: 0;
-    background: #1bff80;
-    box-shadow: 0 0 8px rgba(27, 255, 128, 0.45);
+    background: repeating-linear-gradient(90deg, #39ff88 0 8px, #0e8a4c 8px 10px);
+    box-shadow: none;
 }
 [data-theme="fallout"] .theme-menu-btn {
     border-radius: 0;
     background: transparent;
-    border: 1px solid #1bff80;
+    border: 1px solid #39ff88;
     box-shadow: none;
 }
-[data-theme="fallout"] .theme-menu-btn svg { color: #1bff80; }
+[data-theme="fallout"] .theme-menu-btn svg { color: #39ff88; }
 [data-theme="fallout"] .theme-popover {
     border-radius: 0;
     background: #02140c;
-    border: 1px solid #1bff80;
-    box-shadow: 0 0 24px rgba(27, 255, 128, 0.2);
+    border: 1px solid #39ff88;
+    box-shadow: none;
 }
-[data-theme="fallout"] .theme-option { border-radius: 0; color: #12995a; }
-[data-theme="fallout"] .theme-option.active { color: #021408; background: #1bff80; }
-[data-theme="fallout"] .theme-option.active::after { color: #021408; }
+[data-theme="fallout"] .theme-option { border-radius: 0; color: #148a54; text-transform: uppercase; letter-spacing: 0.06em; }
+[data-theme="fallout"] .theme-option.active { color: #02140c; background: #39ff88; }
+[data-theme="fallout"] .theme-option.active::after { color: #02140c; }
 [data-theme="fallout"] .theme-swatch { border-radius: 0; }
+[data-theme="fallout"] .theme-default-tag { border-radius: 0; color: inherit; border-color: currentColor; }
 [data-theme="fallout"] .mobile-menu-button {
     border-radius: 0;
     background: transparent;
-    color: #1bff80;
-    border: 1px solid #1bff80;
+    color: #39ff88;
+    border: 1px solid #39ff88;
 }
 [data-theme="fallout"] ::-webkit-scrollbar-track { background: #010604; border-radius: 0; }
-[data-theme="fallout"] ::-webkit-scrollbar-thumb { background: #0b8f48; border-radius: 0; }
-[data-theme="fallout"] ::-webkit-scrollbar-thumb:hover { background: #1bff80; }
+[data-theme="fallout"] ::-webkit-scrollbar-thumb { background: #0e8a4c; border-radius: 0; }
+[data-theme="fallout"] ::-webkit-scrollbar-thumb:hover { background: #39ff88; }
 [data-theme="fallout"] .inventory-grid.list-mode .item-slot {
     background: transparent;
-    border: 1px solid rgba(27, 255, 128, 0.22);
+    border: 0;
+    border-bottom: 1px solid rgba(57, 255, 136, 0.16);
     border-radius: 0;
 }
 [data-theme="fallout"] .inventory-grid.list-mode .item-slot:hover,
 [data-theme="fallout"] .inventory-grid.list-mode .item-slot.selected {
-    background: #1bff80;
-    border-color: #1bff80;
+    background: #39ff88;
+    border-color: #39ff88;
 }
 [data-theme="fallout"] .inventory-grid.list-mode .item-slot:hover .item-category,
 [data-theme="fallout"] .inventory-grid.list-mode .item-slot:hover .list-desc,
 [data-theme="fallout"] .inventory-grid.list-mode .item-slot:hover .list-use,
 [data-theme="fallout"] .inventory-grid.list-mode .item-slot.selected .item-category,
 [data-theme="fallout"] .inventory-grid.list-mode .item-slot.selected .list-desc {
-    color: #021408;
+    color: #02140c;
 }
-[data-theme="fallout"] .list-use { color: #7dffb4; }
+[data-theme="fallout"] .list-use { color: #b6ffd0; font-family: var(--fo-mono); }
+[data-theme="fallout"] .kbd-hints { letter-spacing: 0.08em; text-transform: uppercase; color: #148a54; }
 [data-theme="fallout"] .kbd-hints kbd {
     border-radius: 0;
-    border-color: #1bff80;
+    border-color: #39ff88;
     background: transparent;
-    color: #1bff80;
+    color: #39ff88;
+    font-family: var(--fo-mono);
+}
+[data-theme="fallout"] .empty-state-icon { display: none; }
+[data-theme="fallout"] .fo-vaultboy-empty {
+    width: 150px;
+    height: 220px;
+    margin-bottom: 12px;
+}
+[data-theme="fallout"] .empty-state p {
+    font-family: var(--fo-mono) !important;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+[data-theme="fallout"] .fo-hud {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-row: 3;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 16px;
+    margin: 0;
+    padding: 8px 12px 8px;
+    border: 0;
+    border-top: 1px solid var(--fo-line);
+    font-family: var(--fo-mono);
+    z-index: 2;
+}
+[data-theme="fallout"] .fo-hud-group {
+    display: grid;
+    grid-template-columns: 32px 1fr auto;
+    align-items: center;
+    gap: 8px;
+}
+[data-theme="fallout"] .fo-hud-k {
+    color: #148a54;
+    letter-spacing: 0.12em;
+    font-size: 0.72rem;
+}
+[data-theme="fallout"] .fo-hud-v {
+    color: #39ff88;
+    min-width: 2em;
+    text-align: right;
+}
+[data-theme="fallout"] .fo-hud-bar {
+    height: 8px;
+    background: #03150c;
+    border: 1px solid rgba(57, 255, 136, 0.35);
+    overflow: hidden;
+}
+[data-theme="fallout"] .fo-hud-bar i {
+    display: block;
+    height: 100%;
+    background: repeating-linear-gradient(90deg, #39ff88 0 6px, #0e8a4c 6px 8px);
+}
+[data-theme="fallout"] .fo-hud-xp i {
+    background: repeating-linear-gradient(90deg, #ffd15a 0 6px, #8a6a18 6px 8px);
 }
 
 @media (max-width: 768px) {
@@ -4593,9 +4846,60 @@ html[data-theme="fallout"]::after {
         gap: 2px;
         padding: 8px;
     }
+    [data-theme="fallout"] {
+        --header-height: auto;
+        --sidebar-width: 0px;
+    }
+    [data-theme="fallout"] #app {
+        display: flex;
+        flex-direction: column;
+        margin: 8px 10px 10px;
+    }
+    [data-theme="fallout"] .codex-header {
+        position: relative;
+        grid-column: auto;
+        grid-row: auto;
+    }
+    [data-theme="fallout"] .main-container {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-height: 0;
+        padding: 8px;
+    }
+    [data-theme="fallout"] .sidebar {
+        position: fixed;
+        grid-column: auto;
+        grid-row: auto;
+        width: min(280px, 84vw);
+        top: 0;
+        bottom: 0;
+        left: 0;
+        background: #02140c;
+        z-index: 120;
+    }
+    [data-theme="fallout"] .inventory-panel {
+        grid-column: auto;
+        grid-row: auto;
+        border-left: 1px solid #39ff88;
+    }
+    [data-theme="fallout"] .fo-hud {
+        grid-column: auto;
+        grid-row: auto;
+        grid-template-columns: 1fr;
+        gap: 6px;
+    }
+    [data-theme="fallout"] .fo-vaultboy-mascot {
+        display: none;
+    }
+    [data-theme="fallout"] .fo-bezel-l,
+    [data-theme="fallout"] .fo-bezel-r,
+    [data-theme="fallout"] .fo-bezel-b { display: none; }
+    [data-theme="fallout"] .fo-boot span:last-child { display: none; }
+    [data-theme="fallout"] .fo-pip-tab.is-chrome { display: none; }
     [data-theme="fallout"] .inventory-grid:not(.list-mode),
     [data-theme="fallout"] .skeleton-grid {
         grid-template-columns: repeat(auto-fill, minmax(var(--slot-size), 1fr));
-        gap: 8px;
+        gap: 6px;
     }
 }

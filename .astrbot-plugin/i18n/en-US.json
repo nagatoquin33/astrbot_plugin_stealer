@@ -340,6 +340,7 @@
                 "unknown_error": "Unknown error",
                 "unknown": "Unknown",
                 "no_description": "No description",
+                "loading_original": "Loading full image…",
                 "never_used": "Never used",
                 "favorited": "Favorited",
                 "not_favorited": "Not favorited",
@@ -454,7 +455,9 @@
                 "minecraft": "Minecraft",
                 "fallout": "Fallout 4",
                 "group_original": "Original",
-                "group_game": "Game inventory"
+                "group_game": "Game inventory",
+                "save_hint": "Your pick is saved as the default theme.",
+                "saved_default": "Default"
             },
             "view": {
                 "grid": "Grid view",

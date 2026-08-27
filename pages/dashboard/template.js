@@ -1,5 +1,22 @@
 export const TEMPLATE = `
+<div class="fo-chassis" aria-hidden="true">
+    <div class="fo-bezel fo-bezel-l">
+        <div class="fo-thumbwheel"></div>
+        <div class="fo-screw"></div>
+        <div class="fo-screw"></div>
+    </div>
+    <div class="fo-bezel fo-bezel-r">
+        <div class="fo-radio-knob"></div>
+        <div class="fo-screw"></div>
+        <div class="fo-screw"></div>
+    </div>
+    <div class="fo-bezel fo-bezel-b"></div>
+</div>
 <header class="codex-header">
+    <div class="fo-boot" aria-hidden="true">
+        <span>ROBCO INDUSTRIES UNIFIED OPERATING SYSTEM</span>
+        <span>COPYRIGHT 2075-2077 ROBCO INDUSTRIES</span>
+    </div>
     <div class="header-title">
         <button class="mobile-menu-button" type="button" @click="sidebarOpen = true"
             :aria-label="t('pages.dashboard.actions.open_navigation', 'Open navigation')">
@@ -13,9 +30,14 @@ export const TEMPLATE = `
                     d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
             </svg>
         </div>
+        <img class="fo-vaultboy fo-vaultboy-header" src="./vaultboy.png" alt="" width="48" height="72">
         <div class="header-text">
             <h1>{{ t('pages.dashboard.header.brand', 'Henry\\'s Spoils') }}</h1>
             <p>{{ t('pages.dashboard.header.subtitle', 'Sticker Manager') }}</p>
+        </div>
+        <div class="fo-title" aria-hidden="true">
+            <span class="fo-title-os">PIP-BOY 3000 MK IV</span>
+            <span class="fo-title-sub">VAULT-TEC  //  HOLOTAPE ARCHIVE</span>
         </div>
     </div>
 
@@ -50,6 +72,7 @@ export const TEMPLATE = `
                 </svg>
             </button>
             <div v-if="themePickerOpen" class="theme-popover" @click.stop>
+                <p class="theme-save-hint">{{ t('pages.dashboard.themes.save_hint', 'Your pick is saved as the default theme.') }}</p>
                 <div class="theme-group-label">{{ t('pages.dashboard.themes.group_original', 'Original') }}</div>
                 <div v-for="opt in originalThemeOptions" :key="opt.value" class="theme-option"
                     :class="{ active: themeMode === opt.value }" @click="setThemeMode(opt.value); themePickerOpen = false">
@@ -57,6 +80,7 @@ export const TEMPLATE = `
                         :style="{ background: 'linear-gradient(135deg, ' + opt.swatch.split(',')[0] + ' 50%, ' + opt.swatch.split(',')[1] + ' 50%)' }"></span>
                     <span v-else class="theme-swatch" style="background: conic-gradient(#161b2a 50%, #faf8f3 50%)"></span>
                     {{ t('pages.dashboard.themes.' + opt.key, opt.fallback) }}
+                    <span v-if="themeMode === opt.value" class="theme-default-tag">{{ t('pages.dashboard.themes.saved_default', 'Default') }}</span>
                 </div>
                 <div class="theme-group-label">{{ t('pages.dashboard.themes.group_game', 'Game inventory') }}</div>
                 <div v-for="opt in gameThemeOptions" :key="opt.value" class="theme-option"
@@ -64,10 +88,18 @@ export const TEMPLATE = `
                     <span class="theme-swatch"
                         :style="{ background: 'linear-gradient(135deg, ' + opt.swatch.split(',')[0] + ' 50%, ' + opt.swatch.split(',')[1] + ' 50%)' }"></span>
                     {{ t('pages.dashboard.themes.' + opt.key, opt.fallback) }}
+                    <span v-if="themeMode === opt.value" class="theme-default-tag">{{ t('pages.dashboard.themes.saved_default', 'Default') }}</span>
                 </div>
             </div>
         </div>
     </div>
+    <nav class="fo-pip-tabs" aria-label="Pip-Boy">
+        <span class="fo-pip-tab is-chrome">STAT</span>
+        <button type="button" class="fo-pip-tab" :class="{ active: activeSection === 'library' }" @click="switchSection('library')">INV</button>
+        <button type="button" class="fo-pip-tab" :class="{ active: activeSection === 'pending' }" @click="switchSection('pending')">DATA</button>
+        <span class="fo-pip-tab is-chrome">MAP</span>
+        <span class="fo-pip-tab is-chrome">RADIO</span>
+    </nav>
 </header>
 
 <div class="main-container">
@@ -261,7 +293,8 @@ export const TEMPLATE = `
             </div>
 
             <div v-else-if="images.length === 0" class="empty-state">
-                <svg style="width:64px;height:64px;opacity:0.3;margin-bottom:16px" fill="none" stroke="currentColor"
+                <img class="fo-vaultboy fo-vaultboy-empty" src="./vaultboy.png" alt="" width="140" height="210">
+                <svg class="empty-state-icon" style="width:64px;height:64px;opacity:0.3;margin-bottom:16px" fill="none" stroke="currentColor"
                     viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
                         d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
@@ -273,7 +306,7 @@ export const TEMPLATE = `
             <div v-else class="inventory-grid" :class="{ 'list-mode': viewMode === 'list' }">
                 <div v-for="img in images" :key="img.hash" class="item-slot"
                     :class="{ selected: selectedImages.has(img.hash) }"
-                    @mouseenter="onItemSlotEnter($event, img)"
+                    @mouseenter="onItemSlotEnter($event)"
                     @click="isBatchMode ? toggleSelection(img) : openPreview(img)">
                     <div v-if="isBatchMode" class="batch-indicator">
                         <svg v-if="selectedImages.has(img.hash)" style="width:12px;height:12px" fill="none"
@@ -290,10 +323,10 @@ export const TEMPLATE = `
                         </svg>
                     </button>
 
-                    <div class="item-image" :data-hash="img.hash" @mouseenter="loadOriginalImage(img.hash)">
+                    <div class="item-image" :data-hash="img.hash">
                         <div v-if="!imageDataUrls[img.hash]" class="image-placeholder"
                             :style="{ backgroundColor: hashToColor(img.hash) }"></div>
-                        <img v-else :src="originalDataUrls[img.hash] || imageDataUrls[img.hash]" loading="lazy"
+                        <img v-else :src="imageDataUrls[img.hash]" loading="lazy" decoding="async"
                             :alt="img.desc" class="fade-in">
                     </div>
                     <span v-if="(img.use_count || 0) > 1" class="item-stack-count">{{ img.use_count }}</span>
@@ -408,7 +441,8 @@ export const TEMPLATE = `
             </div>
 
             <div v-else-if="pendingImages.length === 0" class="empty-state">
-                <svg style="width:64px;height:64px;opacity:0.3;margin-bottom:16px" fill="none" stroke="currentColor"
+                <img class="fo-vaultboy fo-vaultboy-empty" src="./vaultboy.png" alt="" width="140" height="210">
+                <svg class="empty-state-icon" style="width:64px;height:64px;opacity:0.3;margin-bottom:16px" fill="none" stroke="currentColor"
                     viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 13l4 4L19 7" />
                 </svg>
@@ -428,10 +462,10 @@ export const TEMPLATE = `
                         </svg>
                     </div>
 
-                    <div class="pending-image" @mouseenter="loadOriginalImage(item.hash)">
+                    <div class="pending-image" :data-hash="item.hash">
                         <div v-if="!imageDataUrls[item.hash]" class="image-placeholder"
                             :style="{ backgroundColor: hashToColor(item.hash) }"></div>
-                        <img v-else :src="originalDataUrls[item.hash] || imageDataUrls[item.hash]" loading="lazy"
+                        <img v-else :src="imageDataUrls[item.hash]" loading="lazy" decoding="async"
                             :alt="item.desc" class="fade-in">
                     </div>
 
@@ -513,6 +547,25 @@ export const TEMPLATE = `
     </main>
 </div>
 
+<img class="fo-vaultboy fo-vaultboy-mascot" src="./vaultboy.png" alt="">
+<footer class="fo-hud" aria-hidden="true">
+    <div class="fo-hud-group">
+        <span class="fo-hud-k">HP</span>
+        <div class="fo-hud-bar"><i :style="{ width: hudHpPct }"></i></div>
+        <span class="fo-hud-v">{{ stats.total || 0 }}</span>
+    </div>
+    <div class="fo-hud-group">
+        <span class="fo-hud-k">AP</span>
+        <div class="fo-hud-bar"><i :style="{ width: hudApPct }"></i></div>
+        <span class="fo-hud-v">{{ pendingStats.pending || 0 }}</span>
+    </div>
+    <div class="fo-hud-group">
+        <span class="fo-hud-k">LVL</span>
+        <div class="fo-hud-bar fo-hud-xp"><i :style="{ width: hudXpPct }"></i></div>
+        <span class="fo-hud-v">{{ stats.today || 0 }}</span>
+    </div>
+</footer>
+
 <div v-if="previewOpen" class="modal-overlay" @click.self="closePreview">
     <div class="modal-panel">
         <div class="modal-panel-corner-bl"></div>
@@ -541,9 +594,11 @@ export const TEMPLATE = `
                         :alt="previewItem?.desc"
                         :class="{ zoomable: previewZoom === 1, zoomed: previewZoom > 1, panning: isPanning }"
                         :style="{ transform: previewTransform }"
+                        decoding="async"
                         @wheel.prevent="onPreviewWheel"
                         @mousedown.prevent="startPan"
                         @dblclick.prevent="toggleZoom">
+                    <div v-if="previewLoading" class="preview-loading">{{ t('pages.dashboard.messages.loading_original', 'Loading full image…') }}</div>
 
                     <button v-if="images.length > 1" @click.stop="nextImage" class="nav-btn right">
                         <svg style="width:24px;height:24px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
