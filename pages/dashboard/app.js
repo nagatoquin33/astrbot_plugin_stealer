@@ -45,6 +45,9 @@ createApp({
         const loading = ref(true);
         const searchQuery = ref('');
         const selectedCategory = ref('');
+        const selectedCharacter = ref('');
+        const characters = ref([]);
+        const unassignedCharacterCount = ref(0);
         const sortBy = ref('newest');
         const currentPage = ref(1);
         const pageSize = ref(24);
@@ -89,9 +92,14 @@ createApp({
             localeVersion.value;
             const locale = resolveUiLocale();
             const messages = bridge?.getI18n?.() || bridge?.getContext?.()?.i18n || {};
-            const value = getByPath(messages?.[locale], key);
-            if (value === undefined || value === null) return fallback;
-            return typeof value === 'string' ? value : String(value);
+            const bundles = [messages?.[locale], messages?.[String(locale).replace('_', '-')], messages];
+            if (locale === 'zh-CN') bundles.push(messages?.['zh-CN']);
+            else bundles.push(messages?.['en-US']);
+            for (const bundle of bundles) {
+                const value = getByPath(bundle, key);
+                if (typeof value === 'string' && value) return value;
+            }
+            return fallback;
         };
 
         const updateDocumentMeta = () => {
@@ -141,7 +149,7 @@ createApp({
         const previewOpen = ref(false);
         const previewItem = ref(null);
         const isEditing = ref(false);
-        const editForm = reactive({ category: '', tags: '', scene: '', desc: '', scope_mode: 'public' });
+        const editForm = reactive({ category: '', tags: '', scene: '', desc: '', overlay_text: '', character: '', scope_mode: 'public' });
 
         // 审核区编辑弹窗（issue #87）
         const pendingEditOpen = ref(false);
@@ -153,6 +161,7 @@ createApp({
             desc: '',
             tagsText: '',
             scenesText: '',
+            character: '',
         });
 
         const isBatchMode = ref(false);
@@ -161,6 +170,12 @@ createApp({
         const batchTargetCategory = ref('');
         const batchScopeOpen = ref(false);
         const batchScopeMode = ref('public');
+        const batchCharacterOpen = ref(false);
+        const batchTargetCharacter = ref('');
+        const charactersOpen = ref(false);
+        const newCharacter = reactive({ key: '', name: '' });
+        const addingCharacter = ref(false);
+        const deletingCharacterKey = ref('');
 
         const uploadOpen = ref(false);
         const uploading = ref(false);
@@ -209,7 +224,7 @@ createApp({
             clearTimeout(toastTimer);
             toastTimer = setTimeout(() => { toastOpen.value = false; }, 3000);
         };
-        const uploadForm = reactive({ emotion: '', tags: '', scene: '', desc: '' });
+        const uploadForm = reactive({ emotion: '', tags: '', scene: '', desc: '', overlay_text: '', character: '' });
         const availableEmotions = ref([]);
         const analysisScenes = ref([]);
 
@@ -220,7 +235,7 @@ createApp({
         const batchFiles = ref([]);
         const batchPreviews = ref([]);
         const batchUploadError = ref(null);
-        const batchUploadForm = reactive({ emotion: '', autoAnalyze: false });
+        const batchUploadForm = reactive({ emotion: '', autoAnalyze: false, character: '' });
         const batchTaskId = ref(null);
         const batchTaskStatus = ref(null);
         const batchTaskTotal = ref(0);
@@ -396,7 +411,7 @@ createApp({
         const CATEGORY_HUES = {
             happy: 45, sad: 215, angry: 2, shy: 330, surprised: 52, troll: 285,
             cry: 225, confused: 200, embarrassed: 18, love: 340, disgust: 90,
-            fear: 265, excitement: 30, tired: 195, sigh: 210, thank: 140, dumb: 275,
+            fear: 265, excitement: 30, tired: 195, sigh: 210, thank: 140, dumb: 275, other: 220,
         };
         const hashHue = (text) => {
             let h = 0;
@@ -724,6 +739,9 @@ createApp({
                 if (selectedCategory.value === '__favorite__') {
                     params.set('favorite_only', 'true');
                 }
+                if (selectedCharacter.value) {
+                    params.set('character', selectedCharacter.value);
+                }
                 const res = await apiFetch('api/images?' + params.toString());
                 const data = await res.json();
                 const nextImages = data.images || [];
@@ -739,6 +757,8 @@ createApp({
                 images.value = nextImages;
                 total.value = nextTotal;
                 categories.value = normalizeCategories(data.categories);
+                characters.value = Array.isArray(data.characters) ? data.characters : [];
+                unassignedCharacterCount.value = Number(data.unassigned_character_count || 0);
                 favoriteCount.value = Number(data.favorite_count || 0);
                 const currentHashes = new Set(nextImages.map(img => img.hash));
                 for (const hash of Object.keys(imageDataUrls)) {
@@ -839,6 +859,12 @@ createApp({
             fetchImages(1);
         };
 
+        const selectLibraryCharacter = (character) => {
+            selectedCharacter.value = character;
+            sidebarOpen.value = false;
+            fetchImages(1);
+        };
+
         const selectPendingCategory = (category) => {
             pendingCategory.value = category;
             sidebarOpen.value = false;
@@ -888,6 +914,7 @@ createApp({
             pendingEditForm.desc = item.desc || '';
             pendingEditForm.tagsText = (item.tags || []).join(', ');
             pendingEditForm.scenesText = (item.scenes || []).join(', ');
+            pendingEditForm.character = item.character || '';
             pendingEditOpen.value = true;
             if (item.hash && !imageDataUrls[item.hash]) {
                 loadImageData(item.hash);
@@ -909,6 +936,7 @@ createApp({
                     desc: pendingEditForm.desc,
                     tags: parseListField(pendingEditForm.tagsText),
                     scenes: parseListField(pendingEditForm.scenesText),
+                    character: pendingEditForm.character || '',
                 };
                 const res = await apiFetch('api/pending/update', {
                     method: 'POST',
@@ -1099,6 +1127,7 @@ createApp({
         const anyModalOpen = () => (
             confirmOpen.value || promptOpen.value || uploadOpen.value || batchUploadOpen.value
             || emotionsOpen.value || batchMoveOpen.value || batchScopeOpen.value || pendingEditOpen.value
+            || batchCharacterOpen.value || charactersOpen.value
         );
 
         const handleKeydown = (e) => {
@@ -1150,6 +1179,8 @@ createApp({
                 tags: (previewItem.value.tags || []).join(', '),
                 scene: (previewItem.value.scenes || []).join('、'),
                 desc: previewItem.value.desc,
+                overlay_text: previewItem.value.overlay_text || '',
+                character: previewItem.value.character || '',
                 scope_mode: previewItem.value.scope_mode || 'public',
             });
             isEditing.value = true;
@@ -1178,6 +1209,8 @@ createApp({
                         previewItem.value.tags = editForm.tags.split(',').map((t) => t.trim()).filter((t) => t);
                         previewItem.value.scenes = parseSceneList(editForm.scene);
                         previewItem.value.desc = editForm.desc;
+                        previewItem.value.overlay_text = editForm.overlay_text || '';
+                        previewItem.value.character = editForm.character || '';
                         previewItem.value.scope_mode = editForm.scope_mode || 'public';
                     }
                     await fetchStats();
@@ -1272,6 +1305,39 @@ createApp({
 
         const closeBatchMoveModal = () => {
             batchMoveOpen.value = false;
+        };
+
+        const openBatchCharacterModal = () => {
+            if (selectedImages.value.size === 0) return;
+            batchTargetCharacter.value = '';
+            batchCharacterOpen.value = true;
+        };
+
+        const closeBatchCharacterModal = () => {
+            batchCharacterOpen.value = false;
+        };
+
+        const confirmBatchCharacter = async () => {
+            try {
+                const res = await apiFetch('api/images/batch-character', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        hashes: Array.from(selectedImages.value),
+                        character: batchTargetCharacter.value || '',
+                    }),
+                });
+                const data = await res.json();
+                if (data.success) {
+                    batchCharacterOpen.value = false;
+                    selectedImages.value = new Set();
+                    isBatchMode.value = false;
+                    refreshView();
+                } else {
+                    showAlert(data.error || t('pages.dashboard.alerts.save_failed', 'Save failed.'));
+                }
+            } catch (e) {
+                showAlert(`${t('pages.dashboard.alerts.action_failed', 'Action failed')}: ${e.message}`);
+            }
         };
 
         const openBatchScopeModal = () => {
@@ -1494,6 +1560,8 @@ createApp({
                 tags: '',
                 scene: '',
                 desc: '',
+                overlay_text: '',
+                character: '',
             });
             analysisScenes.value = [];
             fetchEmotions();
@@ -1516,6 +1584,7 @@ createApp({
             Object.assign(batchUploadForm, {
                 emotion: selectedCategory.value || '',
                 autoAnalyze: false,
+                character: selectedCharacter.value && selectedCharacter.value !== '__none__' ? selectedCharacter.value : '',
             });
             fetchEmotions();
         };
@@ -1637,6 +1706,9 @@ createApp({
                     formData.append('category', batchUploadForm.emotion);
                 }
                 formData.append('auto_analyze', String(batchUploadForm.autoAnalyze));
+                if (batchUploadForm.character) {
+                    formData.append('character', batchUploadForm.character);
+                }
 
                 const res = await apiFetch('api/images/batch-upload', { method: 'POST', body: formData });
                 const data = await res.json();
@@ -1720,6 +1792,8 @@ createApp({
                         tags: uploadForm.tags,
                         scene: uploadForm.scene,
                         desc: uploadForm.desc,
+                        overlay_text: uploadForm.overlay_text || '',
+                        character: uploadForm.character || '',
                     }),
                 });
                 const uploadData = await uploadRes.json();
@@ -1802,6 +1876,10 @@ createApp({
                 if (data.description && !form.desc) {
                     form.desc = data.description;
                     result.fields.push('desc');
+                }
+                if (data.overlay_text && !form.overlay_text) {
+                    form.overlay_text = data.overlay_text;
+                    result.fields.push('overlay_text');
                 }
 
                 result.filled = result.fields.length > 0;
@@ -1888,6 +1966,80 @@ createApp({
                 showAlert(`${t('pages.dashboard.alerts.action_failed', 'Action failed')}: ${e.message}`);
             } finally {
                 addingEmotion.value = false;
+            }
+        };
+
+        const characterLabel = (key) => {
+            if (!key) return t('pages.dashboard.characters.unassigned', '未分配');
+            const found = characters.value.find((item) => item.key === key);
+            return found ? found.name : key;
+        };
+
+        const openCharactersModal = () => {
+            charactersOpen.value = true;
+        };
+
+        const closeCharactersModal = () => {
+            charactersOpen.value = false;
+        };
+
+        const addCharacter = async () => {
+            const key = String(newCharacter.key || '').trim().toLowerCase();
+            if (!key) return;
+            addingCharacter.value = true;
+            try {
+                const currentList = characters.value.map((item) => ({
+                    key: item.key,
+                    name: item.name,
+                    desc: item.desc || '',
+                }));
+                const existingIdx = currentList.findIndex((item) => item.key === key);
+                const next = { key, name: String(newCharacter.name || '').trim() || key, desc: '' };
+                if (existingIdx >= 0) currentList[existingIdx] = next;
+                else currentList.push(next);
+                const res = await apiFetch('api/characters', {
+                    method: 'POST',
+                    body: JSON.stringify({ characters: currentList }),
+                });
+                const data = await res.json();
+                if (data.success) {
+                    characters.value = data.characters || currentList;
+                    newCharacter.key = '';
+                    newCharacter.name = '';
+                    await fetchImages(currentPage.value);
+                } else {
+                    showAlert(data.error || t('pages.dashboard.alerts.add_failed', 'Add failed.'));
+                }
+            } catch (e) {
+                showAlert(`${t('pages.dashboard.alerts.action_failed', 'Action failed')}: ${e.message}`);
+            } finally {
+                addingCharacter.value = false;
+            }
+        };
+
+        const deleteCharacter = async (item) => {
+            if (!item?.key) return;
+            if (!await showConfirm(
+                t('pages.dashboard.confirm.delete_character', '确定删除角色 {key}？表情包文件会保留，只去掉角色标记。')
+                    .replace('{key}', item.key)
+            )) return;
+            deletingCharacterKey.value = item.key;
+            try {
+                const res = await apiFetch('api/characters/delete', {
+                    method: 'POST',
+                    body: JSON.stringify({ key: item.key }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (res.ok && data.success) {
+                    if (selectedCharacter.value === item.key) selectedCharacter.value = '';
+                    await fetchImages(1);
+                } else {
+                    showAlert(data.error || t('pages.dashboard.alerts.delete_failed', 'Delete failed.'));
+                }
+            } catch (e) {
+                showAlert(`${t('pages.dashboard.alerts.action_failed', 'Action failed')}: ${e.message}`);
+            } finally {
+                deletingCharacterKey.value = '';
             }
         };
 
@@ -2019,6 +2171,11 @@ createApp({
             loading,
             searchQuery,
             selectedCategory,
+            selectedCharacter,
+            characters,
+            unassignedCharacterCount,
+            selectLibraryCharacter,
+            characterLabel,
             sortBy,
             currentPage,
             pageSize,
@@ -2085,6 +2242,19 @@ createApp({
             openBatchMoveModal,
             closeBatchMoveModal,
             confirmBatchMove,
+            batchCharacterOpen,
+            batchTargetCharacter,
+            openBatchCharacterModal,
+            closeBatchCharacterModal,
+            confirmBatchCharacter,
+            charactersOpen,
+            newCharacter,
+            addingCharacter,
+            deletingCharacterKey,
+            openCharactersModal,
+            closeCharactersModal,
+            addCharacter,
+            deleteCharacter,
             openBatchScopeModal,
             closeBatchScopeModal,
             confirmBatchScope,

@@ -11,6 +11,7 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
 from ..util.safe_io import safe_remove_file
+from .semantic_schema import CATEGORY_OTHER, MAX_DESC_CHARS, clip_chars
 
 try:
     from PIL import Image as PILImage
@@ -45,6 +46,7 @@ class ImageProcessorService:
     # 分类结果常量
     CATEGORY_FILTERED = "过滤不通过"
     CATEGORY_NOT_EMOJI = "非表情包"
+    CATEGORY_OTHER = CATEGORY_OTHER
 
     # 缓存常量
     IMAGE_CACHE_MAX_SIZE = 500  # 最大缓存条目数
@@ -341,7 +343,7 @@ class ImageProcessorService:
         if tags:
             entry["tags"] = tags
         if desc:
-            entry["desc"] = desc
+            entry["desc"] = clip_chars(desc, MAX_DESC_CHARS)
         if scenes:
             entry["scenes"] = scenes
         if extra_meta and isinstance(extra_meta, dict):
@@ -454,7 +456,7 @@ class ImageProcessorService:
             "hash": hash_val,
             "phash": phash_val or None,
             "category": category,
-            "desc": desc or None,
+            "desc": clip_chars(desc, MAX_DESC_CHARS) or None,
             "tags": tags or [],
             "scenes": scenes or [],
         }
@@ -581,21 +583,35 @@ class ImageProcessorService:
                         source_url=source_url,
                         original_name=original_name,
                         add_method=add_method,
+                        overlay_text=cached.get("overlay_text", ""),
+                        emotions=cached.get("emotions", []),
                     )
 
             # 4. 存入 raw 目录（锁外）
             raw_path = await self._move_to_raw(file_path, hash_val, is_temp)
 
             # 5. VLM 分类（锁外，耗时操作）
-            category, tags, desc, emotion, scenes = await self.classify_image(
-                event=event,
-                file_path=raw_path,
-                categories=categories,
-                content_filtration=content_filtration,
+            category, tags, desc, emotion, scenes, overlay_text, emotions = (
+                await self.classify_image(
+                    event=event,
+                    file_path=raw_path,
+                    categories=categories,
+                    content_filtration=content_filtration,
+                )
             )
 
             # 6. 缓存结果（锁外）
-            self._put_image_cache(hash_val, category, tags, desc, emotion, scenes, model_sig)
+            self._put_image_cache(
+                hash_val,
+                category,
+                tags,
+                desc,
+                emotion,
+                scenes,
+                model_sig,
+                overlay_text=overlay_text,
+                emotions=emotions,
+            )
 
             # 7. 处理分类结果（锁内）
             async with self._process_lock:
@@ -617,6 +633,8 @@ class ImageProcessorService:
                     source_url=source_url,
                     original_name=original_name,
                     add_method=add_method,
+                    overlay_text=overlay_text,
+                    emotions=emotions,
                 )
 
         except Exception as e:
@@ -739,6 +757,8 @@ class ImageProcessorService:
         emotion: str,
         scenes: list,
         model_sig: str = "",
+        overlay_text: str = "",
+        emotions: list | None = None,
     ) -> None:
         """写入分类缓存并淘汰过期条目。"""
         self._image_cache[hash_val] = {
@@ -747,6 +767,8 @@ class ImageProcessorService:
             "desc": desc,
             "emotion": emotion,
             "scenes": scenes,
+            "overlay_text": overlay_text or "",
+            "emotions": list(emotions or []),
             "model_sig": str(model_sig or ""),
             "timestamp": time.time(),
         }
@@ -785,6 +807,8 @@ class ImageProcessorService:
         source_url: str = "",
         original_name: str = "",
         add_method: str = "auto",
+        overlay_text: str = "",
+        emotions: list | None = None,
     ) -> tuple[bool, dict[str, Any] | None]:
         """根据分类结果决定存储、跳过或清理。"""
         source = "缓存" if from_cache else "VLM"
@@ -807,32 +831,26 @@ class ImageProcessorService:
                 await safe_remove_file(file_path)
             return False, None
 
-        # 有效分类
-        if category and category in self.categories:
-            logger.debug(f"分类有效（{source}）: {category}")
-            if to_pending:
-                return await self._store_to_pending(
-                    file_path,
-                    is_temp,
-                    category,
-                    hash_val,
-                    extra_meta=extra_meta,
-                    tags=tags,
-                    desc=desc,
-                    scenes=scenes,
-                    already_in_raw=already_in_raw,
-                    phash_val=phash_val,
-                    source_url=source_url,
-                    original_name=original_name,
-                    add_method=add_method,
-                )
-            return await self._store_and_index_image(
+        if not category or (
+            category not in self.categories and category != self.CATEGORY_OTHER
+        ):
+            logger.info(f"分类无效（{source}）: {category!r}，归入 {self.CATEGORY_OTHER}")
+            category = self.CATEGORY_OTHER
+
+        semantic_meta = dict(extra_meta) if isinstance(extra_meta, dict) else {}
+        if overlay_text:
+            semantic_meta["overlay_text"] = overlay_text
+        if emotions:
+            semantic_meta["emotions"] = list(emotions)
+
+        logger.debug(f"分类有效（{source}）: {category}")
+        if to_pending:
+            return await self._store_to_pending(
                 file_path,
                 is_temp,
                 category,
                 hash_val,
-                idx,
-                extra_meta=extra_meta,
+                extra_meta=semantic_meta,
                 tags=tags,
                 desc=desc,
                 scenes=scenes,
@@ -842,12 +860,22 @@ class ImageProcessorService:
                 original_name=original_name,
                 add_method=add_method,
             )
-
-        # 无效分类
-        logger.warning(f"分类无效（{source}）: {category!r}，清理文件")
-        if os.path.exists(file_path):
-            await safe_remove_file(file_path)
-        return False, None
+        return await self._store_and_index_image(
+            file_path,
+            is_temp,
+            category,
+            hash_val,
+            idx,
+            extra_meta=semantic_meta,
+            tags=tags,
+            desc=desc,
+            scenes=scenes,
+            already_in_raw=already_in_raw,
+            phash_val=phash_val,
+            source_url=source_url,
+            original_name=original_name,
+            add_method=add_method,
+        )
 
     async def steal_image_direct(
         self,
@@ -871,7 +899,9 @@ class ImageProcessorService:
         if not base_path.exists():
             return False, f"图片文件不存在: {file_path}"
 
-        if not category or category not in self.categories:
+        if not category:
+            return False, "分类为空"
+        if category not in self.categories and category != self.CATEGORY_OTHER:
             return False, f"分类 '{category}' 不在可用分类列表中"
 
         normalized_tags = [str(t).strip() for t in (tags or []) if t and str(t).strip()]
@@ -951,7 +981,7 @@ class ImageProcessorService:
             content_filtration: 是否进行内容过滤（可选，默认使用 self.content_filtration）
 
         Returns:
-            tuple: (category, tags, desc, emotion, scenes)
+            tuple: (category, tags, desc, emotion, scenes, overlay_text, emotions)
         """
         # 路径验证（单一入口，_call_vision_model 不再重复）
         file_path = os.path.abspath(file_path)
@@ -984,28 +1014,25 @@ class ImageProcessorService:
             raise
         except Exception as e:
             logger.error(f"图片分类失败 [{file_path}]: {e}")
-            return "", [], "", "", []
+            return "", [], "", "", [], "", []
 
-    def _normalize_category(self, raw: str) -> str:
+    def _normalize_category(self, raw: str, *, fallback_other: bool = True) -> str:
         """将 VLM 返回的分类文本规范化为有效分类名。
 
-        无法识别或输出 unknown 时返回空字符串，由调用方决定如何处理。
+        无法识别时默认归入 other，避免因闭集分类失败丢图。
         支持处理带前缀的格式（如 "审核通过：surprised"），提取冒号后的内容。
         """
-        # 清理输入
         raw = self._sanitize_model_scalar(raw).lower()
 
-        # unknown 或空值视为分类失败
         if not raw or raw == "unknown":
+            if fallback_other:
+                logger.debug("[分类规范化] 空分类，归入 other")
+                return self.CATEGORY_OTHER
             logger.debug(f"[分类规范化] 分类失败: {raw!r}")
             return ""
 
-        # 处理带前缀的格式，如 "审核通过：surprised" -> "surprised"
-        # 也处理 "审核不通过：过滤不通过" 这种情况
         if "：" in raw or ":" in raw:
-            # 统一使用英文冒号处理
             normalized_raw = raw.replace("：", ":")
-            # 提取冒号后的部分
             if ":" in normalized_raw:
                 _, _, category_part = normalized_raw.partition(":")
                 raw = category_part.strip()
@@ -1013,12 +1040,22 @@ class ImageProcessorService:
         if self.plugin_config:
             try:
                 normalized = self.plugin_config.normalize_category_strict(raw)
-                if normalized and normalized in self.categories:
-                    return normalized
+                if normalized:
+                    if normalized in self.categories or normalized == self.CATEGORY_OTHER:
+                        return normalized
+                    defaults = getattr(self.plugin_config, "DEFAULT_CATEGORIES", []) or []
+                    if normalized in defaults:
+                        return normalized
             except Exception as e:
                 logger.debug(f"[分类规范化] 异常: {e}")
 
-        logger.warning(f"无法识别情绪分类: {raw!r}，跳过该图片")
+        if raw in self.categories or raw == self.CATEGORY_OTHER:
+            return raw
+
+        if fallback_other:
+            logger.info(f"无法识别情绪分类: {raw!r}，归入 {self.CATEGORY_OTHER}")
+            return self.CATEGORY_OTHER
+        logger.debug(f"无法识别情绪分类: {raw!r}")
         return ""
 
     # ===== 门面委托：ClassificationParser =====

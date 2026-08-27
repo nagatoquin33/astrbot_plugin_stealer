@@ -473,6 +473,98 @@ h2 {
     width: 120px;
 }
 
+.character-filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    border-bottom: 1px solid var(--glass-border);
+    background: var(--toolbar-gradient);
+}
+
+.character-filter-label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    letter-spacing: 0.08em;
+    white-space: nowrap;
+}
+
+.character-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border: 1px solid var(--glass-border);
+    background: transparent;
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-family: inherit;
+}
+
+.character-chip.active {
+    border-color: var(--gold-primary);
+    color: var(--gold-bright);
+    background: rgba(var(--accent-soft-rgb), 0.18);
+}
+
+.character-chip-count {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+}
+
+.character-manage-btn {
+    margin-left: auto;
+}
+
+.item-character-badge {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 5;
+    max-width: calc(100% - 52px);
+    padding: 2px 8px;
+    font-size: 0.68rem;
+    line-height: 1.4;
+    color: var(--gold-bright);
+    background: rgba(0, 0, 0, 0.55);
+    border: 1px solid var(--gold-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    pointer-events: none;
+}
+
+.inventory-grid.list-mode .item-character-badge {
+    display: none;
+}
+
+.item-character-tag {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 0 5px;
+    font-size: 0.68rem;
+    border: 1px solid var(--gold-dim);
+    color: var(--gold-bright);
+    vertical-align: middle;
+}
+
+.character-create-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr auto;
+    gap: 12px;
+}
+
+.character-list-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px;
+    background: var(--bg-slot);
+    border: 1px solid var(--gold-dark);
+}
+
 @media (max-width: 768px) {
     .toolbar-sort-select {
         width: auto;
@@ -588,6 +680,17 @@ h2 {
 [data-theme="light"] .item-info {
     background: linear-gradient(to top, rgba(245, 242, 235, 0.98) 0%, rgba(235, 231, 222, 0.9) 100%);
     border-top-color: #c9a227;
+}
+
+[data-theme="light"] .item-character-badge {
+    color: #4a3f2a;
+    background: rgba(245, 242, 235, 0.92);
+    border-color: #c9a227;
+}
+
+[data-theme="light"] .character-chip.active {
+    color: #8b6914;
+    background: rgba(184, 148, 46, 0.12);
 }
 
 [data-theme="light"] .item-category {
@@ -1477,6 +1580,19 @@ select.codex-input {
     
     .toolbar-actions {
         justify-content: center;
+    }
+
+    .character-filter-bar {
+        padding: 8px 12px;
+    }
+
+    .character-manage-btn {
+        margin-left: 0;
+        width: 100%;
+    }
+
+    .character-create-row {
+        grid-template-columns: 1fr;
     }
     
     .inventory-grid {
@@ -3718,6 +3834,29 @@ html[data-theme="minecraft"],
     background: #c6c6c6;
     border-bottom: 2px solid #8b8b8b;
 }
+[data-theme="minecraft"] .character-filter-bar {
+    background: #c6c6c6;
+    border-bottom: 2px solid #8b8b8b;
+}
+[data-theme="minecraft"] .character-chip {
+    background: #8b8b8b;
+    border: 0;
+    box-shadow: var(--mc-raised);
+    color: #111;
+    border-radius: 0;
+}
+[data-theme="minecraft"] .character-chip.active {
+    background: #ffffa0;
+    color: #111;
+}
+[data-theme="minecraft"] .item-character-badge,
+[data-theme="minecraft"] .item-character-tag {
+    border-radius: 0;
+    font-family: var(--mc-font);
+    background: #000;
+    color: #ffffa0;
+    border: 0;
+}
 [data-theme="minecraft"] .toolbar-search input,
 [data-theme="minecraft"] .codex-input {
     background: #000;
@@ -4466,6 +4605,30 @@ html[data-theme="minecraft"],
 [data-theme="fallout"] .inventory-toolbar {
     background: transparent;
     border-bottom: 1px solid var(--fo-line);
+}
+[data-theme="fallout"] .character-filter-bar {
+    background: transparent;
+    border-bottom: 1px solid var(--fo-line);
+}
+[data-theme="fallout"] .character-chip {
+    border: 1px solid #39ff88;
+    color: #39ff88;
+    background: transparent;
+    font-family: var(--fo-mono);
+    border-radius: 0;
+}
+[data-theme="fallout"] .character-chip.active {
+    background: rgba(57, 255, 136, 0.12);
+    color: #b6ffd0;
+    border-color: #b6ffd0;
+}
+[data-theme="fallout"] .item-character-badge,
+[data-theme="fallout"] .item-character-tag {
+    border-radius: 0;
+    font-family: var(--fo-mono);
+    background: #02140c;
+    color: #39ff88;
+    border-color: #39ff88;
 }
 [data-theme="fallout"] .toolbar-search input,
 [data-theme="fallout"] .codex-input {

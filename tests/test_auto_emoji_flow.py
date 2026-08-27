@@ -364,7 +364,7 @@ class AutoEmojiFlowTests(unittest.IsolatedAsyncioTestCase):
         state.set_auto_decision(allowed=True, reason="forced_by_test")
 
         # 调用 _try_send_emoji
-        result = await main._try_send_emoji(event, ["happy"], "hello")
+        await main._try_send_emoji(event, ["happy"], "hello")
 
         # MemeSelector 应被调用，且不检查概率
         self.assertTrue(main.meme_selector.called)
@@ -628,7 +628,7 @@ class AutoEmojiFlowTests(unittest.IsolatedAsyncioTestCase):
         # 执行完整流程
         allowed = await main._resolve_auto_emoji_turn_permission(event)
         if allowed:
-            sent = await main._try_send_emoji(event, ["happy"], "hello")
+            await main._try_send_emoji(event, ["happy"], "hello")
 
         # 验证调用顺序：判定先于发送
         self.assertEqual(call_log, ["resolve_permission", "selector_send"])

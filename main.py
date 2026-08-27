@@ -17,7 +17,6 @@ from astrbot.api.event.filter import (
 )
 from astrbot.api.message_components import Image as MessageImage
 from astrbot.api.star import Context, Star
-from astrbot.core.agent.message import TextPart
 
 from .cache_service import CacheService
 from .core.commands.command_handler import CommandHandler
@@ -149,17 +148,29 @@ class Main(Star):
         """如果配置中的提示词字段为空，将 prompts.json 内容写入配置作为默认显示值。"""
         updates = {}
         current_prompt = getattr(self.plugin_config, "custom_meme_classification_prompt", "")
-        if not current_prompt or not current_prompt.strip():
-            default_prompt = prompts.get("EMOJI_CLASSIFICATION_PROMPT", "")
-            if default_prompt:
-                updates["custom_meme_classification_prompt"] = default_prompt
+        default_prompt = prompts.get("EMOJI_CLASSIFICATION_PROMPT", "")
+        if default_prompt and (
+            not current_prompt
+            or not current_prompt.strip()
+            or ("15字以内" in current_prompt and "overlay_text" not in current_prompt)
+        ):
+            updates["custom_meme_classification_prompt"] = default_prompt
         current_filter_prompt = getattr(
             self.plugin_config, "custom_meme_classification_with_filter_prompt", ""
         )
-        if not current_filter_prompt or not current_filter_prompt.strip():
-            default_filter_prompt = prompts.get("EMOJI_CLASSIFICATION_WITH_FILTER_PROMPT", "")
-            if default_filter_prompt:
-                updates["custom_meme_classification_with_filter_prompt"] = default_filter_prompt
+        default_filter_prompt = prompts.get("EMOJI_CLASSIFICATION_WITH_FILTER_PROMPT", "")
+        if default_filter_prompt and (
+            not current_filter_prompt
+            or not current_filter_prompt.strip()
+            or (
+                "15字以内" in current_filter_prompt
+                and "overlay_text" not in current_filter_prompt
+            )
+        ):
+            updates["custom_meme_classification_with_filter_prompt"] = default_filter_prompt
+        current_emotion_prompt = getattr(self.plugin_config, "emotion_analysis_prompt", "")
+        if current_emotion_prompt and "只能输出一个英文分类名" in current_emotion_prompt:
+            updates["emotion_analysis_prompt"] = ""
         if updates:
             self.update_config(updates)
             logger.info(f"已将默认提示词写入配置: {list(updates.keys())}")
@@ -648,23 +659,23 @@ class Main(Star):
 
     @filter.llm_tool(name="search_meme")
     async def search_emoji(self, event: AstrMessageEvent, query: str):
-        """搜索表情包候选，并优先按你当前心情词进行匹配。
+        """按当前语气、场景或图上可能出现的文字搜索表情包。
 
         Args:
-            query(string): 你当前心情的代表词（也支持描述词、场景词）
+            query(string): 检索句。优先写场景或原话，例如「被安排加班算了」「无语」「谢谢」。不要只写英文分类名。
 
         使用建议：
-        - 先判断你此刻最能代表自己的心情词（例如：开心、无语、尴尬、感谢）
-        - 再用该心情词调用本工具搜索候选
-        - 若无结果，可换同义词再搜索（如"无语"->"dumb/尴尬"）
+        - 用一句中文描述此刻适合发什么图，或直接用图上可能出现的字
+        - 心情词、场景词、梗词都可以
+        - 若无结果，换更具体的使用场景再搜
 
         返回值：
         返回候选表情包列表，每个包含：
         - 编号：用于调用 send_emoji_by_id
-        - 分类：表情包的情绪分类
-        - 描述：表情包的详细描述（这是你选择时的重要参考）
+        - 分类：浏览分区，仅供参考
+        - 描述 / 图上文字 / 场景：选图时优先看这些
 
-        请先锁定"当前心情词"，再仔细阅读候选描述，选择最能代表你当前心情与语气的一张。
+        请根据候选的描述和图上文字选择最贴合当前语气的一张，不要只看分类名。
         """
         event = _unwrap_event(event)
         query = str(query or "").strip()
@@ -1195,54 +1206,8 @@ class Main(Star):
 
     @filter.on_llm_request()
     async def _inject_emotion_instruction(self, event: AstrMessageEvent, req):
-        """在 LLM 请求时动态注入被动标签模式的情绪选择指令。
-
-        使用 extra_user_content_parts 追加指令，避免修改 system_prompt
-        破坏 LLM 提供商的提示词缓存。
-        """
-        try:
-            if not self.plugin_config.auto_send_meme:
-                return
-
-            turn_state = self._emoji_turn_state(event)
-            if turn_state.is_active_sent():
-                return
-
-            if turn_state.is_auto_claimed():
-                return
-
-            if not await self._resolve_auto_emoji_turn_permission(event):
-                return
-
-            if self.plugin_config.enable_natural_emotion_analysis:
-                return
-
-            cats = self.plugin_config.get_categories()
-            if not cats:
-                return
-
-            categories_str = ", ".join(cats)
-
-            emotion_instruction = f"""
-{self._persona_marker}
-# 角色指令：情绪表达
-你需要根据对话的上下文和你当前的回复态度，从以下列表中选择一个最匹配的情绪：
-[{categories_str}]
-
-# 输出格式严格要求
-1. 必须在回复的**最开头**，使用双浮点号 '&&' 包裹情绪标签。
-2. 格式示例：
-   &&happy&& 哈哈，这个太有意思了！
-   &&sad&& 唉，怎么会这样...
-3. 只能使用列表中的情绪词，严禁创造新词。
-4. 不要使用 Markdown 代码块或括号，**仅使用 && 符号**。
-{self._persona_marker}
-"""
-
-            req.extra_user_content_parts.append(TextPart(text=emotion_instruction))
-
-        except Exception as e:
-            logger.error(f"[Stealer] 注入情绪选择指令失败: {e}", exc_info=True)
+        """兼容旧钩子：被动模式不再向回复注入 &&emotion&& 标签。"""
+        return
 
     @filter.on_decorating_result(priority=100)
     async def _prepare_emoji_response(self, event: AstrMessageEvent):
@@ -1290,8 +1255,6 @@ class Main(Star):
         if not turn_allowed:
             return cleaned_text != text
         if self._should_skip_auto_emoji_by_gate(text_without_explicit):
-            return cleaned_text != text
-        if not self.plugin_config.enable_natural_emotion_analysis and not emotions:
             return cleaned_text != text
 
         if not self._claim_auto_emoji_turn(event):

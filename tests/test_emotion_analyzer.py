@@ -16,7 +16,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -39,6 +38,7 @@ if _star_module is not None:
 
 from core.config.config import PluginConfig
 from core.processing.natural_emotion_analyzer import (
+    EmotionQuery,
     NaturalEmotionAnalyzer,
     SmartEmotionMatcher,
     _EMOTION_ABSTAIN,
@@ -175,7 +175,8 @@ class TestAnalyzeEmotion(unittest.IsolatedAsyncioTestCase):
             analyzer, "_analyze_with_llm", new=AsyncMock(return_value="happy")
         ):
             result = await analyzer.analyze_emotion(_dummy_event(), "reply text here")
-        self.assertEqual(result, "happy")
+        self.assertIsInstance(result, EmotionQuery)
+        self.assertEqual(result.primary, "happy")
         self.assertFalse(analyzer.last_analysis_abstained)
         self.assertEqual(analyzer.stats["total_analyses"], 1)
         self.assertEqual(analyzer.stats["successful_analyses"], 1)
@@ -201,7 +202,8 @@ class TestAnalyzeEmotion(unittest.IsolatedAsyncioTestCase):
             result = await analyzer.analyze_emotion(
                 _dummy_event(), "reply text here", user_message="msg"
             )
-        self.assertEqual(result, "sad")
+        self.assertIsInstance(result, EmotionQuery)
+        self.assertEqual(result.primary, "sad")
         mocked.assert_not_called()
         self.assertEqual(analyzer.stats["cache_hits"], 1)
 
@@ -211,7 +213,8 @@ class TestAnalyzeEmotion(unittest.IsolatedAsyncioTestCase):
             analyzer, "_analyze_with_llm", new=AsyncMock(return_value="troll")
         ) as mocked:
             result = await analyzer.analyze_emotion(_dummy_event(), "哈哈笑死我了")
-        self.assertEqual(result, "happy")
+        self.assertIsInstance(result, EmotionQuery)
+        self.assertEqual(result.primary, "happy")
         mocked.assert_not_called()
 
     async def test_llm_failure_falls_through_without_abstain(self):
@@ -253,7 +256,8 @@ class TestSmartEmotionMatcher(unittest.IsolatedAsyncioTestCase):
         with patch.object(
             matcher.natural_analyzer,
             "analyze_emotion",
-            new=AsyncMock(return_value="happy"),
+            new=AsyncMock(return_value=EmotionQuery(True, "happy reply", ["happy"])),
         ):
             result = await matcher.analyze_and_match_emotion(_dummy_event(), "reply text here")
-        self.assertEqual(result, "happy")
+        self.assertIsInstance(result, EmotionQuery)
+        self.assertEqual(result.primary, "happy")

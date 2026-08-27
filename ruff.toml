@@ -1,0 +1,4 @@
+target-version = "py310"
+
+[lint.per-file-ignores]
+"tests/**" = ["E402"]

@@ -94,8 +94,8 @@
             "hint": "When enabled, uses composite scoring (diversity + relevance + similarity) to pick the best emoji. When disabled, picks randomly (still avoids short-term repeats)."
         },
         "enable_natural_emotion_analysis": {
-            "description": "Emotion recognition mode",
-            "hint": "When enabled, uses a lightweight model to analyze LLM reply semantics without modifying the reply content. When disabled, uses passive tag mode (LLM inserts && emotion tags, modifying reply content). Use /reset to clear context after switching modes."
+            "description": "Smart retrieval rewrite",
+            "hint": "When enabled, a lightweight model writes a search query and decides whether to send a sticker, without changing the reply. When disabled, passive retrieval uses the reply text directly and does not inject tags."
         },
         "emotion_analysis_provider_id": {
             "description": "Emotion analysis model",
@@ -103,7 +103,7 @@
         },
         "emotion_analysis_prompt": {
             "description": "Emotion analysis prompt",
-            "hint": "Analyzes LLM reply text to determine what type of emoji to send. Supports placeholders: {emotion_list} (category list), {llm_reply} (LLM reply text), {user_message} (user message, may be empty). Leave blank to use the default prompt."
+            "hint": "Generates a search query and 1-3 emotion priors. Placeholders: {emotion_list}, {llm_reply}, {user_message}. Leave blank to use the default prompt. Legacy single-label output is still accepted."
         },
         "vision_provider_id": {
             "description": "Vision model",
@@ -151,7 +151,7 @@
         },
         "enable_embedding_search": {
             "description": "Enable embedding vector search",
-            "hint": "When enabled, uses embedding vectors (FaissVecDB) for semantic similarity matching. When disabled, always uses keyword (BM25) search. An embedding model ID must be configured below; otherwise falls back to BM25."
+            "hint": "When enabled, remote text embeddings recall stickers by overlay text + usage scenes + description. When disabled, keyword (BM25) search is used. No local CLIP. Falls back to BM25 if no embedding model is configured."
         },
         "embedding_provider_id": {
             "description": "Embedding model ID",
@@ -192,6 +192,14 @@
         "_smart_section": {
             "description": "Smart selection: text-distance fusion weights",
             "hint": ""
+        },
+        "_webui_section": {
+            "description": "WebUI",
+            "hint": ""
+        },
+        "webui_theme": {
+            "description": "Default WebUI theme",
+            "hint": "Theme used when opening the sticker manager. Picking a theme in the page is remembered and takes priority over this setting."
         }
     },
     "pages": {
@@ -277,14 +285,18 @@
                 "deselect_all": "Deselect All",
                 "move": "Move",
                 "repair_origin": "Repair Origin",
-                "confirm": "Confirm"
+                "confirm": "Confirm",
+                "characters": "Manage characters",
+                "assign_character": "Assign Character",
+                "open_navigation": "Open navigation"
             },
             "empty": {
                 "library_title": "No stickers yet",
                 "library_hint": "Click \"Add\" to upload a new sticker.",
                 "pending_title": "No pending stickers",
                 "pending_hint": "Newly stolen stickers will wait here for review.",
-                "no_categories": "No categories yet"
+                "no_categories": "No categories yet",
+                "no_characters": "No characters yet. Add one, then assign stickers in the library."
             },
             "pagination": {
                 "prev": "Previous",
@@ -305,7 +317,9 @@
                 "batch_move": "Batch Move",
                 "batch_scope": "Batch Scope",
                 "confirm": "Confirm Action",
-                "input": "Input"
+                "input": "Input",
+                "character_manager": "Character Manager",
+                "batch_character": "Assign Character"
             },
             "fields": {
                 "category": "Category",
@@ -328,7 +342,10 @@
                 "add_method_manual": "Manual upload",
                 "add_method_llm": "LLM upload",
                 "add_method_api": "API upload",
-                "add_method_unknown": "Unknown"
+                "add_method_unknown": "Unknown",
+                "character": "Character",
+                "overlay_text": "Overlay text",
+                "id": "ID"
             },
             "units": {
                 "times": "times"
@@ -364,7 +381,10 @@
                 "category_key": "Key (e.g. happy)",
                 "category_name": "Name (e.g. Happy)",
                 "category_desc": "Description (optional)",
-                "select": "Select..."
+                "select": "Select...",
+                "character_key": "Key (e.g. neurosama)",
+                "character_name": "Display name (e.g. Neuro-sama)",
+                "overlay_text": "Text printed on the meme"
             },
             "upload": {
                 "click_to_upload": "Click to upload an image"
@@ -393,7 +413,9 @@
                 "continue_import": "Continue Import",
                 "selected_images": "Selected {count} image(s)",
                 "scope_hint": "Images missing origin group info will be skipped when setting local scope.",
-                "selected_short": "Selected {count}"
+                "selected_short": "Selected {count}",
+                "character": "Character",
+                "character_hint": "This batch will be tagged with the selected character. You can change it later."
             },
             "alerts": {
                 "pending_approved": "Approved {count} item(s).",
@@ -442,7 +464,8 @@
                 "delete_selected_images": "Delete {count} selected image(s)?",
                 "storage_cleanup": "Found {count} cleanable item(s). This will remove stale indexes, orphan files, thumbnail cache, and temp files. Continue?",
                 "update_existing_category": "Category {key} already exists. Update it?",
-                "delete_category": "Delete category {key}? Images in this category will be deleted permanently."
+                "delete_category": "Delete category {key}? Images in this category will be deleted permanently.",
+                "delete_character": "Delete character {key}? Stickers stay; only the character tag is removed."
             },
             "prompt": {
                 "origin_scope": "Enter the origin scope, for example group:123456 or user:123456."
@@ -466,6 +489,14 @@
             "kbd": {
                 "navigate": "Navigate",
                 "clear_focus": "Clear focus"
+            },
+            "characters": {
+                "title": "Characters",
+                "all": "All characters",
+                "unassigned": "Unassigned",
+                "hint": "You assign characters in the dashboard. VLM does not detect them. Create a character first, then edit a card or batch-assign.",
+                "manage": "Manage characters",
+                "bar_hint": "Filter the library by character. Use Manage characters to add or remove them."
             }
         }
     }

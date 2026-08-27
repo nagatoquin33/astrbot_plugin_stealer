@@ -1,6 +1,5 @@
 """v5 schema 回归：v4→v5 迁移、pending 关联表、元数据列、标签规范化、缓存 model_sig。"""
 
-import asyncio
 import json
 import os
 import sqlite3
@@ -57,7 +56,7 @@ async def test_v5_migration_and_metadata():
     # 迁移后版本号
     with sqlite3.connect(db_path) as conn:
         ver = conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0]
-    assert ver == "5"
+    assert ver == "6"
 
     # 旧 pending tags 拆入关联表（主键 (path,tag) 天然去重，与正式表 emoji_tag 语义一致）
     p = db.get_pending(1)
@@ -149,22 +148,45 @@ def test_fresh_db_creates_full_schema():
     """全新数据库：CREATE 直接建全列（含元数据），无需走 ALTER 迁移路径。"""
     tmp = tempfile.mkdtemp()
     db_path = os.path.join(tmp, "fresh.db")
-    db = DatabaseService(db_path)
+    DatabaseService(db_path)
 
-    # 版本直接到 5
+    # 版本直接到当前 schema
     with sqlite3.connect(db_path) as conn:
         ver = conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0]
-    assert ver == "5"
+    assert ver == "6"
 
     # 全列存在（fresh 库 CREATE 含元数据列，_migrate_v5 的 ALTER 被 duplicate 容错跳过）
     with sqlite3.connect(db_path) as conn:
         cols = [r[1] for r in conn.execute("PRAGMA table_info(emoji)").fetchall()]
-    for col in ("reviewed_at", "source_url", "original_name", "width", "height", "format", "bytes", "add_method"):
+    for col in (
+        "reviewed_at",
+        "source_url",
+        "original_name",
+        "width",
+        "height",
+        "format",
+        "bytes",
+        "add_method",
+        "overlay_text",
+        "emotions_json",
+        "character",
+    ):
         assert col in cols, f"emoji 缺少列 {col}"
 
     with sqlite3.connect(db_path) as conn:
         pcols = [r[1] for r in conn.execute("PRAGMA table_info(emoji_pending)").fetchall()]
-    for col in ("source_url", "original_name", "width", "height", "format", "bytes", "add_method"):
+    for col in (
+        "source_url",
+        "original_name",
+        "width",
+        "height",
+        "format",
+        "bytes",
+        "add_method",
+        "overlay_text",
+        "emotions_json",
+        "character",
+    ):
         assert col in pcols, f"emoji_pending 缺少列 {col}"
 
 
@@ -174,12 +196,18 @@ def test_parser_label_normalization():
 
     n = ClassificationParser.normalize_label_list
     # 列表 + 去重 + 截断
-    assert n(["震惊", "瞪眼", "震惊", "卧槽", "无语", "傻眼"], MAX_TAGS) == ["震惊", "瞪眼", "卧槽", "无语"]
+    assert n(["震惊", "瞪眼", "震惊", "卧槽", "无语", "傻眼"], MAX_TAGS) == [
+        "震惊",
+        "瞪眼",
+        "卧槽",
+        "无语",
+        "傻眼",
+    ]
     # 字符串（中文逗号/顿号/分号分隔）+ 去重 + 截断
     assert n("开心，猫、猫；大笑", MAX_TAGS) == ["开心", "猫", "大笑"]
     # 超过上限截断
-    assert n(["a", "b", "c", "d", "e", "f"], MAX_TAGS) == ["a", "b", "c", "d"]
-    assert n(["s1", "s2", "s3", "s4"], MAX_SCENES) == ["s1", "s2"]
+    assert n(["a", "b", "c", "d", "e", "f", "g"], MAX_TAGS) == ["a", "b", "c", "d", "e", "f"]
+    assert n(["s1", "s2", "s3", "s4"], MAX_SCENES) == ["s1", "s2", "s3"]
     # 空/非列表
     assert n(None, MAX_TAGS) == []
     assert n(123, MAX_TAGS) == []

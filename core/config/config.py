@@ -74,6 +74,8 @@ class PluginConfig(BaseModel):
     # === 分类信息 ===
     categories: list[str] = []
     category_info: dict[str, dict[str, str]] = {}
+    characters: list[str] = []
+    character_info: dict[str, dict[str, str]] = {}
 
     # === 待审核池 ===
     # 自动偷取时是否进入待审核池等待人工通过。
@@ -111,6 +113,7 @@ class PluginConfig(BaseModel):
         "sigh",
         "thank",
         "dumb",
+        "other",
     ]
 
     DEFAULT_CATEGORY_INFO: ClassVar[dict[str, dict[str, str]]] = {
@@ -131,6 +134,7 @@ class PluginConfig(BaseModel):
         "sigh": {"name": "无奈", "desc": "叹气、摆烂、算了、心累"},
         "thank": {"name": "感谢", "desc": "道谢、感恩、收到、爱了"},
         "dumb": {"name": "无语", "desc": "呆住、傻眼、离谱、沉默"},
+        "other": {"name": "其他", "desc": "文字梗、模板图、角色图、无法归入明确情绪"},
     }
 
     DEFAULT_CATEGORY_ALIASES: ClassVar[dict[str, str]] = {
@@ -202,10 +206,12 @@ class PluginConfig(BaseModel):
         "傻眼": "dumb",
         "离谱": "dumb",
         "沉默": "dumb",
-        "其它": "",
-        "其他": "",
-        "其他表情": "",
-        "其他情绪": "",
+        "其它": "other",
+        "其他": "other",
+        "其他表情": "other",
+        "其他情绪": "other",
+        "文字梗": "other",
+        "模板": "other",
     }
 
     def __init__(self, config: AstrBotConfig | None, context: Context | None = None):
@@ -228,6 +234,8 @@ class PluginConfig(BaseModel):
         object.__setattr__(self, "cache_dir", data_dir / "cache")
         object.__setattr__(self, "pending_dir", data_dir / "pending")
         object.__setattr__(self, "category_info_path", data_dir / "category_info.json")
+        object.__setattr__(self, "characters_path", data_dir / "characters.json")
+        object.__setattr__(self, "character_info_path", data_dir / "character_info.json")
 
         # 确保目录存在
         self.ensure_base_dirs()
@@ -308,6 +316,7 @@ class PluginConfig(BaseModel):
         BaseModel.__setattr__(self, "category_info", merged_info)
         self.save_categories()
         self.save_category_info()
+        self._load_character_state()
 
     def get_categories(self) -> list[str]:
         """返回当前分类列表；为空时回退到 DEFAULT_CATEGORIES。
@@ -344,6 +353,11 @@ class PluginConfig(BaseModel):
                 self.save_categories()
             else:
                 self.save_category_info()
+        if key in ("characters", "character_info"):
+            if key == "characters":
+                self.save_characters()
+            else:
+                self.save_character_info()
 
     def update_config(self, updates: dict) -> bool:
         """批量更新配置项。
@@ -409,6 +423,48 @@ class PluginConfig(BaseModel):
 
     def save_category_info(self) -> None:
         self._write_json_file(self.category_info_path, self.category_info)
+
+    def _load_character_state(self) -> None:
+        stored_characters = self._read_json_file(self.characters_path)
+        stored_info = self._read_json_file(self.character_info_path)
+        characters = (
+            list(stored_characters)
+            if isinstance(stored_characters, list) and stored_characters
+            else []
+        )
+        info = stored_info if isinstance(stored_info, dict) else {}
+        BaseModel.__setattr__(self, "characters", [str(k).strip() for k in characters if str(k).strip()])
+        BaseModel.__setattr__(self, "character_info", dict(info))
+        self.save_characters()
+        self.save_character_info()
+
+    def save_characters(self) -> None:
+        self._write_json_file(self.characters_path, self.characters)
+
+    def save_character_info(self) -> None:
+        self._write_json_file(self.character_info_path, self.character_info)
+
+    @staticmethod
+    def normalize_character_key(value: str) -> str:
+        key = str(value or "").strip().lower()
+        return key
+
+    def get_characters(self) -> list[str]:
+        return [key for key in (self.characters or []) if key]
+
+    def get_character_info_list(self) -> list[dict[str, str]]:
+        info_map = self.character_info or {}
+        result: list[dict[str, str]] = []
+        for key in self.get_characters():
+            info = info_map.get(key, {}) if isinstance(info_map, dict) else {}
+            result.append(
+                {
+                    "key": key,
+                    "name": str(info.get("name", "") or key),
+                    "desc": str(info.get("desc", "") or ""),
+                }
+            )
+        return result
 
     def ensure_category_dir(self, category: str) -> Path:
         category_dir = self.categories_dir / str(category)

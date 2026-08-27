@@ -64,7 +64,6 @@ _install_astrbot_stubs()
 
 from core.commands.command_handler import CommandHandler
 from core.search.meme_selector import MemeSelector
-from core.events.event_handler import EventHandler
 
 
 class DummyCacheService:

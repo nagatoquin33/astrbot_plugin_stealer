@@ -117,12 +117,12 @@ class CommandHandler:
         if action == "on":
             self._apply_config_updates({"enable_natural_emotion_analysis": True})
             yield event.plain_result(
-                "✅ 已启用自然语言情绪分析（LLM模式）\n\n💡 提示：如果之前使用被动标签模式，建议使用 /reset 清除AI对话上下文，避免继续输出 &&emotion&& 标签"
+                "✅ 已启用自然语言情绪分析（LLM模式）\n\n轻量模型会改写检索句并判断这轮该不该跟表情。"
             )
         else:
             self._apply_config_updates({"enable_natural_emotion_analysis": False})
             yield event.plain_result(
-                "❌ 已禁用自然语言情绪分析（被动标签模式）\n\n💡 提示：LLM现在会在回复开头插入 &&emotion&& 标签，插件会自动清理这些标签"
+                "✅ 已切换为被动检索模式\n\n不再向回复注入 &&emotion&& 标签，直接用回复原文检索表情包。"
             )
 
     async def emotion_analysis_stats(self, event: AstrMessageEvent):
@@ -152,12 +152,10 @@ class CommandHandler:
                 status_text += "- 使用轻量模型分析回复语义\n"
                 status_text += "- 自动识别情绪并发送表情包\n"
             else:
-                # 被动模式：显示标签识别说明
-                status_text += "📋 被动模式说明:\n"
-                status_text += "- 向LLM注入情绪选择提示词\n"
-                status_text += "- LLM在回复中插入 &&情绪&& 标签\n"
-                status_text += "- 插件识别标签并发送表情包\n"
-                status_text += "- 依赖LLM遵循格式要求\n"
+                status_text += "📋 被动检索模式说明:\n"
+                status_text += "- 不向 LLM 注入提示词，不改回复\n"
+                status_text += "- 用回复原文做图上文字 / BM25 / 嵌入检索\n"
+                status_text += "- 仍受概率、冷却和意图门控约束\n"
 
             status_text += "\n⚙️ 配置状态:\n"
             status_text += f"自动发送: {'启用' if self.plugin.plugin_config.auto_send_meme else '禁用'}\n"

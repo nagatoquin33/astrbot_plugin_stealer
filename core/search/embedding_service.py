@@ -8,11 +8,14 @@
 """
 
 import json
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 
 from astrbot.api import logger
+
+from ..processing.semantic_schema import EMBEDDING_TEXT_VERSION, build_meme_search_text
 
 
 class EmbeddingService:
@@ -339,6 +342,8 @@ class EmbeddingService:
         if not self._embedding_enabled():
             return
 
+        await self._upgrade_corpus_if_needed()
+
         # 1. Provider 就绪检查
         provider = self._get_provider()
         if provider is None:
@@ -371,18 +376,23 @@ class EmbeddingService:
     #  插入 / 删除
     # ═══════════════════════════════════════════════════
 
-    @staticmethod
-    def _build_search_text(entry: dict[str, Any]) -> str:
-        """拼接嵌入文本：category + desc + tags + scenes。"""
-        parts = [
-            str(entry.get("category", "") or ""),
-            str(entry.get("desc", "") or ""),
-        ]
-        for field in ("tags", "scenes"):
-            vals = entry.get(field, []) or []
-            if isinstance(vals, list):
-                parts.extend(str(v) for v in vals if v)
-        return " ".join(parts).strip()
+    def _category_info(self) -> dict[str, Any]:
+        cfg = getattr(self.plugin, "plugin_config", None)
+        info = getattr(cfg, "category_info", None) if cfg else None
+        return info if isinstance(info, dict) else {}
+
+    def _character_info(self) -> dict[str, Any]:
+        cfg = getattr(self.plugin, "plugin_config", None)
+        info = getattr(cfg, "character_info", None) if cfg else None
+        return info if isinstance(info, dict) else {}
+
+    def _build_search_text(self, entry: dict[str, Any]) -> str:
+        """拼接嵌入文本：图上文字 + 角色 + 使用句 + 描述 + 多情绪。"""
+        return build_meme_search_text(
+            entry,
+            category_info=self._category_info(),
+            character_info=self._character_info(),
+        )
 
     async def insert_emoji(self, path: str, entry: dict[str, Any]) -> bool:
         """插入单条 emoji 向量（对齐 FaissVecDB.insert 模式）。
@@ -740,6 +750,53 @@ class EmbeddingService:
     # ═══════════════════════════════════════════════════
     #  清理
     # ═══════════════════════════════════════════════════
+
+    async def _upgrade_corpus_if_needed(self) -> None:
+        """语料格式变更时清掉旧向量，让 backfill 按新文档重建。
+
+        只动 SQLite/Faiss 索引文件，不加载本地视觉模型。
+        """
+        db = getattr(self.plugin, "db_service", None)
+        if not db or not hasattr(db, "get_meta_value"):
+            return
+        try:
+            current = str(db.get_meta_value("embedding_text_version") or "")
+        except Exception:
+            current = ""
+        if current == EMBEDDING_TEXT_VERSION:
+            return
+
+        logger.info(
+            f"[Embedding] 语料版本 {current or 'v1'} -> {EMBEDDING_TEXT_VERSION}，重建文本向量"
+        )
+        if self._faiss_db is not None:
+            try:
+                await self._faiss_db.close()
+            except Exception:
+                pass
+            self._faiss_db = None
+            self._faiss_available = None
+
+        data_dir = Path(self._resolve_data_dir())
+        for name in ("emoji_faiss.db", "emoji_faiss.index"):
+            path = data_dir / name
+            try:
+                if path.exists():
+                    path.unlink()
+            except Exception as e:
+                logger.debug(f"[Embedding] 删除旧 Faiss 文件失败 {path}: {e}")
+
+        if hasattr(db, "clear_all_embeddings"):
+            try:
+                db.clear_all_embeddings()
+            except Exception as e:
+                logger.debug(f"[Embedding] 清空 SQLite 向量失败: {e}")
+
+        self.invalidate_cache()
+        try:
+            db.set_meta_value("embedding_text_version", EMBEDDING_TEXT_VERSION)
+        except Exception as e:
+            logger.debug(f"[Embedding] 写入语料版本失败: {e}")
 
     async def close(self) -> None:
         """关闭 FaissVecDB 并重置状态。"""

@@ -2,6 +2,7 @@
 
 import os
 import random
+import re
 from typing import Any
 
 from astrbot.api import logger
@@ -10,7 +11,7 @@ from astrbot.core.agent.run_context import ContextWrapper
 
 from ..events.meme_sender_engine import _send_qq_image_as_sticker
 
-from .text_similarity import calculate_hybrid_similarity, calculate_simple_similarity, tokenize_for_bm25, _extract_words
+from .text_similarity import calculate_hybrid_similarity, tokenize_for_bm25, _extract_words
 from .embedding_service import EmbeddingService
 
 
@@ -34,6 +35,8 @@ class MemeSmartSelectService:
     SMART_FAST_PREFILTER_TOP_K = 120
     SMART_FAST_PREFILTER_FUZZY_RESERVE = 24
     SMART_BM25_BONUS_WEIGHT = 0.2
+    SMART_RECALL_K = 48
+    SMART_OVERLAY_RECALL_LIMIT = 16
 
     def __init__(self, plugin_instance: Any = None) -> None:
         self.plugin = plugin_instance
@@ -49,6 +52,113 @@ class MemeSmartSelectService:
             return getattr(self._selector, name)
         raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
+    def _overlay_recall_paths(
+        self,
+        idx: dict[str, Any],
+        context_text: str,
+        event: AstrMessageEvent | None,
+        limit: int = 16,
+    ) -> list[str]:
+        """图上文字命中：O(n) 字符串包含，n 通常 <= 容量上限，2C2G 可承受。"""
+        ctx = (context_text or "").lower()
+        if len(ctx) < 2:
+            return []
+        hits: list[str] = []
+        for file_path, data in idx.items():
+            if not isinstance(data, dict):
+                continue
+            if not self._is_entry_allowed_for_event(data, event):
+                continue
+            overlay = str(data.get("overlay_text") or "").strip().lower()
+            if len(overlay) < 2:
+                continue
+            matched = overlay in ctx
+            if not matched:
+                for piece in re.split(r"[\s,，。！？!?、~～]+", overlay):
+                    if len(piece) >= 2 and piece in ctx:
+                        matched = True
+                        break
+            if matched:
+                hits.append(file_path)
+                if len(hits) >= limit:
+                    break
+        return hits
+
+    async def _recall_candidate_paths(
+        self,
+        idx: dict[str, Any],
+        context_text: str,
+        event: AstrMessageEvent | None,
+        prior_categories: set[str],
+    ) -> tuple[list[str], dict[str, float]]:
+        """全文召回，分类只作先验。顺序：图上文字 → 文本嵌入 → BM25 → 分类桶兜底。"""
+        recalled: list[str] = []
+        embedding_paths: dict[str, float] = {}
+        seen: set[str] = set()
+
+        def _add(paths: list[str]) -> None:
+            for path in paths:
+                canon = self._canon_path(path)
+                if not path or canon in seen:
+                    continue
+                data = idx.get(path) or idx.get(canon)
+                if not isinstance(data, dict):
+                    continue
+                if not self._is_entry_allowed_for_event(data, event):
+                    continue
+                seen.add(canon)
+                recalled.append(path)
+
+        _add(self._overlay_recall_paths(idx, context_text, event, self.SMART_OVERLAY_RECALL_LIMIT))
+
+        if self._is_embedding_ready() and context_text.strip():
+            try:
+                emb_results = await self._embedding_service.search(
+                    context_text, k=self.SMART_RECALL_K
+                )
+                emb_paths: list[str] = []
+                for path, score in emb_results:
+                    embedding_paths[self._canon_path(path)] = score
+                    emb_paths.append(path)
+                _add(emb_paths)
+                if embedding_paths:
+                    logger.info(
+                        f"[Embedding] 语义召回: context='{context_text[:50]}', topk={len(embedding_paths)}"
+                    )
+            except Exception as e:
+                logger.warning(f"[Embedding] auto-emoji 语义召回异常: {e}")
+        elif not self._is_embedding_ready():
+            logger.debug("[Embedding] auto-emoji: 嵌入未就绪，改走 BM25/分类兜底")
+
+        if len(recalled) < self.SMART_RECALL_K and context_text.strip():
+            try:
+                if self._search_engine._bm25_dirty or self._search_engine._bm25_index is None:
+                    await self._search_engine._build_bm25_index(idx)
+                tokens = tokenize_for_bm25(context_text)
+                if tokens and self._search_engine._bm25_index is not None:
+                    top = self._search_engine._bm25_index.get_top_k(
+                        list(tokens), k=self.SMART_RECALL_K
+                    )
+                    bm25_paths = []
+                    for doc_idx, _score in top:
+                        if doc_idx < len(self._search_engine._bm25_doc_paths):
+                            bm25_paths.append(self._search_engine._bm25_doc_paths[doc_idx])
+                    _add(bm25_paths)
+            except Exception as e:
+                logger.debug(f"[BM25] auto-emoji 召回失败: {e}")
+
+        if not recalled and prior_categories:
+            for file_path, data in idx.items():
+                if not isinstance(data, dict):
+                    continue
+                if self._get_category_from_data(data) not in prior_categories:
+                    continue
+                _add([file_path])
+                if len(recalled) >= self.SMART_RECALL_K:
+                    break
+
+        return recalled[: max(self.SMART_RECALL_K, self.SMART_OVERLAY_RECALL_LIMIT)], embedding_paths
+
     async def _select_emoji_smart_impl(
         self,
         category: str,
@@ -62,7 +172,9 @@ class MemeSmartSelectService:
             if not idx:
                 return None
 
-            allowed_categories = set(candidate_categories or [category])
+            allowed_categories = {
+                item for item in (candidate_categories or [category]) if item
+            }
             candidates = []
             low_score_candidates = []
             context_lower = context_text.lower()
@@ -70,98 +182,36 @@ class MemeSmartSelectService:
             query_tokens = tokenize_for_bm25(context_text)
             query_token_set = set(query_tokens)
 
-            # 热路径优化：先按分类与作用域过滤，再做轻量词法预筛，
-            # 避免每次自动发送都触发全量 BM25 索引加载/查询。
-            scoped_entries: list[
+            recalled_paths, embedding_paths = await self._recall_candidate_paths(
+                idx, context_text, event, allowed_categories
+            )
+            if not recalled_paths:
+                return None
+
+            prefiltered_entries: list[
                 tuple[str, dict[str, Any], str, list[str], list[str], tuple[str, ...], float]
             ] = []
-
-            for file_path, data in idx.items():
+            for file_path in recalled_paths:
+                data = idx.get(file_path) or idx.get(self._canon_path(file_path))
                 if not isinstance(data, dict):
                     continue
-
                 entry_category = self._get_category_from_data(data)
-                if entry_category not in allowed_categories:
-                    continue
-                if not self._is_entry_allowed_for_event(data, event):
-                    continue
-
-                desc_raw = str(data.get("desc", "") or "")
                 tags = self._parse_tags(data.get("tags", []))
                 scenes = self._parse_tags(data.get("scenes", []))
-                entry_text = " ".join([entry_category, desc_raw] + tags + scenes)
+                overlay = str(data.get("overlay_text") or "")
+                entry_text = " ".join(
+                    [overlay, entry_category, str(data.get("desc", "") or "")] + tags + scenes
+                )
                 entry_tokens = tokenize_for_bm25(entry_text)
-
                 fast_score = 0.0
                 if query_token_set and entry_tokens:
-                    entry_token_set = set(entry_tokens)
-                    overlap = query_token_set & entry_token_set
+                    overlap = query_token_set & set(entry_tokens)
                     if overlap:
                         fast_score = len(overlap) / max(1, len(query_token_set))
-
-                scoped_entries.append(
+                prefiltered_entries.append(
                     (file_path, data, entry_category, tags, scenes, entry_tokens, fast_score)
                 )
 
-            if not scoped_entries:
-                return None
-
-            # 仅在候选较多时启用轻量预筛，兼顾召回与性能。
-            if len(scoped_entries) > self.SMART_FAST_PREFILTER_MIN_CANDIDATES and query_token_set:
-                lexical_matches = [item for item in scoped_entries if item[6] > 0]
-                fuzzy_only_matches = [item for item in scoped_entries if item[6] <= 0]
-
-                if len(lexical_matches) > self.SMART_FAST_PREFILTER_TOP_K:
-                    lexical_matches.sort(key=lambda item: item[6], reverse=True)
-                    prefiltered_entries = lexical_matches[: self.SMART_FAST_PREFILTER_TOP_K]
-
-                    if fuzzy_only_matches:
-                        # 使用更轻量的相似度算法做模糊候选初筛
-                        fuzzy_only_matches.sort(
-                            key=lambda item: calculate_simple_similarity(
-                                context_text,
-                                " ".join(
-                                    [
-                                        item[2],
-                                        str(item[1].get("desc", "") or ""),
-                                        *item[3],
-                                        *item[4],
-                                    ]
-                                ),
-                            ),
-                            reverse=True,
-                        )
-                        prefiltered_entries.extend(
-                            fuzzy_only_matches[: self.SMART_FAST_PREFILTER_FUZZY_RESERVE]
-                        )
-                else:
-                    prefiltered_entries = scoped_entries
-            else:
-                prefiltered_entries = scoped_entries
-
-            # 嵌入检索增强：预计算 top-K 语义相似 path → 为后续打分提供 bonus
-            embedding_paths: dict[str, float] = {}
-            emb_ready = self._is_embedding_ready()
-            if not emb_ready:
-                logger.debug("[Embedding] auto-emoji: 嵌入未就绪，跳过语义增强")
-            elif not context_text.strip():
-                pass  # 空文本跳过
-            else:
-                try:
-                    emb_results = await self._embedding_service.search(context_text, k=80)
-                    for path, score in emb_results:
-                        canonical = self._canon_path(path)
-                        embedding_paths[canonical] = score
-                    if embedding_paths:
-                        logger.info(
-                            f"[Embedding] 语义增强: context='{context_text[:50]}', topk={len(embedding_paths)}"
-                        )
-                    else:
-                        logger.debug("[Embedding] auto-emoji: 嵌入搜索返回空结果（向量库可能为空）")
-                except Exception as e:
-                    logger.warning(f"[Embedding] auto-emoji 语义增强异常: {e}")
-
-            # 智能选择时若已积累足够高分候选，可提前终止打分
             SMART_EARLY_STOP_COUNT = 5
             SMART_EARLY_STOP_THRESHOLD = 0.7
 
@@ -193,18 +243,39 @@ class MemeSmartSelectService:
                     if context_words & scene_words:
                         scene_score = min(1.0, scene_score + 0.35)
 
-                category_bonus = 0.12 if entry_category == category else 0.04
+                overlay = str(data.get("overlay_text") or "").strip().lower()
+                overlay_score = 0.0
+                if overlay:
+                    if overlay in context_lower:
+                        overlay_score = 1.0
+                    else:
+                        pieces = [
+                            piece
+                            for piece in re.split(r"[\s,，。！？!?、~～]+", overlay)
+                            if len(piece) >= 2
+                        ]
+                        hits = sum(1 for piece in pieces if piece in context_lower)
+                        if hits:
+                            overlay_score = min(1.0, hits / max(len(pieces), 1) + 0.35)
+
+                entry_emotions = set(self._parse_tags(data.get("emotions", [])))
+                if not entry_emotions and entry_category:
+                    entry_emotions = {entry_category}
+                if entry_category in allowed_categories or (entry_emotions & allowed_categories):
+                    category_bonus = 0.12
+                else:
+                    category_bonus = 0.0
                 use_count_bonus = min(0.08, int(data.get("use_count", 0) or 0) * 0.01)
                 bm25_bonus = fast_score * self.SMART_BM25_BONUS_WEIGHT
                 favorite_bonus = 0.3 if data.get("is_favorite") else 0.0
-                # 嵌入语义 bonus：score 已是 [0,1] 余弦相似度
                 embedding_bonus = embedding_paths.get(
                     self._canon_path(file_path), 0.0
-                ) * 0.20
+                ) * 0.25
                 base_score = (
-                    desc_score * 0.35
-                    + tag_score * 0.25
-                    + scene_score * 0.2
+                    overlay_score * 0.28
+                    + desc_score * 0.22
+                    + tag_score * 0.15
+                    + scene_score * 0.18
                     + category_bonus
                     + use_count_bonus
                     + bm25_bonus
@@ -717,7 +788,7 @@ class MemeSmartSelectService:
         emotions: list[str],
         cleaned_text: str,
     ) -> bool:
-        """尝试发送表情包，遍历 emotions 列表直到第一个匹配到的表情包。
+        """尝试发送表情包。多个情绪作为先验一次召回，不再按桶逐个试。
 
         注意：概率判定由 Main 在调用前通过 _resolve_auto_emoji_turn_permission 完成，
         本方法只负责选图和发图。
@@ -726,20 +797,23 @@ class MemeSmartSelectService:
         if not self._check_group_allowed(event):
             return False
 
-        # active_sent means an emoji was actually sent, not merely auto-claimed.
         if self.plugin._emoji_turn_state(event).is_active_sent():
             logger.debug("[Stealer] 检测到已发送，跳过表情发送")
             return False
 
-        # 遍历情绪列表，第一个能选到表情包的就发送
-        for emotion in emotions:
-            emoji_path = await self.plugin.meme_selector.select_emoji(emotion, cleaned_text, event=event)
-            if emoji_path:
-                sent = await self.send_emoji_with_text(event, emoji_path, cleaned_text)
-                if not sent:
-                    continue
-                logger.debug(f"已发送表情包 (情绪={emotion})")
+        priors = [item for item in (emotions or []) if item]
+        primary = priors[0] if priors else ""
+        emoji_path = await self.plugin.meme_selector.select_emoji(
+            primary,
+            cleaned_text,
+            event=event,
+            extra_categories=priors,
+        )
+        if emoji_path:
+            sent = await self.send_emoji_with_text(event, emoji_path, cleaned_text)
+            if sent:
+                logger.debug(f"已发送表情包 (先验={priors})")
                 return True
 
-        logger.debug("[Stealer] 所有情绪均未匹配到表情包")
+        logger.debug("[Stealer] 未匹配到表情包")
         return False

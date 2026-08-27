@@ -285,15 +285,25 @@ class MemeSelector:
         category: str,
         context_text: str = "",
         event: AstrMessageEvent | None = None,
+        extra_categories: list[str] | None = None,
     ) -> str | None:
         """选择表情包（智能或随机）。"""
         async with self._selection_lock:
             use_smart = self.plugin.plugin_config.smart_meme_selection
-            candidate_categories = self._get_candidate_categories(category)
+            extra = [item for item in (extra_categories or []) if item]
+            primary = self.normalize_category(category) or str(category or "").lower().strip()
+            candidate_categories: list[str] = []
+            if extra:
+                for item in [primary, *extra]:
+                    mapped = self.normalize_category(item) or str(item).lower().strip()
+                    if mapped and mapped not in candidate_categories:
+                        candidate_categories.append(mapped)
+            elif primary:
+                candidate_categories = self._get_candidate_categories(primary)
 
             if use_smart and context_text and len(context_text.strip()) > 5:
                 smart_path = await self._select_emoji_smart_impl(
-                    category,
+                    primary or (candidate_categories[0] if candidate_categories else ""),
                     context_text,
                     candidate_categories=candidate_categories,
                     event=event,

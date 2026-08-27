@@ -3,10 +3,14 @@
 使用小模型对LLM回复进行语义分析，识别隐含情绪
 """
 
+from __future__ import annotations
+
 import asyncio
 import hashlib
+import json
 import re
 import time
+from dataclasses import dataclass, field
 from typing import Any
 
 from astrbot.api import logger
@@ -18,27 +22,64 @@ from ..search.text_similarity import calculate_hybrid_similarity, _has_negation_
 _EMOTION_ABSTAIN = object()
 
 _EMOTION_ANALYSIS_DEFAULT_TEMPLATE = (
-    "你是对话情绪分类器。请根据对话语境判断回复的情绪，"
-    "并从下列分类中选择一个：{emotion_list}\n"
+    "你是表情包检索查询生成器。根据对话判断是否该发表情，并生成检索词。\n"
+    "可选情绪分类：{emotion_list}\n"
     "\n"
     "任务边界：\n"
-    "1. 只分类回复的情绪，不分类用户消息。\n"
-    "2. 用户消息仅用于帮助理解回复的语气与立场。\n"
+    "1. 只分析回复的语气与意图，用户消息仅作语境。\n"
+    "2. 无明显表情意图时输出 {\"should_send\": false}\n"
+    "3. 需要表情时只输出一个 JSON 对象。\n"
     "\n"
     "分类规则：\n"
     "1. 负面情绪优先细分：愤怒→angry，无奈/叹气→sigh，震惊到无语→dumb，悲伤→sad，不解→confused。\n"
     "2. `troll` 仅用于明显阴阳怪气、挑衅、嘲讽、故意拱火语气。\n"
     "3. 普通吐槽、拒绝、抱怨、冷淡，不要判为 `troll`。\n"
-    "4. 证据不足时选择最保守、最贴近字面语气的分类。\n"
-    "5. 无明显情绪时输出 none。\n"
+    "4. query 用中文写「适合发什么图」，可包含图上可能出现的字或使用场景，不要只写分类名。\n"
+    "5. emotions 给 1~3 个分类，按相关度排序，必须来自给定分类。\n"
     "\n"
     "用户消息：{user_message}\n"
     "回复：{llm_reply}\n"
     "\n"
-    "输出要求：\n"
-    "- 只能输出一个英文分类名\n"
-    "- 不能输出解释、标点、代码块或其他文字"
+    "输出示例：\n"
+    "{\"should_send\": true, \"query\": \"被安排加班后的摆烂无奈\", \"emotions\": [\"sigh\", \"tired\"]}\n"
+    "或 {\"should_send\": false}"
 )
+
+
+@dataclass
+class EmotionQuery:
+    """查询改写结果：检索句 + 情绪先验。分类只作加分，不再是唯一键。"""
+
+    should_send: bool = True
+    search_query: str = ""
+    emotion_priors: list[str] = field(default_factory=list)
+
+    @property
+    def primary(self) -> str | None:
+        return self.emotion_priors[0] if self.emotion_priors else None
+
+    def to_cache(self) -> dict[str, Any]:
+        return {
+            "s": self.should_send,
+            "q": self.search_query,
+            "e": list(self.emotion_priors),
+        }
+
+    @classmethod
+    def from_cache(cls, value: Any) -> EmotionQuery | None:
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, str) and value:
+            return cls(True, value, [value])
+        if isinstance(value, dict):
+            priors = [str(item) for item in (value.get("e") or []) if item]
+            query = str(value.get("q") or "").strip()
+            should = bool(value.get("s", True))
+            if not should:
+                return cls(False, "", [])
+            if query or priors:
+                return cls(should, query, priors)
+        return None
 
 
 class NaturalEmotionAnalyzer:
@@ -57,7 +98,7 @@ class NaturalEmotionAnalyzer:
         self.categories: list[str] = self.plugin_config.get_categories()
 
         # 缓存机制
-        self.analysis_cache: dict[str, str] = {}
+        self.analysis_cache: dict[str, Any] = {}
         self.cache_max_size: int = self.CACHE_MAX_SIZE
         self._cache_lock = asyncio.Lock()
 
@@ -98,16 +139,11 @@ class NaturalEmotionAnalyzer:
         llm_reply: str,
         *,
         user_message: str = "",
-    ) -> str | None:
-        """分析文本的自然情绪
-
-        Args:
-            event: 消息事件（用于获取LLM提供商）
-            llm_reply: LLM 回复文本
-            user_message: 用户原始消息，与 llm_reply 组成对话上下文
+    ) -> EmotionQuery | None:
+        """分析文本并生成表情检索查询。
 
         Returns:
-            情绪分类，如果分析失败返回None
+            EmotionQuery；失败或不该发送时返回 None（abstain 通过 last_analysis_abstained 区分）
         """
         if not llm_reply or len(llm_reply.strip()) < 3:
             return None
@@ -126,51 +162,66 @@ class NaturalEmotionAnalyzer:
             if cache_key in self.analysis_cache:
                 self.stats["cache_hits"] += 1
                 logger.debug(f"[情绪分析] 缓存命中: {cleaned_reply[:30]}...")
-                return self.analysis_cache[cache_key]
+                cached = EmotionQuery.from_cache(self.analysis_cache[cache_key])
+                if cached and not cached.should_send:
+                    self.last_analysis_abstained = True
+                    return None
+                return cached
 
         # 本地预匹配：先用分词匹配关键词映射（快速路径）
         local_match = self._local_keyword_match(cleaned_reply)
         if local_match:
+            query = EmotionQuery(True, cleaned_reply, [local_match])
             logger.debug(f"[情绪分析] 本地匹配: {cleaned_reply[:30]}... → {local_match}")
             async with self._cache_lock:
-                self._cache_result(cache_key, local_match)
-            return local_match
+                self._cache_result(cache_key, query.to_cache())
+            return query
 
         # 执行 LLM 分析（传入用户消息作为上下文）
         start_time = time.time()
-        emotion = await self._analyze_with_llm(
+        parsed = await self._analyze_with_llm(
             event,
             cleaned_reply,
             user_message=cleaned_msg,
         )
         end_time = time.time()
 
-        # 模型明确 abstain，不走降级和失败日志
-        if emotion is _EMOTION_ABSTAIN:
+        if parsed is _EMOTION_ABSTAIN:
             self.last_analysis_abstained = True
             return None
         self.last_analysis_abstained = False
 
-        # 更新统计
         self.stats["total_analyses"] += 1
         response_time = (end_time - start_time) * 1000
-        self._update_stats(response_time, emotion is not None)
+        query = parsed if isinstance(parsed, EmotionQuery) else None
+        if query is None and isinstance(parsed, str):
+            query = EmotionQuery(True, cleaned_reply, [parsed])
+        if query and not query.should_send:
+            self.last_analysis_abstained = True
+            self._update_stats(response_time, True)
+            return None
 
-        # LLM 失败时降级到本地匹配
-        if not emotion:
-            emotion = self._local_keyword_match(cleaned_reply, fallback=True)
-            if emotion:
-                logger.debug(f"[情绪分析] LLM失败，降级匹配: {cleaned_reply[:30]}... → {emotion}")
+        if query is None:
+            fallback = self._local_keyword_match(cleaned_reply, fallback=True)
+            if fallback:
+                query = EmotionQuery(True, cleaned_reply, [fallback])
+                logger.debug(f"[情绪分析] LLM失败，降级匹配: {cleaned_reply[:30]}... → {fallback}")
 
-        # 缓存结果
-        if emotion:
+        self._update_stats(response_time, query is not None)
+
+        if query:
+            if not query.search_query:
+                query.search_query = cleaned_reply
             async with self._cache_lock:
-                self._cache_result(cache_key, emotion)
-            logger.info(f"[情绪分析] {cleaned_reply[:30]}... → {emotion} ({response_time:.0f}ms)")
+                self._cache_result(cache_key, query.to_cache())
+            logger.info(
+                f"[情绪分析] {cleaned_reply[:30]}... → {query.emotion_priors} "
+                f"q='{query.search_query[:40]}' ({response_time:.0f}ms)"
+            )
         else:
             logger.warning(f"[情绪分析] 分析失败: {cleaned_reply[:30]}...")
 
-        return emotion
+        return query
 
     def _local_keyword_match(self, text: str, fallback: bool = False) -> str | None:
         """本地关键词匹配（快速路径/降级方案）
@@ -242,14 +293,8 @@ class NaturalEmotionAnalyzer:
         llm_reply: str,
         *,
         user_message: str = "",
-    ) -> str | None:
-        """使用小模型分析情绪
-
-        Args:
-            event: 消息事件
-            llm_reply: LLM 回复文本（已清理）
-            user_message: 用户原始消息（已清理）
-        """
+    ) -> EmotionQuery | object | None:
+        """使用小模型生成检索查询。兼容旧的单分类名输出。"""
         try:
             # 获取文本模型提供商（优先使用配置的小模型）
             provider_id = await self._get_text_provider(event)
@@ -280,7 +325,7 @@ class NaturalEmotionAnalyzer:
             response = await self.plugin.context.llm_generate(
                 chat_provider_id=provider_id,
                 prompt=prompt,
-                max_tokens=15,  # 只需返回一个单词，大幅降低生成时间
+                max_tokens=120,
             )
 
             # 安全获取响应文本
@@ -292,11 +337,7 @@ class NaturalEmotionAnalyzer:
                 logger.warning("[情绪分析] LLM返回空文本")
                 return None
 
-            # 解析结果
-            result_text = result_text.strip().lower()
-            emotion = self._parse_emotion_result(result_text)
-
-            return emotion
+            return self._parse_emotion_query(result_text, fallback_query=llm_reply)
 
         except Exception as e:
             error_msg = str(e)
@@ -347,6 +388,75 @@ class NaturalEmotionAnalyzer:
 
         return cleaned
 
+    def _parse_emotion_query(self, result_text: str, *, fallback_query: str) -> EmotionQuery | object | None:
+        """解析 LLM 输出：优先 JSON 查询改写，兼容旧的单分类名。"""
+        if not result_text:
+            return None
+        stripped = result_text.strip()
+        lowered = stripped.lower()
+        if re.match(r"^none[\s:：,，.。!！?？]*$", lowered):
+            logger.info("[情绪分析] 模型输出 none，跳过发送")
+            return _EMOTION_ABSTAIN
+
+        data = self._extract_json_object(stripped)
+        if isinstance(data, dict):
+            should_raw = data.get("should_send", True)
+            should = str(should_raw).strip().lower() not in {"false", "0", "no"}
+            if not should:
+                logger.info("[情绪分析] 模型判断不该发表情")
+                return EmotionQuery(False, "", [])
+            query = str(data.get("query") or data.get("search_query") or "").strip()
+            raw_emotions = data.get("emotions") or data.get("emotion") or []
+            if isinstance(raw_emotions, str):
+                raw_emotions = [raw_emotions]
+            priors: list[str] = []
+            seen: set[str] = set()
+            for item in raw_emotions:
+                mapped = self._map_category(str(item))
+                if mapped and mapped not in seen:
+                    seen.add(mapped)
+                    priors.append(mapped)
+                if len(priors) >= 3:
+                    break
+            if not priors:
+                mapped = self._parse_emotion_result(query or lowered)
+                if mapped and mapped is not _EMOTION_ABSTAIN:
+                    priors = [mapped]
+            return EmotionQuery(True, query or fallback_query, priors)
+
+        emotion = self._parse_emotion_result(lowered)
+        if emotion is _EMOTION_ABSTAIN or emotion is None:
+            return emotion
+        return EmotionQuery(True, fallback_query, [emotion])
+
+    @staticmethod
+    def _extract_json_object(text: str) -> dict[str, Any] | None:
+        decoder = json.JSONDecoder()
+        for index, char in enumerate(text):
+            if char != "{":
+                continue
+            try:
+                parsed, _ = decoder.raw_decode(text[index:])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict):
+                return parsed
+        return None
+
+    def _map_category(self, raw: str) -> str | None:
+        text = str(raw or "").strip().lower()
+        if not text:
+            return None
+        if text in self.categories:
+            return text
+        cfg = self.plugin.plugin_config
+        if cfg:
+            try:
+                return cfg.normalize_category_strict(text)
+            except Exception:
+                return None
+        return None
+
     def _parse_emotion_result(self, result_text: str) -> str | None:
         """解析LLM返回的情绪结果
 
@@ -364,7 +474,7 @@ class NaturalEmotionAnalyzer:
 
         # 模型选择不发送
         if re.match(r"^none[\s:：,，.。!！?？]*$", result):
-            logger.info(f"[情绪分析] 模型输出 none，跳过发送")
+            logger.info("[情绪分析] 模型输出 none，跳过发送")
             return _EMOTION_ABSTAIN  # type: ignore
 
         cfg = self.plugin.plugin_config
@@ -402,7 +512,7 @@ class NaturalEmotionAnalyzer:
         """生成缓存键"""
         return hashlib.sha256(text.encode()).hexdigest()[:16]
 
-    def _cache_result(self, cache_key: str, emotion: str):
+    def _cache_result(self, cache_key: str, emotion: Any):
         """缓存分析结果"""
         # 清理过期缓存
         if len(self.analysis_cache) >= self.cache_max_size:
@@ -462,7 +572,7 @@ class SmartEmotionMatcher:
         use_natural_analysis: bool = True,
         *,
         user_message: str = "",
-    ) -> str | None:
+    ) -> EmotionQuery | None:
         """分析并匹配情绪
 
         Args:
@@ -472,12 +582,11 @@ class SmartEmotionMatcher:
             user_message: 用户原始消息，与 llm_reply 组成对话上下文提升分析准确度
 
         Returns:
-            匹配的情绪分类
+            EmotionQuery 或 None
         """
         if not llm_reply or len(llm_reply.strip()) < 3:
             return None
 
-        # 使用自然语言分析（主要方案）
         if use_natural_analysis and self.plugin.plugin_config.enable_natural_emotion_analysis:
             emotion = await self.natural_analyzer.analyze_emotion(
                 event,

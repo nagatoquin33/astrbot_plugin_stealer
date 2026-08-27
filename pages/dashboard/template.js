@@ -285,6 +285,28 @@ export const TEMPLATE = `
                 </div>
             </div>
 
+            <div class="character-filter-bar">
+                <span class="character-filter-label">{{ t('pages.dashboard.characters.title', '角色') }}</span>
+                <button type="button" class="character-chip" :class="{ active: !selectedCharacter }"
+                    @click="selectLibraryCharacter('')">
+                    {{ t('pages.dashboard.characters.all', '全部角色') }}
+                </button>
+                <button type="button" class="character-chip" :class="{ active: selectedCharacter === '__none__' }"
+                    @click="selectLibraryCharacter('__none__')">
+                    {{ t('pages.dashboard.characters.unassigned', '未分配') }}
+                    <span class="character-chip-count">{{ unassignedCharacterCount }}</span>
+                </button>
+                <button v-for="item in characters" :key="item.key" type="button" class="character-chip"
+                    :class="{ active: selectedCharacter === item.key }"
+                    @click="selectLibraryCharacter(item.key)">
+                    {{ item.name }}
+                    <span class="character-chip-count">{{ item.count || 0 }}</span>
+                </button>
+                <button type="button" @click="openCharactersModal" class="codex-btn character-manage-btn">
+                    {{ t('pages.dashboard.actions.characters', '角色管理') }}
+                </button>
+            </div>
+
             <div v-if="loading" class="skeleton-grid">
                 <div v-for="n in pageSize" :key="n" class="skeleton-card">
                     <div class="skeleton-image"></div>
@@ -329,6 +351,7 @@ export const TEMPLATE = `
                         <img v-else :src="imageDataUrls[img.hash]" loading="lazy" decoding="async"
                             :alt="img.desc" class="fade-in">
                     </div>
+                    <span v-if="img.character" class="item-character-badge">{{ characterLabel(img.character) }}</span>
                     <span v-if="(img.use_count || 0) > 1" class="item-stack-count">{{ img.use_count }}</span>
 
                     <div class="item-info">
@@ -336,6 +359,7 @@ export const TEMPLATE = `
                             <div class="item-category">
                                 <span class="cat-dot" :style="catAccent(img.category)"></span>
                                 {{ getCategoryName(img.category) }}
+                                <span v-if="img.character" class="item-character-tag">{{ characterLabel(img.character) }}</span>
                             </div>
                             <div v-if="viewMode === 'list'" class="list-desc">{{ img.desc || t('pages.dashboard.messages.no_description', 'No description') }}</div>
                             <div v-if="viewMode === 'list' && (img.tags || []).length" class="list-tags">
@@ -472,6 +496,7 @@ export const TEMPLATE = `
                     <div class="pending-info">
                         <div class="pending-meta">
                             <span class="pending-category-badge">{{ getCategoryName(item.category) }}</span>
+                            <span v-if="item.character" class="item-character-tag">{{ characterLabel(item.character) }}</span>
                             <span v-if="item.scope_mode === 'local'" class="scope-pill local">{{ t('pages.dashboard.scope.local_short', 'Local') }}</span>
                             <span class="pending-source">{{ item.source === 'auto' ? '🤖' : '👤' }}</span>
                         </div>
@@ -662,6 +687,14 @@ export const TEMPLATE = `
                         </p>
                     </div>
                     <div class="stat-row">
+                        <span class="stat-name">{{ t('pages.dashboard.fields.character', '角色') }}</span>
+                        <span class="stat-value">{{ characterLabel(previewItem?.character) }}{{ previewItem?.character && previewItem?.category ? ' : ' + previewItem.category : '' }}</span>
+                    </div>
+                    <div v-if="previewItem?.overlay_text" class="stat-row">
+                        <span class="stat-name">{{ t('pages.dashboard.fields.overlay_text', '图上文字') }}</span>
+                        <span class="stat-value">{{ previewItem.overlay_text }}</span>
+                    </div>
+                    <div class="stat-row">
                         <span class="stat-name">{{ t('pages.dashboard.fields.tags', 'Tags') }}</span>
                     </div>
                     <div class="item-tags" style="margin-bottom:12px">
@@ -686,7 +719,7 @@ export const TEMPLATE = `
                         <span class="stat-value">{{ formatDate(previewItem?.created_at) }}</span>
                     </div>
                     <div class="stat-row">
-                        <span class="stat-name">ID</span>
+                        <span class="stat-name">{{ t('pages.dashboard.fields.id', '编号') }}</span>
                         <span class="stat-value" style="font-size:0.75rem;word-break:break-all">{{ previewItem?.hash?.slice(0, 16) }}...</span>
                     </div>
                 </div>
@@ -706,8 +739,8 @@ export const TEMPLATE = `
                         <label
                             class="form-label">{{ t('pages.dashboard.fields.scope', 'Scope') }}</label>
                         <select v-model="editForm.scope_mode" class="codex-input">
-                            <option value="public">public / {{ t('pages.dashboard.scope.public', 'Public') }}</option>
-                            <option value="local">local / {{ t('pages.dashboard.scope.local', 'Local only') }}</option>
+                            <option value="public">{{ t('pages.dashboard.scope.public', 'Public') }}</option>
+                            <option value="local">{{ t('pages.dashboard.scope.local', 'Local only') }}</option>
                         </select>
                         <div class="form-hint">{{ t('pages.dashboard.fields.origin', 'Origin') }}: {{ formatOriginTarget(previewItem?.origin_target) }}</div>
                     </div>
@@ -716,6 +749,20 @@ export const TEMPLATE = `
                         <label
                             class="form-label">{{ t('pages.dashboard.fields.description', 'Description') }}</label>
                         <textarea v-model="editForm.desc" class="codex-input" rows="3"></textarea>
+                    </div>
+
+                    <div style="margin-bottom:20px">
+                        <label class="form-label">{{ t('pages.dashboard.fields.character', '角色') }}</label>
+                        <select v-model="editForm.character" class="codex-input">
+                            <option value="">{{ t('pages.dashboard.characters.unassigned', '未分配') }}</option>
+                            <option v-for="item in characters" :key="item.key" :value="item.key">{{ item.name }}</option>
+                        </select>
+                    </div>
+
+                    <div style="margin-bottom:20px">
+                        <label class="form-label">{{ t('pages.dashboard.fields.overlay_text', '图上文字') }}</label>
+                        <input v-model="editForm.overlay_text" type="text" class="codex-input"
+                            :placeholder="t('pages.dashboard.placeholders.overlay_text', '图上印的字')">
                     </div>
 
                     <div style="margin-bottom:20px">
@@ -879,6 +926,20 @@ export const TEMPLATE = `
                     :placeholder="t('pages.dashboard.placeholders.upload_desc', 'Describe this sticker...')"></textarea>
             </div>
 
+            <div class="mt-16">
+                <label class="form-label">{{ t('pages.dashboard.fields.overlay_text', '图上文字') }}</label>
+                <input v-model="uploadForm.overlay_text" type="text" class="codex-input"
+                    :placeholder="t('pages.dashboard.placeholders.overlay_text', '图上印的字')">
+            </div>
+
+            <div class="mt-16">
+                <label class="form-label">{{ t('pages.dashboard.fields.character', '角色') }}</label>
+                <select v-model="uploadForm.character" class="codex-input">
+                    <option value="">{{ t('pages.dashboard.characters.unassigned', '未分配') }}</option>
+                    <option v-for="item in characters" :key="item.key" :value="item.key">{{ item.name }}</option>
+                </select>
+            </div>
+
             <div v-if="uploadError" class="error-banner">
                 {{ uploadError }}
             </div>
@@ -977,6 +1038,15 @@ export const TEMPLATE = `
                         <option v-for="emo in availableEmotions" :key="emo.key" :value="emo.key">{{ emo.name || emo.key }}</option>
                     </select>
                     <p class="hint-text" style="margin:8px 0 0">{{ t('pages.dashboard.batch.default_category_hint', 'Images will be saved into this category unless auto analyze is enabled.') }}</p>
+                </div>
+
+                <div class="mt-16">
+                    <label class="form-label">{{ t('pages.dashboard.fields.character', '角色') }}</label>
+                    <select v-model="batchUploadForm.character" class="codex-input">
+                        <option value="">{{ t('pages.dashboard.characters.unassigned', '未分配') }}</option>
+                        <option v-for="item in characters" :key="item.key" :value="item.key">{{ item.name }}</option>
+                    </select>
+                    <p class="hint-text" style="margin:8px 0 0">{{ t('pages.dashboard.batch.character_hint', '这批图会打上该角色标记。可稍后在图库里再改。') }}</p>
                 </div>
 
                 <div class="mt-16">
@@ -1120,6 +1190,54 @@ export const TEMPLATE = `
     </div>
 </div>
 
+<div v-if="charactersOpen" class="modal-overlay" @click.self="closeCharactersModal">
+    <div class="modal-panel modal-lg">
+        <div class="modal-panel-corner-bl"></div>
+        <div class="modal-panel-corner-br"></div>
+
+        <div class="modal-header">
+            <h2>{{ t('pages.dashboard.modal.character_manager', '角色管理') }}</h2>
+            <button @click="closeCharactersModal" class="modal-close">
+                <svg style="width:20px;height:20px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+            </button>
+        </div>
+        <div class="modal-pad">
+            <p class="hint-text" style="margin:0 0 16px">{{ t('pages.dashboard.characters.hint', '角色由你在管理面板手工归档，VLM 不会识别角色。先创建角色，再点卡片编辑或用批量分配。') }}</p>
+            <div style="background:var(--bg-main);padding:16px;margin-bottom:20px;border:1px solid var(--gold-dark)">
+                <h3 style="margin:0 0 16px 0;font-size:0.9rem;color:var(--gold-primary);font-family:'Cinzel',serif">{{ t('pages.dashboard.actions.characters', '角色管理') }}</h3>
+                <div class="character-create-row">
+                    <input v-model="newCharacter.key" class="codex-input"
+                        :placeholder="t('pages.dashboard.placeholders.character_key', '标识（如 neurosama）')">
+                    <input v-model="newCharacter.name" class="codex-input"
+                        :placeholder="t('pages.dashboard.placeholders.character_name', '显示名（如 Neuro-sama）')">
+                    <button @click="addCharacter" :disabled="addingCharacter || !newCharacter.key" class="codex-btn primary">
+                        {{ addingCharacter ? '...' : t('pages.dashboard.actions.add', '添加') }}
+                    </button>
+                </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:8px;max-height:400px;overflow-y:auto">
+                <div v-for="item in characters" :key="item.key" class="character-list-row">
+                    <div>
+                        <div style="display:flex;align-items:center;gap:12px;margin-bottom:4px">
+                            <span style="font-family:'Cinzel',serif;color:var(--gold-primary);font-size:1.1rem">{{ item.name || item.key }}</span>
+                            <span style="font-size:0.75rem;color:var(--text-muted);background:var(--bg-main);padding:2px 8px;border:1px solid var(--gold-dark)">{{ item.key }}</span>
+                        </div>
+                        <p style="margin:0;color:var(--text-muted);font-size:0.85rem">{{ item.count || 0 }}</p>
+                    </div>
+                    <button @click="deleteCharacter(item)" :disabled="deletingCharacterKey === item.key" class="codex-btn danger">
+                        {{ deletingCharacterKey === item.key ? '...' : t('pages.dashboard.actions.delete', '删除') }}
+                    </button>
+                </div>
+                <div v-if="characters.length === 0" class="empty-state" style="padding:40px">
+                    <p>{{ t('pages.dashboard.empty.no_characters', '还没有角色。先创建一个，再到图库里分配。') }}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div v-if="batchMoveOpen" class="modal-overlay" @click.self="closeBatchMoveModal">
     <div class="modal-panel modal-narrow">
         <div class="modal-panel-corner-bl"></div>
@@ -1148,6 +1266,25 @@ export const TEMPLATE = `
     </div>
 </div>
 
+<div v-if="batchCharacterOpen" class="modal-overlay" @click.self="closeBatchCharacterModal">
+    <div class="modal-panel modal-narrow">
+        <div class="modal-header">
+            <h2>{{ t('pages.dashboard.modal.batch_character', '批量分配角色') }}</h2>
+        </div>
+        <div class="modal-pad">
+            <label class="form-label">{{ t('pages.dashboard.fields.character', '角色') }}</label>
+            <select v-model="batchTargetCharacter" class="codex-input" style="margin-bottom:20px">
+                <option value="">{{ t('pages.dashboard.characters.unassigned', '未分配') }}</option>
+                <option v-for="item in characters" :key="item.key" :value="item.key">{{ item.name }}</option>
+            </select>
+            <div style="display:flex;gap:12px">
+                <button @click="closeBatchCharacterModal" class="codex-btn" style="flex:1">{{ t('pages.dashboard.actions.cancel', 'Cancel') }}</button>
+                <button @click="confirmBatchCharacter" class="codex-btn primary" style="flex:1">{{ t('pages.dashboard.actions.save', 'Save') }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div v-if="batchScopeOpen" class="modal-overlay" @click.self="closeBatchScopeModal">
     <div class="modal-panel modal-narrow">
         <div class="modal-panel-corner-bl"></div>
@@ -1163,8 +1300,8 @@ export const TEMPLATE = `
             <label
                 class="form-label">{{ t('pages.dashboard.fields.target_scope', 'Target Scope') }}</label>
             <select v-model="batchScopeMode" class="codex-input" style="margin-bottom:20px">
-                <option value="public">public / {{ t('pages.dashboard.scope.public', 'Public') }}</option>
-                <option value="local">local / {{ t('pages.dashboard.scope.local', 'Local only') }}</option>
+                <option value="public">{{ t('pages.dashboard.scope.public', 'Public') }}</option>
+                <option value="local">{{ t('pages.dashboard.scope.local', 'Local only') }}</option>
             </select>
             <div class="form-hint">{{ t('pages.dashboard.batch.scope_hint', 'Images missing origin group info will be skipped when setting local scope.') }}</div>
 
@@ -1181,6 +1318,7 @@ export const TEMPLATE = `
     <div style="width:1px;height:24px;background:var(--gold-dark)"></div>
     <button @click="selectAll" class="codex-btn" style="font-size:0.8rem;padding:8px 16px">{{ t('pages.dashboard.actions.select_all', 'Select All') }}</button>
     <button @click="openBatchMoveModal" class="codex-btn" style="font-size:0.8rem;padding:8px 16px">{{ t('pages.dashboard.actions.move', 'Move') }}</button>
+    <button @click="openBatchCharacterModal" class="codex-btn" style="font-size:0.8rem;padding:8px 16px">{{ t('pages.dashboard.actions.assign_character', '分配角色') }}</button>
     <button @click="handleBatchDelete" class="codex-btn danger" style="font-size:0.8rem;padding:8px 16px">{{ t('pages.dashboard.actions.delete', 'Delete') }}</button>
     <button @click="openBatchScopeModal" class="codex-btn" style="font-size:0.8rem;padding:8px 16px">{{ t('pages.dashboard.fields.scope', 'Scope') }}</button>
     <button @click="repairSelectedScope" class="codex-btn" style="font-size:0.8rem;padding:8px 16px">{{ t('pages.dashboard.actions.repair_origin', 'Repair Origin') }}</button>
@@ -1273,6 +1411,14 @@ export const TEMPLATE = `
                         </label>
                         <select v-model="pendingEditForm.category" class="codex-input">
                             <option v-for="cat in categories" :key="cat.key" :value="cat.key">{{ cat.name }}</option>
+                        </select>
+                    </div>
+
+                    <div style="margin-bottom:16px">
+                        <label class="form-label sm">{{ t('pages.dashboard.fields.character', '角色') }}</label>
+                        <select v-model="pendingEditForm.character" class="codex-input">
+                            <option value="">{{ t('pages.dashboard.characters.unassigned', '未分配') }}</option>
+                            <option v-for="item in characters" :key="item.key" :value="item.key">{{ item.name }}</option>
                         </select>
                     </div>
 

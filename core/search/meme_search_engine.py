@@ -6,6 +6,7 @@ from typing import Any
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
+from ..processing.semantic_schema import build_meme_search_text
 from .text_similarity import (
     BM25,
     _extract_words,
@@ -41,15 +42,21 @@ class MemeSearchEngine:
             scenes = tuple(
                 str(scene).strip() for scene in data.get("scenes", []) if str(scene).strip()
             )
+            emotions = tuple(
+                str(item).strip() for item in data.get("emotions", []) if str(item).strip()
+            )
             desc = str(data.get("desc", "") or "")
             category = str(data.get("category", "") or "")
+            overlay = str(data.get("overlay_text", "") or "")
             payload = "\x1f".join(
                 [
                     str(file_path),
                     category,
                     desc,
+                    overlay,
                     "\x1e".join(tags),
                     "\x1e".join(scenes),
+                    "\x1e".join(emotions),
                 ]
             )
             hasher.update(payload.encode("utf-8", errors="ignore"))
@@ -115,11 +122,7 @@ class MemeSearchEngine:
         for file_path, data in idx.items():
             if not isinstance(data, dict):
                 continue
-            tags = self.selector._parse_tags(data.get("tags", []))
-            scenes = self.selector._parse_tags(data.get("scenes", []))
-            desc = str(data.get("desc", "") or "")
-            category = self.selector._get_category_from_data(data)
-            text_content = " ".join([category, desc] + tags + scenes)
+            text_content = build_meme_search_text(data)
             tokens = tokenize_for_bm25(text_content)
             if tokens:
                 documents.append(tokens)

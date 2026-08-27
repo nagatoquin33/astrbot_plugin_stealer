@@ -9,15 +9,11 @@
 
 import asyncio
 import json
-import os
 import tempfile
 import pytest
-import sqlite3
 import sys
-import tempfile
 import types
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 # 安装 astrbot stubs
 def _install_stubs():
@@ -52,7 +48,6 @@ def _install_stubs():
 PACKAGE_NAME = _install_stubs()
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import core.db.database_service
 from core.db.database_service import DatabaseService
 
 
@@ -61,7 +56,7 @@ class TestDatabaseInit:
 
     def test_init_creates_database_file(self, tmp_path: Path):
         db_path = tmp_path / "test.db"
-        db = DatabaseService(db_path)
+        DatabaseService(db_path)
         assert db_path.exists()
 
     def test_init_creates_tables(self, tmp_path: Path):
@@ -639,6 +634,38 @@ class TestStats:
         assert images[0]["is_favorite"] == 1
         assert images[0]["use_count"] == 7
         assert images[0]["last_used_at"] == 1700000000
+
+    def test_character_is_independent_of_category(self, db: DatabaseService):
+        asyncio.run(db.insert_batch([
+            {
+                "path": "/test/neuro_happy.gif",
+                "hash": "n1",
+                "category": "happy",
+                "character": "neurosama",
+                "desc": "棕发小女孩唱歌",
+            },
+            {
+                "path": "/test/plain_happy.gif",
+                "hash": "n2",
+                "category": "happy",
+                "character": "",
+                "desc": "普通开心",
+            },
+        ]))
+        neuro, total, _ = db.get_emojis_paginated(page=1, page_size=50, character="neurosama")
+        assert total == 1
+        assert neuro[0]["hash"] == "n1"
+        assert neuro[0]["character"] == "neurosama"
+        assert neuro[0]["category"] == "happy"
+
+        none_assigned, none_total, _ = db.get_emojis_paginated(
+            page=1, page_size=50, character="__none__", category="happy"
+        )
+        assert none_total >= 1
+        assert all(not (item.get("character") or "") for item in none_assigned)
+
+        counts = db.get_character_counts()
+        assert counts.get("neurosama") == 1
 
     def test_get_corpus_signature_changes_when_searchable_metadata_changes(
         self, db: DatabaseService

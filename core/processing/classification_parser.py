@@ -1,14 +1,21 @@
 """分类结果解析器：负责解析 VLM 的 JSON/文本响应。"""
 
+from typing import Any
+
 import json
 import re
-from typing import Any
 
 from astrbot.api import logger
 
-# 打标数量上限（与 prompts.json 的 output_format 约束一致）
-MAX_TAGS = 4
-MAX_SCENES = 2
+from .semantic_schema import (
+    CATEGORY_OTHER,
+    MAX_DESC_CHARS,
+    MAX_EMOTIONS,
+    MAX_OVERLAY_CHARS,
+    MAX_SCENES,
+    MAX_TAGS,
+    clip_chars,
+)
 
 
 class ClassificationParser:
@@ -57,16 +64,33 @@ class ClassificationParser:
                 break
         return result
 
-    def _normalize_category(self, raw: str) -> str:
+    def _normalize_category(self, raw: str, *, fallback_other: bool = True) -> str:
         """将 VLM 返回的分类文本规范化为有效分类名（委托到 ImageProcessorService）。"""
         if self.plugin and hasattr(self.plugin, "image_processor_service"):
-            return self.plugin.image_processor_service._normalize_category(raw)
-        return str(raw or "").strip().lower()
+            normalizer = getattr(
+                self.plugin.image_processor_service, "_normalize_category", None
+            )
+            if callable(normalizer):
+                try:
+                    return normalizer(raw, fallback_other=fallback_other)
+                except TypeError:
+                    result = normalizer(raw)
+                    if result:
+                        return result
+                    return CATEGORY_OTHER if fallback_other else ""
+        text = str(raw or "").strip().lower()
+        if not text:
+            return CATEGORY_OTHER if fallback_other else ""
+        return text
 
     def _parse_classification_response(
         self, response: str, file_path: str
-    ) -> tuple[str, list[str], str, str, list[str]]:
-        """Parse the classification payload returned by the VLM."""
+    ) -> tuple[str, list[str], str, str, list[str], str, list[str]]:
+        """Parse the classification payload returned by the VLM.
+
+        Returns:
+            (category, tags, description, emotion, scenes, overlay_text, emotions)
+        """
         response = response.strip()
 
         data = self._extract_json_payload(response)
@@ -82,20 +106,51 @@ class ClassificationParser:
             or "\u5ba1\u6838\u4e0d\u901a\u8fc7" in reason
         ):
             logger.warning(f"Image moderation rejected: {file_path}")
-            return self.CATEGORY_FILTERED, [], "", self.CATEGORY_FILTERED, []
+            return self.CATEGORY_FILTERED, [], "", self.CATEGORY_FILTERED, [], "", []
 
         category = data.get("category", "")
         tags = data.get("tags", [])
-        description = self._sanitize_model_scalar(data.get("description", "emoji")) or "emoji"
+        description = clip_chars(
+            self._sanitize_model_scalar(data.get("description", "emoji")) or "emoji",
+            MAX_DESC_CHARS,
+        )
         scenes = data.get("scenes", [])
+        overlay_text = clip_chars(
+            self._sanitize_model_scalar(data.get("overlay_text", "")),
+            MAX_OVERLAY_CHARS,
+        )
 
-        normalized_category = self._normalize_category(category)
-
-        # 标签/场景规范化：保序去重 + 数量截断（tags≤4、scenes≤2，与提示词约束一致）
+        normalized_category = self._normalize_category(category, fallback_other=True)
         tags = self.normalize_label_list(tags, MAX_TAGS)
         scenes = self.normalize_label_list(scenes, MAX_SCENES)
 
-        return normalized_category, tags, description, normalized_category, scenes
+        extra_emotions = self.normalize_label_list(
+            data.get("emotions", data.get("emotion_labels", [])),
+            MAX_EMOTIONS,
+        )
+        emotions: list[str] = []
+        seen: set[str] = set()
+        if normalized_category and normalized_category != self.CATEGORY_FILTERED:
+            emotions.append(normalized_category)
+            seen.add(normalized_category)
+        for item in extra_emotions:
+            mapped = self._normalize_category(item, fallback_other=False)
+            if not mapped or mapped in seen or mapped == self.CATEGORY_FILTERED:
+                continue
+            seen.add(mapped)
+            emotions.append(mapped)
+            if len(emotions) >= MAX_EMOTIONS:
+                break
+
+        return (
+            normalized_category,
+            tags,
+            description,
+            normalized_category,
+            scenes,
+            overlay_text,
+            emotions,
+        )
 
     def _sanitize_model_scalar(self, value: Any) -> str:
         """Normalize single-value model outputs before category matching."""
@@ -137,13 +192,13 @@ class ClassificationParser:
 
         return None
 
-    def _parse_legacy_format(self, response: str) -> tuple[str, list[str], str, str, list[str]]:
+    def _parse_legacy_format(
+        self, response: str
+    ) -> tuple[str, list[str], str, str, list[str], str, list[str]]:
         """兼容旧格式：管道符分隔的响应。"""
-        # 处理审核不通过
         if self.CATEGORY_FILTERED in response or "审核不通过" in response:
-            return self.CATEGORY_FILTERED, [], "", self.CATEGORY_FILTERED, []
+            return self.CATEGORY_FILTERED, [], "", self.CATEGORY_FILTERED, [], "", []
 
-        # 兼容旧格式：情绪分类|语义标签|画面描述|场景标签
         parts = [p.strip() for p in response.strip().split("|")]
         emotion_result = parts[0] if parts else ""
         tags_str = parts[1] if len(parts) > 1 else ""
@@ -152,19 +207,23 @@ class ClassificationParser:
             for t in tags_str.replace("，", ",").replace("、", ",").split(",")
             if t.strip()
         ]
-        desc_result = parts[2] if len(parts) > 2 else "表情包"
+        desc_result = clip_chars(parts[2] if len(parts) > 2 else "表情包", MAX_DESC_CHARS)
         scenes_str = parts[3] if len(parts) > 3 else ""
         scenes_result = [
             s.strip()
             for s in scenes_str.replace("，", ",").replace("、", ",").replace("；", ",").split(",")
             if s.strip()
         ]
+        overlay_text = clip_chars(parts[4] if len(parts) > 4 else "", MAX_OVERLAY_CHARS)
 
-        category = self._normalize_category(emotion_result)
+        category = self._normalize_category(emotion_result, fallback_other=True)
+        emotions = [category] if category and category != self.CATEGORY_FILTERED else []
         return (
             category,
             self.normalize_label_list(tags_result, MAX_TAGS),
             desc_result,
             category,
             self.normalize_label_list(scenes_result, MAX_SCENES),
+            overlay_text,
+            emotions,
         )

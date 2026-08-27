@@ -12,6 +12,8 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain
 from astrbot.api.message_components import Plain
 
+from ..processing.natural_emotion_analyzer import EmotionQuery
+
 
 async def _send_qq_image_as_sticker(
     event: AstrMessageEvent,
@@ -402,6 +404,7 @@ class MemeSenderEngine:
             task_start = asyncio.get_event_loop().time()
             final_emotions = list(emotions or [])
 
+            search_text = text
             if getattr(self.plugin, "enable_natural_emotion_analysis", False) and hasattr(
                 self.plugin, "smart_emotion_matcher"
             ):
@@ -411,10 +414,17 @@ class MemeSenderEngine:
                     use_natural_analysis=True,
                     user_message=user_message,
                 )
-                if analyzed:
+                if isinstance(analyzed, EmotionQuery):
+                    if not analyzed.should_send:
+                        return
+                    if analyzed.emotion_priors:
+                        final_emotions = analyzed.emotion_priors
+                    if analyzed.search_query:
+                        search_text = analyzed.search_query
+                elif analyzed:
                     final_emotions = [analyzed]
 
-            if not final_emotions:
+            if not final_emotions and not search_text:
                 return
 
             result = event.get_result()
@@ -426,7 +436,7 @@ class MemeSenderEngine:
             if delay > 0:
                 await asyncio.sleep(delay)
 
-            sent = await self.try_send_emoji(event, final_emotions, text)
+            sent = await self.try_send_emoji(event, final_emotions, search_text or text)
             if sent:
                 await self.mark_auto_emoji_sent(event)
                 self.emoji_turn_state(event).mark_active_sent()

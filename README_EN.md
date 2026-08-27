@@ -189,13 +189,13 @@ The management page is served through the AstrBot Dashboard plugin page system. 
 
 ## 🔄 Emotion Analysis Modes
 
-| | LLM Mode (recommended) | Passive Tag Mode |
+| | LLM mode (recommended) | Passive retrieval |
 |:---|:---|:---|
-| **How it works** | A lightweight model analyzes the reply's sentiment in the background | Inject a prompt that makes the LLM insert `&&emotion&&` tags into its reply |
-| **Effect on replies** | ✅ Doesn't modify the LLM's original reply | ❌ Temporarily inserts tags (cleaned before sending) |
-| **Best for** | Daily use, keeping conversation natural | When you want the LLM to precisely control emotion classification |
+| **How it works** | A lightweight model rewrites a search query and decides whether to send a sticker | No tags are injected; the reply text is used as the search query |
+| **Effect on replies** | ✅ Does not modify the LLM reply | ✅ Does not modify the LLM reply |
+| **Best for** | Enough tokens, want a `should_send` gate | Tight token budget, skip the extra model call |
 
-> ⚠️ **Run `/reset` after switching modes** to clear the conversation context, otherwise the LLM may carry over the old mode's output patterns.
+Character archives are assigned by hand in the WebUI and are independent of emotion categories. VLM only writes semantics; you pick the character (for example neurosama).
 
 ## 🎮 Command Reference
 

@@ -67,6 +67,9 @@ class PluginAPI:
             ("/pending/stats", "handle_pending_stats", ["GET"]),
             ("/categories", "handle_categories", ["GET", "POST"]),
             ("/categories/delete", "handle_delete_category", ["POST"]),
+            ("/characters", "handle_characters", ["GET", "POST"]),
+            ("/characters/delete", "handle_delete_character", ["POST"]),
+            ("/images/batch-character", "handle_batch_character", ["POST"]),
             ("/emotions", "handle_get_emotions", ["GET"]),
             ("/health", "handle_health_check", ["GET"]),
             ("/prefs", "handle_prefs", ["GET", "POST"]),
@@ -211,6 +214,54 @@ class PluginAPI:
                 seen.add(key)
                 keys.append(key)
         return keys
+
+    @staticmethod
+    def _normalize_character_key(value: str) -> str:
+        return str(value or "").strip().lower()
+
+    def _build_characters_list(self, counts: dict[str, int] | None = None) -> list[dict]:
+        counts = counts or {}
+        result: list[dict] = []
+        known: set[str] = set()
+        for item in self._cfg.get_character_info_list():
+            key = item["key"]
+            known.add(key)
+            result.append(
+                {
+                    "key": key,
+                    "name": item["name"],
+                    "desc": item.get("desc", ""),
+                    "count": int(counts.get(key, 0) or 0),
+                }
+            )
+        for key, count in counts.items():
+            if key and key not in known:
+                result.append({"key": key, "name": key, "desc": "", "count": int(count)})
+        result.sort(key=lambda x: (-int(x.get("count") or 0), x["key"]))
+        return result
+
+    async def _refresh_embedding_for_path(self, path: str) -> None:
+        db = self._db
+        if not db or not path:
+            return
+        entry = {}
+        try:
+            entry = db.get_emoji(path) or {}
+        except Exception:
+            entry = {}
+        if not entry:
+            return
+        try:
+            smart = getattr(
+                getattr(self.plugin, "meme_selector", None), "_smart_select_service", None
+            )
+            if smart and getattr(smart, "_embedding_service", None):
+                await smart._embedding_service.delete_by_path(path)
+                await smart._embedding_service.insert_emoji(path, entry)
+                smart._invalidate_embedding_index()
+        except Exception as e:
+            logger.debug(f"[Embedding] 角色更新后重建向量失败: {e}")
+        self._invalidate_bm25()
 
     def _file_base64(self, file_path: str) -> str:
         with open(file_path, "rb") as f:
@@ -405,6 +456,14 @@ class PluginAPI:
         else:
             tags = []
         scenes = self._split_scenes(data.get("scenes", data.get("scene")))
+        overlay_text = str(data.get("overlay_text", "") or "").strip()
+        emotions_raw = data.get("emotions", [])
+        if isinstance(emotions_raw, str):
+            emotions = self._split_csv(emotions_raw)
+        elif isinstance(emotions_raw, list):
+            emotions = [str(item).strip() for item in emotions_raw if str(item).strip()]
+        else:
+            emotions = []
         scope_mode = self._norm_scope(data.get("scope_mode"))
         origin_target = str(data.get("origin_target", "") or "").strip()
         return {
@@ -412,8 +471,11 @@ class PluginAPI:
             "tags": tags,
             "desc": str(data.get("desc", data.get("description", "")) or ""),
             "scenes": scenes,
+            "overlay_text": overlay_text,
+            "emotions": emotions,
             "scope_mode": scope_mode,
             "origin_target": origin_target,
+            "character": self._normalize_character_key(str(data.get("character", "") or "")),
         }
 
     def _build_categories_list(self, counts: dict[str, int]) -> list[dict]:
@@ -463,6 +525,8 @@ class PluginAPI:
                 "reviewed_at": meta.get("reviewed_at"),
                 "source_url": meta.get("source_url"),
                 "original_name": meta.get("original_name"),
+                "overlay_text": str(meta.get("overlay_text", "") or ""),
+                "character": str(meta.get("character", "") or ""),
             }
         except ValueError:
             return None
@@ -479,6 +543,9 @@ class PluginAPI:
         scenes: list[str] | None = None,
         scope_mode: str = "public",
         origin_target: str = "",
+        overlay_text: str = "",
+        emotions: list[str] | None = None,
+        character: str = "",
     ) -> dict:
         final_cat = str(category or "").strip() or "unknown"
         ts = int(datetime.now().timestamp())
@@ -495,6 +562,9 @@ class PluginAPI:
             "tags": list(tags or []),
             "desc": str(desc or ""),
             "scenes": list(scenes or []),
+            "overlay_text": str(overlay_text or ""),
+            "emotions": list(emotions or []),
+            "character": self._normalize_character_key(character),
             "scope_mode": self._norm_scope(scope_mode),
             "origin_target": str(origin_target or "").strip(),
             "created_at": ts,
@@ -643,6 +713,7 @@ class PluginAPI:
             search = str(request.args.get("q", "")).lower()
             sort_order = request.args.get("sort", "newest")
             favorite_only = request.args.get("favorite_only", "false").lower() == "true"
+            character_filter = str(request.args.get("character", "") or "")
 
             db = self._db
             get_paginated = getattr(db, "get_emojis_paginated", None) if db else None
@@ -655,11 +726,13 @@ class PluginAPI:
                     sort_order=sort_order,
                     search_query=search if search else None,
                     favorite_only=favorite_only,
+                    character=character_filter or None,
                 )
                 images = [
                     item for item in (self._build_image_item(i["path"], i) for i in raw) if item
                 ]
                 cats = self._build_categories_list(cat_counts)
+                char_counts = db.get_character_counts() if hasattr(db, "get_character_counts") else {}
                 return jsonify(
                     {
                         "success": True,
@@ -668,6 +741,8 @@ class PluginAPI:
                         "size": page_size,
                         "images": images,
                         "categories": cats,
+                        "characters": self._build_characters_list(char_counts),
+                        "unassigned_character_count": int(char_counts.get("", 0) or 0),
                         "favorite_count": self._count_favorites(),
                     }
                 )
@@ -694,6 +769,11 @@ class PluginAPI:
                     continue
                 if favorite_only and not item.get("is_favorite"):
                     continue
+                item_character = str(item.get("character", "") or "")
+                if character_filter == "__none__" and item_character:
+                    continue
+                if character_filter and character_filter != "__none__" and item_character != character_filter:
+                    continue
                 images.append(item)
 
             images.sort(
@@ -705,6 +785,11 @@ class PluginAPI:
             start = (page - 1) * page_size
             paged = images[start : start + page_size]
             cats = self._build_categories_list(cat_counts)
+            char_counts: dict[str, int] = {}
+            for path_str, meta in index.items():
+                if isinstance(meta, dict):
+                    key = str(meta.get("character", "") or "")
+                    char_counts[key] = char_counts.get(key, 0) + 1
 
             return jsonify(
                 {
@@ -714,6 +799,8 @@ class PluginAPI:
                     "size": page_size,
                     "images": paged,
                     "categories": cats,
+                    "characters": self._build_characters_list(char_counts),
+                    "unassigned_character_count": int(char_counts.get("", 0) or 0),
                     "favorite_count": self._count_favorites(),
                 }
             )
@@ -845,6 +932,7 @@ class PluginAPI:
                 "add_method": row.get("add_method"),
                 "source_url": row.get("source_url"),
                 "original_name": row.get("original_name"),
+                "character": str(row.get("character", "") or ""),
             }
         except (ValueError, TypeError):
             return None
@@ -936,9 +1024,9 @@ class PluginAPI:
             return False, "pending file missing"
 
         category = str(row.get("category", "") or "").strip()
-        if not category or category not in self._cfg.categories:
-            # 分类无效：保留 pending 行让用户改，或可选拒绝。这里返回失败不删。
-            return False, f"invalid category: {category!r}"
+        known = set(self._cfg.categories or [])
+        if not category or (category not in known and category != "other"):
+            category = "other"
 
         cat_dir = self._cfg.ensure_category_dir(category)
         cat_path = str(cat_dir / os.path.basename(src_path))
@@ -964,6 +1052,9 @@ class PluginAPI:
                 "reviewed_at": int(time.time()),
                 "tags": list(row.get("tags", []) or []),
                 "scenes": list(row.get("scenes", []) or []),
+                "overlay_text": str(row.get("overlay_text", "") or ""),
+                "emotions": list(row.get("emotions", []) or []),
+                "character": str(row.get("character", "") or ""),
                 # v5：从 pending 继承元数据（宽高/格式/字节/来源/入库方式）
                 "source_url": row.get("source_url"),
                 "original_name": row.get("original_name"),
@@ -1130,6 +1221,11 @@ class PluginAPI:
                         for s in str(scenes_raw or "").split(",")
                         if s.strip()
                     ]
+            if "character" in data:
+                character = self._normalize_character_key(str(data.get("character") or ""))
+                if character and character not in set(self._cfg.get_characters()):
+                    return jsonify({"success": False, "error": f"角色无效: {character}"})
+                fields["character"] = character
 
             if not fields:
                 return jsonify({"success": False, "error": "没有可更新字段"})
@@ -1185,6 +1281,9 @@ class PluginAPI:
                 tags=metadata["tags"],
                 desc=metadata["desc"],
                 scenes=metadata["scenes"],
+                overlay_text=metadata.get("overlay_text", ""),
+                emotions=metadata.get("emotions") or [],
+                character=metadata.get("character", ""),
                 scope_mode=metadata["scope_mode"],
                 origin_target=metadata["origin_target"],
             )
@@ -1207,6 +1306,9 @@ class PluginAPI:
             new_tags = data.get("tags")
             new_desc = data.get("desc")
             new_scenes = data.get("scenes", data.get("scene"))
+            new_overlay = data.get("overlay_text")
+            new_emotions = data.get("emotions")
+            new_character = data.get("character") if "character" in data else None
             new_scope = self._norm_scope(data.get("scope_mode"))
             new_favorite = data.get("is_favorite")
             found = self._find_index_entry_by_hash(str(img_hash))
@@ -1221,6 +1323,15 @@ class PluginAPI:
                 updates["desc"] = new_desc
             if new_scenes is not None:
                 updates["scenes"] = self._split_scenes(new_scenes)
+            if new_overlay is not None:
+                updates["overlay_text"] = str(new_overlay or "").strip()
+            if new_emotions is not None:
+                if isinstance(new_emotions, str):
+                    updates["emotions"] = self._split_csv(new_emotions)
+                elif isinstance(new_emotions, list):
+                    updates["emotions"] = [str(item).strip() for item in new_emotions if str(item).strip()]
+            if new_character is not None:
+                updates["character"] = self._normalize_character_key(str(new_character or ""))
             if new_scope:
                 if new_scope == "local" and not str(meta.get("origin_target", "")).strip():
                     return jsonify({"success": False, "error": "Origin target missing"})
@@ -1248,9 +1359,12 @@ class PluginAPI:
                             )
                 if not moved:
                     return jsonify({"success": False, "error": "Update index failed"})
+                await self._refresh_embedding_for_path(str(new_path))
             elif updates:
                 if not await self._update_index_path(target, updates):
                     return jsonify({"success": False, "error": "Update index failed"})
+                if "character" in updates or "overlay_text" in updates:
+                    await self._refresh_embedding_for_path(target)
             return jsonify({"success": True})
         except Exception as e:
             logger.error(f"更新图片失败: {e}", exc_info=True)
@@ -1356,6 +1470,30 @@ class PluginAPI:
             logger.error(f"批量移动失败: {e}", exc_info=True)
             return jsonify({"success": False, "error": str(e)})
 
+    async def handle_batch_character(self):
+        try:
+            data = await request.get_json() or {}
+            hashes = set(data.get("hashes", []))
+            character = self._normalize_character_key(str(data.get("character", "") or ""))
+            if not hashes:
+                return jsonify({"success": False, "error": "缺少 hashes"})
+            if character and character not in set(self._cfg.get_characters()):
+                return jsonify({"success": False, "error": f"角色无效: {character}"})
+            updated = 0
+            index = self._build_full_index_snapshot()
+            for path, meta in index.items():
+                if not isinstance(meta, dict) or meta.get("hash") not in hashes:
+                    continue
+                if str(meta.get("character", "") or "") == character:
+                    continue
+                if await self._update_index_path(path, {"character": character}):
+                    await self._refresh_embedding_for_path(path)
+                    updated += 1
+            return jsonify({"success": True, "count": updated})
+        except Exception as e:
+            logger.error(f"批量分配角色失败: {e}", exc_info=True)
+            return jsonify({"success": False, "error": str(e)})
+
     async def handle_batch_scope(self):
         try:
             data = await request.get_json() or {}
@@ -1426,11 +1564,13 @@ class PluginAPI:
                         )
                 category = str(data.get("category", "")).strip()
                 auto_analyze = str(data.get("auto_analyze", "false")).lower() == "true"
+                character = self._normalize_character_key(str(data.get("character", "") or ""))
             else:
                 files = await request.files
                 form = await request.form
                 category = form.get("category", "").strip()
                 auto_analyze = form.get("auto_analyze", "false").lower() == "true"
+                character = self._normalize_character_key(str(form.get("character", "") or ""))
                 for field_name in files:
                     f = files[field_name]
                     ext = Path(f.filename or "upload.png").suffix.lower()
@@ -1469,7 +1609,7 @@ class PluginAPI:
                 "updated_at": now,
             }
             asyncio.create_task(
-                self._process_batch(task_id, files_data, category, auto_analyze, fallback)
+                self._process_batch(task_id, files_data, category, auto_analyze, fallback, character)
             )
             return jsonify({"success": True, "task_id": task_id, "total": len(files_data)})
         except Exception as e:
@@ -1477,7 +1617,7 @@ class PluginAPI:
             return jsonify({"success": False, "error": str(e)})
 
     async def _process_batch(
-        self, task_id: str, files_data: list[dict], category: str, auto_analyze: bool, fallback: str
+        self, task_id: str, files_data: list[dict], category: str, auto_analyze: bool, fallback: str, character: str = ""
     ) -> None:
         try:
             task = self.batch_upload_tasks.get(task_id)
@@ -1487,6 +1627,7 @@ class PluginAPI:
                 tmp: Path | None = None
                 try:
                     tags, desc, scenes = [], "", []
+                    overlay_text, emotions = "", []
                     final_cat = category or fallback
                     if auto_analyze:
                         try:
@@ -1496,17 +1637,20 @@ class PluginAPI:
                             await asyncio.to_thread(lambda: tmp.write_bytes(fd["content"]))
                             proc = self.plugin.image_processor_service
                             if proc:
-                                rc, rt, rd, _, rs = await proc.classify_image(
+                                classified = await proc.classify_image(
                                     event=None,
                                     file_path=str(tmp),
                                     categories=list(self._cfg.categories or []),
                                     content_filtration=False,
                                 )
+                                rc, rt, rd, _, rs, overlay_text, emotions = classified
                                 if rc and rc != getattr(proc, "CATEGORY_FILTERED", None):
                                     final_cat = rc
                                     tags = rt or []
                                     desc = rd or ""
                                     scenes = rs or []
+                                    overlay_text = overlay_text or ""
+                                    emotions = emotions or []
                         except Exception as e:
                             logger.warning(f"自动分析失败: {e}")
                         finally:
@@ -1521,6 +1665,9 @@ class PluginAPI:
                         tags=tags,
                         desc=desc,
                         scenes=scenes,
+                        overlay_text=overlay_text,
+                        emotions=emotions,
+                        character=character,
                     )
                     task["results"].append(
                         {"hash": img["hash"], "category": img["category"], "success": True}
@@ -1736,7 +1883,7 @@ class PluginAPI:
             if not file_path:
                 return jsonify({"success": False, "error": "缺少 hash 或 base64 图片数据"})
 
-            cat, tags, desc, _, scenes = await proc.classify_image(
+            cat, tags, desc, _, scenes, overlay_text, emotions = await proc.classify_image(
                 event=None,
                 file_path=file_path,
                 categories=list(self._cfg.categories or []),
@@ -1754,6 +1901,8 @@ class PluginAPI:
                     "tags": tags,
                     "description": desc,
                     "scenes": scenes or [],
+                    "overlay_text": overlay_text or "",
+                    "emotions": emotions or [],
                 }
             )
         except Exception as e:
@@ -1881,6 +2030,86 @@ class PluginAPI:
             )
         except Exception as e:
             logger.error(f"删除分类失败: {e}", exc_info=True)
+            return jsonify({"success": False, "error": str(e)})
+
+    async def handle_characters(self):
+        if request.method == "POST":
+            return await self._characters_update()
+        return await self._characters_list()
+
+    async def _characters_list(self):
+        try:
+            counts = self._db.get_character_counts() if self._db and hasattr(self._db, "get_character_counts") else {}
+            return jsonify(
+                {
+                    "success": True,
+                    "characters": self._build_characters_list(counts),
+                    "unassigned": int(counts.get("", 0) or 0),
+                }
+            )
+        except Exception as e:
+            logger.error(f"获取角色列表失败: {e}")
+            return jsonify({"success": False, "error": str(e)})
+
+    async def _characters_update(self):
+        try:
+            data = await request.get_json() or {}
+            items = data.get("characters", [])
+            if not isinstance(items, list):
+                return jsonify({"success": False, "error": "角色列表无效"})
+            keys: list[str] = []
+            info: dict[str, dict] = {}
+            seen: set[str] = set()
+            for item in items:
+                if isinstance(item, dict) and item.get("key"):
+                    key = self._normalize_character_key(str(item.get("key") or ""))
+                    if not key or key in seen:
+                        continue
+                    seen.add(key)
+                    keys.append(key)
+                    name = str(item.get("name", "") or "").strip()
+                    desc = str(item.get("desc", "") or "").strip()
+                    info[key] = {"name": name or key, "desc": desc}
+                elif isinstance(item, str):
+                    key = self._normalize_character_key(item)
+                    if not key or key in seen:
+                        continue
+                    seen.add(key)
+                    keys.append(key)
+            self._cfg.characters = keys
+            self._cfg.character_info = info
+            self._cfg.save_characters()
+            self._cfg.save_character_info()
+            counts = self._db.get_character_counts() if self._db and hasattr(self._db, "get_character_counts") else {}
+            return jsonify(
+                {
+                    "success": True,
+                    "characters": self._build_characters_list(counts),
+                }
+            )
+        except Exception as e:
+            logger.error(f"更新角色列表失败: {e}", exc_info=True)
+            return jsonify({"success": False, "error": str(e)})
+
+    async def handle_delete_character(self):
+        try:
+            data = await request.get_json() or {}
+            key = self._normalize_character_key(str(data.get("key") or ""))
+            if not key:
+                return jsonify({"success": False, "error": "缺少 key"})
+            updated = [item for item in self._cfg.get_characters() if item != key]
+            info = dict(self._cfg.character_info or {})
+            info.pop(key, None)
+            if self._db and hasattr(self._db, "clear_character"):
+                self._db.clear_character(key)
+            self._cfg.characters = updated
+            self._cfg.character_info = info
+            self._cfg.save_characters()
+            self._cfg.save_character_info()
+            self._invalidate_bm25()
+            return jsonify({"success": True, "deleted": key, "characters": updated})
+        except Exception as e:
+            logger.error(f"删除角色失败: {e}", exc_info=True)
             return jsonify({"success": False, "error": str(e)})
 
     async def handle_get_emotions(self):
