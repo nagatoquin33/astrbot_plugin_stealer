@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.7] - 2026-08-28
+
+### fixed
+- 情绪分析提示词渲染不再使用 `str.format` 把输出示例里的 `{"query": ...}` 误当成占位符，修复 `提示词模板缺少占位符 '"query"'` / `LLM调用失败` 报错
+
 ## [2.8.6] - 2026-08-27
 
 ### added

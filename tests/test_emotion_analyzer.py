@@ -77,6 +77,35 @@ class TestTemplateLoading:
         assert "troll 仅" not in text
         assert "无法判断" not in text
 
+    def test_default_template_renders_without_key_error(self):
+        analyzer = _build_analyzer()
+        prompt = analyzer._render_emotion_analysis_template(
+            _EMOTION_ANALYSIS_DEFAULT_TEMPLATE,
+            emotion_list="happy, sigh",
+            llm_reply="又被安排加班了",
+            user_message="今天好累",
+        )
+        assert '{"query": "摸鱼 下班 辛苦了"' in prompt
+        assert "{emotion_list}" not in prompt
+        assert "{llm_reply}" not in prompt
+        assert "{user_message}" not in prompt
+
+    def test_legacy_unescaped_prompt_renders_without_key_error(self):
+        # 旧版本 _conf_schema.json 默认值里的输出示例带有未转义 JSON 花括号，
+        # 使用 .format() 会把 {query} 当成占位符导致 KeyError。
+        cfg = PluginConfig(
+            {"emotion_analysis_prompt": _EMOTION_ANALYSIS_DEFAULT_TEMPLATE}
+        )
+        analyzer = _build_analyzer(cfg)
+        prompt = analyzer._render_emotion_analysis_template(
+            analyzer._emotion_analysis_template,
+            emotion_list="happy, sigh",
+            llm_reply="又被安排加班了",
+            user_message="今天好累",
+        )
+        assert '{"query": "摸鱼 下班 辛苦了"' in prompt
+        assert "又被安排加班了" in prompt
+
     def test_custom_template_is_loaded_and_stripped(self):
         cfg = PluginConfig(
             {"emotion_analysis_prompt": "  {emotion_list} | {llm_reply} | {user_message}  "}
@@ -247,6 +276,18 @@ class TestAnalyzeEmotion(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result)
         self.assertFalse(analyzer.last_analysis_abstained)
         self.assertEqual(analyzer.stats["total_analyses"], 1)
+
+    async def test_legacy_unescaped_default_prompt_llm_path(self):
+        cfg = PluginConfig(
+            {"emotion_analysis_prompt": _EMOTION_ANALYSIS_DEFAULT_TEMPLATE}
+        )
+        analyzer = _build_analyzer(cfg)
+        result = await analyzer._analyze_with_llm(
+            _dummy_event(), "reply text here", user_message="msg"
+        )
+        self.assertIsInstance(result, EmotionQuery)
+        call = analyzer.plugin.context.llm_generate.await_args
+        self.assertIn('{"query": "摸鱼 下班 辛苦了"', call.kwargs["prompt"])
 
 
 class TestSmartEmotionMatcher(unittest.IsolatedAsyncioTestCase):

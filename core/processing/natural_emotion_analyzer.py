@@ -274,6 +274,30 @@ class NaturalEmotionAnalyzer:
 
         return None
 
+    @staticmethod
+    def _render_emotion_analysis_template(
+        template: str,
+        *,
+        emotion_list: str,
+        llm_reply: str,
+        user_message: str,
+    ) -> str:
+        """仅替换受支持的占位符，保留 JSON 花括号和未知占位符原样输出。"""
+        mapping = {
+            "emotion_list": emotion_list,
+            "llm_reply": llm_reply,
+            "user_message": user_message,
+        }
+
+        # 先保护 Python format 风格的转义花括号，避免替换到 {{placeholder}}。
+        template = template.replace("{{", "\x00").replace("}}", "\x01")
+
+        def _replace(match: re.Match[str]) -> str:
+            return mapping.get(match.group(1), match.group(0))
+
+        prompt = re.sub(r"\{([A-Za-z_][A-Za-z0-9_]*)\}", _replace, template)
+        return prompt.replace("\x00", "{").replace("\x01", "}")
+
     async def _analyze_with_llm(
         self,
         event: AstrMessageEvent,
@@ -291,21 +315,12 @@ class NaturalEmotionAnalyzer:
 
             # 构建提示词：用分类列表替换 {emotion_list}，再填入具体文本
             emotion_list = self._build_emotion_list_text()
-            try:
-                prompt = self._emotion_analysis_template.format(
-                    emotion_list=emotion_list,
-                    llm_reply=llm_reply,
-                    user_message=user_message if user_message else "",
-                )
-            except KeyError as e:
-                logger.warning(
-                    f"[情绪分析] 提示词模板缺少占位符 {e}，使用默认模板"
-                )
-                prompt = _EMOTION_ANALYSIS_DEFAULT_TEMPLATE.format(
-                    emotion_list=emotion_list,
-                    llm_reply=llm_reply,
-                    user_message=user_message if user_message else "",
-                )
+            prompt = self._render_emotion_analysis_template(
+                self._emotion_analysis_template,
+                emotion_list=emotion_list,
+                llm_reply=llm_reply,
+                user_message=user_message if user_message else "",
+            )
 
             # 调用LLM（限制 max_tokens 提升速度）
             logger.debug(f"[情绪分析] 调用LLM，provider_id={provider_id}")
