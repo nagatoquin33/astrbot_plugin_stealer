@@ -42,17 +42,17 @@
     "hint": "开启后使用 VLM 审核图片内容，过滤不当图片。开启后会增加单张图片的处理时间。"
   },
   "qqofficial_steal_mode": {
-    "description": "QQ_Official：表情收录模式",
+    "description": "表情收录模式（QQ_Official）",
     "type": "string",
     "default": "cdn_only",
     "options": [
-      "cdn_only",
       "all_images",
+      "cdn_only",
       "gif_only"
     ],
     "labels": [
-      "仅收录表情 CDN 特征",
       "所有图片按表情收录",
+      "仅收录表情 CDN 特征",
       "仅收录 GIF 格式"
     ],
     "hint": "QQ_Official 平台的大表情/表情包是普通图片附件，无 OneBot 的 sub_type 标记。默认仅收录带表情 CDN 特征的图片（如商城表情）；可选全部收录，或仅收录 GIF。"
