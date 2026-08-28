@@ -41,6 +41,23 @@
     "default": false,
     "hint": "开启后使用 VLM 审核图片内容，过滤不当图片。开启后会增加单张图片的处理时间。"
   },
+  "steal_pool_capacity": {
+    "description": "待审核池容量上限",
+    "type": "int",
+    "default": 200,
+    "slider": {
+      "min": 10,
+      "max": 2000,
+      "step": 10
+    },
+    "hint": "自动偷取的图片先进「待审核池」。达到此数量后暂停自动偷取，待人工在 WebUI 审核区处理（通过入库或删除）腾出空间后自动恢复。调整后即时生效，无需重启。"
+  },
+  "audit_required": {
+    "description": "自动偷取需人工审核",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后自动偷取的图片进入「待审核池」，需在 WebUI 审核区人工通过后才正式入库。关闭后跳过审核，自动偷取的图片直接入库分类，请配合内容审核开关使用以避免低质量图片污染图库。"
+  },
   "qqofficial_steal_mode": {
     "description": "表情收录模式（QQ_Official）",
     "type": "string",
@@ -138,6 +155,18 @@
     "hint": "用于图片分类。留空则自动使用 AstrBot 全局配置的图片描述模型（default_image_caption_provider_id）。",
     "_special": "select_provider"
   },
+  "enable_embedding_search": {
+    "description": "启用嵌入向量检索",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后用远程文本嵌入按语义召回（图上文字 + 使用场景 + 描述）。关闭则只用关键词（BM25）。不使用本地 CLIP。未配置嵌入模型时自动降级为 BM25。"
+  },
+  "embedding_provider_id": {
+    "description": "嵌入模型 ID",
+    "type": "string",
+    "default": "",
+    "hint": "用于生成表情包语义向量的嵌入模型。留空则自动使用 AstrBot 首个可用的 Embedding Provider。在 AstrBot 管理后台 → LLM 配置中可查看已配置的 Embedding 模型 ID（通常以 _embedding 结尾，如 openai_embedding、qwen_embedding 等）。此字段填写的是 Embedding 模型 ID，不是聊天模型或视觉模型 ID。"
+  },
   "_group_section": {
     "description": "=== 群聊过滤 ===",
     "type": "text",
@@ -194,40 +223,6 @@
       "黑名单优先"
     ],
     "hint": "白名单优先：白名单命中时允许，否则再查黑名单。黑名单优先：黑名单命中时拒绝，否则再查白名单。"
-  },
-  "_pool_section": {
-    "description": "=== 待审核池 & 嵌入检索 ===",
-    "type": "text",
-    "invisible": true
-  },
-  "steal_pool_capacity": {
-    "description": "待审核池容量上限",
-    "type": "int",
-    "default": 200,
-    "slider": {
-      "min": 10,
-      "max": 2000,
-      "step": 10
-    },
-    "hint": "自动偷取的图片先进「待审核池」。达到此数量后暂停自动偷取，待人工在 WebUI 审核区处理（通过入库或删除）腾出空间后自动恢复。调整后即时生效，无需重启。"
-  },
-  "audit_required": {
-    "description": "自动偷取需人工审核",
-    "type": "bool",
-    "default": true,
-    "hint": "开启后自动偷取的图片进入「待审核池」，需在 WebUI 审核区人工通过后才正式入库。关闭后跳过审核，自动偷取的图片直接入库分类，请配合内容审核开关使用以避免低质量图片污染图库。"
-  },
-  "enable_embedding_search": {
-    "description": "启用嵌入向量检索",
-    "type": "bool",
-    "default": true,
-    "hint": "开启后用远程文本嵌入按语义召回（图上文字 + 使用场景 + 描述）。关闭则只用关键词（BM25）。不使用本地 CLIP。未配置嵌入模型时自动降级为 BM25。"
-  },
-  "embedding_provider_id": {
-    "description": "嵌入模型 ID",
-    "type": "string",
-    "default": "",
-    "hint": "用于生成表情包语义向量的嵌入模型。留空则自动使用 AstrBot 首个可用的 Embedding Provider。在 AstrBot 管理后台 → LLM 配置中可查看已配置的 Embedding 模型 ID（通常以 _embedding 结尾，如 openai_embedding、qwen_embedding 等）。此字段填写的是 Embedding 模型 ID，不是聊天模型或视觉模型 ID。"
   },
   "_storage_section": {
     "description": "=== 存储及进阶管理 ===",
