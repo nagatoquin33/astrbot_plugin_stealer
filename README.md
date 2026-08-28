@@ -128,6 +128,7 @@
 | **偷图模式** | `probability` | `probability` 概率模式 / `cooldown` 冷却模式 |
 | **偷图概率** | `0.3` | 概率模式下每次收到图片尝试偷取的概率 |
 | **内容审核** | `false` | 开启后会过滤不当图片，可能增加处理时间 |
+| **表情收录模式（QQ_Official）** | `cdn_only` | QQ_Official（QQ 官方机器人平台）的消息中，大表情/表情包是普通图片附件、无 OneBot 的 sub_type 标记。`cdn_only` 仅收录带表情 CDN 特征的图片（如商城表情）；`all_images` 所有图片附件按表情收录；`gif_only` 仅收录 GIF 格式 |
 
 ### 发送设置
 
