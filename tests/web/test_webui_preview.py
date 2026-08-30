@@ -106,6 +106,15 @@ def test_fallout_theme_avoids_fullpage_compositing():
     assert "loadDashboardPrefs" in (DASHBOARD_DIR / "app.js").read_text(encoding="utf-8")
 
 
+def test_server_theme_overrides_local_storage_after_prefs_load():
+    """服务端可用时由其统一解析配置默认值，localStorage 仅作失败兜底。"""
+    app_js = (DASHBOARD_DIR / "app.js").read_text(encoding="utf-8")
+    prefs_block = app_js[app_js.index("const loadDashboardPrefs"):]
+    assert "!readStored(THEME_STORAGE_KEY)" not in prefs_block
+    assert "requestRevision === themePreferenceRevision" in prefs_block
+    assert "setThemeMode(resolveThemeValue(data.theme), false)" in prefs_block
+
+
 @pytest.mark.asyncio
 async def test_prefs_persist_theme_and_view():
     state = PreviewState(seed=False)

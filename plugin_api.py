@@ -31,6 +31,7 @@ class PluginAPI:
     ALLOWED_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
     BATCH_TASK_TTL_SECONDS = 30 * 60
     DASHBOARD_PREFS_KEY = "dashboard_prefs"
+    THEME_CONFIG_SNAPSHOT_KEY = "theme_config_default"
     VALID_THEMES = frozenset({"auto", "dark", "light", "minecraft", "fallout"})
     _THEME_ALIASES = {"midnight": "dark", "sakura": "light"}
 
@@ -859,7 +860,7 @@ class PluginAPI:
             return await value
         return value
 
-    async def _load_dashboard_prefs(self) -> dict[str, str]:
+    async def _read_dashboard_prefs(self) -> dict[str, str]:
         stored: Any = None
         getter = getattr(self.plugin, "get_kv_data", None)
         if callable(getter):
@@ -872,13 +873,49 @@ class PluginAPI:
             stored = getattr(self.plugin, "_dashboard_prefs", {}) or {}
         if not isinstance(stored, dict):
             stored = {}
-        theme = stored.get("theme") or self._config_default_theme()
+        return dict(stored)
+
+    def _resolve_dashboard_prefs(
+        self,
+        stored: dict[str, str],
+        config_theme: str | None = None,
+    ) -> dict[str, str]:
+        config_theme = config_theme or self._config_default_theme()
+        theme = stored.get("theme") or config_theme
         return {
             "theme": self._normalize_theme(theme),
             "view": self._normalize_view(stored.get("view")),
         }
 
+    def _discard_stale_theme_override(
+        self,
+        stored: dict[str, str],
+        config_theme: str,
+    ) -> bool:
+        """配置默认主题变化后，丢弃基于旧默认值保存的页面覆盖。"""
+        has_override = bool(stored.get("theme"))
+        snapshot = stored.get(self.THEME_CONFIG_SNAPSHOT_KEY)
+        snapshot_theme = self._normalize_theme(snapshot) if snapshot else None
+        if has_override and snapshot_theme == config_theme:
+            return False
+        changed = False
+        for key in ("theme", self.THEME_CONFIG_SNAPSHOT_KEY):
+            if key in stored:
+                stored.pop(key, None)
+                changed = True
+        return changed
+
+    async def _load_dashboard_prefs(self) -> dict[str, str]:
+        stored = await self._read_dashboard_prefs()
+        config_theme = self._config_default_theme()
+        if self._discard_stale_theme_override(stored, config_theme):
+            # 旧版本只保存 theme，没有配置快照。首次读取时迁移掉这个永久覆盖；
+            # view 等其他偏好继续保留。
+            await self._save_dashboard_prefs(stored)
+        return self._resolve_dashboard_prefs(stored, config_theme)
+
     async def _save_dashboard_prefs(self, prefs: dict[str, str]) -> None:
+        prefs = dict(prefs)
         setattr(self.plugin, "_dashboard_prefs", prefs)
         setter = getattr(self.plugin, "put_kv_data", None)
         if not callable(setter):
@@ -888,8 +925,27 @@ class PluginAPI:
         except Exception as e:
             logger.warning(f"保存 WebUI 偏好失败: {e}")
 
+    async def _update_dashboard_prefs(self, payload: dict[str, Any]) -> dict[str, str]:
+        stored = await self._read_dashboard_prefs()
+        config_theme = self._config_default_theme()
+        self._discard_stale_theme_override(stored, config_theme)
+
+        if "theme" in payload:
+            raw_theme = payload.get("theme")
+            mapped_theme = self._THEME_ALIASES.get(
+                str(raw_theme or "").strip(), str(raw_theme or "").strip()
+            )
+            if mapped_theme in self.VALID_THEMES:
+                stored["theme"] = mapped_theme
+                stored[self.THEME_CONFIG_SNAPSHOT_KEY] = config_theme
+        if "view" in payload:
+            stored["view"] = self._normalize_view(payload.get("view"))
+
+        await self._save_dashboard_prefs(stored)
+        return self._resolve_dashboard_prefs(stored, config_theme)
+
     async def handle_prefs(self):
-        """WebUI 主题 / 视图偏好：KV 持久化，配置项作初次默认。"""
+        """WebUI 主题 / 视图偏好：KV 持久化，配置变更会淘汰旧主题覆盖。"""
         if request.method == "GET":
             prefs = await self._load_dashboard_prefs()
             return jsonify({"success": True, **prefs})
@@ -901,12 +957,7 @@ class PluginAPI:
             payload = {}
         if not isinstance(payload, dict):
             payload = {}
-        current = await self._load_dashboard_prefs()
-        if "theme" in payload:
-            current["theme"] = self._normalize_theme(payload.get("theme"))
-        if "view" in payload:
-            current["view"] = self._normalize_view(payload.get("view"))
-        await self._save_dashboard_prefs(current)
+        current = await self._update_dashboard_prefs(payload)
         return jsonify({"success": True, **current})
 
     # ── Pending (待审核池) ────────────────────────────────────

@@ -187,6 +187,8 @@ All settings can be modified in the AstrBot admin panel.
 
 The management page is served through the AstrBot Dashboard plugin page system. Click "Emoji Manager" in the plugin detail panel to access it. No additional port or password configuration is needed.
 
+Since v2.8.8, theme choices made in the WebUI are persisted. When `webui_theme` is changed in the plugin configuration, the previous page-level choice is invalidated automatically and the new configured default takes effect without clearing browser storage.
+
 ## 🔄 Emotion Analysis Modes
 
 | | LLM mode (recommended) | Passive retrieval |

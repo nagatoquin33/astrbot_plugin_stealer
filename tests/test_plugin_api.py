@@ -67,8 +67,45 @@ class TestBuildCategoriesList:
 
 class TestDashboardPrefs:
     @pytest.mark.asyncio
-    async def test_config_used_when_kv_empty_then_kv_wins(self):
+    async def test_page_override_persists_until_config_theme_changes(self):
         store: dict = {}
+
+        async def get_kv(key, default=None):
+            return store.get(key, default)
+
+        async def put_kv(key, value):
+            store[key] = value
+
+        config = types.SimpleNamespace(webui_theme="minecraft")
+        plugin = types.SimpleNamespace(
+            plugin_config=config,
+            get_kv_data=get_kv,
+            put_kv_data=put_kv,
+        )
+        api = PluginAPI(plugin)
+        loaded = await api._load_dashboard_prefs()
+        assert loaded["theme"] == "minecraft"
+        assert loaded["view"] == "grid"
+
+        updated = await api._update_dashboard_prefs({"theme": "fallout", "view": "list"})
+        assert updated == {"theme": "fallout", "view": "list"}
+        loaded = await api._load_dashboard_prefs()
+        assert loaded == updated
+        assert store[api.DASHBOARD_PREFS_KEY]["theme"] == "fallout"
+        assert (
+            store[api.DASHBOARD_PREFS_KEY][api.THEME_CONFIG_SNAPSHOT_KEY]
+            == "minecraft"
+        )
+
+        config.webui_theme = "dark"
+        loaded = await api._load_dashboard_prefs()
+        assert loaded == {"theme": "dark", "view": "list"}
+        assert "theme" not in store[api.DASHBOARD_PREFS_KEY]
+        assert api.THEME_CONFIG_SNAPSHOT_KEY not in store[api.DASHBOARD_PREFS_KEY]
+
+    @pytest.mark.asyncio
+    async def test_legacy_theme_without_config_snapshot_is_migrated(self):
+        store = {"dashboard_prefs": {"theme": "auto", "view": "list"}}
 
         async def get_kv(key, default=None):
             return store.get(key, default)
@@ -82,14 +119,31 @@ class TestDashboardPrefs:
             put_kv_data=put_kv,
         )
         api = PluginAPI(plugin)
-        loaded = await api._load_dashboard_prefs()
-        assert loaded["theme"] == "minecraft"
-        assert loaded["view"] == "grid"
 
-        await api._save_dashboard_prefs({"theme": "fallout", "view": "list"})
         loaded = await api._load_dashboard_prefs()
-        assert loaded == {"theme": "fallout", "view": "list"}
-        assert store[api.DASHBOARD_PREFS_KEY]["theme"] == "fallout"
+        assert loaded == {"theme": "minecraft", "view": "list"}
+        assert store[api.DASHBOARD_PREFS_KEY] == {"view": "list"}
+
+    @pytest.mark.asyncio
+    async def test_invalid_theme_update_keeps_valid_override(self):
+        store: dict = {}
+
+        async def get_kv(key, default=None):
+            return store.get(key, default)
+
+        async def put_kv(key, value):
+            store[key] = value
+
+        plugin = types.SimpleNamespace(
+            plugin_config=types.SimpleNamespace(webui_theme="light"),
+            get_kv_data=get_kv,
+            put_kv_data=put_kv,
+        )
+        api = PluginAPI(plugin)
+        await api._update_dashboard_prefs({"theme": "fallout"})
+
+        updated = await api._update_dashboard_prefs({"theme": "not-a-theme"})
+        assert updated["theme"] == "fallout"
 
     def test_normalize_theme_aliases_and_unknown(self):
         api = _build_api([])

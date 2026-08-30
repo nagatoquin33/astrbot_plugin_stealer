@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.8] - 2026-08-30
+
+### added
+- PR #103：支持在 QQ Official（QQ 官方机器人平台）按 CDN 特征、全部图片或 GIF 模式收录表情，并补充平台声明、配置项与回归测试
+
+### fixed
+- WebUI 成功读取服务端偏好后不再被浏览器旧 `localStorage` 覆盖；页面主题偏好会记录配置默认值快照，配置项 `webui_theme` 再次变更后，下次打开或刷新管理页时自动清理旧覆盖并采用新默认主题
+
 ## [2.8.7] - 2026-08-28
 
 ### fixed

@@ -377,8 +377,10 @@ createApp({
                 await bridge.apiPost('prefs', patch);
             } catch (e) { /* 无后端时仍走 localStorage */ }
         };
+        let themePreferenceRevision = 0;
         const setThemeMode = (mode, persist = true) => {
             if (!THEME_OPTIONS.some((o) => o.value === mode)) return;
+            if (persist) themePreferenceRevision += 1;
             themeMode.value = mode;
             writeStored(THEME_STORAGE_KEY, mode);
             applyTheme();
@@ -394,13 +396,14 @@ createApp({
             if (persist) persistPrefs({ view: viewMode.value });
         };
         const loadDashboardPrefs = async () => {
+            const requestRevision = themePreferenceRevision;
             try {
                 const data = await bridge.apiGet('prefs');
                 if (!data || data.success === false) return;
                 const hasQueryTheme = Boolean(new URLSearchParams(location.search).get('theme'));
-                // 本地已记住主题时不覆盖（刷新保持上次选择）；
-                // 仅首次（localStorage 为空）才用后端配置/KV 的值。
-                if (!hasQueryTheme && data.theme && !readStored(THEME_STORAGE_KEY)) {
+                // 服务端统一处理“页面偏好 / 配置默认”的优先级；localStorage 只负责
+                // 首屏和 API 不可用时兜底。请求期间用户刚点选的主题不得被旧响应覆盖。
+                if (!hasQueryTheme && data.theme && requestRevision === themePreferenceRevision) {
                     setThemeMode(resolveThemeValue(data.theme), false);
                 }
                 if (data.view === 'list' || data.view === 'grid') {
