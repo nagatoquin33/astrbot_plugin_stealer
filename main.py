@@ -1,7 +1,6 @@
 import asyncio
 import json
 import os
-import re
 import time
 from pathlib import Path
 from typing import Any
@@ -26,13 +25,14 @@ from .core.search.meme_selector import MemeSelector
 from .core.events.event_handler import EventHandler
 from .core.events.meme_sender_engine import MemeSenderEngine
 from .core.db.index_manager import IndexManager
+from .core.events.event_context import unwrap_event
 from .core.processing.natural_emotion_analyzer import SmartEmotionMatcher
 from .core.processing.image_processor_service import ImageProcessorService
 from .core.maintenance.service import MaintenanceService
+from .core.util.normalization import canonicalize_path, normalize_label_list
 from .core.util.safe_io import safe_remove_file
 from .task_scheduler import TaskScheduler
 from .plugin_api import PluginAPI
-from .core.search.meme_smart_select_service import _unwrap_event
 
 try:
     import aiofiles  # type: ignore
@@ -51,6 +51,8 @@ class Main(Star):
 
     # 常量定义
     BACKEND_TAG = "emoji_stealer"
+    SEARCH_MEME_TOOL_NAME = "search_meme"
+    SEND_MEME_TOOL_NAME = "send_meme"
 
     # 时间间隔常量（单位：秒）
     RAW_CLEANUP_INTERVAL_SECONDS = 30 * 60  # 30分钟
@@ -65,9 +67,6 @@ class Main(Star):
 
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
         super().__init__(context)
-
-        # 情绪选择标记（用于识别注入的内容）
-        self._persona_marker = "<!-- STEALER_PLUGIN_EMOTION_MARKER_v3 -->"  # 更新版本号
 
         # 初始化插件配置
         self.plugin_config = PluginConfig(config, context)
@@ -411,11 +410,6 @@ class Main(Star):
 
     # ===== 门面委托：MemeSenderEngine =====
     _emoji_turn_state = lambda self, event: self._emoji_sender_engine.emoji_turn_state(event)  # noqa: E731
-    _send_explicit_emojis = (  # noqa: E731
-        lambda self, event, paths, text: self._emoji_sender_engine.send_explicit_emojis(
-            event, paths, text
-        )
-    )
     _get_auto_emoji_session_key = (  # noqa: E731
         lambda self, event: self._emoji_sender_engine.get_auto_emoji_session_key(event)
     )
@@ -458,13 +452,6 @@ class Main(Star):
         text,
         emotions,
         **kw: self._emoji_sender_engine.async_analyze_and_send_emoji(event, text, emotions, **kw)
-    )
-    _validate_result = lambda self, result: self._emoji_sender_engine.validate_result(result)  # noqa: E731
-    _update_result_with_cleaned_text_safe = (  # noqa: E731
-        lambda self,
-        event,
-        result,
-        text: self._emoji_sender_engine.update_result_with_cleaned_text_safe(event, result, text)
     )
 
     @filter.command_group("meme")
@@ -613,7 +600,7 @@ class Main(Star):
         async for result in self.command_handler.rebuild_index(event):
             yield result
 
-    async def _search_emoji_candidates(
+    async def _search_meme_candidates(
         self,
         event: AstrMessageEvent,
         query: str,
@@ -635,26 +622,26 @@ class Main(Star):
         """找到与查询词最相似的多个分类，委托给 MemeSelector。"""
         return self.meme_selector.find_similar_categories(query, top_n)
 
-    @filter.llm_tool(name="search_meme")
-    async def search_emoji(self, event: AstrMessageEvent, query: str):
-        """按当前语气、图上文字、角色名或画面描述搜索表情包。
+    @filter.llm_tool(name=SEARCH_MEME_TOOL_NAME)
+    async def search_meme(self, event: AstrMessageEvent, query: str):
+        """从插件索引中搜索表情包候选；不要直接浏览表情库目录或发送本地文件。
 
         Args:
-            query(string): 检索句。优先写图上可能出现的字、角色名或画面，不要只写英文分类名。
+            query(string): 2-8 个检索关键词。优先写图上文字、角色名、画面或语气，例如“猫猫 震惊 怎么会这样”。
 
         使用建议：
-        - 用图上文字、角色名、画面关键词来搜
-        - 若无结果，换更具体的原文或角色名再搜
+        - 这是从表情库选图的唯一入口；不要使用文件、终端或通用消息工具绕过它
+        - 若候选不合适，换图上原文、角色名或更具体的画面词再次调用本工具
 
         返回值：
         返回候选表情包列表，每个包含：
-        - 编号：用于调用 send_emoji_by_id
+        - 编号：用于调用 send_meme
         - 分类：浏览分区，仅供参考
         - 角色 / 图上文字 / 描述：选图时优先看这些
 
-        请根据候选的图上文字、角色和描述选择最贴合的一张，不要只看分类名。
+        根据候选的图上文字、角色和描述选择最贴合的一张，然后调用 send_meme；不要猜测或传递文件路径。
         """
-        event = _unwrap_event(event)
+        event = unwrap_event(event)
         query = str(query or "").strip()
         logger.info(f"[Tool] LLM 搜索表情包: {query}")
 
@@ -677,7 +664,7 @@ class Main(Star):
                 idx = self.db_service.get_index_cache_readonly()
 
             # smart_search 已内置关键词映射和模糊匹配（阈值0.4）
-            results = await self._search_emoji_candidates(
+            results = await self._search_meme_candidates(
                 event, query, limit=self.MAX_SEARCH_RESULTS, idx=idx
             )
 
@@ -704,7 +691,7 @@ class Main(Star):
                     if not raw_scenes:
                         raw_scenes = meta.get("scene", None) if isinstance(meta, dict) else None
 
-                    scenes_items = PluginAPI._split_scenes(raw_scenes)
+                    scenes_items = normalize_label_list(raw_scenes)
                     scenes_str = ", ".join(scenes_items)
                     overlay_text = str(meta.get("overlay_text", "") or "") if isinstance(meta, dict) else ""
                     character_key = str(meta.get("character", "") or "") if isinstance(meta, dict) else ""
@@ -758,7 +745,8 @@ class Main(Star):
 
             turn_state.set_candidates(candidates)
             result_lines.append(
-                "\n\n请先确定你当前最能代表自己的心情词，再根据候选描述选择最合适的表情包，最后调用 send_emoji_by_id(编号) 发送。"
+                f"\n\n下一步请从候选中选择一项，并调用 {self.SEND_MEME_TOOL_NAME}(emoji_id=编号) 发送。"
+                "候选不合适时请换关键词再次搜索；不要用文件、终端或通用消息工具直接发送表情库文件。"
             )
 
             result_text = "\n".join(result_lines)
@@ -769,17 +757,17 @@ class Main(Star):
             logger.error(f"[Tool] 搜索表情包失败: {e}", exc_info=True)
             yield f"搜索出错：{e}"
 
-    @filter.llm_tool(name="send_meme")
-    async def send_emoji_by_id(self, event: AstrMessageEvent, emoji_id: int):
-        """发送你选择的表情包。必须先调用 search_emoji 获取候选列表。
+    @filter.llm_tool(name=SEND_MEME_TOOL_NAME)
+    async def send_meme(self, event: AstrMessageEvent, emoji_id: int):
+        """发送 search_meme 返回的候选表情包；不要猜测或直接传递文件路径。
 
         选择原则：优先发送能代表你"当前心情词"的候选项。
 
         Args:
-            emoji_id(number): 表情包编号（从 search_emoji 返回的列表中选择）
+            emoji_id(number): 表情包编号（从 search_meme 返回的候选列表中选择）
 
         """
-        event = _unwrap_event(event)
+        event = unwrap_event(event)
         logger.info(f"[Tool] LLM 选择发送表情包编号: {emoji_id}")
         turn_state = self._emoji_turn_state(event)
 
@@ -789,7 +777,7 @@ class Main(Star):
                 return
 
             if emoji_id is None:
-                yield "发送失败：reason=missing_id。缺少 emoji_id 参数。请先调用 search_emoji，再传入候选编号。"
+                yield f"发送失败：reason=missing_id。缺少 emoji_id 参数。请先调用 {self.SEARCH_MEME_TOOL_NAME}，再传入候选编号。"
                 return
 
             try:
@@ -800,7 +788,7 @@ class Main(Star):
 
             candidates = turn_state.get_candidates()
             if not candidates:
-                yield "发送失败：reason=candidate_expired。没有可用候选列表。请先调用 search_emoji 重新搜索。"
+                yield f"发送失败：reason=candidate_expired。没有可用候选列表。请先调用 {self.SEARCH_MEME_TOOL_NAME} 重新搜索。"
                 return
 
             if emoji_id < 1 or emoji_id > len(candidates):
@@ -863,7 +851,7 @@ class Main(Star):
         Args:
             image_ref(string): 图片 URL 或文件路径，从当前消息已有的 Image URL 中选择。
         """
-        event = _unwrap_event(event)
+        event = unwrap_event(event)
         try:
             if not self.plugin_config.steal_meme:
                 yield "偷取失败：表情包偷取功能未开启，请先在插件配置中启用"
@@ -1076,9 +1064,7 @@ class Main(Star):
             if os.path.isabs(image_ref):
                 for attr in ("file", "path"):
                     value = str(getattr(comp, attr, "") or "").strip()
-                    if value and os.path.normcase(os.path.normpath(value)) == os.path.normcase(
-                        os.path.normpath(image_ref)
-                    ):
+                    if value and canonicalize_path(value) == canonicalize_path(image_ref):
                         return value
 
             # c. 调用组件自身方法把图片落到本地，返回真实可读路径
@@ -1094,9 +1080,9 @@ class Main(Star):
                 path_basename = path_norm.rsplit("/", 1)[-1].split("?")[0]
                 if ref_basename and path_basename == ref_basename:
                     return path
-                if os.path.isabs(image_ref) and os.path.normcase(
-                    os.path.normpath(path)
-                ) == os.path.normcase(os.path.normpath(image_ref)):
+                if os.path.isabs(image_ref) and canonicalize_path(path) == canonicalize_path(
+                    image_ref
+                ):
                     return path
 
         return ""
@@ -1164,16 +1150,6 @@ class Main(Star):
                 await safe_remove_file(file_path)
             return False, idx if idx is not None else {}
 
-    async def _extract_emotions_from_text(
-        self, event: AstrMessageEvent | None, text: str
-    ) -> tuple[list[str], str]:
-        """从文本中提取情绪关键词。"""
-        try:
-            return await self.meme_selector.extract_emotions_from_text(event, text)
-        except Exception as e:
-            logger.error(f"提取文本情绪失败: {e}")
-            return [], text
-
     @filter.event_message_type(EventMessageType.ALL)
     @filter.platform_adapter_type(PlatformAdapterType.ALL)
     async def on_message(self, event: AstrMessageEvent):
@@ -1193,68 +1169,70 @@ class Main(Star):
         except Exception as e:
             logger.error(f"[Stealer] 处理消息时发生错误: {e}", exc_info=True)
 
-    @filter.on_llm_request()
-    async def _inject_emotion_instruction(self, event: AstrMessageEvent, req):
-        """兼容旧钩子：被动模式不再向回复注入 &&emotion&& 标签。"""
-        return
+    @filter.on_llm_tool_respond()
+    async def _track_external_image_delivery(
+        self,
+        event: AstrMessageEvent,
+        tool,
+        tool_args: dict | None,
+        tool_result,
+    ) -> None:
+        """记录 LLM 通过 AstrBot 通用消息工具发送的图片，避免同轮再被动发表情。"""
+        if str(getattr(tool, "name", "") or "") != "send_message_to_user":
+            return
+        if not getattr(event, "_has_send_oper", False):
+            return
+        result_contents = getattr(tool_result, "content", None)
+        if not isinstance(result_contents, list) or not any(
+            "Message sent to session" in str(getattr(item, "text", "") or "")
+            for item in result_contents
+        ):
+            return
+        messages = tool_args.get("messages") if isinstance(tool_args, dict) else None
+        if not isinstance(messages, list):
+            return
+        sent_image = any(
+            isinstance(item, dict)
+            and str(item.get("type", "") or "").strip().lower() == "image"
+            for item in messages
+        )
+        if not sent_image:
+            return
+        self._emoji_turn_state(event).mark_active_sent()
+        logger.debug("[Stealer] LLM 已通过通用消息工具发送图片，跳过本轮被动表情")
 
     @filter.on_decorating_result(priority=100)
     async def _prepare_emoji_response(self, event: AstrMessageEvent):
-        """清理情绪标签并异步发送表情包（不阻塞回复）。"""
+        """LLM 回复完成后异步发送表情包（不阻塞回复）。"""
         result = event.get_result()
         if result is None:
             return False
         if not result.is_llm_result():
             return False
+        if any(isinstance(comp, MessageImage) for comp in getattr(result, "chain", [])):
+            return False
         turn_state = self._emoji_turn_state(event)
         if turn_state.is_active_sent():
-            text = result.get_plain_text() or ""
-            if text.strip():
-                _, cleaned_text = await self._extract_emotions_from_text(event, text)
-                if cleaned_text != text:
-                    self._update_result_with_cleaned_text_safe(event, result, cleaned_text)
             return False
         text = result.get_plain_text() or ""
         if not text.strip():
             return False
-        explicit_emojis = []
-        text_without_explicit = re.sub(
-            r"\[ast_emoji:(.*?)\]", lambda m: explicit_emojis.append(m.group(1)) or "", text
-        )
-
-        emotions = []
-        cleaned_text = text_without_explicit
-        if not self.plugin_config.enable_natural_emotion_analysis:
-            emotions, cleaned_text = await self._extract_emotions_from_text(event, text_without_explicit)
-            if cleaned_text != text:
-                self._update_result_with_cleaned_text_safe(event, result, cleaned_text)
 
         turn_allowed = await self._resolve_auto_emoji_turn_permission(event)
-        if explicit_emojis:
-            if not turn_allowed:
-                return cleaned_text != text
-            if not self._claim_auto_emoji_turn(event):
-                return cleaned_text != text
-            sent = await self._send_explicit_emojis(event, explicit_emojis, cleaned_text)
-            if sent:
-                await self._mark_auto_emoji_sent(event)
-                turn_state.mark_active_sent()
-                return True
-            return cleaned_text != text
         if not turn_allowed:
-            return cleaned_text != text
-        if self._should_skip_auto_emoji_by_gate(text_without_explicit):
-            return cleaned_text != text
+            return False
+        if self._should_skip_auto_emoji_by_gate(text):
+            return False
 
         if not self._claim_auto_emoji_turn(event):
-            return cleaned_text != text
+            return False
         user_message = ""
         try:
             user_message = event.get_message_str() or ""
         except Exception:
             pass
         task = self._safe_create_task(
-            self._async_analyze_and_send_emoji(event, cleaned_text, emotions, user_message=user_message),
+            self._async_analyze_and_send_emoji(event, text, [], user_message=user_message),
             name="emoji_analyze_passive",
         )
         self._schedule_auto_emoji_task(event, task)

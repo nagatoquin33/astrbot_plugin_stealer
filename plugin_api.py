@@ -20,6 +20,13 @@ except ImportError:
 
 from astrbot.api import logger
 
+from .core.util.blacklist import add_blacklist_hash
+from .core.util.normalization import (
+    canonicalize_path,
+    normalize_character_key,
+    normalize_label_list,
+    normalize_scope_mode,
+)
 from .core.util.safe_io import safe_remove_file
 
 PLUGIN_NAME = "astrbot_plugin_stealer"
@@ -31,9 +38,7 @@ class PluginAPI:
     ALLOWED_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
     BATCH_TASK_TTL_SECONDS = 30 * 60
     DASHBOARD_PREFS_KEY = "dashboard_prefs"
-    THEME_CONFIG_SNAPSHOT_KEY = "theme_config_default"
     VALID_THEMES = frozenset({"auto", "dark", "light", "minecraft", "fallout"})
-    _THEME_ALIASES = {"midnight": "dark", "sakura": "light"}
 
     def __init__(self, plugin: Any) -> None:
         self.plugin = plugin
@@ -139,20 +144,7 @@ class PluginAPI:
             logger.debug(f"[BM25] 失效索引失败: {e}")
 
     async def _add_blacklist_hash(self, image_hash: str) -> bool:
-        if not image_hash:
-            return False
-        try:
-            db = self._db
-            if db and hasattr(db, "add_blacklist"):
-                await db.add_blacklist(image_hash, int(time.time()))
-                return True
-            await self._cache.set(
-                "blacklist_cache", image_hash, int(time.time()), persist=True
-            )
-            return True
-        except Exception as e:
-            logger.error(f"写入黑名单失败: {e}", exc_info=True)
-            return False
+        return await add_blacklist_hash(self.plugin, image_hash)
 
     async def _delete_index_paths(self, paths: list[str]) -> None:
         """通过 db_service 删除索引条目。"""
@@ -218,7 +210,7 @@ class PluginAPI:
 
     @staticmethod
     def _normalize_character_key(value: str) -> str:
-        return str(value or "").strip().lower()
+        return normalize_character_key(value)
 
     def _build_characters_list(self, counts: dict[str, int] | None = None) -> list[dict]:
         counts = counts or {}
@@ -280,36 +272,16 @@ class PluginAPI:
         return f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
 
     @staticmethod
-    def _split_csv(tags_raw: str) -> list[str]:
-        return [t.strip() for t in str(tags_raw).split(",") if t.strip()]
+    def _split_csv(values: Any) -> list[str]:
+        return normalize_label_list(values, allow_duplicates=True, csv_only=True)
 
     @staticmethod
     def _split_scenes(scene_raw: Any) -> list[str]:
-        if scene_raw is None:
-            return []
-        if isinstance(scene_raw, list):
-            raw_items = scene_raw
-        else:
-            raw_items = (
-                str(scene_raw).replace("、", ",").replace("，", ",").replace("；", ",").split(",")
-            )
-        seen: set[str] = set()
-        result: list[str] = []
-        for item in raw_items:
-            text = str(item).strip()
-            if text and text not in seen:
-                seen.add(text)
-                result.append(text)
-        return result
+        return normalize_label_list(scene_raw)
 
     @staticmethod
     def _norm_scope(scope_mode: object) -> str:
-        raw = str(scope_mode or "").strip().lower()
-        if raw in {"public", "global", "all"}:
-            return "public"
-        if raw in {"local", "private", "scoped"}:
-            return "local"
-        return "public"
+        return normalize_scope_mode(scope_mode) or "public"
 
     def _is_allowed_ext(self, ext: str) -> bool:
         return str(ext or "").lower() in self.ALLOWED_IMAGE_EXTS
@@ -354,10 +326,7 @@ class PluginAPI:
         避免存储路径与磁盘遍历路径的大小写/分隔符差异，导致有效表情被
         误判为过期索引或孤儿文件，进而错删索引或清空自定义类别。
         """
-        try:
-            return os.path.normcase(os.path.normpath(str(path)))
-        except Exception:
-            return os.path.normcase(str(path))
+        return canonicalize_path(path)
 
     @staticmethod
     def _file_stat(path: Path) -> dict[str, Any]:
@@ -449,22 +418,10 @@ class PluginAPI:
 
     def _parse_upload_metadata(self, data: dict[str, Any]) -> dict[str, Any]:
         category = str(data.get("category", data.get("emotion", "")) or "").strip()
-        tags_raw = data.get("tags", [])
-        if isinstance(tags_raw, str):
-            tags = self._split_csv(tags_raw)
-        elif isinstance(tags_raw, list):
-            tags = [str(tag).strip() for tag in tags_raw if str(tag).strip()]
-        else:
-            tags = []
+        tags = self._split_csv(data.get("tags", []))
         scenes = self._split_scenes(data.get("scenes", data.get("scene")))
         overlay_text = str(data.get("overlay_text", "") or "").strip()
-        emotions_raw = data.get("emotions", [])
-        if isinstance(emotions_raw, str):
-            emotions = self._split_csv(emotions_raw)
-        elif isinstance(emotions_raw, list):
-            emotions = [str(item).strip() for item in emotions_raw if str(item).strip()]
-        else:
-            emotions = []
+        emotions = self._split_csv(data.get("emotions", []))
         scope_mode = self._norm_scope(data.get("scope_mode"))
         origin_target = str(data.get("origin_target", "") or "").strip()
         return {
@@ -835,8 +792,8 @@ class PluginAPI:
         return jsonify({"success": True, "status": "ok", "service": "emoji-manager-webui"})
 
     def _normalize_theme(self, raw: Any) -> str:
-        mapped = self._THEME_ALIASES.get(str(raw or "").strip(), str(raw or "").strip())
-        return mapped if mapped in self.VALID_THEMES else "auto"
+        value = str(raw or "").strip()
+        return value if value in self.VALID_THEMES else "auto"
 
     @staticmethod
     def _normalize_view(raw: Any) -> str:
@@ -869,8 +826,9 @@ class PluginAPI:
             except Exception as e:
                 logger.debug(f"读取 WebUI 偏好失败: {e}")
                 stored = None
-        if not isinstance(stored, dict):
-            stored = getattr(self.plugin, "_dashboard_prefs", {}) or {}
+        memory_prefs = getattr(self.plugin, "_dashboard_prefs", {}) or {}
+        if not isinstance(stored, dict) or (not stored and isinstance(memory_prefs, dict)):
+            stored = memory_prefs
         if not isinstance(stored, dict):
             stored = {}
         return dict(stored)
@@ -881,38 +839,16 @@ class PluginAPI:
         config_theme: str | None = None,
     ) -> dict[str, str]:
         config_theme = config_theme or self._config_default_theme()
-        theme = stored.get("theme") or config_theme
+        stored_theme = str(stored.get("theme") or "").strip()
+        theme = stored_theme if stored_theme in self.VALID_THEMES else config_theme
         return {
             "theme": self._normalize_theme(theme),
             "view": self._normalize_view(stored.get("view")),
         }
 
-    def _discard_stale_theme_override(
-        self,
-        stored: dict[str, str],
-        config_theme: str,
-    ) -> bool:
-        """配置默认主题变化后，丢弃基于旧默认值保存的页面覆盖。"""
-        has_override = bool(stored.get("theme"))
-        snapshot = stored.get(self.THEME_CONFIG_SNAPSHOT_KEY)
-        snapshot_theme = self._normalize_theme(snapshot) if snapshot else None
-        if has_override and snapshot_theme == config_theme:
-            return False
-        changed = False
-        for key in ("theme", self.THEME_CONFIG_SNAPSHOT_KEY):
-            if key in stored:
-                stored.pop(key, None)
-                changed = True
-        return changed
-
     async def _load_dashboard_prefs(self) -> dict[str, str]:
         stored = await self._read_dashboard_prefs()
-        config_theme = self._config_default_theme()
-        if self._discard_stale_theme_override(stored, config_theme):
-            # 旧版本只保存 theme，没有配置快照。首次读取时迁移掉这个永久覆盖；
-            # view 等其他偏好继续保留。
-            await self._save_dashboard_prefs(stored)
-        return self._resolve_dashboard_prefs(stored, config_theme)
+        return self._resolve_dashboard_prefs(stored)
 
     async def _save_dashboard_prefs(self, prefs: dict[str, str]) -> None:
         prefs = dict(prefs)
@@ -928,16 +864,11 @@ class PluginAPI:
     async def _update_dashboard_prefs(self, payload: dict[str, Any]) -> dict[str, str]:
         stored = await self._read_dashboard_prefs()
         config_theme = self._config_default_theme()
-        self._discard_stale_theme_override(stored, config_theme)
 
         if "theme" in payload:
-            raw_theme = payload.get("theme")
-            mapped_theme = self._THEME_ALIASES.get(
-                str(raw_theme or "").strip(), str(raw_theme or "").strip()
-            )
-            if mapped_theme in self.VALID_THEMES:
-                stored["theme"] = mapped_theme
-                stored[self.THEME_CONFIG_SNAPSHOT_KEY] = config_theme
+            theme = str(payload.get("theme") or "").strip()
+            if theme in self.VALID_THEMES:
+                stored["theme"] = theme
         if "view" in payload:
             stored["view"] = self._normalize_view(payload.get("view"))
 
@@ -1212,11 +1143,10 @@ class PluginAPI:
                     except Exception as e:
                         logger.warning(f"拒绝时删除文件失败 {p}: {e}")
                 if blacklist and h:
-                    try:
-                        await db.add_blacklist(h)
+                    if await add_blacklist_hash(self.plugin, h):
                         blacklisted += 1
-                    except Exception as e:
-                        logger.warning(f"拉黑失败 {h}: {e}")
+                    else:
+                        logger.warning(f"拉黑失败 {h}")
             return jsonify(
                 {"success": True, "deleted": deleted, "blacklisted": blacklisted}
             )
@@ -1374,7 +1304,7 @@ class PluginAPI:
 
             updates: dict[str, Any] = {}
             if new_tags is not None:
-                updates["tags"] = self._split_csv(new_tags) if isinstance(new_tags, str) else new_tags
+                updates["tags"] = self._split_csv(new_tags)
             if new_desc is not None:
                 updates["desc"] = new_desc
             if new_scenes is not None:
@@ -1382,10 +1312,7 @@ class PluginAPI:
             if new_overlay is not None:
                 updates["overlay_text"] = str(new_overlay or "").strip()
             if new_emotions is not None:
-                if isinstance(new_emotions, str):
-                    updates["emotions"] = self._split_csv(new_emotions)
-                elif isinstance(new_emotions, list):
-                    updates["emotions"] = [str(item).strip() for item in new_emotions if str(item).strip()]
+                updates["emotions"] = self._split_csv(new_emotions)
             if new_character is not None:
                 updates["character"] = self._normalize_character_key(str(new_character or ""))
             if new_scope:

@@ -8,6 +8,8 @@ from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent
 from astrbot.api.star import Context, StarTools
 
+from ..util.normalization import normalize_character_key, normalize_label_list
+
 
 class PluginConfig(BaseModel):
     # === 基础功能 ===
@@ -505,7 +507,11 @@ class PluginConfig(BaseModel):
             else []
         )
         info = stored_info if isinstance(stored_info, dict) else {}
-        BaseModel.__setattr__(self, "characters", [str(k).strip() for k in characters if str(k).strip()])
+        BaseModel.__setattr__(
+            self,
+            "characters",
+            normalize_label_list(characters, allow_duplicates=True),
+        )
         BaseModel.__setattr__(self, "character_info", dict(info))
         self.save_characters()
         self.save_character_info()
@@ -518,8 +524,7 @@ class PluginConfig(BaseModel):
 
     @staticmethod
     def normalize_character_key(value: str) -> str:
-        key = str(value or "").strip().lower()
-        return key
+        return normalize_character_key(value)
 
     def get_characters(self) -> list[str]:
         return [key for key in (self.characters or []) if key]

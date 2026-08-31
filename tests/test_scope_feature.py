@@ -6,6 +6,7 @@ import time
 import types
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 def _install_astrbot_stubs() -> None:
@@ -318,6 +319,44 @@ class ScopeFeatureTests(unittest.IsolatedAsyncioTestCase):
         await handler.on_message(event)
 
         self.assertEqual(checks, [])
+
+    async def test_steal_log_is_emitted_after_probability_gate(self):
+        plugin = DummyPlugin()
+        handler = self._create_handler(plugin)
+        image_cls = self._get_shared_image_class()
+        image = image_cls()
+        image.url = "https://example.com/emoji.gif"
+        event = DummyEvent(target="group:123", messages=[image])
+        order = []
+
+        class DummyQueue:
+            async def submit_capture_async(self, _descriptors):
+                order.append("queue")
+
+        handler._background_queue = DummyQueue()
+        handler._check_platform_emoji_metadata = lambda *args, **kwargs: order.append("detect") or True
+        handler._should_process_image = lambda: order.append("probability") or True
+
+        with patch(
+            "core.events.event_handler.logger.info",
+            side_effect=lambda *_args, **_kwargs: order.append("steal_log"),
+        ):
+            await handler.on_message(event)
+
+        self.assertEqual(order, ["detect", "probability", "steal_log", "queue"])
+
+    async def test_steal_log_is_skipped_when_probability_gate_rejects(self):
+        plugin = DummyPlugin()
+        handler = self._create_handler(plugin)
+        image_cls = self._get_shared_image_class()
+        event = DummyEvent(target="group:123", messages=[image_cls()])
+        handler._check_platform_emoji_metadata = lambda *args, **kwargs: True
+        handler._should_process_image = lambda: False
+
+        with patch("core.events.event_handler.logger.info") as info_log:
+            await handler.on_message(event)
+
+        info_log.assert_not_called()
 
     async def test_force_capture_stays_synchronous_with_background_queue(self):
         plugin = DummyPlugin()

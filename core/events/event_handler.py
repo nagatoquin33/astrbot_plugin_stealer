@@ -12,6 +12,7 @@ from astrbot.api.message_components import Image, Plain
 
 from ..util.safe_io import safe_remove_file
 from .background_steal_queue import BackgroundStealQueue
+from .event_context import get_event_session_key
 from .platform_detector import PlatformDetector
 from .image_download_service import ImageDownloadService
 
@@ -362,21 +363,7 @@ class EventHandler:
         Returns:
             str: 唯一键
         """
-        if hasattr(event, "get_session_id"):
-            try:
-                session_id = event.get_session_id()
-                if session_id:
-                    return str(session_id)
-            except Exception:
-                pass
-
-        if hasattr(event, "unified_msg_origin"):
-            try:
-                return str(event.unified_msg_origin)
-            except Exception:
-                pass
-
-        return "global"
+        return get_event_session_key(event)
 
     def _cleanup_expired_capture_windows(self) -> int:
         """清理所有过期的强制捕获窗口。
@@ -595,7 +582,6 @@ class EventHandler:
                     sub_type_value = getattr(img, "subType", "unknown")
                     logger.debug(f"跳过非表情包图片 (subType={sub_type_value})")
                     continue
-                logger.info("检测到表情包，准备偷走它！")
                 extra_meta = None
                 try:
                     seg = raw_image_segments[i] if 0 <= i < len(raw_image_segments) else None
@@ -624,6 +610,11 @@ class EventHandler:
         # 否则紧随其后的真实表情包会被直接跳过。
         if (imgs_to_process or store_urls) and not self._should_process_image():
             return
+
+        # 只有通过概率/冷却判断后，才记录即将执行的自动偷取，避免让检测日志
+        # 造成“每个检测到的表情包都会被偷”的误解。
+        if imgs_to_process or store_urls:
+            logger.info("检测到表情包，准备偷走它！")
 
         if self._background_queue is not None:
             descriptors: list[dict[str, Any]] = []

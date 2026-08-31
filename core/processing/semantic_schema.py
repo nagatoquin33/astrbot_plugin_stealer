@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..util.normalization import normalize_label_list
+
 EMBEDDING_TEXT_VERSION = "v2"
 
 MAX_TAGS = 3
@@ -22,7 +24,7 @@ def as_label_list(value: Any) -> list[str]:
         text = value.strip()
         return [text] if text else []
     if isinstance(value, list):
-        return [str(item).strip() for item in value if item is not None and str(item).strip()]
+        return normalize_label_list(value, allow_duplicates=True)
     return []
 
 

@@ -45,8 +45,8 @@ def _install_stubs() -> str:
             return _decorator(*args, **kwargs)
 
     filter_stub = types.SimpleNamespace(
-        on_llm_request=_decorator,
         on_decorating_result=_decorator,
+        on_llm_tool_respond=_decorator,
         command_group=lambda *args, **kwargs: _CommandGroup(),
         permission_type=_decorator,
         llm_tool=_decorator,
@@ -159,11 +159,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 Main = importlib.import_module(f"{PACKAGE_NAME}.main").Main
 
 
+class DummyPlain:
+    def __init__(self, text: str = ""):
+        self.text = text
+
+
 class DummyResult:
     def __init__(self, text: str):
         self._text = text
-        plain_cls = sys.modules[MemeSenderEngine.__module__].Plain
-        self.chain = [plain_cls(text=text)]
+        self.chain = [DummyPlain(text)]
 
     def is_llm_result(self):
         return True
@@ -205,10 +209,6 @@ class DummyEvent:
         self.sent.append(message)
 
 
-async def _extract_emotions(_event, _text):
-    return ["happy"], "hello"
-
-
 def _build_main(chance: float) -> Main:
     main = Main.__new__(Main)
     main.auto_send_meme = True
@@ -237,11 +237,7 @@ def _build_main(chance: float) -> Main:
     main._auto_emoji_cooldowns = {}
     main._auto_emoji_cooldowns_lock = asyncio.Lock()
     main._auto_emoji_cooldowns_max = 100
-    main._validate_result = lambda result: result is not None
-    main._extract_emotions_from_text = _extract_emotions
-    main._update_result_with_cleaned_text_safe = lambda *args, **kwargs: None
     main._should_skip_auto_emoji_by_gate = lambda text: False
-    main._send_explicit_emojis = _extract_emotions
     main.is_send_enabled_for_event = lambda event: True
     main._emoji_sender_engine = MemeSenderEngine(main)
     return main
@@ -283,24 +279,18 @@ class AutoEmojiFlowTests(unittest.IsolatedAsyncioTestCase):
             event.get_extra("stealer_auto_emoji_turn_reason"), "chance_zero"
         )
 
-    async def test_prepare_emoji_response_cleans_tags_when_probability_misses(self):
+    async def test_prepare_emoji_response_leaves_text_unchanged_when_probability_misses(self):
         main = _build_main(0.0)
-        main._update_result_with_cleaned_text_safe = (
-            main._emoji_sender_engine.update_result_with_cleaned_text_safe
-        )
-        event = DummyEvent("&&happy&& hello")
+        event = DummyEvent("hello")
 
         handled = await main._prepare_emoji_response(event)
 
-        self.assertTrue(handled)
+        self.assertFalse(handled)
         self.assertEqual(event.get_result().get_plain_text(), "hello")
         self.assertFalse(event.get_extra("stealer_auto_emoji_turn_claimed", False))
 
     async def test_prepare_emoji_response_only_claims_once_per_turn(self):
         main = _build_main(1.0)
-        main._update_result_with_cleaned_text_safe = (
-            main._emoji_sender_engine.update_result_with_cleaned_text_safe
-        )
         scheduled = []
 
         def _safe_create_task(coro, name):
@@ -308,7 +298,7 @@ class AutoEmojiFlowTests(unittest.IsolatedAsyncioTestCase):
             coro.close()
 
         main._safe_create_task = _safe_create_task
-        event = DummyEvent("&&happy&& hello")
+        event = DummyEvent("hello")
 
         first = await main._prepare_emoji_response(event)
         second = await main._prepare_emoji_response(event)
@@ -321,7 +311,8 @@ class AutoEmojiFlowTests(unittest.IsolatedAsyncioTestCase):
     async def test_search_tool_bypasses_probability_gate(self):
         main = _build_main(0.0)
         main.categories = ["happy"]
-        main.cache_service = types.SimpleNamespace(
+        main.db_service = types.SimpleNamespace(
+            count_total=lambda: 1,
             get_index_cache_readonly=lambda: {__file__: {"source": "local"}}
         )
 
@@ -329,16 +320,57 @@ class AutoEmojiFlowTests(unittest.IsolatedAsyncioTestCase):
             return [(__file__, "desc", "happy", "tag")]
 
         main._load_index = lambda: None
-        main._search_emoji_candidates = _search_candidates
+        main._search_meme_candidates = _search_candidates
         event = DummyEvent()
 
         results = []
-        async for chunk in main.search_emoji(event, "happy"):
+        async for chunk in main.search_meme(event, "happy"):
             results.append(chunk)
 
         self.assertTrue(results)
         self.assertNotIn("Auto emoji is disabled for this turn.", results)
         self.assertIsNotNone(main._emoji_turn_state(event).get_candidates())
+        result_text = "\n".join(results)
+        self.assertIn("send_meme(emoji_id=", result_text)
+        self.assertNotIn("send_emoji_by_id", result_text)
+
+    async def test_generic_image_tool_send_suppresses_passive_meme(self):
+        main = _build_main(1.0)
+        event = DummyEvent("final reply")
+        event._has_send_oper = True
+        tool = types.SimpleNamespace(name="send_message_to_user")
+        tool_result = types.SimpleNamespace(
+            content=[types.SimpleNamespace(text="Message sent to session session-1")]
+        )
+
+        await main._track_external_image_delivery(
+            event,
+            tool,
+            {"messages": [{"type": "image", "path": "meme.png"}]},
+            tool_result,
+        )
+
+        scheduled = []
+
+        def _safe_create_task(coro, name):
+            scheduled.append(name)
+            coro.close()
+
+        main._safe_create_task = _safe_create_task
+        handled = await main._prepare_emoji_response(event)
+
+        self.assertTrue(main._emoji_turn_state(event).is_active_sent())
+        self.assertFalse(handled)
+        self.assertEqual(scheduled, [])
+
+    def test_tool_documentation_uses_exposed_names(self):
+        search_doc = Main.search_meme.__doc__ or ""
+        send_doc = Main.send_meme.__doc__ or ""
+
+        self.assertIn("send_meme", search_doc)
+        self.assertIn("search_meme", send_doc)
+        self.assertNotIn("send_emoji_by_id", search_doc)
+        self.assertNotIn("search_emoji", send_doc)
 
     async def test_emoji_selector_no_probability_check(self):
         """验证 MemeSelector.try_send_emoji 不再检查概率，由 Main 在调用前完成判定"""

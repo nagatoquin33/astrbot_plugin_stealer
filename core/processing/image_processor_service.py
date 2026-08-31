@@ -11,6 +11,7 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
 from ..util.safe_io import safe_remove_file
+from ..util.normalization import normalize_label_list
 from .semantic_schema import MAX_DESC_CHARS, clip_chars
 
 try:
@@ -906,9 +907,9 @@ class ImageProcessorService:
         if category == "other" or category not in self.categories:
             return False, f"分类 '{category}' 不在可用分类列表中"
 
-        normalized_tags = [str(t).strip() for t in (tags or []) if t and str(t).strip()]
+        normalized_tags = normalize_label_list(tags or [], allow_duplicates=True)
         normalized_desc = str(desc or "").strip()
-        normalized_scenes = [str(s).strip() for s in (scenes or []) if s and str(s).strip()]
+        normalized_scenes = normalize_label_list(scenes or [], allow_duplicates=True)
 
         # 兜底描述：用分类信息中的中文名，而不是干巴巴的"LLM手动入库"
         if not normalized_desc:

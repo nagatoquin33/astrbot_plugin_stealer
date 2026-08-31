@@ -378,11 +378,8 @@ class NaturalEmotionAnalyzer:
         if not text:
             return ""
 
-        # 移除情绪标记
-        cleaned = re.sub(r"&&[^&]*&&", "", text)
-
-        # 移除多余空白
-        cleaned = re.sub(r"\s+", " ", cleaned.strip())
+        # 仅压缩空白；插件已不再注入或解析 &&emotion&& 标签。
+        cleaned = re.sub(r"\s+", " ", text.strip())
 
         # 限制长度（小模型处理能力有限）
         if len(cleaned) > self.TEXT_MAX_LENGTH:

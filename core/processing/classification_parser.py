@@ -7,6 +7,7 @@ import re
 
 from astrbot.api import logger
 
+from ..util.normalization import normalize_label_list as normalize_values
 from .semantic_schema import (
     MAX_DESC_CHARS,
     MAX_EMOTIONS,
@@ -39,29 +40,11 @@ class ClassificationParser:
             max_count: 最多保留数量（超出截断）
             allow_duplicates: 是否允许重复（默认去重）
         """
-        if isinstance(values, str):
-            items = [
-                s.strip()
-                for s in values.replace("，", ",").replace("、", ",").replace("；", ",").split(",")
-                if s.strip()
-            ]
-        elif isinstance(values, list):
-            items = [str(v).strip() for v in values if v is not None and str(v).strip()]
-        else:
-            return []
-
-        result: list[str] = []
-        seen: set[str] = set()
-        for item in items:
-            if not item:
-                continue
-            if not allow_duplicates and item in seen:
-                continue
-            seen.add(item)
-            result.append(item)
-            if len(result) >= max_count:
-                break
-        return result
+        return normalize_values(
+            values,
+            max_count,
+            allow_duplicates=allow_duplicates,
+        )
 
     def sanitize_scenes(self, values: Any, overlay_text: str = "") -> list[str]:
         """scenes 保留适用对话句，最多 40 字；优先放入图上文字。"""
@@ -226,25 +209,17 @@ class ClassificationParser:
         parts = [p.strip() for p in response.strip().split("|")]
         emotion_result = parts[0] if parts else ""
         tags_str = parts[1] if len(parts) > 1 else ""
-        tags_result = [
-            t.strip()
-            for t in tags_str.replace("，", ",").replace("、", ",").split(",")
-            if t.strip()
-        ]
+        tags_result = self.normalize_label_list(tags_str, MAX_TAGS)
         desc_result = clip_chars(parts[2] if len(parts) > 2 else "表情包", MAX_DESC_CHARS)
         scenes_str = parts[3] if len(parts) > 3 else ""
-        scenes_result = [
-            s.strip()
-            for s in scenes_str.replace("，", ",").replace("、", ",").replace("；", ",").split(",")
-            if s.strip()
-        ]
+        scenes_result = normalize_values(scenes_str)
         overlay_text = clip_chars(parts[4] if len(parts) > 4 else "", MAX_OVERLAY_CHARS)
 
         category = self._normalize_category(emotion_result, fallback_other=True)
         emotions = [category] if category and category != self.CATEGORY_FILTERED else []
         return (
             category,
-            self.normalize_label_list(tags_result, MAX_TAGS),
+            tags_result,
             desc_result,
             category,
             self.sanitize_scenes(scenes_result, overlay_text),

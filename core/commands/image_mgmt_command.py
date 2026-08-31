@@ -1,12 +1,13 @@
 """表情包管理命令：负责表情包的 list、delete、blacklist、scope 操作。"""
 
-import time
 from pathlib import Path
 from typing import Any
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
+from ..util.blacklist import add_blacklist_hash
+from ..util.normalization import normalize_scope_mode
 from ..util.safe_io import safe_remove_file
 
 
@@ -17,21 +18,7 @@ class ImageManagementCommand:
         self.plugin = plugin_instance
 
     async def _add_blacklist_hash(self, image_hash: str) -> bool:
-        if not image_hash:
-            return False
-        try:
-            db = getattr(self.plugin, "db_service", None)
-            if db is not None and hasattr(db, "add_blacklist"):
-                await db.add_blacklist(image_hash, int(time.time()))
-                return True
-            if getattr(self.plugin, "cache_service", None):
-                await self.plugin.cache_service.set(
-                    "blacklist_cache", image_hash, int(time.time()), persist=True
-                )
-                return True
-        except Exception as e:
-            logger.error(f"写入黑名单失败: {e}", exc_info=True)
-        return False
+        return await add_blacklist_hash(self.plugin, image_hash)
 
     async def list_images(
         self,
@@ -376,12 +363,8 @@ class ImageManagementCommand:
             )
             return
 
-        normalized_mode = str(scope_mode or "").strip().lower()
-        if normalized_mode in {"public", "global", "all"}:
-            normalized_mode = "public"
-        elif normalized_mode in {"local", "private", "scoped"}:
-            normalized_mode = "local"
-        else:
+        normalized_mode = normalize_scope_mode(scope_mode, default=None)
+        if normalized_mode is None:
             yield event.plain_result("作用域无效，请使用 public 或 local")
             return
 

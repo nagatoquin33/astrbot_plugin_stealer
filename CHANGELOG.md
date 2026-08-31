@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.9] - 2026-08-31
+
+### changed
+- 移除旧的情绪标签注入、标签清理和相关兼容钩子；被动发送直接使用 LLM 回复内容进行检索
+- 提取事件解包、路径/标签规范化、黑名单和媒体发送等跨模块重复逻辑，统一插件内部实现
+- LLM 表情工具统一使用 `search_meme` → `send_meme`；搜索自然短句时自动展开情绪别名参与分类召回
+
+### fixed
+- 被动表情的 info 日志移动到概率、冷却和意图门控通过之后，避免造成“检测到就会偷取”的误解
+- LLM 通过通用图片发送工具绕过插件工具时，同轮不会再次触发被动表情发送
+- WebUI 主题跟随宿主参数不再覆盖页面已保存的主题选择，刷新后可稳定恢复主题状态
+
 ## [2.8.8] - 2026-08-30
 
 ### added

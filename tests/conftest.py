@@ -78,8 +78,8 @@ def _install_compatible_stubs() -> None:
             return _decorator(*args, **kwargs)
 
     filter_stub = types.SimpleNamespace(
-        on_llm_request=_decorator,
         on_decorating_result=_decorator,
+        on_llm_tool_respond=_decorator,
         command_group=lambda *args, **kwargs: _CommandGroup(),
         permission_type=_decorator,
         llm_tool=_decorator,

@@ -1,10 +1,10 @@
 """表情包选择策略：负责最近使用记录管理和候选分类获取。"""
 
-import os
 from typing import Any
 
 from astrbot.api import logger
 
+from ..util.normalization import canonicalize_path
 from .text_similarity import calculate_hybrid_similarity
 
 
@@ -19,10 +19,6 @@ class MemeSelectionStrategy:
         self.selector = selector
         self._recent_usage: dict[str, list[str]] = {}  # category -> [canon_path, ...]
 
-    def _canon_path(self, path: str) -> str:
-        """规范化路径用于比较去重（仅大小写规范化，不转换斜杠）。"""
-        return os.path.normcase(str(path or "")).replace("\\", "/")
-
     def _get_recent_usage(self, category: str) -> list[str]:
         return list(self._recent_usage.get(category, []))
 
@@ -30,9 +26,9 @@ class MemeSelectionStrategy:
         self._recent_usage[category] = recent_usage
 
     def _update_recent_usage(self, category: str, path: str) -> None:
-        canon_path = self._canon_path(path)
+        canon_path = canonicalize_path(path)
         recent_usage = [
-            p for p in self._get_recent_usage(category) if self._canon_path(p) != canon_path
+            p for p in self._get_recent_usage(category) if canonicalize_path(p) != canon_path
         ]
         recent_usage.append(path)
         if len(recent_usage) > self.MAX_RECENT_USAGE:
@@ -41,9 +37,9 @@ class MemeSelectionStrategy:
         logger.debug(f"[去重] 更新历史: 分类={category}, 路径={path}, 新历史={recent_usage}")
 
     def _calculate_recent_penalty(self, category: str, path: str) -> float:
-        canon_path = self._canon_path(path)
+        canon_path = canonicalize_path(path)
         recent_usage = self._get_recent_usage(category)
-        recent_paths_canon = [self._canon_path(p) for p in recent_usage]
+        recent_paths_canon = [canonicalize_path(p) for p in recent_usage]
         if not recent_usage or canon_path not in recent_paths_canon:
             return 0.0
 

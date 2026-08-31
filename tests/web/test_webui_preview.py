@@ -106,13 +106,16 @@ def test_fallout_theme_avoids_fullpage_compositing():
     assert "loadDashboardPrefs" in (DASHBOARD_DIR / "app.js").read_text(encoding="utf-8")
 
 
-def test_server_theme_overrides_local_storage_after_prefs_load():
-    """服务端可用时由其统一解析配置默认值，localStorage 仅作失败兜底。"""
+def test_server_theme_overrides_host_query_after_prefs_load():
+    """AstrBot 必带的 ?theme=dark/light 只代表宿主状态，不能覆盖页面偏好。"""
     app_js = (DASHBOARD_DIR / "app.js").read_text(encoding="utf-8")
     prefs_block = app_js[app_js.index("const loadDashboardPrefs"):]
     assert "!readStored(THEME_STORAGE_KEY)" not in prefs_block
+    assert "hasQueryTheme" not in prefs_block
     assert "requestRevision === themePreferenceRevision" in prefs_block
     assert "setThemeMode(resolveThemeValue(data.theme), false)" in prefs_block
+    assert "hostThemeFromQuery" in app_js
+    assert "themeMode = ref(resolveThemeValue(readStored" in app_js
 
 
 @pytest.mark.asyncio

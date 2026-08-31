@@ -1,56 +1,15 @@
 """表情包发送决策引擎：负责 LLM 响应拦截、自动发送决策和表情包发送。"""
 
 import asyncio
-import os
 import random
 import re
 from typing import Any
 
-from astrbot.api.message_components import Image
-
 from astrbot.api import logger
-from astrbot.api.event import AstrMessageEvent, MessageChain
-from astrbot.api.message_components import Plain
+from astrbot.api.event import AstrMessageEvent
 
 from ..processing.natural_emotion_analyzer import EmotionQuery
-
-
-async def _send_qq_image_as_sticker(
-    event: AstrMessageEvent,
-    file_path: str,
-    summary: str = "[动画表情]",
-    plugin: Any = None,
-) -> bool:
-    """在 QQ (aiocqhttp) 平台发送表情包时修改 summary 外显。"""
-    try:
-        from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import (
-            AiocqhttpMessageEvent,
-        )
-    except ImportError:
-        return False
-    if not isinstance(event, AiocqhttpMessageEvent):
-        return False
-    if not file_path or not os.path.exists(file_path):
-        return False
-    # 尝试以 QQ 贴纸格式发送（平台专属优化）。
-    # 注意：_parse_onebot_json / event.bot / message_obj 为 SDK 内部 API，
-    # 若未来版本变更此处可能失败；已包裹 try/except，
-    # 失败时自动回退到调用方 send_emoji_message 的标准 event.send() 路径。
-    try:
-        file_source: str = file_path
-        if plugin and getattr(plugin, "send_meme_as_gif", False):
-            image_processor = getattr(plugin, "image_processor_service", None)
-            if image_processor:
-                b64 = await image_processor._file_to_gif_base64(file_path)
-                if b64:
-                    file_source = f"base64://{b64}"
-        chain = MessageChain(chain=[Image(file=file_source)])
-        obmsg = await event._parse_onebot_json(chain)
-        obmsg[0]["data"]["summary"] = summary
-        await event.bot.send(event.message_obj.raw_message, obmsg)
-        return True
-    except Exception:
-        return False
+from .event_context import get_event_session_key
 
 
 class _MemeTurnState:
@@ -122,7 +81,7 @@ class _MemeTurnState:
 
 
 class MemeSenderEngine:
-    """负责表情包自动发送决策、情绪注入和响应处理。"""
+    """负责表情包自动发送决策和响应处理。"""
 
     AUTO_EMOJI_COOLDOWN_SECONDS = 20  # 同一会话自动发表情的最短间隔
 
@@ -148,18 +107,7 @@ class MemeSenderEngine:
 
     def get_auto_emoji_session_key(self, event: AstrMessageEvent) -> str:
         """获取自动表情会话键。"""
-        session_id = ""
-        if hasattr(event, "get_session_id"):
-            try:
-                session_id = str(event.get_session_id())
-            except Exception:
-                pass
-        if not session_id and hasattr(event, "unified_msg_origin"):
-            try:
-                session_id = str(event.unified_msg_origin)
-            except Exception:
-                pass
-        return session_id or "global"
+        return get_event_session_key(event)
 
     def reset_turn_state(self, event: AstrMessageEvent) -> None:
         """重置表情包回合状态及事件 extras，为新的一轮对话做准备。"""
@@ -343,23 +291,6 @@ class MemeSenderEngine:
             logger.warning(f"[MemeSenderEngine] 尝试发送表情包失败: {e}")
             return False
 
-    async def send_explicit_emojis(
-        self, event: AstrMessageEvent, emoji_paths: list[str], cleaned_text: str
-    ) -> bool:
-        """发送指定的表情包。"""
-        if not emoji_paths:
-            return False
-
-        sent = False
-        for path in emoji_paths:
-            try:
-                if not await _send_qq_image_as_sticker(event, path, plugin=self.plugin):
-                    await event.send(Image(file=path))
-                sent = True
-            except Exception as e:
-                logger.warning(f"[MemeSenderEngine] 发送表情包失败: {e}")
-        return sent
-
     def get_meme_send_delay(self, text: str = "", task_start: float = 0.0) -> float:
         """获取表情包发送延迟（秒）。"""
         char_delay = getattr(self.plugin, "meme_send_char_delay", 0.0)
@@ -444,25 +375,3 @@ class MemeSenderEngine:
             raise
         except Exception as e:
             logger.warning(f"[MemeSenderEngine] 异步分析发送表情包失败: {e}")
-
-    # --- 结果处理 ---
-
-    def validate_result(self, result) -> bool:
-        """验证结果是否有效。"""
-        if result is None:
-            return False
-        return True
-
-    def update_result_with_cleaned_text_safe(
-        self, event: AstrMessageEvent, result, cleaned_text: str
-    ):
-        """安全地更新结果中的清理后文本。"""
-        try:
-            if not hasattr(result, "chain"):
-                return
-            for comp in result.chain:
-                if isinstance(comp, Plain):
-                    comp.text = cleaned_text
-                    break
-        except Exception as e:
-            logger.debug(f"[MemeSenderEngine] 更新结果文本失败: {e}")

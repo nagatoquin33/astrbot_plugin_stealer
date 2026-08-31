@@ -351,31 +351,35 @@ createApp({
             { value: 'minecraft', key: 'minecraft', fallback: 'Minecraft', swatch: '#2a1c10,#5d9c3d', group: 'game' },
             { value: 'fallout', key: 'fallout', fallback: 'Fallout 4', swatch: '#021408,#1bff80', group: 'game' },
         ];
-        const LEGACY_THEMES = { midnight: 'dark', sakura: 'light' };
         const originalThemeOptions = computed(() => THEME_OPTIONS.filter((o) => o.group !== 'game'));
         const gameThemeOptions = computed(() => THEME_OPTIONS.filter((o) => o.group === 'game'));
         const resolveThemeValue = (raw) => {
-            const mapped = LEGACY_THEMES[raw] || raw;
-            return THEME_OPTIONS.some((o) => o.value === mapped) ? mapped : 'auto';
+            return THEME_OPTIONS.some((o) => o.value === raw) ? raw : 'auto';
         };
-        const themeMode = ref((() => {
+        const hostThemeFromQuery = (() => {
             try {
                 const q = new URLSearchParams(location.search).get('theme');
-                if (q) return resolveThemeValue(q);
+                return q === 'light' || q === 'dark' ? q : null;
             } catch (e) { /* ignore */ }
-            return resolveThemeValue(readStored(THEME_STORAGE_KEY) || 'auto');
-        })());
-        const contextIsDark = ref(true);
+            return null;
+        })();
+        // AstrBot 会始终附加 ?theme=dark/light。它只代表宿主当前明暗状态，
+        // 不能当作用户选择，否则每次重开页面都会压过已保存主题。
+        const themeMode = ref(resolveThemeValue(readStored(THEME_STORAGE_KEY) || 'auto'));
+        const contextIsDark = ref(hostThemeFromQuery !== 'light');
         const effectiveTheme = computed(() => (
             themeMode.value !== 'auto' ? themeMode.value : (contextIsDark.value ? 'dark' : 'light')
         ));
         const applyTheme = () => {
             document.documentElement.setAttribute('data-theme', effectiveTheme.value);
         };
-        const persistPrefs = async (patch) => {
-            try {
-                await bridge.apiPost('prefs', patch);
-            } catch (e) { /* 无后端时仍走 localStorage */ }
+        let preferenceWriteQueue = Promise.resolve();
+        const persistPrefs = (patch) => {
+            preferenceWriteQueue = preferenceWriteQueue
+                .catch(() => undefined)
+                .then(() => bridge.apiPost('prefs', patch))
+                .catch(() => undefined); // 无后端时仍走 localStorage
+            return preferenceWriteQueue;
         };
         let themePreferenceRevision = 0;
         const setThemeMode = (mode, persist = true) => {
@@ -400,10 +404,9 @@ createApp({
             try {
                 const data = await bridge.apiGet('prefs');
                 if (!data || data.success === false) return;
-                const hasQueryTheme = Boolean(new URLSearchParams(location.search).get('theme'));
                 // 服务端统一处理“页面偏好 / 配置默认”的优先级；localStorage 只负责
                 // 首屏和 API 不可用时兜底。请求期间用户刚点选的主题不得被旧响应覆盖。
-                if (!hasQueryTheme && data.theme && requestRevision === themePreferenceRevision) {
+                if (data.theme && requestRevision === themePreferenceRevision) {
                     setThemeMode(resolveThemeValue(data.theme), false);
                 }
                 if (data.view === 'list' || data.view === 'grid') {
@@ -2118,7 +2121,9 @@ createApp({
 
         const syncThemeFromContext = (context = null) => {
             const nextContext = context || bridge?.getContext?.() || {};
-            contextIsDark.value = nextContext?.isDark === undefined ? true : Boolean(nextContext.isDark);
+            if (typeof nextContext?.isDark === 'boolean') {
+                contextIsDark.value = nextContext.isDark;
+            }
             applyTheme();
             localeVersion.value += 1;
             updateDocumentMeta();

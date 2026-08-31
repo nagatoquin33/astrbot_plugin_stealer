@@ -18,6 +18,8 @@ from typing import Any
 
 from astrbot.api import logger
 
+from ..util.normalization import normalize_label_list, normalize_scope_mode
+
 
 class DatabaseService:
     """SQLite 数据库服务，管理表情包索引存储。"""
@@ -411,26 +413,26 @@ class DatabaseService:
                 return None
             if text.startswith("["):
                 return text
-            items = [part.strip() for part in text.split(",") if part.strip()]
+            items = normalize_label_list(text, allow_duplicates=True, csv_only=True)
             return json.dumps(items, ensure_ascii=False) if items else None
         if isinstance(value, list):
-            items = [str(item).strip() for item in value if str(item).strip()]
+            items = normalize_label_list(value, allow_duplicates=True)
             return json.dumps(items, ensure_ascii=False) if items else None
         return None
 
     @staticmethod
     def _load_emotions_json(value: Any) -> list[str]:
         if isinstance(value, list):
-            return [str(item).strip() for item in value if str(item).strip()]
+            return normalize_label_list(value, allow_duplicates=True)
         text = str(value or "").strip()
         if not text:
             return []
         try:
             parsed = json.loads(text)
         except (json.JSONDecodeError, TypeError):
-            return [part.strip() for part in text.split(",") if part.strip()]
+            return normalize_label_list(text, allow_duplicates=True, csv_only=True)
         if isinstance(parsed, list):
-            return [str(item).strip() for item in parsed if str(item).strip()]
+            return normalize_label_list(parsed, allow_duplicates=True)
         return []
 
     def _emotions_json_from_meta(self, meta: dict[str, Any]) -> str | None:
@@ -549,7 +551,7 @@ class DatabaseService:
     @staticmethod
     def _normalize_multi_value(values: Any) -> list[str]:
         if isinstance(values, list):
-            return [str(v).strip() for v in values if str(v).strip()]
+            return normalize_label_list(values, allow_duplicates=True)
         if values is None:
             return []
         text = str(values).strip()
@@ -1720,8 +1722,7 @@ class DatabaseService:
 
         # scope_mode 兜底
         if "scope_mode" in clean_fields:
-            sm = str(clean_fields["scope_mode"] or "").strip().lower()
-            clean_fields["scope_mode"] = sm if sm in ("public", "local") else "public"
+            clean_fields["scope_mode"] = normalize_scope_mode(clean_fields["scope_mode"])
 
         # category 不能为空
         if "category" in clean_fields:

@@ -5,6 +5,8 @@ from typing import Any
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
+from .event_context import get_event_platform_name, normalize_event_value
+
 # QQ 官方商城表情 CDN 特征（用于 qq_official 平台的表情判定）
 _QQ_EMOJI_URL_MARKERS = (
     "vip.qq.com/club/item/parcel",
@@ -21,33 +23,11 @@ class PlatformDetector:
     @staticmethod
     def _normalize_str(value: object) -> str:
         """规范化字符串值。"""
-        if value is None:
-            return ""
-        try:
-            s = str(value)
-        except Exception:
-            return ""
-        s = s.strip()
-        if s.startswith("`") and s.endswith("`") and len(s) >= 2:
-            s = s[1:-1].strip()
-        return s
+        return normalize_event_value(value)
 
     def get_platform_name(self, event: AstrMessageEvent | None = None) -> str:
         """获取事件平台名（小写），失败时返回空字符串。"""
-        if event is None:
-            return ""
-
-        for getter in ("get_platform_name", "get_platform_id"):
-            fn = getattr(event, getter, None)
-            if callable(fn):
-                try:
-                    name = self._normalize_str(fn()).lower()
-                    if name:
-                        return name
-                except Exception:
-                    pass
-
-        return ""
+        return get_event_platform_name(event)
 
     def is_telegram_event(self, event: AstrMessageEvent | None = None) -> bool:
         """判断事件是否来自 Telegram 平台。"""

@@ -1,9 +1,10 @@
 """表情包作用域检查服务。"""
 
-import os
 from typing import Any
 
 from astrbot.api.event import AstrMessageEvent
+
+from ..util.normalization import canonicalize_path, normalize_scope_mode
 
 
 class MemeScopeService:
@@ -35,8 +36,7 @@ class MemeScopeService:
         if not isinstance(data, dict) or event is None:
             return True
 
-        scope_mode = str(data.get("scope_mode", "public") or "public").strip().lower()
-        if scope_mode not in {"local", "private", "scoped"}:
+        if normalize_scope_mode(data.get("scope_mode")) != "local":
             return True
 
         origin_target = str(data.get("origin_target", "") or "").strip()
@@ -58,10 +58,10 @@ class MemeScopeService:
             data = db_service.get_emoji(path)
             if data is None:
                 # 尝试规范化路径匹配
-                target_path = self._canon_path(path)
+                target_path = canonicalize_path(path)
                 all_paths = db_service.get_all_paths()
                 for stored_path in all_paths:
-                    if self._canon_path(stored_path) == target_path:
+                    if canonicalize_path(stored_path) == target_path:
                         data = db_service.get_emoji(stored_path)
                         break
             if data is None:
@@ -70,7 +70,3 @@ class MemeScopeService:
 
         # DB 不可用时直接拒绝（不再回退到 cache）
         return False
-
-    def _canon_path(self, path: str) -> str:
-        """规范化路径用于比较去重（仅大小写规范化，不转换斜杠）。"""
-        return os.path.normcase(str(path or "")).replace("\\", "/")

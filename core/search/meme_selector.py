@@ -1,6 +1,5 @@
 import asyncio
 import random
-import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -8,6 +7,7 @@ from typing import Any
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
+from ..util.normalization import canonicalize_path
 from .meme_search_engine import MemeSearchEngine
 from .meme_selection_strategy import MemeSelectionStrategy
 
@@ -18,11 +18,6 @@ from .text_similarity import (
 
 class MemeSelector:
     """表情包选择器，负责查找、筛选和选择表情包。"""
-
-    # 正则表达式模式常量
-    HEX_PATTERN = re.compile(r"(?:&&|\\&\\&)\s*([a-zA-Z0-9_]+)\s*(?:&&|\\&\\&)")
-    INCOMPLETE_HEX_PATTERN = re.compile(r"(?:&&|\\&\\&)\s*([a-zA-Z0-9_]+)\s*(?:[|]|\n|$)")
-    SINGLE_HEX_PATTERN = re.compile(r"&([^&\s]+?)&")
 
     # 选择器常量
     MAX_RECENT_USAGE = 10  # 最近使用记录最大数量
@@ -118,10 +113,8 @@ class MemeSelector:
         return MemeScopeService(self.plugin).is_path_allowed_for_event(path, event)
 
     def _canon_path(self, path: str) -> str:
-        """规范化路径（已迁移到 MemeScopeService）。"""
-        from .meme_scope_service import MemeScopeService
-
-        return MemeScopeService(self.plugin)._canon_path(path)
+        """兼容旧调用方的路径规范化门面。"""
+        return canonicalize_path(path)
 
     def find_similar_categories(self, query: str, top_n: int = 3) -> list[str]:
         """找到与查询词最相似的分类（委托给 MemeSearchEngine）。"""
@@ -231,65 +224,6 @@ class MemeSelector:
             return result or ""
         except Exception:
             return ""
-
-    async def extract_emotions_from_text(
-        self, event: AstrMessageEvent | None, text: str
-    ) -> tuple[list[str], str]:
-        """从文本中提取情绪关键词。"""
-        try:
-            res: list[str] = []
-            seen: set[str] = set()
-            cleaned_text = str(text)
-            valid_categories = set(self.categories)
-
-            # 三种标记格式依次提取: &&tag&&, 残缺 &&tag, 单个 &tag&
-            patterns = [
-                (self.HEX_PATTERN, True),  # 完整标记：总是清理
-                (self.INCOMPLETE_HEX_PATTERN, False),  # 残缺标记：仅匹配时清理
-                (self.SINGLE_HEX_PATTERN, True),  # 单标记：总是清理
-            ]
-            for pattern, always_clean in patterns:
-                cleaned_text, found = self._extract_with_pattern(
-                    pattern, cleaned_text, valid_categories, seen, always_clean
-                )
-                res.extend(found)
-
-            return res, cleaned_text
-        except Exception as e:
-            logger.error(f"提取文本情绪失败: {e}")
-            return [], text
-
-    @staticmethod
-    def _extract_with_pattern(
-        pattern: re.Pattern,
-        text: str,
-        valid_categories: set[str],
-        seen: set[str],
-        always_clean: bool,
-    ) -> tuple[str, list[str]]:
-        """用指定正则从文本中提取情绪标签并清理原文。
-
-        Args:
-            pattern: 编译好的正则
-            text: 待处理文本
-            valid_categories: 合法分类集合
-            seen: 已出现的分类（去重用，会被原地修改）
-            always_clean: True=无论是否匹配到分类都清理标记; False=仅匹配到有效分类时清理
-
-        Returns:
-            (cleaned_text, new_emotions)
-        """
-        found: list[str] = []
-        temp = text
-        for match in pattern.finditer(text):
-            norm_cat = match.group(1).strip().lower()
-            if norm_cat in valid_categories and norm_cat not in seen:
-                seen.add(norm_cat)
-                found.append(norm_cat)
-                temp = temp.replace(match.group(0), "", 1)
-            elif always_clean:
-                temp = temp.replace(match.group(0), "", 1)
-        return temp, found
 
     async def select_emoji(
         self,
@@ -475,10 +409,6 @@ class MemeSelector:
     async def send_emoji_with_text(self, event: AstrMessageEvent, path: str, text: str):
         """带文本发送表情包（已迁移到 MemeSmartSelectService）。"""
         return await self._smart_select_service.send_emoji_with_text(event, path, text)
-
-    async def send_explicit_emojis(self, event: AstrMessageEvent, paths: list[str], text: str):
-        """发送指定表情包列表（已迁移到 MemeSmartSelectService）。"""
-        return await self._smart_select_service.send_explicit_emojis(event, paths, text)
 
     async def try_send_emoji(self, event: AstrMessageEvent, emotions: list[str], text: str) -> bool:
         """尝试发送表情包（已迁移到 MemeSmartSelectService）。"""

@@ -7,25 +7,12 @@ from typing import Any
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
-from astrbot.core.agent.run_context import ContextWrapper
 
-from ..events.meme_sender_engine import _send_qq_image_as_sticker
+from ..events.emoji_delivery import send_qq_image_as_sticker
+from ..events.event_context import get_event_platform_name, unwrap_event
 
 from .text_similarity import calculate_hybrid_similarity, tokenize_for_bm25, _extract_words
 from .embedding_service import EmbeddingService
-
-
-def _unwrap_event(event: AstrMessageEvent) -> AstrMessageEvent:
-    """从 ContextWrapper 中提取 AstrMessageEvent（兼容 v4.26+ 工具调用上下文）。
-
-    v4.26+ 中 @filter.llm_tool 处理函数接收 ContextWrapper 而非直接 AstrMessageEvent，
-    通过 ContextWrapper.context.event 获取内部的 AstrMessageEvent。
-    参考: astrbot.core.astr_agent_context.AstrAgentContext
-    """
-    if isinstance(event, ContextWrapper):
-        return event.context.event
-    return event
-
 
 class MemeSmartSelectService:
     """负责智能选择表情包。"""
@@ -616,8 +603,8 @@ class MemeSmartSelectService:
         """智能搜索表情包（带多级 fallback）。
 
         搜索顺序：
-        1) 直接用 query 调用 search_images
-        2) 关键词映射（如"无语" -> dumb）
+        1) 展开查询中的情绪别名（如"有点无语" -> "有点无语 dumb"）后搜索
+        2) 分别用命中的分类搜索
         3) 模糊匹配到分类（相似度阈值 0.4）
 
         Args:
@@ -628,21 +615,52 @@ class MemeSmartSelectService:
         Returns:
             list[tuple[path, desc, emotion, tags]]
         """
-        # 1) 直接搜索
-        results = await self.search_images(query, limit=limit, idx=idx, event=event)
+        query = str(query or "").strip()
+        if not query:
+            return []
+
+        cfg = self.plugin.plugin_config
+        keyword_map_getter = getattr(cfg, "get_keyword_map", None)
+        keyword_map = keyword_map_getter() if callable(keyword_map_getter) else {}
+        query_folded = query.casefold()
+        mapped_categories: list[str] = []
+        if isinstance(keyword_map, dict):
+            # 长词优先；单字和英文别名只做精确匹配，避免“可爱”误命中“爱”、
+            # “emotion”误命中“emo”。中文多字别名允许出现在自然短句中。
+            aliases = sorted(keyword_map.items(), key=lambda item: len(str(item[0])), reverse=True)
+            for raw_alias, raw_category in aliases:
+                alias = str(raw_alias or "").strip().casefold()
+                category = str(raw_category or "").strip()
+                if not alias or not category:
+                    continue
+                exact_only = len(alias) <= 1 or alias.isascii()
+                matched = query_folded == alias if exact_only else alias in query_folded
+                if matched and category not in mapped_categories:
+                    mapped_categories.append(category)
+
+        # 将分类 key 加入原查询，使只有英文分类、缺少中文描述的旧索引也能被召回。
+        expanded_query = " ".join([query, *mapped_categories])
+        results = await self.search_images(
+            expanded_query,
+            limit=limit,
+            idx=idx,
+            event=event,
+        )
         if results:
             return results
 
-        # 2) 关键词映射
-        cfg = self.plugin.plugin_config
-        keyword_map = cfg.get_keyword_map() if cfg else {}
-        if query in keyword_map:
-            mapped_category = keyword_map[query]
-            results = await self.search_images(mapped_category, limit=limit, idx=idx, event=event)
+        # 若组合查询没有命中，逐个分类重试，避免多个先验相互稀释。
+        for mapped_category in mapped_categories:
+            results = await self.search_images(
+                mapped_category,
+                limit=limit,
+                idx=idx,
+                event=event,
+            )
             if results:
                 return results
 
-        # 3) 模糊匹配到分类
+        # 最后模糊匹配到分类。
         best_match = self._find_best_category_match(query, threshold=0.4)
         if best_match:
             results = await self.search_images(best_match, limit=limit, idx=idx, event=event)
@@ -677,12 +695,7 @@ class MemeSmartSelectService:
 
     async def _try_send_telegram_sticker(self, event: AstrMessageEvent, emoji_path: str) -> bool:
         """Telegram 平台优先尝试以贴纸发送，失败返回 False 供上层回退。"""
-        try:
-            platform_name = str(event.get_platform_name() or "").strip().lower()
-        except Exception:
-            platform_name = ""
-
-        if platform_name != "telegram":
+        if get_event_platform_name(event) != "telegram":
             return False
 
         client = getattr(event, "client", None)
@@ -732,12 +745,7 @@ class MemeSmartSelectService:
         if getattr(self.plugin, "send_meme_as_gif", True):
             return False
 
-        try:
-            platform_name = str(event.get_platform_name() or "").strip().lower()
-        except Exception:
-            platform_name = ""
-
-        return platform_name != "aiocqhttp"
+        return get_event_platform_name(event) != "aiocqhttp"
 
     async def _send_emoji_file_directly(self, event: AstrMessageEvent, emoji_path: str) -> bool:
         """Attempt the lowest-overhead file send path and let callers fall back on failure."""
@@ -786,11 +794,11 @@ class MemeSmartSelectService:
 
     async def send_emoji_message(self, event: AstrMessageEvent, emoji_path: str) -> str | None:
         """Send a single emoji using the fastest compatible path."""
-        event = _unwrap_event(event)
+        event = unwrap_event(event)
         if await self._try_send_telegram_sticker(event, emoji_path):
             return "telegram_sticker"
 
-        if await _send_qq_image_as_sticker(event, emoji_path, plugin=self.plugin):
+        if await send_qq_image_as_sticker(event, emoji_path, plugin=self.plugin):
             return "qq_sticker"
 
         if await self._send_emoji_file_directly(event, emoji_path):
@@ -810,7 +818,7 @@ class MemeSmartSelectService:
         self, event: AstrMessageEvent, emoji_path: str, cleaned_text: str
     ) -> bool:
         """Send one emoji message in the fastest compatible format."""
-        event = _unwrap_event(event)
+        event = unwrap_event(event)
         try:
             # active_sent means an emoji was actually sent, not merely auto-claimed.
             if self.plugin._emoji_turn_state(event).is_active_sent():
@@ -835,38 +843,6 @@ class MemeSmartSelectService:
             logger.error(f"发送表情包失败: {e}", exc_info=True)
             return False
 
-    async def send_explicit_emojis(
-        self, event: AstrMessageEvent, emoji_paths: list[str], cleaned_text: str
-    ) -> None:
-        """Append explicitly selected emojis to the current result."""
-        event = _unwrap_event(event)
-        from astrbot.api.message_components import Plain
-
-        try:
-            result = event.get_result()
-            new_result = event.make_result().set_result_content_type(result.result_content_type)
-
-            for comp in result.chain:
-                if not isinstance(comp, Plain):
-                    new_result.chain.append(comp)
-
-            if cleaned_text.strip():
-                new_result.message(cleaned_text.strip())
-
-            sent_paths = []
-            for path_str in emoji_paths:
-                if await self._try_send_telegram_sticker(event, path_str):
-                    sent_paths.append(path_str)
-                    continue
-                if await self._append_emoji_to_result(event, new_result, path_str):
-                    sent_paths.append(path_str)
-
-            event.set_result(new_result)
-            for path_str in sent_paths:
-                await self.record_emoji_usage(path_str, trigger="explicit")
-        except Exception as e:
-            logger.error(f"发送显式表情包失败: {e}", exc_info=True)
-
     async def try_send_emoji(
         self,
         event: AstrMessageEvent,
@@ -878,7 +854,7 @@ class MemeSmartSelectService:
         注意：概率判定由 Main 在调用前通过 _resolve_auto_emoji_turn_permission 完成，
         本方法只负责选图和发图。
         """
-        event = _unwrap_event(event)
+        event = unwrap_event(event)
         if not self._check_group_allowed(event):
             return False
 

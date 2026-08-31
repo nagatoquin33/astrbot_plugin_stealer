@@ -362,6 +362,32 @@ class TestFallbackSearch:
         assert "/path/happy_1.png" not in result_paths
 
 
+class TestSmartSearchQueryExpansion:
+    def setup_method(self):
+        self.plugin = MockPlugin()
+        self.plugin.plugin_config.keyword_map = {"无语": "dumb"}
+        self.selector = MemeSelector(self.plugin)
+
+    def test_natural_phrase_expands_to_category_key(self):
+        calls = []
+        expected = [("/path/dumb.png", "无语", "dumb", "沉默")]
+
+        async def _search_images(query, *, limit, idx, event):
+            calls.append(query)
+            return expected if query == "来个无语的表情包 dumb" else []
+
+        self.selector._smart_select_service.search_images = _search_images
+
+        import asyncio
+
+        results = asyncio.run(
+            self.selector.smart_search("来个无语的表情包", limit=5, idx={})
+        )
+
+        assert results == expected
+        assert calls == ["来个无语的表情包 dumb"]
+
+
 class _DummyTurnState:
     def is_active_sent(self):
         return False
@@ -456,23 +482,6 @@ class TestSendPathOptimization:
 
         assert event.sent == [["b64:encoded-image"]]
         self.plugin.image_processor_service._file_to_gif_base64.assert_awaited_once()
-
-    def test_send_explicit_emojis_prefers_file_images_in_result(self, tmp_path):
-        image_path = tmp_path / "emoji.png"
-        image_path.write_bytes(b"fake")
-        event = _DummyEvent(platform_name="discord")
-        event._result.chain = ["existing"]
-
-        import asyncio
-
-        asyncio.run(
-            self.selector.send_explicit_emojis(event, [str(image_path)], "hello world")
-        )
-
-        assert event.get_result().file_images == [str(image_path)]
-        assert event.get_result().base64_images == []
-        self.plugin.image_processor_service._file_to_gif_base64.assert_not_awaited()
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

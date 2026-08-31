@@ -62,6 +62,10 @@ def _dummy_event():
 
 
 class TestTemplateLoading:
+    def test_clean_text_does_not_parse_removed_emotion_markers(self):
+        analyzer = _build_analyzer()
+        assert analyzer._clean_text("  &&happy&&   hello  ") == "&&happy&& hello"
+
     def test_default_template_used_when_prompt_empty(self):
         analyzer = _build_analyzer(PluginConfig(None))
         assert analyzer._emotion_analysis_template == _EMOTION_ANALYSIS_DEFAULT_TEMPLATE

@@ -20,18 +20,20 @@ Main (main.py)
 ├── CommandHandler (core/commands/command_handler.py) -- /meme commands
 ├── EventHandler (core/events/event_handler.py) -- Message listeners, image download, force-capture window
 ├── ImageProcessorService (core/processing/image_processor_service.py) -- VLM classification, dedup, tagging
-├── EmojiSelector (core/search/emoji_selector.py) -- Search, selection strategy, BM25 + fuzzy matching
-├── EmojiSenderEngine (core/events/emoji_sender_engine.py) -- Auto-send decision, cooldowns, emotion injection
+├── MemeSelector (core/search/meme_selector.py) -- Search, selection strategy, BM25 + fuzzy matching
+├── MemeSenderEngine (core/events/meme_sender_engine.py) -- Auto-send decision and cooldowns
+├── EventContext / EmojiDelivery (core/events/) -- Shared event identity and platform delivery helpers
 ├── SmartEmotionMatcher (core/processing/natural_emotion_analyzer.py) -- LLM-based emotion analysis
 ├── PluginAPI (plugin_api.py)                   -- Web API routes for the dashboard page
+├── Shared utilities (core/util/)               -- Path/metadata normalization, blacklist writes, safe IO
 └── TaskScheduler (task_scheduler.py)         -- Periodic tasks (cleanup, capacity control)
 ```
 
 ### Data Flow
 
 1. **Collection**: `EventHandler` listens to messages → downloads images → `ImageProcessorService` computes perceptual hash and calls VLM for category/tags → `DatabaseService` stores metadata in SQLite.
-2. **Selection**: `EmojiSelector` uses `EmojiSearchEngine` (BM25 pre-filter + fuzzy re-ranking) and `EmojiSelectionStrategy` (recent-usage penalty + randomness) to pick a matching emoji.
-3. **Sending**: `EmojiSenderEngine` intercepts LLM responses (via `on_decorating_result`), decides whether to append an emoji based on cooldowns and probability, and injects the emoji into the outgoing message chain.
+2. **Selection**: `MemeSelector` uses `MemeSearchEngine` (BM25 pre-filter + fuzzy re-ranking) and `MemeSelectionStrategy` (recent-usage penalty + randomness) to pick a matching emoji.
+3. **Sending**: `MemeSenderEngine` intercepts LLM responses via `on_decorating_result`, decides whether to send an emoji based on cooldowns and probability, and dispatches the selected image asynchronously.
 4. **WebUI**: `PluginAPI` registers routes under `/astrbot_plugin_stealer/*` via `context.register_web_api()`. The frontend is in `pages/表情管理/`.
 
 ### Key Design Patterns
