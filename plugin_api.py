@@ -1057,7 +1057,7 @@ class PluginAPI:
             db.delete_pending(pending_id)
 
             # 审核通过后写入嵌入向量（仅在开启嵌入检索时，失败不阻塞）
-            if getattr(self.plugin, "enable_embedding_search", True):
+            if getattr(self.plugin, "enable_embedding_search", False):
                 try:
                     smart_service = getattr(getattr(self.plugin, "meme_selector", None), "_smart_select_service", None)
                     if smart_service and smart_service._embedding_service:

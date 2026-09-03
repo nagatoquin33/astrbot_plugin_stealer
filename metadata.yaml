@@ -33,7 +33,7 @@ help: |
 
   对话中 LLM 可自动调用 search_meme / send_meme / steal_meme 工具搜索、发送和收录表情包。
   WebUI：在插件详情页点击「表情管理」进入管理面板。
-version: 2.8.9
+version: 2.8.10
 support_platforms:
   - aiocqhttp
   - telegram

@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import tempfile
 from pathlib import Path
 
 from astrbot.api import logger
@@ -14,14 +15,30 @@ except Exception:
     PILImage = None
     PILImageDraw = None
 
-try:
-    import numpy as np
-except Exception:
-    np = None
-
 
 class VLMCallService:
     """负责调用视觉模型进行图片分析。"""
+
+    STORYBOARD_SAMPLE_COUNT = 9
+    STORYBOARD_COLUMNS = 3
+    STORYBOARD_ROWS = 3
+    STORYBOARD_GAP = 4
+    STORYBOARD_LABEL_HEIGHT = 20
+    MAX_VLM_DIMENSION = 2048
+    STORYBOARD_FRAME_BACKGROUND = (128, 128, 128, 255)
+    STORYBOARD_SEPARATOR_COLOR = (232, 232, 232)
+    STORYBOARD_LABEL_BACKGROUND = (34, 34, 34)
+    STORYBOARD_LABEL_COLOR = (255, 255, 255)
+    ANIMATED_STORYBOARD_PROMPT = (
+        "[GIF 九宫格时间序列说明]\n"
+        "输入图是从同一个 GIF 的完整帧序列中等距抽取 9 帧后生成的 3×3 分镜。"
+        "阅读顺序为从左到右、从上到下：第一行 1→2→3，第二行 4→5→6，第三行 7→8→9。"
+        "九格中的重复人物或物体表示同一主体在不同时刻；源 GIF 少于 9 帧时，相邻格可能重复。\n"
+        "请比较前后格的变化，概括完整动作、表情变化和最终表达的情绪或梗。"
+        "不要把九格布局描述为多人合照、九张独立图片或多个同时发生的场景。"
+        "每格上方的深色编号栏与数字、浅色分隔线和中性灰透明底均由预处理添加，忽略这些人工元素。"
+        "识别原图文字时按原字符逐字转写；同一句文字跨格重复时只记录一次，勿把帧序号写入 overlay_text。\n\n"
+    )
 
     def __init__(self, plugin_instance) -> None:
         self.plugin = plugin_instance
@@ -76,7 +93,7 @@ class VLMCallService:
         """调用视觉模型分析图片。
 
         使用 context.llm_generate 调用指定的视觉模型 provider，
-        支持指数退避重试。对于 GIF 动图，会提取关键帧拼接后分析。
+        支持指数退避重试。对于 GIF 动图，会均匀采样九帧并生成 3×3 分镜后分析。
 
         Args:
             event: 消息事件（用于 provider 解析）
@@ -111,7 +128,7 @@ class VLMCallService:
                 "请在插件配置或 AstrBot 全局配置中设置。"
             )
 
-        # 处理 GIF 动图：提取多帧拼接
+        # 处理 GIF 动图：均匀采样九帧并生成 3×3 分镜
         temp_file = None
         try:
             actual_img_path, is_animated = await self._prepare_image_for_vlm(img_path)
@@ -121,18 +138,10 @@ class VLMCallService:
             # 直接传入本地绝对路径，框架内部会自动处理路径转换
             resolved_img_path = str(Path(actual_img_path).resolve())
 
-            # 如果是动图拼接，添加专用提示词前缀
+            # 如果是动图九宫格，添加专用提示词前缀
             actual_prompt = prompt
             if is_animated:
-                animated_prefix = (
-                    "[动图帧序列] 这不是多人并排的静态场景，而是一个动态表情包的多帧连续截图。"
-                    "图片从左到右按时间顺序展示同一角色/同一画面的不同时刻；帧之间有分隔线，左上角数字是帧序号。"
-                    "黑色背景代表透明区域。"
-                    "请以动图/动画的角度理解：这个表情包在表达什么连续动作、表情或情绪变化？"
-                    "不要描述成“并排站立”“多人同时出现”或“几个人站在一起”。"
-                    "如果画面中有文字（字幕、弹幕、对话框、贴纸文字），请逐字识别并理解语义。\n\n"
-                )
-                actual_prompt = animated_prefix + prompt
+                actual_prompt = self.ANIMATED_STORYBOARD_PROMPT + prompt
 
             return await self._do_vlm_call(provider_id, actual_prompt, resolved_img_path)
         finally:
@@ -145,7 +154,7 @@ class VLMCallService:
                     logger.warning(f"清理临时文件失败: {e}")
 
     async def _prepare_image_for_vlm(self, img_path: str) -> tuple[str, bool]:
-        """为 VLM 分析准备图片，对动图提取多帧拼接。
+        """为 VLM 分析准备图片，对 GIF 均匀采样并生成 3×3 分镜。
 
         Args:
             img_path: 原始图片路径
@@ -157,7 +166,7 @@ class VLMCallService:
         if not img_path.lower().endswith(".gif"):
             return img_path, False
 
-        if PILImage is None or np is None:
+        if PILImage is None:
             return img_path, False
 
         try:
@@ -177,113 +186,129 @@ class VLMCallService:
             if not is_animated or n_frames <= 1:
                 return img_path, False
 
-            # 动图处理：提取关键帧并横向拼接
-            MAX_FRAMES = 12  # 最多提取 12 帧
-            TARGET_HEIGHT = 480  # 输出高度（提高以保留小字可读性）
-            SIMILARITY_THRESHOLD = 1000.0  # 相似帧过滤阈值 (MSE)
-            MAX_VLM_DIMENSION = 2048  # VLM 模型最大输入边长
-
-            # 计算缩放比例
-            scale = TARGET_HEIGHT / height if height > TARGET_HEIGHT else 1.0
-            frame_width = int(width * scale)
-            frame_height = TARGET_HEIGHT
+            frame_indices = self._uniform_frame_indices(n_frames)
+            frame_width, frame_height = self._storyboard_frame_size(width, height)
 
             def _extract_and_combine(fp: str) -> tuple[str, int, int, int]:
-                frames = []
-                last_selected_np = None
+                decoded_frames = {}
+                resampling = getattr(PILImage, "Resampling", PILImage).LANCZOS
 
                 with PILImage.open(fp) as im:
-                    # 先提取所有帧
-                    all_frames = []
-                    for idx in range(n_frames):
-                        im.seek(idx)
+                    for frame_idx in dict.fromkeys(frame_indices):
+                        im.seek(frame_idx)
                         frame = im.convert("RGBA")
-                        if scale < 1.0:
-                            frame = frame.resize((frame_width, frame_height), PILImage.LANCZOS)
-                        all_frames.append(frame)
+                        if frame.size != (frame_width, frame_height):
+                            frame = frame.resize((frame_width, frame_height), resampling)
 
-                # 相似帧过滤
-                for frame in all_frames:
-                    frame_np = np.array(frame, dtype=np.float32)
+                        # GIF 透明像素由中性灰底承接，兼顾黑色与白色线条的可读性。
+                        backdrop = PILImage.new(
+                            "RGBA",
+                            (frame_width, frame_height),
+                            self.STORYBOARD_FRAME_BACKGROUND,
+                        )
+                        backdrop.alpha_composite(frame)
+                        decoded_frames[frame_idx] = backdrop.convert("RGB")
 
-                    if last_selected_np is None:
-                        # 第一帧直接加入
-                        frames.append(frame)
-                        last_selected_np = frame_np
-                    else:
-                        # 计算均方误差 (MSE)
-                        mse = np.mean((frame_np - last_selected_np) ** 2)
+                cell_height = frame_height + self.STORYBOARD_LABEL_HEIGHT
+                grid_width = (
+                    frame_width * self.STORYBOARD_COLUMNS
+                    + self.STORYBOARD_GAP * (self.STORYBOARD_COLUMNS - 1)
+                )
+                grid_height = (
+                    cell_height * self.STORYBOARD_ROWS
+                    + self.STORYBOARD_GAP * (self.STORYBOARD_ROWS - 1)
+                )
+                combined = PILImage.new(
+                    "RGB",
+                    (grid_width, grid_height),
+                    self.STORYBOARD_SEPARATOR_COLOR,
+                )
+                draw = PILImageDraw.Draw(combined) if PILImageDraw is not None else None
 
-                        # 差异够大才选中
-                        if mse > SIMILARITY_THRESHOLD:
-                            frames.append(frame)
-                            last_selected_np = frame_np
-
-                # 如果过滤后帧数太少，保留更多帧
-                if len(frames) < 3 and len(all_frames) >= 3:
-                    # 均匀采样
-                    step = max(1, len(all_frames) // 6)
-                    frames = [all_frames[i] for i in range(0, len(all_frames), step)][:6]
-
-                # 限制最大帧数
-                if len(frames) > MAX_FRAMES:
-                    # 均匀抽取
-                    step = len(frames) / MAX_FRAMES
-                    frames = [frames[int(i * step)] for i in range(MAX_FRAMES)]
-
-                # 横向拼接所有帧，黑色背景代表透明
-                total_width = frame_width * len(frames)
-                combined = PILImage.new("RGBA", (total_width, frame_height), (0, 0, 0, 255))
-
-                for i, frame in enumerate(frames):
-                    combined.paste(frame, (i * frame_width, 0), frame)  # 使用帧的 alpha 通道
-
-                # 画帧分隔线和帧序号，帮助 VLM 理解这是时间序列而不是多人并排。
-                if PILImageDraw is not None:
-                    draw = PILImageDraw.Draw(combined)
-                    for i in range(len(frames)):
-                        x = i * frame_width
-                        if i > 0:
-                            draw.line([(x, 0), (x, frame_height)], fill=(255, 255, 255, 160), width=2)
-                        draw.text((x + 4, 4), str(i + 1), fill=(255, 255, 255, 255))
-
-                # 如果拼接图超出 VLM 输入限制，等比缩放到限制内
-                if total_width > MAX_VLM_DIMENSION or frame_height > MAX_VLM_DIMENSION:
-                    scale_factor = min(
-                        MAX_VLM_DIMENSION / total_width,
-                        MAX_VLM_DIMENSION / frame_height,
+                for sample_idx, frame_idx in enumerate(frame_indices):
+                    row, column = divmod(sample_idx, self.STORYBOARD_COLUMNS)
+                    x = column * (frame_width + self.STORYBOARD_GAP)
+                    y = row * (cell_height + self.STORYBOARD_GAP)
+                    combined.paste(
+                        PILImage.new(
+                            "RGB",
+                            (frame_width, self.STORYBOARD_LABEL_HEIGHT),
+                            self.STORYBOARD_LABEL_BACKGROUND,
+                        ),
+                        (x, y),
                     )
-                    new_w = max(1, int(total_width * scale_factor))
-                    new_h = max(1, int(frame_height * scale_factor))
-                    combined = combined.resize((new_w, new_h), PILImage.LANCZOS)
-                    logger.debug(
-                        f"GIF 拼接图超出 VLM 限制({total_width}x{frame_height})，"
-                        f"已缩放至 {new_w}x{new_h}"
+                    if draw is not None:
+                        draw.text(
+                            (x + 6, y + 3),
+                            str(sample_idx + 1),
+                            fill=self.STORYBOARD_LABEL_COLOR,
+                        )
+                    combined.paste(
+                        decoded_frames[frame_idx],
+                        (x, y + self.STORYBOARD_LABEL_HEIGHT),
                     )
-
-                # 保存临时文件
-                import tempfile
 
                 temp_fd, temp_path = tempfile.mkstemp(suffix=".png")
                 os.close(temp_fd)
-                # 使用无损 PNG，避免 JPEG 压缩导致小字发糊。
-                combined.save(temp_path, "PNG", optimize=True)
+                try:
+                    # 使用无损 PNG，避免压缩噪声损伤字幕和细线。
+                    combined.save(temp_path, "PNG", optimize=True)
+                except Exception:
+                    try:
+                        os.remove(temp_path)
+                    except OSError:
+                        pass
+                    raise
 
                 final_w, final_h = combined.size
-                return temp_path, len(frames), final_w, final_h
+                return temp_path, len(frame_indices), final_w, final_h
 
             temp_path, actual_frames, final_width, final_height = await asyncio.to_thread(
                 _extract_and_combine, img_path
             )
             logger.debug(
-                f"GIF 动图拼接完成: {n_frames} 帧 -> {actual_frames} 帧, "
-                f"输出尺寸: {final_width}x{final_height}"
+                f"GIF 九宫格完成: {n_frames} 帧 -> {actual_frames} 个采样格, "
+                f"采样索引: {frame_indices}, 输出尺寸: {final_width}x{final_height}"
             )
             return temp_path, True
 
         except Exception as e:
             logger.warning(f"GIF 动图帧提取失败，使用原图: {e}")
             return img_path, False
+
+    @classmethod
+    def _uniform_frame_indices(cls, frame_count: int) -> list[int]:
+        """返回覆盖首尾的 9 个等距帧索引，短 GIF 通过重复邻近帧补齐。"""
+        if frame_count <= 0:
+            return []
+        if cls.STORYBOARD_SAMPLE_COUNT <= 1:
+            return [0]
+
+        span = frame_count - 1
+        denominator = cls.STORYBOARD_SAMPLE_COUNT - 1
+        return [
+            (sample_idx * span + denominator // 2) // denominator
+            for sample_idx in range(cls.STORYBOARD_SAMPLE_COUNT)
+        ]
+
+    @classmethod
+    def _storyboard_frame_size(cls, width: int, height: int) -> tuple[int, int]:
+        """在保持帧比例的前提下，让完整九宫格落入 VLM 尺寸上限。"""
+        if width <= 0 or height <= 0:
+            raise ValueError("GIF 帧尺寸必须大于 0")
+
+        available_width = cls.MAX_VLM_DIMENSION - cls.STORYBOARD_GAP * (
+            cls.STORYBOARD_COLUMNS - 1
+        )
+        available_height = (
+            cls.MAX_VLM_DIMENSION
+            - cls.STORYBOARD_GAP * (cls.STORYBOARD_ROWS - 1)
+            - cls.STORYBOARD_LABEL_HEIGHT * cls.STORYBOARD_ROWS
+        )
+        max_frame_width = max(1, available_width // cls.STORYBOARD_COLUMNS)
+        max_frame_height = max(1, available_height // cls.STORYBOARD_ROWS)
+        scale = min(1.0, max_frame_width / width, max_frame_height / height)
+        return max(1, int(width * scale)), max(1, int(height * scale))
 
     async def _do_vlm_call(self, provider_id: str, prompt: str, file_url: str) -> str:
         """执行 VLM 调用（带重试）。

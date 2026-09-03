@@ -1921,6 +1921,19 @@ select.codex-input {
     border-bottom-color: var(--glass-border);
 }
 
+[data-theme="light"] .character-filter-bar {
+    background: var(--bg-elevated);
+    border-bottom-color: var(--glass-border);
+}
+
+[data-theme="light"] .character-chip-count {
+    color: var(--text-tertiary);
+}
+
+[data-theme="light"] .character-chip.active .character-chip-count {
+    color: currentColor;
+}
+
 [data-theme="light"] .toolbar-search input {
     background: var(--bg-card);
     border-color: var(--glass-border);

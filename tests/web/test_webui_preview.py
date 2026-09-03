@@ -86,6 +86,21 @@ def test_grid_does_not_prefetch_originals_on_hover():
     assert "requestOriginalForPreview" in app_js
 
 
+def test_light_theme_character_filter_uses_readable_surface():
+    """issue #108：亮色主题的角色筛选栏不得继续使用暗色工具栏渐变。"""
+    css = (DASHBOARD_DIR / "app.css").read_text(encoding="utf-8")
+    selector = '[data-theme="light"] .character-filter-bar'
+    start = css.index(selector)
+    rule = css[start:css.index("}", start)]
+    assert "background: var(--bg-elevated)" in rule
+    assert "border-bottom-color: var(--glass-border)" in rule
+
+    active_count_selector = '[data-theme="light"] .character-chip.active .character-chip-count'
+    count_start = css.index(active_count_selector)
+    count_rule = css[count_start:css.index("}", count_start)]
+    assert "color: currentColor" in count_rule
+
+
 def test_fallout_theme_avoids_fullpage_compositing():
     """辐射 4 主题不得用全屏 mix-blend / 图片 filter，避免详情弹窗合成卡死。"""
     css = (DASHBOARD_DIR / "app.css").read_text(encoding="utf-8")

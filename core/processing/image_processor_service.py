@@ -361,7 +361,7 @@ class ImageProcessorService:
         entry["add_method"] = add_method
         idx[cat_path] = entry
 
-        if not getattr(self.plugin, "enable_embedding_search", True):
+        if not getattr(self.plugin, "enable_embedding_search", False):
             return True, idx
 
         # 入库后写入嵌入向量（失败不阻塞）

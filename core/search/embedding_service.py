@@ -55,7 +55,7 @@ class EmbeddingService:
 
     def _embedding_enabled(self) -> bool:
         """读取插件配置中的嵌入检索开关。"""
-        return getattr(self.plugin, "enable_embedding_search", True)
+        return getattr(self.plugin, "enable_embedding_search", False)
 
     def _reset_provider_state_if_changed(self) -> None:
         """配置开关或 provider ID 变化时重置 provider 探测状态。"""
@@ -180,7 +180,7 @@ class EmbeddingService:
 
     def is_available(self) -> bool:
         """嵌入检索是否可用。"""
-        if not getattr(self.plugin, "enable_embedding_search", True):
+        if not getattr(self.plugin, "enable_embedding_search", False):
             return False
 
         if self._init_faiss():

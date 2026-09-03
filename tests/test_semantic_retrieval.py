@@ -201,6 +201,42 @@ def test_bundled_prompts_are_category_neutral_and_tag_light():
         assert "0~3" in text
         assert "2~6" not in text
         assert "troll 不是" not in text
+        assert "GIF 九宫格" in text
+        assert "不要写画面说明" in text
+
+
+def test_schema_prompts_match_bundled_defaults():
+    import json
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    prompts = json.loads((root / "prompts.json").read_text(encoding="utf-8"))
+    schema = json.loads((root / "_conf_schema.json").read_text(encoding="utf-8"))
+
+    assert (
+        schema["custom_meme_classification_prompt"]["default"]
+        == prompts["EMOJI_CLASSIFICATION_PROMPT"]
+    )
+    assert (
+        schema["custom_meme_classification_with_filter_prompt"]["default"]
+        == prompts["EMOJI_CLASSIFICATION_WITH_FILTER_PROMPT"]
+    )
+
+
+def test_embedding_search_defaults_to_disabled():
+    import json
+    from pathlib import Path
+
+    from core.config.config import PluginConfig
+
+    schema = json.loads(
+        (Path(__file__).resolve().parents[1] / "_conf_schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert schema["enable_embedding_search"]["default"] is False
+    assert PluginConfig.model_fields["enable_embedding_search"].default is False
+    assert EmbeddingService(types.SimpleNamespace())._embedding_enabled() is False
 
 
 def test_get_prompts_falls_back_to_bundled_when_custom_blank():

@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.10] - 2026-09-03
+
+### changed
+- 嵌入向量检索默认改为关闭；新安装默认使用 BM25，已有显式配置保持不变
+- GIF 的 VLM 预处理改为在完整帧序列中等距抽取九帧并生成 3×3 分镜，只保留采样帧，不再缓存全帧或依赖 NumPy 相似帧过滤
+- 精简并统一 VLM 默认提示词，强化 GIF 时间顺序、OCR 去重、动作变化、分类键与适用对话字段约束
+
+### fixed
+- 修复 WebUI 亮色主题下角色筛选栏沿用暗色背景、导致标签与计数文字对比度不足的问题（#108）
+
 ## [2.8.9] - 2026-08-31
 
 ### changed

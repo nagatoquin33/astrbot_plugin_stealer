@@ -57,7 +57,7 @@ class PluginConfig(BaseModel):
 
     # === 待审核池 / 嵌入检索 ===
     steal_pool_capacity: int = 200  # 待审核池容量上限，到达即暂停自动偷取
-    enable_embedding_search: bool = True  # 启用嵌入向量检索；不可用时降级 BM25
+    enable_embedding_search: bool = False  # 嵌入检索默认关闭；开启后不可用时降级 BM25
     embedding_provider_id: str = ""  # 嵌入模型；留空则尝试框架首个 embedding provider
 
     # === 智能选择：文字距离融合权重（预设见 _conf_schema.json _smart_section）===
