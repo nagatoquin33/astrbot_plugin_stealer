@@ -209,6 +209,14 @@ class DummyEvent:
         self.sent.append(message)
 
 
+class DummyLLMResponse:
+    def __init__(self, text: str, role: str = "assistant"):
+        self.completion_text = text
+        self.role = role
+        self.tools_call_args = []
+        self.result_chain = None
+
+
 def _build_main(chance: float) -> Main:
     main = Main.__new__(Main)
     main.auto_send_meme = True
@@ -305,6 +313,26 @@ class AutoEmojiFlowTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(first)
         self.assertFalse(second)
+        self.assertEqual(scheduled, ["emoji_analyze_passive"])
+        self.assertTrue(event.get_extra("stealer_auto_emoji_turn_claimed"))
+
+    async def test_llm_response_hook_schedules_for_streaming_completion(self):
+        main = _build_main(1.0)
+        scheduled = []
+
+        def _safe_create_task(coro, name):
+            scheduled.append(name)
+            coro.close()
+
+        main._safe_create_task = _safe_create_task
+        event = DummyEvent("streamed reply")
+
+        handled = await main._prepare_emoji_after_llm(
+            event,
+            DummyLLMResponse("streamed reply"),
+        )
+
+        self.assertTrue(handled)
         self.assertEqual(scheduled, ["emoji_analyze_passive"])
         self.assertTrue(event.get_extra("stealer_auto_emoji_turn_claimed"))
 

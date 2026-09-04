@@ -1,5 +1,6 @@
 """PR #90: PluginAPI 待审核分类列表构建（_build_categories_list）。"""
 
+import io
 import sys
 import types
 from pathlib import Path
@@ -9,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import pytest
 
 from astrbot_plugin_stealer.plugin_api import PluginAPI
+from astrbot_plugin_stealer.core.sources.models import ExternalSourceSecurityError
 
 
 def _build_api(category_info):
@@ -63,6 +65,21 @@ class TestBuildCategoriesList:
             {"key": "a", "name": "a", "count": 2},
             {"key": "b", "name": "b", "count": 1},
         ]
+
+
+class TestExternalSourceUpload:
+    def test_bounded_stream_write(self, tmp_path):
+        target = tmp_path / "pack.zip"
+        upload = types.SimpleNamespace(stream=io.BytesIO(b"zip bytes"))
+        written = PluginAPI._save_source_upload_limited(upload, target, 32)
+        assert written == 9
+        assert target.read_bytes() == b"zip bytes"
+
+    def test_bounded_stream_rejects_oversized_upload(self, tmp_path):
+        target = tmp_path / "pack.zip"
+        upload = types.SimpleNamespace(stream=io.BytesIO(b"too large"))
+        with pytest.raises(ExternalSourceSecurityError):
+            PluginAPI._save_source_upload_limited(upload, target, 4)
 
 
 class TestDashboardPrefs:

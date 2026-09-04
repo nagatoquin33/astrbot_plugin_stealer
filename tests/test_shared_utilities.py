@@ -51,6 +51,15 @@ def test_event_context_uses_consistent_platform_and_session_fallbacks():
     assert get_event_session_key(None) == "global"
 
 
+def test_event_context_prefers_unified_origin_over_local_session_id():
+    event = types.SimpleNamespace(
+        get_session_id=lambda: "42",
+        unified_msg_origin="telegram:group:42",
+    )
+
+    assert get_event_session_key(event) == "telegram:group:42"
+
+
 @pytest.mark.asyncio
 async def test_blacklist_writer_prefers_database():
     calls = []

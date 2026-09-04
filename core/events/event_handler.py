@@ -181,7 +181,7 @@ class EventHandler:
     def _select_items_for_removal(self, image_index: dict) -> list[tuple[str, int]]:
         """从索引中选出需要移除的条目（按创建时间从旧到新排序后取最旧的）。
 
-        收藏表情包不参与自动清理。
+        收藏表情包和外部源托管副本不参与自动清理。
 
         Returns:
             需要移除的 (file_path, created_at) 列表；若无需移除则返回空列表。
@@ -195,12 +195,23 @@ class EventHandler:
             logger.warning(f"容量控制上限无效: max_reg_num={max_reg}，跳过")
             return []
 
-        if len(image_index) <= max_reg:
+        native_total = sum(
+            1
+            for image_info in image_index.values()
+            if not isinstance(image_info, dict)
+            or str(image_info.get("retention_class", "native") or "native")
+            not in {"external", "pinned"}
+        )
+        if native_total <= max_reg:
             return []
 
         image_items: list[tuple[str, int]] = []
         for file_path, image_info in image_index.items():
             if isinstance(image_info, dict) and image_info.get("is_favorite"):
+                continue
+            if isinstance(image_info, dict) and str(
+                image_info.get("retention_class", "native") or "native"
+            ) in {"external", "pinned"}:
                 continue
             created_at = int(image_info.get("created_at", 0)) if isinstance(image_info, dict) else 0
             image_items.append((file_path, created_at))
@@ -209,12 +220,12 @@ class EventHandler:
             return []
 
         image_items.sort(key=lambda x: x[1])
-        overflow = len(image_index) - max_reg
+        overflow = native_total - max_reg
         remove_count = min(max(0, overflow), len(image_items))
         if overflow > len(image_items):
             logger.warning(
                 f"[capacity] Need to remove {overflow} entries, but only "
-                f"{len(image_items)} non-favorite entries are eligible"
+                f"{len(image_items)} native non-favorite entries are eligible"
             )
         return image_items[:remove_count]
 

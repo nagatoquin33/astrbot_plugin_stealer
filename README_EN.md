@@ -38,6 +38,7 @@ This plugin is fully open-source and free. Issues and PRs are welcome.
 | **Emotion Matching** | Analyze the emotion of Bot replies and append a matching emoji |
 | **LLM Proactive Selection** | LLM can search and send the best emoji via tool calls during conversation |
 | **Dual-Mode Emotion Analysis** | Smart keyword extraction (a lightweight model extracts keywords and emotion priors from the reply; it does not decide whether to send) / Raw-text retrieval (directly uses the reply text, no tags injected) |
+| **External Meme Sources** | Import Meme Manager / AstrBot Meme Packs or GitHub repositories, or sync a paginated HTTPS JSON API with preflight, mapping, deduplication, and provenance |
 | **WebUI Dual-Section** | Review Queue: manually approve/reject pending emojis / Library: browse, sort, batch manage |
 | **Sort & Filter** | Most used / Recently used / Newest / Oldest — all via SQL ORDER BY |
 | **Group Filtering** | Whitelist/blacklist control over which groups allow stealing/sending |
@@ -80,6 +81,16 @@ Open the plugin detail panel in the AstrBot Dashboard and click "Emoji Manager" 
 - **Category Management**: Add, edit, and delete emoji categories.
 
 > ⚠️ **High Concurrency Warning**: Auto-analysis processes multiple images concurrently and may trigger API rate limits. Batch your imports accordingly.
+
+## 🔌 v3 External Meme Sources
+
+Open **External Sources** in the WebUI to discover same-instance Meme Manager v4 packs, upload ZIP / `.meme-pack` exports, read a GitHub repository such as [DDZS987/astrbot-meme-pack-semantic-01](https://github.com/DDZS987/astrbot-meme-pack-semantic-01), or register a paginated HTTPS JSON catalog. Preflight shows item counts, source categories, warnings, and capacity impact before import. You can map categories, choose public or local scope, assign a whole series to an existing or newly created character, and route imports through Pending Review.
+
+The recommended pack layout is `manifest.json` plus `memes/<category>/images`, optionally accompanied by `meme_pack_export.json` and `semantic_metadata.json` for per-image descriptions, tags, and OCR. A plain ZIP of supported images is accepted too; categories are inferred from the directory layout and `previews/` or thumbnail directories are skipped. See the [External Source Protocol](docs/external-sources.md) for the exact format and limits.
+
+Every accepted image is validated and copied into this plugin's own storage. Source files remain untouched, SHA-256 deduplication prevents duplicate copies, and provenance keeps source URL, license, attribution, and stale state. External copies use a protected retention class, so a large pack does not evict chat-collected memes. Missing remote items are marked stale during sync and are kept in the library.
+
+HTTPS is required by default. Local/private hosts, unsafe redirects, oversized responses, archive traversal, symlinks, decompression bombs, and excessive pixel counts are rejected. See the [External Source Protocol](docs/external-sources.md) for the JSON contract and limits.
 
 ## 💡 Recommended Usage
 

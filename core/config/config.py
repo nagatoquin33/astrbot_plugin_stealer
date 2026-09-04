@@ -60,6 +60,16 @@ class PluginConfig(BaseModel):
     enable_embedding_search: bool = False  # 嵌入检索默认关闭；开启后不可用时降级 BM25
     embedding_provider_id: str = ""  # 嵌入模型；留空则尝试框架首个 embedding provider
 
+    # === 外部表情包源（v3） ===
+    external_sources_enabled: bool = True
+    external_source_allow_http: bool = False
+    external_source_default_review: bool = False
+    external_source_max_items: int = 2000
+    external_source_max_image_bytes: int = 32 * 1024 * 1024
+    external_source_max_archive_bytes: int = 1024 * 1024 * 1024
+    external_source_max_uncompressed_bytes: int = 4 * 1024 * 1024 * 1024
+    external_source_max_pixels: int = 40_000_000
+
     # === 智能选择：文字距离融合权重（预设见 _conf_schema.json _smart_section）===
     sim_weight_preset: str = "balanced"  # balanced / keyword / semantic / strict
     sim_weight_ngram: float = 0.28  # 兼容旧配置保留，不再单独暴露

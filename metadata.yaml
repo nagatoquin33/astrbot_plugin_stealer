@@ -2,8 +2,8 @@ name: astrbot_plugin_stealer
 display_name: 表情包小偷
 author: nagatoquin33
 author_url: https://github.com/nagatoquin33
-desc: 人机代码，仿maibot的表情包偷取。让bot自动偷走别人的表情包并为己所用。配置好视觉模型就能自动识别分类，对话时根据情绪自动发送。支持LLM主动选表情包、WebUI管理、存储清理、作用域修复和智能情绪匹配。
-short_desc: 自动偷取群聊表情包，AI 分类入库，对话时按情绪自动发送。
+desc: 人机代码，仿maibot的表情包偷取。让bot自动偷走别人的表情包并为己所用。配置好视觉模型就能自动识别分类，对话时根据情绪自动发送。支持 Meme Manager / AstrBot Meme Pack、外部 HTTPS JSON API、LLM 主动选表情包、WebUI 管理、存储清理、作用域修复和智能情绪匹配。
+short_desc: 自动偷取、导入和同步表情包，AI 分类入库，对话时按情绪自动发送。
 repo: https://github.com/nagatoquin33/astrbot_plugin_stealer
 category: 娱乐
 tags:
@@ -12,6 +12,7 @@ tags:
   - 情绪匹配
   - LLM 工具调用
   - WebUI
+  - 外部表情包源
   - 群聊
 help: |
   基于多模态 AI 的 AstrBot 娱乐插件：自动偷取群聊表情包，分类入库，对话时按情绪自动发送。
@@ -32,8 +33,8 @@ help: |
   - /meme tag_stats [N]：标签统计（高频/低频/零标签，打标质量体检）
 
   对话中 LLM 可自动调用 search_meme / send_meme / steal_meme 工具搜索、发送和收录表情包。
-  WebUI：在插件详情页点击「表情管理」进入管理面板。
-version: 2.8.10
+  WebUI：在插件详情页点击「表情管理」进入管理面板；「外部源」可导入 Meme Pack、GitHub 资源包仓库或同步 HTTPS JSON 目录，也能在导入整套角色表情时批量分配角色。
+version: 3.0.0
 support_platforms:
   - aiocqhttp
   - telegram

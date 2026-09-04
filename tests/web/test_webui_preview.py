@@ -41,8 +41,9 @@ async def test_index_injects_bridge_and_i18n():
         assert '"zh-CN"' in html and '"en-US"' in html
         assert "./app.js" in html
         # 快速项：prod 构建 + favicon
-        assert "vue.global.prod.min.js" in html
+        assert "./vendor/vue.global.prod.js" in html
         assert 'rel="icon"' in html
+        assert (DASHBOARD_DIR / "vendor" / "vue.global.prod.js").is_file()
 
 
 @pytest.mark.asyncio
@@ -58,6 +59,7 @@ async def test_bridge_js_and_static_assets_served():
             ("/app.js", "createApp"),
             ("/template.js", "TEMPLATE"),
             ("/app.css", "{"),
+            ("/vendor/vue.global.prod.js", "Vue"),
         ):
             resp = await client.get(path)
             assert resp.status == 200, path
@@ -94,6 +96,11 @@ def test_light_theme_character_filter_uses_readable_surface():
     rule = css[start:css.index("}", start)]
     assert "background: var(--bg-elevated)" in rule
     assert "border-bottom-color: var(--glass-border)" in rule
+
+
+def test_dashboard_font_assets_are_pinned():
+    css = (DASHBOARD_DIR / "app.css").read_text(encoding="utf-8")
+    assert "@latest" not in css
 
     active_count_selector = '[data-theme="light"] .character-chip.active .character-chip-count'
     count_start = css.index(active_count_selector)

@@ -335,6 +335,7 @@ class PreviewServer:
         r.add_get("/vaultboy.png", self.handle_vaultboy)
         for filename in ("app.js", "app.css", "template.js"):
             r.add_get("/" + filename, self._make_static_handler(filename))
+        r.add_get("/vendor/{filename}", self._make_vendor_handler)
         r.add_route("*", PLUGIN_BASE + "/{endpoint:.+}", self.handle_api)
         r.add_get("/{tail:.+}", self.handle_fallback_404)
 
@@ -379,6 +380,19 @@ class PreviewServer:
             return web.Response(text=path.read_text(encoding="utf-8"), content_type=ctype, charset="utf-8")
 
         return handler
+
+    async def _make_vendor_handler(self, request: web.Request) -> web.Response:
+        filename = request.match_info["filename"]
+        if Path(filename).name != filename or filename != "vue.global.prod.js":
+            return web.Response(status=404, text="missing vendor asset")
+        path = DASHBOARD_DIR / "vendor" / filename
+        if not path.is_file():
+            return web.Response(status=404, text=f"missing {filename}")
+        return web.Response(
+            text=path.read_text(encoding="utf-8"),
+            content_type="application/javascript",
+            charset="utf-8",
+        )
 
     async def handle_fallback_404(self, request: web.Request) -> web.Response:
         return web.json_response({"success": False, "error": f"not found: {request.match_info['tail']}"}, status=404)

@@ -125,6 +125,42 @@
             "description": "Умный выбор: пресеты весов текстового сходства",
             "hint": ""
         },
+        "_external_source_section": {
+            "description": "Внешние источники мемов",
+            "hint": ""
+        },
+        "external_sources_enabled": {
+            "description": "Включить внешние источники мемов",
+            "hint": "Поддержка Meme Manager, AstrBot Meme Pack, репозиториев GitHub и ограниченных JSON API."
+        },
+        "external_source_allow_http": {
+            "description": "Разрешить HTTP-источники",
+            "hint": "По умолчанию требуется HTTPS; локальные и частные адреса блокируются."
+        },
+        "external_source_default_review": {
+            "description": "Отправлять внешний импорт на проверку",
+            "hint": "При включённой модерации внешний импорт всегда попадает в очередь проверки."
+        },
+        "external_source_max_items": {
+            "description": "Максимум изображений в источнике",
+            "hint": "По умолчанию: 2000."
+        },
+        "external_source_max_image_bytes": {
+            "description": "Максимальный размер одного изображения",
+            "hint": "По умолчанию: 32 МиБ."
+        },
+        "external_source_max_archive_bytes": {
+            "description": "Максимальный размер архива",
+            "hint": "По умолчанию: 1 ГиБ."
+        },
+        "external_source_max_uncompressed_bytes": {
+            "description": "Максимальный размер распакованных данных",
+            "hint": "По умолчанию: 4 ГиБ."
+        },
+        "external_source_max_pixels": {
+            "description": "Максимум пикселей в изображении",
+            "hint": "По умолчанию: 40 миллионов пикселей."
+        },
         "_webui_section": {
             "description": "WebUI",
             "hint": ""
@@ -235,6 +271,35 @@
             },
             "confirm": {
                 "delete_character": "Удалить персонажа {key}? Стикеры останутся, метка снимется."
+            },
+            "sources": {
+                "title": "Внешние источники",
+                "copy_title": "Безопасная локальная копия",
+                "copy_hint": "Изображения проверяются, дедуплицируются и копируются в этот плагин; исходные файлы не изменяются.",
+                "pack": "Импортировать набор",
+                "pack_hint": "ZIP / экспорт .meme-pack",
+                "github": "Репозиторий мемов GitHub",
+                "api": "Внешний JSON-каталог",
+                "preflight": "Предпросмотр",
+                "checking": "Проверка источника…",
+                "format_title": "Поддерживаемый формат набора",
+                "format_hint": "Рекомендуется AstrBot Meme Pack v2: manifest.json + memes/; semantic_metadata.json поддерживается. Также принимаются ZIP с PNG/JPG/GIF/WEBP/BMP; previews/ пропускается.",
+                "license": "Лицензия",
+                "attribution": "Авторство",
+                "capacity_note": "Внешние копии используют отдельный защищённый класс хранения.",
+                "auto_map": "Автосопоставление",
+                "review": "Сначала отправить на проверку",
+                "scope": "Область",
+                "assign_character": "Назначить персонажа набору",
+                "character_placeholder": "Ключ существующего или нового персонажа",
+                "character_hint": "Существующий ключ будет переиспользован; новый создаётся при импорте.",
+                "import": "Импорт",
+                "sync": "Синхронизация",
+                "import_job": "Задание импорта",
+                "available": "Доступные источники",
+                "empty": "Зарегистрированных источников нет.",
+                "forget": "Забыть",
+                "forget_confirm": "Забыть этот источник? Импортированные изображения останутся в библиотеке."
             }
         }
     }

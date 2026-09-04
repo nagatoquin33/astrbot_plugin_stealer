@@ -29,6 +29,7 @@ from .core.events.event_context import unwrap_event
 from .core.processing.natural_emotion_analyzer import SmartEmotionMatcher
 from .core.processing.image_processor_service import ImageProcessorService
 from .core.maintenance.service import MaintenanceService
+from .core.sources.source_service import SourceService
 from .core.util.normalization import canonicalize_path, normalize_label_list
 from .core.util.safe_io import safe_remove_file
 from .task_scheduler import TaskScheduler
@@ -82,6 +83,7 @@ class Main(Star):
         # 初始化核心服务类
         self.cache_service = CacheService(self.cache_dir)
         self.db_service = DatabaseService(self.cache_dir / "emoji.db")
+        self.source_service = SourceService(self)
         self.command_handler = CommandHandler(self)
         self.web_server = None
         self.plugin_api = PluginAPI(self)
@@ -228,6 +230,28 @@ class Main(Star):
             errors.append("待审核池容量必须是不小于10的整数")
             fixed.append("待审核池容量已重置为200")
             fixed_values["steal_pool_capacity"] = 200
+        source_limits = {
+            "external_source_max_items": (1, 20_000, 2000),
+            "external_source_max_image_bytes": (1024, 1024 * 1024 * 1024, 32 * 1024 * 1024),
+            "external_source_max_archive_bytes": (
+                1024,
+                8 * 1024 * 1024 * 1024,
+                1024 * 1024 * 1024,
+            ),
+            "external_source_max_uncompressed_bytes": (
+                1024,
+                16 * 1024 * 1024 * 1024,
+                4 * 1024 * 1024 * 1024,
+            ),
+            "external_source_max_pixels": (1, 200_000_000, 40_000_000),
+        }
+        for name, (minimum, maximum, default) in source_limits.items():
+            value = getattr(cfg, name, default)
+            if not isinstance(value, int) or not minimum <= value <= maximum:
+                errors.append(f"外部源限制 {name} 超出安全范围")
+                fixed_values[name] = default
+        if any(name in fixed_values for name in source_limits):
+            fixed.append("外部源资源限制已恢复为安全默认值")
         if errors:
             logger.warning(f"配置验证发现问题: {'; '.join(errors)}")
         if fixed:
@@ -1201,6 +1225,70 @@ class Main(Star):
         self._emoji_turn_state(event).mark_active_sent()
         logger.debug("[Stealer] LLM 已通过通用消息工具发送图片，跳过本轮被动表情")
 
+    async def _schedule_passive_emoji_response(
+        self,
+        event: AstrMessageEvent,
+        text: str,
+    ) -> bool:
+        """Apply the passive-emoji gates and schedule at most one task per turn."""
+
+        normalized_text = str(text or "").strip()
+        if not normalized_text:
+            return False
+        turn_state = self._emoji_turn_state(event)
+        if turn_state.is_active_sent():
+            return False
+
+        turn_allowed = await self._resolve_auto_emoji_turn_permission(event)
+        if not turn_allowed or self._should_skip_auto_emoji_by_gate(normalized_text):
+            return False
+        if not self._claim_auto_emoji_turn(event):
+            return False
+
+        user_message = ""
+        try:
+            user_message = event.get_message_str() or ""
+        except Exception:
+            pass
+        task = self._safe_create_task(
+            self._async_analyze_and_send_emoji(
+                event,
+                normalized_text,
+                [],
+                user_message=user_message,
+            ),
+            name="emoji_analyze_passive",
+        )
+        self._schedule_auto_emoji_task(event, task)
+        return True
+
+    @staticmethod
+    def _response_chain_has_image(response: Any) -> bool:
+        chain = getattr(response, "result_chain", None)
+        components = getattr(chain, "chain", chain if isinstance(chain, list) else [])
+        return any(isinstance(component, MessageImage) for component in components or [])
+
+    @filter.on_llm_response()
+    async def _prepare_emoji_after_llm(self, event: AstrMessageEvent, response: Any):
+        """Capture final LLM text before the streaming result is decorated.
+
+        AstrBot skips ``on_decorating_result`` while a result is still a
+        streaming result.  The LLM response hook runs after the agent has its
+        final response and gives passive emoji scheduling a stable entry point.
+        """
+
+        role = str(getattr(response, "role", "assistant") or "assistant").lower()
+        if role not in {"", "assistant"}:
+            return False
+        if getattr(response, "tools_call_args", None):
+            return False
+        if self._response_chain_has_image(response):
+            return False
+        text = str(getattr(response, "completion_text", "") or "").strip()
+        if not text:
+            return False
+        return await self._schedule_passive_emoji_response(event, text)
+
     @filter.on_decorating_result(priority=100)
     async def _prepare_emoji_response(self, event: AstrMessageEvent):
         """LLM 回复完成后异步发送表情包（不阻塞回复）。"""
@@ -1211,32 +1299,8 @@ class Main(Star):
             return False
         if any(isinstance(comp, MessageImage) for comp in getattr(result, "chain", [])):
             return False
-        turn_state = self._emoji_turn_state(event)
-        if turn_state.is_active_sent():
-            return False
         text = result.get_plain_text() or ""
-        if not text.strip():
-            return False
-
-        turn_allowed = await self._resolve_auto_emoji_turn_permission(event)
-        if not turn_allowed:
-            return False
-        if self._should_skip_auto_emoji_by_gate(text):
-            return False
-
-        if not self._claim_auto_emoji_turn(event):
-            return False
-        user_message = ""
-        try:
-            user_message = event.get_message_str() or ""
-        except Exception:
-            pass
-        task = self._safe_create_task(
-            self._async_analyze_and_send_emoji(event, text, [], user_message=user_message),
-            name="emoji_analyze_passive",
-        )
-        self._schedule_auto_emoji_task(event, task)
-        return True
+        return await self._schedule_passive_emoji_response(event, text)
 
     async def initialize(self):
         """初始化插件运行时资源。
@@ -1261,6 +1325,7 @@ class Main(Star):
                     self.plugin_config.DEFAULT_CATEGORIES
                 )
             )
+            await self.source_service.initialize()
             await self.image_processor_service._auto_migrate_categories()
             self._auto_merge_existing_categories()
             try:
@@ -1317,6 +1382,11 @@ class Main(Star):
         if self.cache_service:
             try:
                 await self.cache_service.cleanup()
+            except Exception:
+                pass
+        if self.source_service:
+            try:
+                await self.source_service.close()
             except Exception:
                 pass
         if self.task_scheduler:

@@ -274,6 +274,13 @@ export const TEMPLATE = `
                             </svg>
                             {{ t('pages.dashboard.actions.batch_import', 'Batch Import') }}
                         </button>
+                        <button @click="openSourceModal" class="codex-btn source-open-btn">
+                            <svg style="width:16px;height:16px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M8 12h8m-4-4v8M5 19a4 4 0 010-8 7 7 0 0113.8 1.6A3.5 3.5 0 0118.5 19H5z" />
+                            </svg>
+                            {{ t('pages.dashboard.actions.sources', 'Sources') }}
+                        </button>
                         <button @click="runStorageCleanup" class="codex-btn">
                             <svg style="width:16px;height:16px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -1135,6 +1142,199 @@ export const TEMPLATE = `
                 </div>
             </div>
         </form>
+    </div>
+</div>
+
+<div v-if="sourceOpen" class="modal-overlay" @click.self="closeSourceModal">
+    <div class="modal-panel modal-lg source-modal">
+        <div class="modal-panel-corner-bl"></div>
+        <div class="modal-panel-corner-br"></div>
+        <div class="modal-header">
+            <div>
+                <h2>{{ t('pages.dashboard.sources.title', 'External Sources') }}</h2>
+                <p class="source-header-sub">Meme Manager · AstrBot Meme Pack · GitHub Repo · HTTPS JSON API</p>
+            </div>
+            <button @click="closeSourceModal" class="modal-close">
+                <svg style="width:20px;height:20px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+            </button>
+        </div>
+
+        <div class="modal-pad source-layout">
+            <div class="source-safety-note">
+                <strong>{{ t('pages.dashboard.sources.copy_title', 'Safe local copy') }}</strong>
+                <span>{{ t('pages.dashboard.sources.copy_hint', 'Imported images are validated, deduplicated, and copied into this plugin. Original plugin files stay untouched.') }}</span>
+            </div>
+
+            <div class="source-input-grid">
+                <label class="source-input-card">
+                    <span class="source-card-kicker">PACK</span>
+                    <strong>{{ t('pages.dashboard.sources.pack', 'Import resource pack') }}</strong>
+                    <span>{{ sourceFile?.name || t('pages.dashboard.sources.pack_hint', 'ZIP / .meme-pack export') }}</span>
+                    <input type="file" accept=".zip,.meme-pack,application/zip" @change="handleSourceFile">
+                </label>
+                <div class="source-input-card">
+                    <span class="source-card-kicker">GITHUB</span>
+                    <strong>{{ t('pages.dashboard.sources.github', 'GitHub meme repository') }}</strong>
+                    <div class="source-api-row">
+                        <input v-model="sourceForm.github" type="text" class="codex-input"
+                            placeholder="https://github.com/owner/meme-pack or owner/repo">
+                        <button type="button" class="codex-btn" @click="inspectGitHubSource"
+                            :disabled="sourceLoading || !sourceForm.github">
+                            {{ t('pages.dashboard.sources.preflight', 'Preflight') }}
+                        </button>
+                    </div>
+                </div>
+                <div class="source-input-card">
+                    <span class="source-card-kicker">API</span>
+                    <strong>{{ t('pages.dashboard.sources.api', 'External JSON catalog') }}</strong>
+                    <div class="source-api-row">
+                        <input v-model="sourceForm.endpoint" type="url" class="codex-input"
+                            placeholder="https://example.com/memes.json">
+                        <button type="button" class="codex-btn" @click="inspectExternalApi"
+                            :disabled="sourceLoading || !sourceForm.endpoint">
+                            {{ t('pages.dashboard.sources.preflight', 'Preflight') }}
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="source-format-note">
+                <strong>{{ t('pages.dashboard.sources.format_title', 'Accepted pack format') }}</strong>
+                <span>{{ t('pages.dashboard.sources.format_hint', 'Preferred: AstrBot Meme Pack v2 export or a repository containing manifest.json + memes/; semantic_metadata.json is supported. A ZIP with supported images is also accepted. previews/ are ignored.') }}</span>
+            </div>
+
+            <div v-if="sourceError" class="error-banner">{{ sourceError }}</div>
+            <div v-if="sourceLoading" class="source-loading-line">
+                <span class="batch-spinner"></span>
+                {{ t('pages.dashboard.sources.checking', 'Checking source...') }}
+            </div>
+
+            <section v-if="sourceInspection" class="source-inspection">
+                <div class="source-inspection-head">
+                    <div>
+                        <span class="source-card-kicker">PREFLIGHT OK</span>
+                        <h3>{{ sourceInspection.name }}</h3>
+                    </div>
+                    <div class="source-metrics">
+                        <span><b>{{ sourceInspection.item_count }}</b> images</span>
+                        <span><b>{{ formatBytes(sourceInspection.total_bytes) || '—' }}</b></span>
+                        <span><b>{{ sourceInspection.categories?.length || 0 }}</b> categories</span>
+                    </div>
+                </div>
+                <div v-if="sourceInspection.manifest?.license || sourceInspection.manifest?.attribution || sourceInspection.manifest?.author"
+                    class="source-license-note">
+                    <span v-if="sourceInspection.manifest?.license">{{ t('pages.dashboard.sources.license', 'License') }}: {{ sourceInspection.manifest.license }}</span>
+                    <span v-if="sourceInspection.manifest?.attribution || sourceInspection.manifest?.author">{{ t('pages.dashboard.sources.attribution', 'Attribution') }}: {{ sourceInspection.manifest.attribution || sourceInspection.manifest.author }}</span>
+                </div>
+
+                <div v-if="sourceInspection.capacity?.would_exceed_limit" class="source-warning">
+                    {{ t('pages.dashboard.sources.capacity_note', 'This pack is larger than the native collection limit. External copies are protected and use a separate retention class.') }}
+                </div>
+                <div v-if="sourceInspection.warnings?.length" class="source-warning">
+                    <div v-for="warning in sourceInspection.warnings" :key="warning">{{ warning }}</div>
+                </div>
+
+                <div v-if="sourceInspection.categories?.length" class="source-map-grid">
+                    <label v-for="sourceCategory in sourceInspection.categories" :key="sourceCategory">
+                        <span>{{ sourceCategory }}</span>
+                        <select v-model="sourceCategoryMap[sourceCategory]" class="codex-input">
+                            <option value="">{{ t('pages.dashboard.sources.auto_map', 'Auto map') }}</option>
+                            <option v-for="cat in categories" :key="cat.key" :value="cat.key">{{ cat.name }}</option>
+                        </select>
+                    </label>
+                </div>
+
+                <div class="source-options">
+                    <label>
+                        <input type="checkbox" v-model="sourceForm.review"
+                            :disabled="sourceDefaults.review_forced">
+                        {{ t('pages.dashboard.sources.review', 'Send imports to Pending first') }}
+                    </label>
+                    <label>
+                        {{ t('pages.dashboard.sources.scope', 'Scope') }}
+                        <select v-model="sourceForm.scope_mode" class="codex-input">
+                            <option value="public">{{ t('pages.dashboard.scope.public', 'Public') }}</option>
+                            <option value="local">{{ t('pages.dashboard.scope.local', 'Local only') }}</option>
+                        </select>
+                    </label>
+                    <input v-if="sourceForm.scope_mode === 'local'" v-model="sourceForm.origin_target"
+                        class="codex-input source-origin-input" placeholder="group:123456 / user:123456">
+                    <label class="source-character-toggle">
+                        <input type="checkbox" v-model="sourceForm.assign_character">
+                        {{ t('pages.dashboard.sources.assign_character', 'Assign a character') }}
+                    </label>
+                    <input v-if="sourceForm.assign_character" v-model="sourceForm.character"
+                        list="source-character-options" class="codex-input source-character-input"
+                        :placeholder="t('pages.dashboard.sources.character_placeholder', 'Existing or new character key')">
+                    <span v-if="sourceForm.assign_character" class="source-character-hint">
+                        {{ t('pages.dashboard.sources.character_hint', 'Existing keys are reused; a new key is created during import.') }}
+                    </span>
+                    <datalist id="source-character-options">
+                        <option v-for="item in characters" :key="item.key" :value="item.key">{{ item.name }}</option>
+                    </datalist>
+                    <button type="button" class="codex-btn primary" @click="startSourceImport()"
+                        :disabled="sourceLoading || sourceJob?.status === 'queued' || sourceJob?.status === 'running'">
+                        {{ t('pages.dashboard.sources.import', 'Import Source') }}
+                    </button>
+                </div>
+            </section>
+
+            <section v-if="sourceJob" class="source-job" :class="'is-' + sourceJob.status">
+                <div class="source-job-head">
+                    <strong>{{ sourceJob.source_name || t('pages.dashboard.sources.import_job', 'Import job') }}</strong>
+                    <span>{{ sourceJob.status }}</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" :style="{ width: (sourceJob.total ? sourceJob.processed / sourceJob.total * 100 : 0) + '%' }"></div>
+                </div>
+                <div class="source-job-stats">
+                    <span>{{ sourceJob.processed }} / {{ sourceJob.total }}</span>
+                    <span class="source-ok">+{{ sourceJob.imported }} imported</span>
+                    <span>{{ sourceJob.duplicates }} duplicates</span>
+                    <span v-if="sourceJob.pending">{{ sourceJob.pending }} pending</span>
+                    <span v-if="sourceJob.failed" class="source-failed">{{ sourceJob.failed }} failed</span>
+                    <button v-if="sourceJob.status === 'queued' || sourceJob.status === 'running'"
+                        type="button" class="codex-btn" @click="cancelSourceJob">Cancel</button>
+                </div>
+                <div v-if="sourceJob.error" class="error-banner">{{ sourceJob.error }}</div>
+                <div v-if="sourceJob.errors?.length" class="source-job-errors">
+                    <div v-for="error in sourceJob.errors" :key="error">{{ error }}</div>
+                </div>
+            </section>
+
+            <section class="source-registry">
+                <div class="source-section-head">
+                    <div>
+                        <span class="source-card-kicker">REGISTRY</span>
+                        <h3>{{ t('pages.dashboard.sources.available', 'Available sources') }}</h3>
+                    </div>
+                    <button type="button" class="codex-btn" @click="fetchSources" :disabled="sourceLoading">↻</button>
+                </div>
+                <div v-if="!sourceList.length && !sourceLoading" class="source-empty">
+                    {{ t('pages.dashboard.sources.empty', 'No registered sources. Same-instance Meme Manager packs appear here automatically.') }}
+                </div>
+                <div v-for="source in sourceList" :key="source.source_id" class="source-row">
+                    <div class="source-row-main">
+                        <strong>{{ source.name }}</strong>
+                        <span>{{ source.source_type }} · {{ source.item_count || 0 }} items</span>
+                        <small>{{ source.endpoint }}</small>
+                    </div>
+                    <span class="source-status" :class="'is-' + source.status">{{ source.status }}</span>
+                    <div class="source-row-actions">
+                        <button type="button" class="codex-btn" @click="inspectSource(source)">
+                            {{ t('pages.dashboard.sources.preflight', 'Preflight') }}
+                        </button>
+                        <button type="button" class="codex-btn primary" @click="syncSource(source)">
+                            {{ source.discovered ? t('pages.dashboard.sources.import', 'Import') : t('pages.dashboard.sources.sync', 'Sync') }}
+                        </button>
+                        <button v-if="!source.discovered" type="button" class="codex-btn danger"
+                            @click="forgetSource(source)">{{ t('pages.dashboard.sources.forget', 'Forget') }}</button>
+                    </div>
+                </div>
+            </section>
+        </div>
     </div>
 </div>
 

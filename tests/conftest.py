@@ -79,6 +79,7 @@ def _install_compatible_stubs() -> None:
 
     filter_stub = types.SimpleNamespace(
         on_decorating_result=_decorator,
+        on_llm_response=_decorator,
         on_llm_tool_respond=_decorator,
         command_group=lambda *args, **kwargs: _CommandGroup(),
         permission_type=_decorator,
@@ -183,6 +184,10 @@ def _install_compatible_stubs() -> None:
         f"{package_name}.core.processing.natural_emotion_analyzer",
         f"{package_name}.core.db.database_service",
         f"{package_name}.core.db.index_manager",
+        f"{package_name}.core.sources.pack_source",
+        f"{package_name}.core.sources.http_source",
+        f"{package_name}.core.sources.github_source",
+        f"{package_name}.core.sources.source_service",
         f"{package_name}.core.config.config",
         f"{package_name}.api.image_handler",
         f"{package_name}.api.batch_handler",

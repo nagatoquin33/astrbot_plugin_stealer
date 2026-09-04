@@ -38,6 +38,18 @@ def get_event_session_key(event: Any | None, *, default: str = "global") -> str:
     if event is None:
         return default
 
+    # AstrBot v4's unified message origin carries the platform, message type,
+    # and session identifier.  It is the only key that remains collision-free
+    # when two adapters use the same local group/user id.
+    try:
+        unified_msg_origin = normalize_event_value(
+            getattr(event, "unified_msg_origin", "")
+        )
+    except Exception:
+        unified_msg_origin = ""
+    if unified_msg_origin:
+        return unified_msg_origin
+
     getter = getattr(event, "get_session_id", None)
     if callable(getter):
         try:
@@ -46,14 +58,7 @@ def get_event_session_key(event: Any | None, *, default: str = "global") -> str:
             session_id = ""
         if session_id:
             return session_id
-
-    try:
-        unified_msg_origin = normalize_event_value(
-            getattr(event, "unified_msg_origin", "")
-        )
-    except Exception:
-        unified_msg_origin = ""
-    return unified_msg_origin or default
+    return default
 
 
 def unwrap_event(event: Any) -> Any:

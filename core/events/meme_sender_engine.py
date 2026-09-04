@@ -359,8 +359,10 @@ class MemeSenderEngine:
 
             result = event.get_result()
             if result and not result.get_plain_text().strip():
-                logger.debug("[MemeSenderEngine] 主回复已被置空，跳过自动表情")
-                return
+                content_type = str(getattr(result, "result_content_type", "") or "").lower()
+                if "streaming" not in content_type:
+                    logger.debug("[MemeSenderEngine] 主回复已被置空，跳过自动表情")
+                    return
 
             delay = self.get_meme_send_delay(text, task_start)
             if delay > 0:

@@ -125,6 +125,42 @@
             "description": "智能选择：文字距离融合权重预设",
             "hint": ""
         },
+        "_external_source_section": {
+            "description": "外部表情包源",
+            "hint": ""
+        },
+        "external_sources_enabled": {
+            "description": "启用外部表情包源",
+                "hint": "支持 Meme Manager / AstrBot Meme Pack、GitHub 资源包仓库和受限 JSON API。导入内容会复制到本插件目录。"
+        },
+        "external_source_allow_http": {
+            "description": "允许明文 HTTP 外部源",
+            "hint": "默认仅允许 HTTPS。回环、内网、链路本地和保留地址始终受到拦截。"
+        },
+        "external_source_default_review": {
+            "description": "外部导入默认进入待审核池",
+            "hint": "启用内容审核时，外部导入也会自动进入待审核池。"
+        },
+        "external_source_max_items": {
+            "description": "单个外部源最大图片数",
+            "hint": "默认 2000。"
+        },
+        "external_source_max_image_bytes": {
+            "description": "外部单图字节上限",
+            "hint": "默认 32 MiB。"
+        },
+        "external_source_max_archive_bytes": {
+            "description": "资源包压缩体积上限",
+            "hint": "默认 1 GiB。"
+        },
+        "external_source_max_uncompressed_bytes": {
+            "description": "资源包解压体积上限",
+            "hint": "默认 4 GiB。"
+        },
+        "external_source_max_pixels": {
+            "description": "外部单图最大像素数",
+            "hint": "默认 4000 万像素。"
+        },
         "_webui_section": {
             "description": "WebUI",
             "hint": ""
@@ -239,6 +275,7 @@
                 "repair_origin": "修复来源",
                 "confirm": "确认",
                 "characters": "角色管理",
+                "sources": "外部源",
                 "assign_character": "分配角色",
                 "open_navigation": "打开导航"
             },
@@ -450,6 +487,35 @@
                 "hint": "角色由你在管理面板手工归档，VLM 不会识别角色。先创建角色，再点卡片编辑或用批量分配。",
                 "manage": "角色管理",
                 "bar_hint": "点角色筛选图库；「角色管理」里新增或删除角色。"
+            },
+            "sources": {
+                "title": "外部表情包源",
+                "copy_title": "安全本地副本",
+                "copy_hint": "导入时会校验格式、查重并复制到本插件目录，其他插件的原文件保持不变。",
+                "pack": "导入资源包",
+                "pack_hint": "ZIP / .meme-pack 导出文件",
+                "github": "GitHub 表情包仓库",
+                "api": "外部 JSON 目录",
+                "preflight": "预检",
+                "checking": "正在检查外部源…",
+                "format_title": "支持的资源包格式",
+                "format_hint": "推荐 AstrBot Meme Pack v2：manifest.json + memes/，可附带 semantic_metadata.json；也接受含 PNG/JPG/GIF/WEBP/BMP 的 ZIP，previews/ 会跳过。",
+                "license": "许可证",
+                "attribution": "署名",
+                "capacity_note": "该资源包超过原生收集上限；外部副本使用独立保留等级，不会触发原生容量淘汰。",
+                "auto_map": "自动映射",
+                "review": "导入后先进入待审核池",
+                "scope": "作用域",
+                "assign_character": "为整套图片分配角色",
+                "character_placeholder": "已有角色或新角色标识",
+                "character_hint": "已有标识会直接复用；新标识会在导入时创建角色。",
+                "import": "导入",
+                "sync": "同步",
+                "import_job": "导入任务",
+                "available": "可用外部源",
+                "empty": "尚无已注册外部源。同一 AstrBot 实例中的 Meme Manager 资源包会自动显示。",
+                "forget": "移除记录",
+                "forget_confirm": "移除此外部源记录？已经导入的图片会继续保留在图库中。"
             }
         }
     }

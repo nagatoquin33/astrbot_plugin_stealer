@@ -125,6 +125,42 @@
             "description": "Smart selection: text-distance fusion presets",
             "hint": ""
         },
+        "_external_source_section": {
+            "description": "External Meme Sources",
+            "hint": ""
+        },
+        "external_sources_enabled": {
+            "description": "Enable external meme sources",
+                "hint": "Supports Meme Manager / AstrBot Meme Pack, GitHub repositories, and constrained JSON APIs. Imports are copied into this plugin."
+        },
+        "external_source_allow_http": {
+            "description": "Allow plaintext HTTP sources",
+            "hint": "HTTPS is required by default. Loopback, private, link-local, and reserved addresses remain blocked."
+        },
+        "external_source_default_review": {
+            "description": "Send external imports to Pending by default",
+            "hint": "External imports also enter Pending automatically when content moderation is enabled."
+        },
+        "external_source_max_items": {
+            "description": "Maximum images per source",
+            "hint": "Default: 2000."
+        },
+        "external_source_max_image_bytes": {
+            "description": "Maximum bytes per external image",
+            "hint": "Default: 32 MiB."
+        },
+        "external_source_max_archive_bytes": {
+            "description": "Maximum compressed pack size",
+            "hint": "Default: 1 GiB."
+        },
+        "external_source_max_uncompressed_bytes": {
+            "description": "Maximum unpacked pack size",
+            "hint": "Default: 4 GiB."
+        },
+        "external_source_max_pixels": {
+            "description": "Maximum pixels per external image",
+            "hint": "Default: 40 million pixels."
+        },
         "_webui_section": {
             "description": "WebUI",
             "hint": ""
@@ -239,6 +275,7 @@
                 "repair_origin": "Repair Origin",
                 "confirm": "Confirm",
                 "characters": "Manage characters",
+                "sources": "Sources",
                 "assign_character": "Assign Character",
                 "open_navigation": "Open navigation"
             },
@@ -450,6 +487,35 @@
                 "hint": "You assign characters in the dashboard. VLM does not detect them. Create a character first, then edit a card or batch-assign.",
                 "manage": "Manage characters",
                 "bar_hint": "Filter the library by character. Use Manage characters to add or remove them."
+            },
+            "sources": {
+                "title": "External Sources",
+                "copy_title": "Safe local copy",
+                "copy_hint": "Imports are validated, deduplicated, and copied into this plugin. Other plugins' original files remain unchanged.",
+                "pack": "Import resource pack",
+                "pack_hint": "ZIP / .meme-pack export",
+                "github": "GitHub meme repository",
+                "api": "External JSON catalog",
+                "preflight": "Preflight",
+                "checking": "Checking source...",
+                "format_title": "Accepted pack format",
+                "format_hint": "Preferred AstrBot Meme Pack v2: manifest.json + memes/, optionally semantic_metadata.json. ZIPs containing PNG/JPG/GIF/WEBP/BMP images are also accepted; previews/ is skipped.",
+                "license": "License",
+                "attribution": "Attribution",
+                "capacity_note": "This pack exceeds the native collection limit. External copies use a protected retention class.",
+                "auto_map": "Auto map",
+                "review": "Send imports to Pending first",
+                "scope": "Scope",
+                "assign_character": "Assign a character to this series",
+                "character_placeholder": "Existing or new character key",
+                "character_hint": "Existing keys are reused; a new key is created during import.",
+                "import": "Import",
+                "sync": "Sync",
+                "import_job": "Import job",
+                "available": "Available sources",
+                "empty": "No registered sources. Same-instance Meme Manager packs appear automatically.",
+                "forget": "Forget",
+                "forget_confirm": "Forget this source? Imported images will remain in your library."
             }
         }
     }
