@@ -102,11 +102,17 @@
     },
     "hint": "设为 0 时从不发送，设为 1 时每次都发送。建议 0.1~0.3，避免刷屏。"
   },
+  "send_meme_as_qq_sticker": {
+    "description": "以 QQ 表情包形式发送",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后在 QQ 中按自定义表情包展示；关闭后按普通图片发送。仅对 QQ（aiocqhttp/NapCat）生效，与图片是否转换为 GIF 独立。"
+  },
   "send_meme_as_gif": {
     "description": "以 GIF 格式发送",
     "type": "bool",
     "default": false,
-    "hint": "开启后始终以 GIF 输出，更接近真表情包样式。关闭时按原文件格式发送（png/jpg/gif 等）。开启后高频发送大图/动图场景会有较高瞬时内存占用。"
+    "hint": "开启后始终以 GIF 输出。QQ 中是否按表情包展示由「以 QQ 表情包形式发送」控制。关闭时按原文件格式发送（png/jpg/gif 等）。开启后高频发送大图/动图场景会有较高瞬时内存占用。"
   },
   "meme_send_delay": {
     "description": "固定延迟（秒）",
