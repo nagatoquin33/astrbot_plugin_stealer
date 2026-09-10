@@ -20,7 +20,7 @@ def qq_delivery(monkeypatch, tmp_path):
     module.AiocqhttpMessageEvent = QQEvent
     monkeypatch.setitem(sys.modules, module_name, module)
     monkeypatch.setattr(emoji_delivery, "Image", lambda **kwargs: kwargs)
-    monkeypatch.setattr(emoji_delivery, "MessageChain", lambda **kwargs: kwargs)
+    monkeypatch.setattr(emoji_delivery, "MessageChain", list)
     event = QQEvent()
     event._parse_onebot_json = AsyncMock(
         return_value=[{"type": "image", "data": {"file": "base64://image"}}]
@@ -62,9 +62,7 @@ async def test_qq_sticker_type_with_enabled_or_legacy_config(
         ],
     )
     expected_source = "base64://gif" if as_gif else path
-    event._parse_onebot_json.assert_awaited_once_with(
-        {"chain": [{"file": expected_source}]}
-    )
+    event._parse_onebot_json.assert_awaited_once_with([{"file": expected_source}])
 
 
 @pytest.mark.asyncio

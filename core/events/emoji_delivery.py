@@ -38,7 +38,7 @@ async def send_qq_image_as_sticker(
                 encoded = await image_processor._file_to_gif_base64(file_path)
                 if encoded:
                     file_source = f"base64://{encoded}"
-        chain = MessageChain(chain=[Image(file=file_source)])
+        chain = MessageChain([Image(file=file_source)])
         onebot_message = await event._parse_onebot_json(chain)
         onebot_message[0]["data"]["summary"] = summary
         # NapCat: 0 为普通图片，1 为自定义表情；summary 只修改摘要。
