@@ -88,6 +88,15 @@ def test_grid_does_not_prefetch_originals_on_hover():
     assert "requestOriginalForPreview" in app_js
 
 
+def test_preview_exposes_vlm_reanalysis_and_ab_apply_controls():
+    template = (DASHBOARD_DIR / "template.js").read_text(encoding="utf-8")
+    app_js = (DASHBOARD_DIR / "app.js").read_text(encoding="utf-8")
+    assert "reanalyzePreview" in template and "applyReanalysis" in template
+    assert "vlm-compare-grid" in template
+    assert "body: JSON.stringify({ hash })" in app_js
+    assert "vlmReanalysisResult.value" in app_js
+
+
 def test_light_theme_character_filter_uses_readable_surface():
     """issue #108：亮色主题的角色筛选栏不得继续使用暗色工具栏渐变。"""
     css = (DASHBOARD_DIR / "app.css").read_text(encoding="utf-8")
@@ -403,6 +412,25 @@ async def test_analyze_emotions_storage_scan_cleanup():
         )).json())
         assert analyzed["success"] is True
         assert {"category", "tags", "desc"} <= set(analyzed)
+
+        item = (await (await client.get(f"{PLUGIN_BASE}/images?page=1&size=1")).json())["images"][0]
+        reanalyzed = (await (await client.post(
+            f"{PLUGIN_BASE}/analyze", json={"hash": item["hash"]}
+        )).json())
+        assert reanalyzed["success"] is True
+        applied = (await (await client.post(
+            f"{PLUGIN_BASE}/images/update",
+            json={
+                "hash": item["hash"],
+                "category": reanalyzed["category"],
+                "tags": reanalyzed["tags"],
+                "desc": reanalyzed["desc"],
+                "scenes": reanalyzed["scenes"],
+                "overlay_text": reanalyzed["overlay_text"],
+                "emotions": reanalyzed["emotions"],
+            },
+        )).json())
+        assert applied["success"] is True
 
         emotions = (await (await client.get(f"{PLUGIN_BASE}/emotions")).json())
         assert emotions["success"] is True and len(emotions["emotions"]) == 17

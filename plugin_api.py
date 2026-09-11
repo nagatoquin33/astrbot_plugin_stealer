@@ -481,6 +481,7 @@ class PluginAPI:
                 "tags": meta.get("tags", []),
                 "desc": meta.get("desc", ""),
                 "scenes": self._split_scenes(meta.get("scenes", [])),
+                "emotions": self._split_csv(meta.get("emotions", [])),
                 "scope_mode": self._norm_scope(meta.get("scope_mode")),
                 "origin_target": str(meta.get("origin_target", "") or ""),
                 "created_at": meta.get("created_at", 0),

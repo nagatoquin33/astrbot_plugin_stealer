@@ -67,6 +67,15 @@ class TestBuildCategoriesList:
         ]
 
 
+def test_build_image_item_includes_emotions_for_reanalysis_comparison():
+    api = PluginAPI(types.SimpleNamespace())
+    item = api._build_image_item(
+        "meme.gif",
+        {"hash": "h", "emotions": ["happy", "surprised"], "tags": [], "scenes": []},
+    )
+    assert item["emotions"] == ["happy", "surprised"]
+
+
 class TestExternalSourceUpload:
     def test_bounded_stream_write(self, tmp_path):
         target = tmp_path / "pack.zip"

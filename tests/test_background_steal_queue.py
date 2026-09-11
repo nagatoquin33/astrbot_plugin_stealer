@@ -111,6 +111,25 @@ class BackgroundQueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.processed), 1)
         self.assertFalse(Path(self.processed[0]["file_path"]).exists())
 
+    async def test_local_media_suffix_follows_file_magic(self):
+        source = self._write_file("event-owned.jpg")
+        source.write_bytes(b"RIFF" + (12).to_bytes(4, "little") + b"WEBP" + b"fixture")
+        self.plugin.event_handler = types.SimpleNamespace(
+            _download_url_to_temp=self._download_url_to_temp
+        )
+
+        accepted = await self.queue.submit_capture_async(
+            [{"media_ref": str(source), "source": "automatic", "to_pending": True}]
+        )
+
+        self.assertTrue(accepted)
+        for _ in range(20):
+            if self.processed:
+                break
+            await asyncio.sleep(0.01)
+        self.assertEqual(len(self.processed), 1)
+        self.assertEqual(Path(self.processed[0]["file_path"]).suffix, ".webp")
+
     async def test_remote_capture_tasks_are_bounded(self):
         started = asyncio.Event()
         release = asyncio.Event()

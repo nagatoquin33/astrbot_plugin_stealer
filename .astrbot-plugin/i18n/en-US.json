@@ -261,6 +261,9 @@
                 "cancel": "Cancel",
                 "save": "Save",
                 "analyzing": "Analyzing...",
+                "reanalyze": "Re-analyze with VLM",
+                "saving": "Applying...",
+                "apply_vlm": "Apply B result",
                 "auto_analyze": "Auto Analyze",
                 "uploading": "Uploading...",
                 "confirm_add": "Confirm Add",
@@ -334,6 +337,7 @@
                 "add_method_unknown": "Unknown",
                 "character": "Character",
                 "overlay_text": "Overlay text",
+                "emotions": "Emotions",
                 "id": "ID"
             },
             "units": {
@@ -353,6 +357,7 @@
                 "no_tags": "No tags",
                 "no_scenes": "No usage lines",
                 "no_overlay_text": "None",
+                "none": "None",
                 "no_preview": "No preview",
                 "scene_separator_hint": "comma separated",
                 "tag_separator_hint": "comma separated",
@@ -381,7 +386,12 @@
             },
             "analysis": {
                 "scenes_title": "Detected usage lines",
-                "scenes_hint": "Click to add or remove a chat line this sticker can reply to."
+                "scenes_hint": "Click to add or remove a chat line this sticker can reply to.",
+                "reanalysis_title": "VLM re-analysis",
+                "reanalysis_hint": "Run the vision model again and compare the stored labels before applying them.",
+                "current": "Current labels",
+                "new_result": "New VLM result",
+                "reanalysis_preserve": "Character, scope, favorites and usage history stay unchanged."
             },
             "batch": {
                 "include_subfolders": "Include subfolders",
@@ -442,6 +452,9 @@
                 "batch_import_failed": "Batch import failed.",
                 "select_image_first": "Select an image first.",
                 "analyze_failed": "Analyze failed.",
+                "reanalyze_failed": "Re-analysis failed.",
+                "reanalyze_apply_failed": "Failed to apply VLM result.",
+                "reanalyze_applied": "VLM result applied.",
                 "no_valid_info": "No valid information recognized.",
                 "add_failed": "Add failed."
             },

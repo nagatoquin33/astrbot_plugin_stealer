@@ -72,10 +72,19 @@ class ImageRenderService:
                 return cached_b64
 
         try:
+            # GIF 本身已经包含完整的帧和时序。重新编码会丢失大量帧，
+            # 也会让原始 duration 失去对应关系，因此直接透传原始字节。
+            if self._is_gif_file(file_path):
+                result = await self.file_to_base64(file_path)
+                if result:
+                    self._gif_base64_cache[cache_key] = (time.time(), result)
+                    self._evict_gif_base64_cache()
+                return result
+
             if PILImage is None:
                 return await self.file_to_base64(file_path)
 
-            # GIF 转换限制常量：不改尺寸不改 optimize
+            # 非 GIF 动图转换限制常量：不改尺寸不改 optimize。
             MAX_FRAMES = 30
 
             def _sync_convert_to_gif(fp: str) -> str:
@@ -85,18 +94,54 @@ class ImageRenderService:
                     n_frames = int(getattr(im, "n_frames", 1) or 1)
 
                     if is_animated and n_frames > 1:
-                        actual_frames = min(n_frames, MAX_FRAMES)
+                        selected_indices = self._uniform_frame_indices(n_frames, MAX_FRAMES)
+                        selected_set = set(selected_indices)
                         frames = []
-                        durations = []
-                        frame_step = max(1, n_frames // actual_frames)
-                        for frame_idx in range(0, n_frames, frame_step):
-                            if len(frames) >= MAX_FRAMES:
-                                break
+                        frame_durations = []
+                        fingerprints = []
+                        for frame_idx in range(n_frames):
                             im.seek(frame_idx)
-                            frame = im.convert("RGBA")
-                            # 保留帧原始尺寸，避免二次缩放
-                            frames.append(frame)
-                            durations.append(im.info.get("duration", 100))
+                            frame_durations.append(
+                                max(1, int(im.info.get("duration", 100) or 100))
+                            )
+                            if frame_idx in selected_set:
+                                frame = im.convert("RGBA")
+                                # 保留帧原始尺寸，避免二次缩放。
+                                frames.append(frame)
+                                fingerprints.append(self._frame_fingerprint(frame))
+
+                        # 极短的非 GIF 动画可能只在两个抽样点之间变化。
+                        # 若均匀抽样看起来完全相同，补入第一张真正不同的帧，
+                        # 避免输出被误认为静态图。
+                        if len(frames) > 1 and len(set(fingerprints)) == 1:
+                            baseline = fingerprints[0]
+                            for frame_idx in range(n_frames):
+                                if frame_idx in selected_set:
+                                    continue
+                                im.seek(frame_idx)
+                                candidate = im.convert("RGBA")
+                                if self._frame_fingerprint(candidate) != baseline:
+                                    selected_indices[-1] = frame_idx
+                                    frames[-1] = candidate
+                                    break
+
+                        ordered = sorted(zip(selected_indices, frames), key=lambda item: item[0])
+                        selected_indices = [index for index, _ in ordered]
+                        frames = [frame for _, frame in ordered]
+                        duration_ranges = zip(
+                            selected_indices,
+                            selected_indices[1:] + [n_frames],
+                        )
+                        durations = [
+                            max(1, sum(frame_durations[start:end]))
+                            for start, end in duration_ranges
+                        ]
+
+                        loop = im.info.get("loop", 0)
+                        try:
+                            loop = max(0, int(loop or 0))
+                        except (TypeError, ValueError):
+                            loop = 0
 
                         if frames:
                             frames[0].save(
@@ -105,7 +150,7 @@ class ImageRenderService:
                                 save_all=True,
                                 append_images=frames[1:],
                                 duration=durations,
-                                loop=0,
+                                loop=loop,
                                 optimize=False,
                                 disposal=2,
                             )
@@ -122,6 +167,34 @@ class ImageRenderService:
         except Exception as e:
             logger.error(f"转换为 GIF base64 失败: {e}")
             return await self.file_to_base64(file_path)
+
+    @staticmethod
+    def _is_gif_file(file_path: str) -> bool:
+        try:
+            with open(file_path, "rb") as handle:
+                return handle.read(6) in (b"GIF87a", b"GIF89a")
+        except OSError:
+            return False
+
+    @staticmethod
+    def _uniform_frame_indices(n_frames: int, max_frames: int) -> list[int]:
+        count = min(max(1, int(max_frames)), max(0, int(n_frames)))
+        if count <= 0:
+            return []
+        if count == 1:
+            return [0]
+        denominator = count - 1
+        last = max(0, int(n_frames) - 1)
+        return [
+            (position * last + denominator // 2) // denominator
+            for position in range(count)
+        ]
+
+    @staticmethod
+    def _frame_fingerprint(frame: Any) -> bytes:
+        sample = frame.convert("RGB")
+        sample.thumbnail((32, 32), LANCZOS or PILImage.BICUBIC)
+        return sample.tobytes()
 
     def _evict_gif_base64_cache(self) -> None:
         """淘汰 _gif_base64_cache 中最旧的条目。"""

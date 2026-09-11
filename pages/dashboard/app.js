@@ -150,6 +150,10 @@ createApp({
         const previewItem = ref(null);
         const isEditing = ref(false);
         const editForm = reactive({ category: '', tags: '', scene: '', desc: '', overlay_text: '', character: '', scope_mode: 'public' });
+        const vlmReanalysisLoading = ref(false);
+        const vlmReanalysisApplying = ref(false);
+        const vlmReanalysisError = ref('');
+        const vlmReanalysisResult = ref(null);
 
         // 审核区编辑弹窗（issue #87）
         const pendingEditOpen = ref(false);
@@ -1419,6 +1423,8 @@ createApp({
         const openPreview = (img) => {
             previewItem.value = img;
             previewOpen.value = true;
+            vlmReanalysisError.value = '';
+            vlmReanalysisResult.value = null;
             resetPreviewZoom();
             requestOriginalForPreview(img?.hash);
         };
@@ -1427,6 +1433,8 @@ createApp({
             previewOpen.value = false;
             previewItem.value = null;
             isEditing.value = false;
+            vlmReanalysisError.value = '';
+            vlmReanalysisResult.value = null;
             previewLoading.value = false;
             resetPreviewZoom();
             pruneOriginalUrls();
@@ -1438,12 +1446,107 @@ createApp({
             const nextIdx = idx + direction;
             if (nextIdx >= 0 && nextIdx < images.value.length) {
                 previewItem.value = images.value[nextIdx];
+                vlmReanalysisError.value = '';
+                vlmReanalysisResult.value = null;
                 resetPreviewZoom();
                 requestOriginalForPreview(previewItem.value.hash);
             }
         };
         const prevImage = () => navigateImage(-1);
         const nextImage = () => navigateImage(1);
+
+        const buildAnalysisSnapshot = (item) => ({
+            category: String(item?.category || ''),
+            tags: parseListField(item?.tags),
+            description: String(item?.desc || ''),
+            overlay_text: String(item?.overlay_text || ''),
+            scenes: parseSceneList(Array.isArray(item?.scenes) ? item.scenes.join(', ') : item?.scenes),
+            emotions: parseListField(item?.emotions),
+        });
+
+        const normalizeVlmResult = (data) => ({
+            category: String(data?.category || ''),
+            tags: parseListField(data?.tags),
+            description: String(data?.description || data?.desc || ''),
+            overlay_text: String(data?.overlay_text || ''),
+            scenes: parseSceneList(Array.isArray(data?.scenes) ? data.scenes.join(', ') : data?.scenes),
+            emotions: parseListField(data?.emotions),
+        });
+
+        const formatAnalysisValue = (value) => {
+            if (Array.isArray(value)) {
+                return value.length ? value.join('、') : t('pages.dashboard.messages.none', '无');
+            }
+            const text = String(value || '').trim();
+            return text || t('pages.dashboard.messages.none', '无');
+        };
+
+        const reanalyzePreview = async () => {
+            const item = previewItem.value;
+            if (!item?.hash || vlmReanalysisLoading.value) return;
+            const hash = item.hash;
+            vlmReanalysisLoading.value = true;
+            vlmReanalysisError.value = '';
+            vlmReanalysisResult.value = null;
+            try {
+                const res = await apiFetch('api/analyze', {
+                    method: 'POST',
+                    body: JSON.stringify({ hash }),
+                });
+                const data = await res.json();
+                if (!data?.success) {
+                    throw new Error(data?.error || t('pages.dashboard.alerts.reanalyze_failed', 'Re-analysis failed.'));
+                }
+                if (previewItem.value?.hash === hash) {
+                    vlmReanalysisResult.value = {
+                        hash,
+                        before: buildAnalysisSnapshot(item),
+                        after: normalizeVlmResult(data),
+                    };
+                }
+            } catch (e) {
+                if (previewItem.value?.hash === hash) {
+                    vlmReanalysisError.value = e.message || t('pages.dashboard.alerts.reanalyze_failed', 'Re-analysis failed.');
+                }
+            } finally {
+                vlmReanalysisLoading.value = false;
+            }
+        };
+
+        const applyReanalysis = async () => {
+            const comparison = vlmReanalysisResult.value;
+            const item = previewItem.value;
+            if (!comparison || !item?.hash || comparison.hash !== item.hash || vlmReanalysisApplying.value) return;
+            vlmReanalysisApplying.value = true;
+            vlmReanalysisError.value = '';
+            try {
+                const after = comparison.after;
+                const res = await apiFetch('api/images/update', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        hash: item.hash,
+                        category: after.category,
+                        tags: after.tags,
+                        desc: after.description,
+                        scenes: after.scenes,
+                        overlay_text: after.overlay_text,
+                        emotions: after.emotions,
+                    }),
+                });
+                const data = await res.json();
+                if (!data?.success) throw new Error(data?.error || t('pages.dashboard.alerts.reanalyze_apply_failed', 'Failed to apply VLM result.'));
+                const refreshedImages = await fetchImages(currentPage.value);
+                const refreshedItem = refreshedImages.find((entry) => entry.hash === item.hash);
+                if (refreshedItem) previewItem.value = refreshedItem;
+                vlmReanalysisResult.value = null;
+                showAlert(t('pages.dashboard.alerts.reanalyze_applied', 'VLM result applied.'), 'success');
+                await fetchStats();
+            } catch (e) {
+                vlmReanalysisError.value = e.message || t('pages.dashboard.alerts.reanalyze_apply_failed', 'Failed to apply VLM result.');
+            } finally {
+                vlmReanalysisApplying.value = false;
+            }
+        };
 
         const isTypingTarget = (e) => {
             const target = e.target;
@@ -2548,6 +2651,10 @@ createApp({
             previewItem,
             isEditing,
             editForm,
+            vlmReanalysisLoading,
+            vlmReanalysisApplying,
+            vlmReanalysisError,
+            vlmReanalysisResult,
             openPreview,
             closePreview,
             prevImage,
@@ -2555,6 +2662,9 @@ createApp({
             startEdit,
             cancelEdit,
             saveEdit,
+            reanalyzePreview,
+            applyReanalysis,
+            formatAnalysisValue,
 
             isBatchMode,
             selectedImages,

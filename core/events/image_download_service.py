@@ -14,6 +14,7 @@ from astrbot.api import logger
 class ImageDownloadService:
     """基于 aiohttp 的图片下载服务，复用连接池。"""
 
+    ALLOWED_IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"})
     HTTP_TIMEOUT_SECONDS = 30
     HTTP_CONNECTOR_LIMIT = 10
     HTTP_CONNECTOR_LIMIT_PER_HOST = 5
@@ -66,9 +67,30 @@ class ImageDownloadService:
             content[:4] == b"RIFF" and content[8:12] == b"WEBP"
         ):
             return ".webp", False
-        if "jpeg" in content_type or "jpg" in content_type:
+        if "jpeg" in content_type or "jpg" in content_type or content[:2] == b"\xff\xd8":
             return ".jpg", False
+        if "bmp" in content_type or content[:2] == b"BM":
+            return ".bmp", False
         return ".jpg", False
+
+    @classmethod
+    def detect_local_file_type(cls, file_path: str) -> tuple[str, bool]:
+        """按本地文件魔数检测扩展名，并保留未知格式的原始后缀。"""
+        with open(file_path, "rb") as handle:
+            header = handle.read(12)
+        ext, is_gif = cls.detect_file_type("", header)
+        known = (
+            header[:6] in (b"GIF89a", b"GIF87a")
+            or header[:8] == b"\x89PNG\r\n\x1a\n"
+            or (header[:4] == b"RIFF" and header[8:12] == b"WEBP")
+            or header[:2] == b"\xff\xd8"
+            or header[:2] == b"BM"
+        )
+        if not known:
+            original_ext = os.path.splitext(file_path)[1].lower()
+            if original_ext in cls.ALLOWED_IMAGE_EXTS:
+                ext = original_ext
+        return ext, is_gif
 
     async def download_to_temp(
         self, url: str, *, log_download: bool = False
@@ -134,21 +156,11 @@ class ImageDownloadService:
         # 检查是否已经是本地文件路径
         for candidate in (img_path, img_file, img_url):
             if candidate and os.path.exists(candidate):
-                content_type = ""
                 try:
-                    with open(candidate, "rb") as f:
-                        header = f.read(12)
-                    if header[:6] in (b"GIF89a", b"GIF87a"):
-                        content_type = "image/gif"
-                    elif header[:8] == b"\x89PNG\r\n\x1a\n":
-                        content_type = "image/png"
-                    elif header[:4] == b"RIFF" and header[8:12] == b"WEBP":
-                        content_type = "image/webp"
+                    ext, is_gif = self.detect_local_file_type(candidate)
                 except OSError:
                     logger.warning(f"无法读取本地图片文件: {candidate}")
                     continue
-
-                ext, is_gif = self.detect_file_type(content_type, header)
                 temp_fd, temp_path = tempfile.mkstemp(suffix=ext)
                 os.close(temp_fd)
                 try:

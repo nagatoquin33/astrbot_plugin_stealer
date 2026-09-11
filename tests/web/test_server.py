@@ -206,6 +206,8 @@ class PreviewState:
             "tags": list(kwargs.get("tags") or []),
             "desc": str(kwargs.get("desc") or ""),
             "scenes": list(kwargs.get("scenes") or []),
+            "emotions": list(kwargs.get("emotions") or []),
+            "overlay_text": str(kwargs.get("overlay_text") or ""),
             "scope_mode": str(kwargs.get("scope_mode") or "public"),
             "origin_target": str(kwargs.get("origin_target") or ""),
             "created_at": ts,
@@ -692,6 +694,15 @@ class PreviewServer:
             )
         if payload.get("desc") is not None:
             item["desc"] = str(payload["desc"])
+        if payload.get("overlay_text") is not None:
+            item["overlay_text"] = str(payload["overlay_text"] or "")
+        if payload.get("emotions") is not None:
+            raw_emotions = payload["emotions"]
+            item["emotions"] = (
+                [str(value).strip() for value in raw_emotions if str(value).strip()]
+                if isinstance(raw_emotions, list)
+                else [value.strip() for value in str(raw_emotions).split(",") if value.strip()]
+            )
         if payload.get("scenes") is not None:
             raw = payload["scenes"]
             parts = raw if isinstance(raw, list) else str(raw).replace("，", ",").replace("、", ",").split(",")
@@ -862,6 +873,8 @@ class PreviewServer:
             "tags": [emotion["name"], "AI分析"],
             "desc": f"[mock VLM 分析] 看起来很「{emotion['name']}」",
             "scenes": ["聊天"],
+            "overlay_text": "AI",
+            "emotions": [emotion["key"]],
         }
 
     def api_storage_cleanup(self, request, payload):

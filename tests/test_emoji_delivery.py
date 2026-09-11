@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from core.config.config import PluginConfig
-from core.events import emoji_delivery
+from astrbot_plugin_stealer.core.config.config import PluginConfig
+from astrbot_plugin_stealer.core.events import emoji_delivery
 
 
 @pytest.fixture
@@ -97,7 +97,9 @@ async def test_non_qq_platform_keeps_existing_delivery(qq_delivery):
 
 
 def test_sticker_setting_schema_and_config_default():
-    schema = json.loads((Path(__file__).parents[1] / "_conf_schema.json").read_text())
+    schema = json.loads(
+        (Path(__file__).parents[1] / "_conf_schema.json").read_text(encoding="utf-8")
+    )
     assert schema["send_meme_as_qq_sticker"]["type"] == "bool"
     assert schema["send_meme_as_qq_sticker"]["default"] is True
     assert PluginConfig.model_fields["send_meme_as_qq_sticker"].default is True

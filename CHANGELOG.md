@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### added
+- WebUI 详情预览支持重新调用 VLM，并提供当前标注与新结果的 A/B 对比；确认后才应用新分类、描述、标签、场景、图上文字和情绪
+
+### fixed
+- 已是 GIF 的表情包发送时直接保留原始帧与时序；非 GIF 动图转换时保留总时长、循环设置和稀疏变化帧，修复动图加速或表现为静态图
+- 本地事件图片和后台暂存按文件魔数校正 GIF/WebP/PNG 等后缀，避免动图因错误扩展名在预览或发送端表现异常
+- 合并 PR #109 的事件文件保护与 PR #112 的 QQ 自定义表情发送支持
+
 ## [3.0.0] - 2026-09-04
 
 ### added

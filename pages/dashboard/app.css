@@ -1012,6 +1012,13 @@ h2 {
     min-height: 500px;
 }
 
+.preview-stack {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    min-width: 0;
+}
+
 .item-preview {
     flex: 1;
     background: var(--preview-gradient);
@@ -1488,6 +1495,14 @@ select.codex-input {
         flex-direction: column;
     }
 
+    .vlm-reanalysis-panel {
+        padding: 16px;
+    }
+
+    .vlm-compare-grid {
+        grid-template-columns: 1fr;
+    }
+
     .item-preview {
         min-height: 300px;
         padding: 20px;
@@ -1919,6 +1934,106 @@ select.codex-input {
 [data-theme="light"] .inventory-toolbar {
     background: var(--bg-elevated);
     border-bottom-color: var(--glass-border);
+}
+
+.vlm-reanalysis-panel {
+    padding: 20px 28px 24px;
+    border-top: 1px solid var(--glass-border);
+    background: rgba(var(--accent-soft-rgb), 0.03);
+}
+
+.vlm-reanalysis-toolbar,
+.vlm-reanalysis-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.vlm-reanalysis-title {
+    color: var(--gold-primary);
+    font-size: 0.9rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.vlm-reanalysis-hint,
+.vlm-reanalysis-preserve {
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    line-height: 1.5;
+}
+
+.vlm-reanalysis-error {
+    margin-top: 12px;
+    padding: 10px 12px;
+    color: var(--danger, #f87171);
+    border: 1px solid rgba(248, 113, 113, 0.35);
+    border-radius: 6px;
+    background: rgba(127, 29, 29, 0.16);
+    font-size: 0.8rem;
+}
+
+.vlm-compare-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 16px;
+}
+
+.vlm-compare-card {
+    min-width: 0;
+    padding: 14px;
+    border: 1px solid var(--glass-border);
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.12);
+}
+
+.vlm-compare-card.proposed {
+    border-color: rgba(var(--accent-soft-rgb), 0.65);
+    background: rgba(var(--accent-soft-rgb), 0.08);
+}
+
+.vlm-compare-label {
+    margin-bottom: 10px;
+    color: var(--gold-primary);
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.vlm-compare-card dl {
+    display: grid;
+    gap: 8px;
+    margin: 0;
+}
+
+.vlm-compare-card dl > div {
+    display: grid;
+    grid-template-columns: 92px minmax(0, 1fr);
+    gap: 10px;
+    align-items: start;
+}
+
+.vlm-compare-card dt {
+    color: var(--text-tertiary);
+    font-size: 0.72rem;
+}
+
+.vlm-compare-card dd {
+    min-width: 0;
+    margin: 0;
+    color: var(--text-main);
+    font-size: 0.82rem;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
+.vlm-reanalysis-actions {
+    justify-content: flex-start;
+    margin-top: 16px;
+    flex-wrap: wrap;
 }
 
 [data-theme="light"] .character-filter-bar {

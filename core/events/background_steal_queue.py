@@ -14,6 +14,7 @@ from typing import Any
 from astrbot.api import logger
 
 from ..util.safe_io import safe_remove_file
+from .image_download_service import ImageDownloadService
 
 
 @dataclass(slots=True)
@@ -170,6 +171,14 @@ class BackgroundStealQueue:
             executor, shutil.copy2, source_path, target_path
         )
 
+    @staticmethod
+    def _staging_suffix(file_path: str) -> str:
+        try:
+            suffix, _ = ImageDownloadService.detect_local_file_type(file_path)
+            return suffix
+        except OSError:
+            return Path(file_path).suffix.lower() or ".jpg"
+
     async def _stage_local_descriptor(self, descriptor: dict[str, Any]) -> bool:
         ref = str(descriptor.get("media_ref") or "")
         if not ref or not os.path.exists(ref):
@@ -181,7 +190,7 @@ class BackgroundStealQueue:
                 return False
             staged_path = ""
             try:
-                suffix = Path(ref).suffix or ".jpg"
+                suffix = self._staging_suffix(ref)
                 staged = self.staging_dir / f"{uuid.uuid4().hex}{suffix.lower()}"
                 await self._copy_file(ref, str(staged))
                 staged_path = str(staged)
@@ -258,7 +267,7 @@ class BackgroundStealQueue:
                 async with self._staging_lock:
                     if not self._accepting:
                         return
-                    suffix = Path(source_path).suffix or ".jpg"
+                    suffix = self._staging_suffix(source_path)
                     staged_path = str(
                         self.staging_dir / f"{uuid.uuid4().hex}{suffix.lower()}"
                     )

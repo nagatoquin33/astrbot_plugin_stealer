@@ -261,6 +261,9 @@
                 "cancel": "取消",
                 "save": "保存",
                 "analyzing": "分析中...",
+                "reanalyze": "重新 VLM 分析",
+                "saving": "应用中...",
+                "apply_vlm": "应用 B 结果",
                 "auto_analyze": "自动识别",
                 "uploading": "上传中...",
                 "confirm_add": "确认添加",
@@ -334,6 +337,7 @@
                 "add_method_unknown": "未知",
                 "character": "角色",
                 "overlay_text": "图上文字",
+                "emotions": "情绪",
                 "id": "编号"
             },
             "units": {
@@ -353,6 +357,7 @@
                 "no_tags": "无标签",
                 "no_scenes": "暂无适用对话",
                 "no_overlay_text": "无",
+                "none": "无",
                 "no_preview": "无预览",
                 "scene_separator_hint": "逗号分隔",
                 "tag_separator_hint": "逗号分隔",
@@ -381,7 +386,12 @@
             },
             "analysis": {
                 "scenes_title": "识别到的适用对话",
-                "scenes_hint": "点击可添加或移除到「适用对话」输入框。写成群友会说的话，不是空标签。"
+                "scenes_hint": "点击可添加或移除到「适用对话」输入框。写成群友会说的话，不是空标签。",
+                "reanalysis_title": "VLM 重新分析",
+                "reanalysis_hint": "再次调用视觉模型，与当前标注对比后再决定是否应用。",
+                "current": "当前标注",
+                "new_result": "新的 VLM 结果",
+                "reanalysis_preserve": "角色、作用域、收藏和使用记录保持不变。"
             },
             "batch": {
                 "include_subfolders": "包含子文件夹",
@@ -442,6 +452,9 @@
                 "batch_import_failed": "批量导入失败。",
                 "select_image_first": "请先选择图片。",
                 "analyze_failed": "分析失败。",
+                "reanalyze_failed": "重新分析失败。",
+                "reanalyze_apply_failed": "应用 VLM 结果失败。",
+                "reanalyze_applied": "VLM 结果已应用。",
                 "no_valid_info": "未能识别有效信息。",
                 "add_failed": "添加失败。"
             },

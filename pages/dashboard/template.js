@@ -613,7 +613,8 @@ export const TEMPLATE = `
         </div>
 
         <div class="modal-content">
-            <div v-if="!isEditing" class="item-detail">
+            <div v-if="!isEditing" class="preview-stack">
+                <div class="item-detail">
                 <div class="item-preview">
                     <button v-if="images.length > 1" @click.stop="prevImage" class="nav-btn left">
                         <svg style="width:24px;height:24px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -728,6 +729,55 @@ export const TEMPLATE = `
                     <div class="stat-row">
                         <span class="stat-name">{{ t('pages.dashboard.fields.id', '编号') }}</span>
                         <span class="stat-value" style="font-size:0.75rem;word-break:break-all">{{ previewItem?.hash?.slice(0, 16) }}...</span>
+                    </div>
+                </div>
+                </div>
+
+                <div class="vlm-reanalysis-panel">
+                    <div class="vlm-reanalysis-toolbar">
+                        <div>
+                            <div class="vlm-reanalysis-title">{{ t('pages.dashboard.analysis.reanalysis_title', 'VLM re-analysis') }}</div>
+                            <div class="vlm-reanalysis-hint">{{ t('pages.dashboard.analysis.reanalysis_hint', 'Run the vision model again and compare the stored labels before applying them.') }}</div>
+                        </div>
+                        <button @click="reanalyzePreview" class="codex-btn" :disabled="vlmReanalysisLoading || vlmReanalysisApplying">
+                            <span v-if="vlmReanalysisLoading">{{ t('pages.dashboard.actions.analyzing', 'Analyzing...') }}</span>
+                            <span v-else>{{ t('pages.dashboard.actions.reanalyze', 'Re-analyze') }}</span>
+                        </button>
+                    </div>
+
+                    <div v-if="vlmReanalysisError" class="vlm-reanalysis-error">{{ vlmReanalysisError }}</div>
+
+                    <div v-if="vlmReanalysisResult" class="vlm-compare-grid">
+                        <section class="vlm-compare-card">
+                            <div class="vlm-compare-label">A · {{ t('pages.dashboard.analysis.current', 'Current') }}</div>
+                            <dl>
+                                <div><dt>{{ t('pages.dashboard.fields.category', 'Category') }}</dt><dd>{{ getCategoryName(vlmReanalysisResult.before.category) }}</dd></div>
+                                <div><dt>{{ t('pages.dashboard.fields.description', 'Description') }}</dt><dd>{{ formatAnalysisValue(vlmReanalysisResult.before.description) }}</dd></div>
+                                <div><dt>{{ t('pages.dashboard.fields.overlay_text', 'Overlay text') }}</dt><dd>{{ formatAnalysisValue(vlmReanalysisResult.before.overlay_text) }}</dd></div>
+                                <div><dt>{{ t('pages.dashboard.fields.tags', 'Tags') }}</dt><dd>{{ formatAnalysisValue(vlmReanalysisResult.before.tags) }}</dd></div>
+                                <div><dt>{{ t('pages.dashboard.fields.scenes', 'Scenes') }}</dt><dd>{{ formatAnalysisValue(vlmReanalysisResult.before.scenes) }}</dd></div>
+                                <div><dt>{{ t('pages.dashboard.fields.emotions', 'Emotions') }}</dt><dd>{{ formatAnalysisValue(vlmReanalysisResult.before.emotions) }}</dd></div>
+                            </dl>
+                        </section>
+                        <section class="vlm-compare-card proposed">
+                            <div class="vlm-compare-label">B · {{ t('pages.dashboard.analysis.new_result', 'New VLM result') }}</div>
+                            <dl>
+                                <div><dt>{{ t('pages.dashboard.fields.category', 'Category') }}</dt><dd>{{ getCategoryName(vlmReanalysisResult.after.category) }}</dd></div>
+                                <div><dt>{{ t('pages.dashboard.fields.description', 'Description') }}</dt><dd>{{ formatAnalysisValue(vlmReanalysisResult.after.description) }}</dd></div>
+                                <div><dt>{{ t('pages.dashboard.fields.overlay_text', 'Overlay text') }}</dt><dd>{{ formatAnalysisValue(vlmReanalysisResult.after.overlay_text) }}</dd></div>
+                                <div><dt>{{ t('pages.dashboard.fields.tags', 'Tags') }}</dt><dd>{{ formatAnalysisValue(vlmReanalysisResult.after.tags) }}</dd></div>
+                                <div><dt>{{ t('pages.dashboard.fields.scenes', 'Scenes') }}</dt><dd>{{ formatAnalysisValue(vlmReanalysisResult.after.scenes) }}</dd></div>
+                                <div><dt>{{ t('pages.dashboard.fields.emotions', 'Emotions') }}</dt><dd>{{ formatAnalysisValue(vlmReanalysisResult.after.emotions) }}</dd></div>
+                            </dl>
+                        </section>
+                    </div>
+
+                    <div v-if="vlmReanalysisResult" class="vlm-reanalysis-actions">
+                        <button @click="applyReanalysis" class="codex-btn primary" :disabled="vlmReanalysisApplying">
+                            <span v-if="vlmReanalysisApplying">{{ t('pages.dashboard.actions.saving', 'Applying...') }}</span>
+                            <span v-else>{{ t('pages.dashboard.actions.apply_vlm', 'Apply B result') }}</span>
+                        </button>
+                        <span class="vlm-reanalysis-preserve">{{ t('pages.dashboard.analysis.reanalysis_preserve', 'Character, scope, favorites and usage history stay unchanged.') }}</span>
                     </div>
                 </div>
             </div>
