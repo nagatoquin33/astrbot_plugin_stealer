@@ -53,9 +53,13 @@
             "description": "Emoji send probability",
             "hint": "Set to 0 to never send, set to 1 to always send. Recommended 0.1~0.3 to avoid spamming."
         },
+        "send_meme_as_qq_sticker": {
+            "description": "Send as a QQ sticker",
+            "hint": "When enabled, images use QQ's custom sticker display. This applies only to aiocqhttp/NapCat."
+        },
         "send_meme_as_gif": {
             "description": "Send as GIF",
-            "hint": "When enabled, always output as GIF for a native sticker feel. When disabled, send in original format (png/jpg/gif etc.). High-frequency sending of large GIFs may cause high memory usage."
+            "hint": "When enabled, always output as GIF. QQ sticker display is controlled separately. When disabled, keep the original image format."
         },
         "meme_send_delay": {
             "description": "Fixed delay (seconds)",

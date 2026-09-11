@@ -1537,7 +1537,19 @@ createApp({
                 if (!data?.success) throw new Error(data?.error || t('pages.dashboard.alerts.reanalyze_apply_failed', 'Failed to apply VLM result.'));
                 const refreshedImages = await fetchImages(currentPage.value);
                 const refreshedItem = refreshedImages.find((entry) => entry.hash === item.hash);
-                if (refreshedItem) previewItem.value = refreshedItem;
+                if (refreshedItem) {
+                    previewItem.value = refreshedItem;
+                } else {
+                    previewItem.value = {
+                        ...item,
+                        category: after.category,
+                        tags: [...after.tags],
+                        desc: after.description,
+                        scenes: [...after.scenes],
+                        overlay_text: after.overlay_text,
+                        emotions: [...after.emotions],
+                    };
+                }
                 vlmReanalysisResult.value = null;
                 showAlert(t('pages.dashboard.alerts.reanalyze_applied', 'VLM result applied.'), 'success');
                 await fetchStats();

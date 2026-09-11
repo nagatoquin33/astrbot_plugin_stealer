@@ -91,10 +91,15 @@ def test_grid_does_not_prefetch_originals_on_hover():
 def test_preview_exposes_vlm_reanalysis_and_ab_apply_controls():
     template = (DASHBOARD_DIR / "template.js").read_text(encoding="utf-8")
     app_js = (DASHBOARD_DIR / "app.js").read_text(encoding="utf-8")
+    css = (DASHBOARD_DIR / "app.css").read_text(encoding="utf-8")
     assert "reanalyzePreview" in template and "applyReanalysis" in template
     assert "vlm-compare-grid" in template
     assert "body: JSON.stringify({ hash })" in app_js
     assert "vlmReanalysisResult.value" in app_js
+    assert "previewItem.value = {" in app_js
+    base_rule = css.index(".vlm-reanalysis-panel {")
+    responsive_rule = css.rindex("@media (max-width: 1100px)")
+    assert responsive_rule > base_rule
 
 
 def test_light_theme_character_filter_uses_readable_surface():

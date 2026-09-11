@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.1] - 2026-09-11
+
 ### added
 - WebUI 详情预览支持重新调用 VLM，并提供当前标注与新结果的 A/B 对比；确认后才应用新分类、描述、标签、场景、图上文字和情绪
 

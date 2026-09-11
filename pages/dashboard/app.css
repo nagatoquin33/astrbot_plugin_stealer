@@ -1495,14 +1495,6 @@ select.codex-input {
         flex-direction: column;
     }
 
-    .vlm-reanalysis-panel {
-        padding: 16px;
-    }
-
-    .vlm-compare-grid {
-        grid-template-columns: 1fr;
-    }
-
     .item-preview {
         min-height: 300px;
         padding: 20px;
@@ -2034,6 +2026,16 @@ select.codex-input {
     justify-content: flex-start;
     margin-top: 16px;
     flex-wrap: wrap;
+}
+
+@media (max-width: 1100px) {
+    .vlm-reanalysis-panel {
+        padding: 16px;
+    }
+
+    .vlm-compare-grid {
+        grid-template-columns: 1fr;
+    }
 }
 
 [data-theme="light"] .character-filter-bar {
