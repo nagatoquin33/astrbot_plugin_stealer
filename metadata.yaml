@@ -34,7 +34,7 @@ help: |
 
   对话中 LLM 可自动调用 search_meme / send_meme / steal_meme 工具搜索、发送和收录表情包。
   WebUI：在插件详情页点击「表情管理」进入管理面板；「外部源」可导入 Meme Pack、GitHub 资源包仓库或同步 HTTPS JSON 目录，也能在导入整套角色表情时批量分配角色。
-version: 3.0.1
+version: 3.0.2
 support_platforms:
   - aiocqhttp
   - telegram

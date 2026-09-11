@@ -7,8 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.2] - 2026-09-11
+
+### added
+- 新增基于 `metadata.yaml` 版本提交的自动发布校验与可复现安装包流程，并提供手动 dry-run 产物
+
 ### changed
 - 发布流程改为 PR CI 门禁与 `metadata.yaml` 版本提交驱动；版本递增后自动检查、打包、创建标签与 Release，并附带 SHA-256
+- README 中英文同步整理当前功能、安装更新方式、外部资源包布局、配置默认值与维护者发布流程；补充 VLM A/B 复核和 GIF 处理说明，并标注旧的 meme_manager 标签注入机制已弃用
 
 ### fixed
 - 统一 Linux 与 Windows 的路径规范化行为，修复跨平台检索去重测试失败

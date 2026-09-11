@@ -4,7 +4,7 @@
 
 <img src="https://count.getloli.com/@nagatoquin33?name=nagatoquin33&theme=rule34&padding=7&offset=0&align=top&scale=1&pixelated=1&darkmode=auto" alt="Moe Counter">
 
-**Inspired by maibot's emoji-stealing and meme-manager's tag-injection systems.**
+**Let your Bot collect memes from chat, understand their mood, and send the right one at the right moment.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 ![Python Version](https://img.shields.io/badge/Python-3.12%2B-blue)
@@ -24,200 +24,208 @@
 
 ## 📢 Introduction
 
-An [AstrBot](https://github.com/AstrBotDevs/AstrBot) entertainment plugin powered by multimodal AI. Automatically steals emojis from chat, classifies them with a vision model, and sends a mood-matching emoji during conversations to make Bot replies feel more human. Stealing and auto-sending can be toggled independently.
+Inspired by maibot's emoji-stealing approach and the former meme-manager tag-injection mechanism (deprecated in the current version), this [AstrBot](https://github.com/AstrBotDevs/AstrBot) entertainment plugin adds LLM-callable meme tools.
 
-This plugin is fully open-source and free. Issues and PRs are welcome.
+Emoji Stealer collects images from chat, uses a vision model for semantic and emotion labels, and sends a matching meme according to probability, cooldown, intent, and target-filter rules. Collection and auto-send can be toggled independently.
+
+The plugin is open source and free to use. Issues and pull requests are welcome at [GitHub](https://github.com/nagatoquin33/astrbot_plugin_stealer/issues).
 
 ## ✨ Core Features
 
 | Feature | Description |
 |:---|:---|
-| **Auto Steal** | Monitor group chat images, auto-collect by probability or cooldown, with pending pool capacity control |
-| **Pending Review Pool** | Auto-stolen images enter a review queue first; manual approval prevents low-quality images from polluting the library |
-| **Smart Classification** | Use VLM to identify image content and classify by emotion preset categories |
-| **Semantic Search** | FaissVecDB vector embedding matches emojis by meaning, not just keywords; auto-degrades to BM25 when unavailable |
-| **Emotion Matching** | Analyze the emotion of Bot replies and append a matching emoji |
-| **LLM Proactive Selection** | LLM can search and send the best emoji via tool calls during conversation |
-| **Dual-Mode Emotion Analysis** | Smart keyword extraction (a lightweight model extracts keywords and emotion priors from the reply; it does not decide whether to send) / Raw-text retrieval (directly uses the reply text, no tags injected) |
-| **External Meme Sources** | Import Meme Manager / AstrBot Meme Packs or GitHub repositories, or sync a paginated HTTPS JSON API with preflight, mapping, deduplication, and provenance |
-| **WebUI Dual-Section** | Review Queue: manually approve/reject pending emojis / Library: browse, sort, batch manage |
-| **Sort & Filter** | Most used / Recently used / Newest / Oldest — all via SQL ORDER BY |
-| **Group Filtering** | Whitelist/blacklist control over which groups allow stealing/sending |
+| **Auto Steal** | Monitor group-chat images and collect them by probability or cooldown, with a pending-pool capacity limit |
+| **Pending Review Pool** | Route automatically collected images through a review queue before adding them to the library |
+| **Smart Classification** | VLM extracts image text, description, scenes, and emotion; GIFs use nine evenly sampled frames in a 3×3 timeline storyboard |
+| **Semantic Search** | Search over visible text, descriptions, and reply scenes; optional remote Embedding improves recall, with BM25 fallback and no local CLIP |
+| **Emotion Matching** | Analyze the Bot reply and append a mood-matched meme after it |
+| **LLM Proactive Selection** | `search_meme`, `send_meme`, and `steal_meme` let the LLM search, send, and collect memes |
+| **Dual-Mode Emotion Analysis** | Extract keywords and emotion priors with a lightweight model, or search directly with the reply text; neither mode rewrites the reply |
+| **VLM A/B Review** | Re-analyze an image in the WebUI and compare the current labels with the new result before applying it |
+| **Character Library** | Assign a whole series to an existing or newly created character in the WebUI; characters are independent of emotion categories |
+| **External Meme Sources** | Import Meme Manager / AstrBot Meme Packs, GitHub packs, or paginated HTTPS JSON catalogs with preflight, mapping, deduplication, and provenance |
+| **Two-Part WebUI** | Review Queue handles pending images; Library supports browsing, sorting, and batch operations |
+| **Group Filtering** | Configure separate send/steal whitelists, blacklists, and conflict priorities |
 
 ## 🚀 Quick Start
 
-### 1. Installation
+### 1. Install or update
 
-Search and install `astrbot_plugin_stealer` in the AstrBot plugin manager.
+- Search for `astrbot_plugin_stealer` in the AstrBot plugin manager and install it.
+- For a manual install or update, download `astrbot_plugin_stealer-vX.Y.Z.zip` from a GitHub Release. Extract the top-level `astrbot_plugin_stealer/` directory into the AstrBot plugin directory, then restart AstrBot. Replacing the plugin code keeps the library and database under `plugin_data/astrbot_plugin_stealer/`; avoid an extra nested directory.
 
 ### 2. Prerequisites
 
-**A vision model is required.** The plugin relies on VLM for image classification. You can configure the global image caption model in AstrBot, or specify `vision_provider_id` in the plugin config.
+**A vision model is required.** Use AstrBot's global image-caption provider or set `vision_provider_id` in the plugin configuration. Embedding search is optional and requires an available Embedding Provider when enabled.
 
-### 3. Getting Started
+### 3. Getting started
 
 ```
 /meme on        # Enable emoji stealing
 /meme auto_on   # Enable auto-sending
 ```
 
-Done stealing?
+Pause collection at any time:
 
 ```
-/meme off       # Disable stealing (collected emojis remain available)
+/meme off       # Disable stealing; collected memes remain available
 ```
 
-### 4. WebUI Management
+### 4. WebUI management
 
-Open the plugin detail panel in the AstrBot Dashboard and click "Emoji Manager" to access the management page.
+Open the plugin detail panel in the AstrBot Dashboard and click **Emoji Manager**. No extra port or password is needed.
 
-- **Browse**: Filter by category, search, and sort collected emojis.
-- **Scope Management**: `public` for shared library, `local` for origin-group-only sending.
-- **Batch Operations**: Move categories, delete, set scopes, and repair origin targets in batch.
-- **Single Upload**: Upload an image and use AI to auto-detect category and scene tags.
-- **Batch Import**: Upload multiple emojis at once. **Category selection** and **Auto-analysis** are mutually exclusive:
-  - **Select Category**: Saves images to the specified category without calling VLM.
-  - **Auto-analysis**: VLM automatically identifies each image's category (high concurrent API calls).
-- **Storage Maintenance**: Scan and clean stale index rows, orphan files, thumbnail cache, and temporary files.
-- **Category Management**: Add, edit, and delete emoji categories.
-
-> ⚠️ **High Concurrency Warning**: Auto-analysis processes multiple images concurrently and may trigger API rate limits. Batch your imports accordingly.
+- **Browse**: Filter by category, search, and sort collected memes.
+- **Scope**: `public` is shared; `local` restricts sending to the source group.
+- **Review Queue**: Approve or delete pending images in batches and inspect failure reasons.
+- **Single upload**: Upload an image and let AI detect category, description, tags, and scenes.
+- **VLM A/B review**: Click re-analyze in the detail view. Apply the new category, visible text, tags, scenes, or emotions only after confirmation; character, scope, favorites, and usage history are preserved.
+- **Batch import**: Category selection and auto-analysis are mutually exclusive. Category selection skips VLM; auto-analysis makes concurrent VLM calls, so batch according to your API limits.
+- **Maintenance**: Scan and clean stale index rows, orphan files, thumbnail cache, and temporary files.
+- **Categories**: Add, edit, and delete categories.
+- **Themes**: Choose host default, dark, light, Minecraft, or Fallout. The page choice persists, while `webui_theme` supplies the default.
 
 ## 🔌 v3 External Meme Sources
 
-Open **External Sources** in the WebUI to discover same-instance Meme Manager v4 packs, upload ZIP / `.meme-pack` exports, read a GitHub repository such as [DDZS987/astrbot-meme-pack-semantic-01](https://github.com/DDZS987/astrbot-meme-pack-semantic-01), or register a paginated HTTPS JSON catalog. Preflight shows item counts, source categories, warnings, and capacity impact before import. You can map categories, choose public or local scope, assign a whole series to an existing or newly created character, and route imports through Pending Review.
+Open **External Sources** in the WebUI to:
 
-The recommended pack layout is `manifest.json` plus `memes/<category>/images`, optionally accompanied by `meme_pack_export.json` and `semantic_metadata.json` for per-image descriptions, tags, and OCR. A plain ZIP of supported images is accepted too; categories are inferred from the directory layout and `previews/` or thumbnail directories are skipped. See the [External Source Protocol](docs/external-sources.md) for the exact format and limits.
+- Discover Meme Manager v4 packs in the same AstrBot instance.
+- Upload AstrBot Meme Pack ZIP / `.meme-pack` exports, including generic ZIPs with a `memes/` directory.
+- Enter a GitHub repository (`owner/repo` or an HTTPS URL) and read a branch or subdirectory, such as [DDZS987/astrbot-meme-pack-semantic-01](https://github.com/DDZS987/astrbot-meme-pack-semantic-01). GitHub sources use public archives and never execute repository code.
+- Register a paginated HTTPS JSON catalog for later synchronization.
+- Map source categories to local categories and choose direct import or Pending Review.
+- Assign an entire character series to an existing character or create a new one.
+- Inspect imported, duplicate, failed, and stale entries. Missing remote items are marked stale while the local copy remains available.
 
-Every accepted image is validated and copied into this plugin's own storage. Source files remain untouched, SHA-256 deduplication prevents duplicate copies, and provenance keeps source URL, license, attribution, and stale state. External copies use a protected retention class, so a large pack does not evict chat-collected memes. Missing remote items are marked stale during sync and are kept in the library.
+Recommended pack layout:
 
-HTTPS is required by default. Local/private hosts, unsafe redirects, oversized responses, archive traversal, symlinks, decompression bombs, and excessive pixel counts are rejected. See the [External Source Protocol](docs/external-sources.md) for the JSON contract and limits.
+```
+pack/
+├── manifest.json                 # pack metadata
+├── memes/<category>/<image>      # required image directory
+├── meme_pack_export.json         # optional export metadata
+└── semantic_metadata.json        # optional descriptions, tags, OCR, remote hashes
+```
+
+A plain ZIP of supported images is accepted; categories are inferred from the first directory below `memes/` or from the image parent directory, and `previews/` or thumbnail directories are skipped. Each image is validated for format, size, and pixel count before being copied into this plugin's storage. Source files stay untouched, SHA-256 prevents duplicate copies, and license, attribution, and source URLs are retained as provenance. External imports have a protected retention class and do not evict chat-collected memes.
+
+HTTPS is required by default. Loopback, private, link-local, and reserved hosts, unsafe redirects, oversized responses, archive traversal, symlinks, decompression bombs, and excessive pixel counts are rejected. See the [External Source Protocol](docs/external-sources.md) for the JSON contract, pagination, and limits.
 
 ## 💡 Recommended Usage
 
-### Fully Automatic (for token-rich setups)
-
-**Enable auto-steal + auto-send**
+### Fully automatic (for token-rich setups)
 
 1. Enable stealing: `/meme on`
 2. Enable auto-send: `/meme auto_on`
-3. The bot auto-collects and classifies group emojis
-4. The bot appends mood-matched emojis to replies
+3. The Bot collects and classifies group-chat images.
+4. After each reply, intent, probability, and cooldown gates decide whether to append a matching meme.
 
-> LLM mode: A lightweight model analyzes emotion after the reply, without modifying the reply content.
-> Passive tag mode: The LLM directly tags emotion — faster but modifies the reply.
+LLM emotion mode uses a lightweight model to extract search terms and emotion priors. Passive retrieval searches the reply text directly. Both modes preserve the original reply, and the normal send gates still apply. The LLM can also call the meme tools proactively.
 
-**LLM Proactive Selection**: The bot can search for the best emoji via tool calls during conversation.
+### Semi-automatic (for token-constrained setups)
 
-### Semi-Automatic (for token-constrained setups)
+1. Place images under `plugin_data/astrbot_plugin_stealer/categories/<category>/`.
+2. Or use WebUI batch upload with a chosen category.
+3. Auto-send uses existing categories without an additional VLM call.
 
-**Manual emoji management**
+### Precision collection (for controlled setups)
 
-1. Place emojis in `plugin_data/astrbot_plugin_stealer/categories/<category>/` manually
-2. Or use WebUI batch upload with a specified category
-3. The bot still auto-sends matching emojis (using existing categories only, no VLM calls)
-
-### Precision Collection (for controlled setups)
-
-**Targeted collection + WebUI management**
-
-1. Use command: `/meme 偷` to enter 30-second forced collection mode
-2. Or use WebUI batch import + auto-analysis
-3. Manage via WebUI: view, edit, delete, set scopes
+1. Use `/meme 偷` to enter 30-second forced collection mode; images received during that window go straight to the library.
+2. Or use WebUI batch import with auto-analysis.
+3. Review, edit, delete, and scope images from the Review Queue and Library pages.
 
 ## ⚙️ Configuration
 
-All settings can be modified in the AstrBot admin panel.
+All public settings can be changed in the AstrBot admin panel. Defaults below match `_conf_schema.json` and the runtime configuration.
 
 ### Stealing Settings
 
 | Setting | Default | Description |
 |:---|:---|:---|
 | **Enable emoji stealing** | `false` | Master toggle |
-| **Steal mode** | `probability` | `probability` = roll chance per image / `cooldown` = enforce interval |
-| **Steal probability** | `0.3` | Chance of stealing each received image (probability mode) |
-| **Steal cooldown (seconds)** | `30` | Minimum interval between two steals (cooldown mode) |
-| **Content filtration** | `false` | Filter inappropriate images; may increase processing time |
-| **Allow import on audit service errors** | `false` | Policy hint for audit-service failures; explicitly rejected unsafe images still won't be imported |
+| **Steal mode** | `probability` | `probability` rolls per image; `cooldown` keeps at least 30 seconds between collections |
+| **Steal probability** | `0.3` | Collection probability in probability mode |
+| **Content filtration** | `false` | Use VLM to filter inappropriate images; adds processing time |
+| **Pending pool capacity** | `200` | Stealing pauses at this many pending images and resumes after review |
+| **Require manual review for auto-steal** | `true` | Route auto-collected images to Review Queue; when disabled, validated images enter the library directly |
+| **QQ_Official collection mode** | `cdn_only` | `all_images` collects every image; `cdn_only` uses emoji CDN markers; `gif_only` keeps GIFs only |
 
 ### Sending Settings
 
 | Setting | Default | Description |
 |:---|:---|:---|
-| **Auto-send emojis** | `false` | Auto-send emojis during conversation |
-| **Auto-send intent gate** | `true` | Skip commands, serious/error replies, very short replies, and question-heavy messages |
-| **Cancel pending auto-send on new message** | `true` | Cancel the previous delayed auto-send when a new message arrives in the same session |
-| **Emoji send probability** | `0.2` | Probability of auto-sending (0.0 ~ 1.0) |
-| **Send as GIF** | `false` | Send as GIF (closer to native emoji style, slightly higher memory) |
-| **Send delay (seconds)** | `5.0` | Delay before sending to avoid conflicts with message segmentation plugins. Set to 0 for immediate. |
-| **Random delay** | `false` | Random delay between [delay] ~ [max delay] for more natural timing |
-| **Max random delay (seconds)** | `8.0` | Upper bound for random delay |
-| **Smart emoji selection** | `true` | Composite scoring; disable for completely random picks |
+| **Auto-send emojis** | `true` | Send a meme after eligible Bot replies |
+| **Auto-send intent gate** | `true` | Skip commands, error or serious replies, very short replies, and question-heavy content |
+| **Cancel pending auto-send on new message** | `true` | Cancel the previous delayed send when a new message arrives in the same session |
+| **Emoji send probability** | `0.2` | Auto-send probability (0.0 ~ 1.0) |
+| **Send as GIF** | `false` | Force GIF output; large images use more transient memory |
+| **Send as QQ sticker** | `true` | On aiocqhttp/NapCat, show a custom QQ sticker; otherwise send a normal image |
+| **Send delay (seconds)** | `5.0` | Delay to avoid message-segmentation conflicts; 0 sends immediately |
+| **Random delay** | `false` | Randomize between the fixed delay and the maximum delay |
+| **Maximum random delay (seconds)** | `8.0` | Upper bound for random delay |
+| **Smart emoji selection** | `true` | Use composite matching scores; disabled mode picks randomly while avoiding short-term repeats |
 
 ### Emotion Recognition
 
 | Setting | Default | Description |
 |:---|:---|:---|
-| **Emotion recognition mode** | `true` | `true` = LLM mode (recommended, doesn't pollute chat) / `false` = passive tag mode |
-| **Emotion analysis model** | `""` | Lightweight model for LLM mode; leave blank to use the current session default |
-| **Emotion analysis prompt** | `""` | Custom prompt for the lightweight emotion-analysis model; leave blank to use the built-in template |
+| **Smart keyword extraction** | `true` | Use a lightweight model for search terms and emotion priors; disabled mode searches the reply text directly |
+| **Emotion analysis model** | `""` | Leave blank to use the current session model |
+| **Emotion analysis prompt** | `""` | Leave blank for the bundled template; supports `{emotion_list}`, `{llm_reply}`, and `{user_message}` |
 
 ### Model Configuration
 
 | Setting | Default | Description |
 |:---|:---|:---|
-| **Vision model** | `""` | For image classification; leave blank to auto-use the global image caption model |
+| **Vision model** | `""` | Leave blank to use AstrBot's global image-caption provider |
+| **Enable embedding search** | `false` | Use FaissVecDB semantic retrieval; falls back to BM25 when unavailable |
+| **Embedding model ID** | `""` | Leave blank for AstrBot's first Embedding Provider; enter an Embedding model ID, not a chat or vision model ID |
 
 ### Group Filtering
 
 | Setting | Default | Description |
 |:---|:---|:---|
-| **Send whitelist** | `[]` | Format: `group:<id>` or `user:<id>`. Non-empty = only whitelisted targets. |
-| **Send blacklist** | `[]` | Can coexist with whitelist; priority controls conflict resolution. |
+| **Send whitelist** | `[]` | Use `group:<id>` or `user:<id>` |
+| **Send blacklist** | `[]` | Can coexist with the whitelist |
 | **Send filter priority** | `whitelist_first` | `whitelist_first` or `blacklist_first` |
-| **Steal whitelist** | `[]` | Format: `group:<id>` or `user:<id>`. |
-| **Steal blacklist** | `[]` | Can coexist with whitelist. |
+| **Steal whitelist** | `[]` | Use `group:<id>` or `user:<id>` |
+| **Steal blacklist** | `[]` | Can coexist with the whitelist |
 | **Steal filter priority** | `whitelist_first` | `whitelist_first` or `blacklist_first` |
 
-### Pending Pool & Embedding Search
+### Storage, Prompts, and Smart Selection
 
 | Setting | Default | Description |
 |:---|:---|:---|
-| **Pending pool capacity** | `200` | Auto-stolen images enter the pool first; stealing pauses when full. Resumes after manual review. Adjustable in real-time |
-| **Enable embedding search** | `true` | FaissVecDB semantic similarity matching; auto-degrades to BM25 when disabled or unavailable |
-| **Embedding model ID** | `""` | Leave blank to auto-use AstrBot's first Embedding Provider. Check AstrBot Admin → LLM Config for available embedding model IDs (e.g., `openai_embedding`) |
+| **Maximum meme count** | `100` | Library limit; older memes are evicted according to the cleanup strategy |
+| **VLM classification prompt** | `""` | Custom VLM prompt; blank uses bundled `prompts.json` |
+| **VLM classification prompt (with filtration)** | `""` | Used when content filtration is enabled; blank uses the bundled template |
+| **Text-distance weight preset** | `balanced` | `balanced`, `keyword`, `semantic`, or `strict` for smart-selection weights |
 
-### Storage & Advanced
+### External Meme Sources
 
 | Setting | Default | Description |
 |:---|:---|:---|
-| **Max emoji count** | `100` | Storage limit; oldest emojis are cleaned when exceeded |
-| **VLM classification prompt** | `""` | Custom prompt for VLM emotion classification; leave blank to use bundled `prompts.json` |
-| **VLM classification prompt (with filtration)** | `""` | Prompt used when content filtration is enabled; leave blank to use bundled `prompts.json` |
+| **Enable external meme sources** | `true` | Enable pack and JSON-catalog imports |
+| **Allow plain HTTP sources** | `false` | Keep disabled to require HTTPS |
+| **Default external import to Review Queue** | `false` | The import dialog can override this; content filtration still forces review |
+| **Maximum images per source** | `2000` | Limit preflight and one synchronization run |
+| **Per-image / archive / expanded / pixel limit** | `32 MiB / 1 GiB / 4 GiB / 40 million` | Protect against oversized responses, decompression bombs, and huge images |
 
 ### WebUI
 
-The management page is served through the AstrBot Dashboard plugin page system. Click "Emoji Manager" in the plugin detail panel to access it. No additional port or password configuration is needed.
-
-### Maintainer release flow
-
-1. Update the version in `metadata.yaml` and add the dated section to `CHANGELOG.md`.
-2. Run the full local checks: `python -m pytest -p no:cacheprovider -q`, Ruff, compilation, and dashboard syntax checks.
-3. Commit and push the `metadata.yaml` version change, for example `git commit -m "release: vX.Y.Z"` followed by `git push origin master`.
-4. The GitHub Release workflow verifies that the version increased, runs all checks, creates the `vX.Y.Z` tag, builds `astrbot_plugin_stealer-vX.Y.Z.zip` plus `.sha256`, and uses the Changelog section as release notes.
-5. A manual Release run with `publish=false` performs validation and packaging without creating a tag or publishing a release.
-
-Since v2.8.8, theme choices made in the WebUI are persisted. When `webui_theme` is changed in the plugin configuration, the previous page-level choice is invalidated automatically and the new configured default takes effect without clearing browser storage.
+| Setting | Default | Description |
+|:---|:---|:---|
+| **WebUI default theme** | `auto` | `auto`, `dark`, `light`, `minecraft`, or `fallout`; page-level choices persist |
 
 ## 🔄 Emotion Analysis Modes
 
 | | LLM mode (recommended) | Passive retrieval |
 |:---|:---|:---|
-| **How it works** | A lightweight model extracts search keywords and emotion priors from the reply; sending is still gated by probability/cooldown/intent rules | No tags are injected; the reply text is used as the search query |
+| **How it works** | A lightweight model extracts search terms and 1–3 emotion priors; probability, cooldown, and intent gates still decide sending | The reply text is used directly as the search query, with no tags injected |
 | **Effect on replies** | ✅ Does not modify the LLM reply | ✅ Does not modify the LLM reply |
-| **Best for** | Want stronger emoji matching and can afford one extra lightweight model call | Tight token budget, skip the extra model call |
+| **Best for** | Stronger matching with one extra lightweight model call | Tight token budgets or lower latency |
 
-Character archives are assigned by hand in the WebUI and are independent of emotion categories. VLM only writes semantics; you pick the character (for example neurosama).
+Character assignment is done manually in the WebUI and remains independent of emotion categories. VLM writes semantic labels; you choose the character.
 
 ## 🎮 Command Reference
 
@@ -227,54 +235,64 @@ All commands use the `/meme` prefix.
 
 | Command | Description |
 |:---|:---|
-| `status` | View running status and emoji stats |
-| `list [category] [page_size] [page]` | List collected emojis (default: 10 per page, page 1) |
-| `emotion_stats` | View emotion analysis stats and current mode |
+| `status` | View running status and meme statistics |
+| `list [category] [page_size] [page]` | List collected memes (default: 10 per page, page 1) |
+| `emotion_stats` | View emotion-analysis statistics and the current mode |
 
 ### Admin Commands (admins only)
 
 | Command | Description |
 |:---|:---|
-| `on` / `off` | Enable / disable emoji collection |
-| `auto_on` / `auto_off` | Enable / disable auto-sending |
+| `on` / `off` | Enable / disable meme collection |
+| `auto_on` / `auto_off` | Enable / disable auto-send |
 | `clean [force]` | Clean unclassified raw staging images |
 | `偷` | Enter 30-second forced collection mode |
-| `group show` | View current send/steal filter config |
+| `group show` | View send/steal filter configuration |
 | `group <send\|steal> priority <wl\|bl>` | Set whitelist/blacklist conflict priority |
-| `group <send\|steal> <wl\|bl> <add\|del\|clear> [group:<id>\|user:<id>]` | Manage group/user filter lists |
-| `delete <index\|filename>` | Delete a specific emoji |
-| `blacklist <index\|filename>` | Delete and add to blacklist, preventing re-collection |
-| `scope <index\|filename> <public\|local>` | Set emoji scope; `local` is restricted to the origin group |
-| `capacity` | Trigger capacity control immediately |
-| `rebuild_index` | Rebuild the index (for version migration or corruption) |
-| `natural_analysis <on\|off>` | Toggle between the two emotion recognition systems |
-| `clear_emotion_cache` | Clear emotion analysis cache |
+| `group <send\|steal> <wl\|bl> <add\|del\|clear> [group:<id>\|user:<id>]` | Manage group and user filter lists |
+| `delete <index\|filename>` | Delete a meme |
+| `blacklist <index\|filename>` | Delete a meme and block it from future collection |
+| `scope <index\|filename> <public\|local>` | Set meme scope |
+| `capacity` | Run capacity control immediately |
+| `rebuild_index` | Rebuild the index after migration or corruption |
+| `natural_analysis <on\|off>` | Switch between the two emotion-analysis modes |
+| `clear_emotion_cache` | Clear cached emotion-analysis results |
+| `tag_stats [N]` | Inspect tag/scene statistics; N defaults to 15 |
 
-### LLM Tool Calls (triggered automatically in conversation)
+### LLM Tool Calls (automatic during conversation)
 
 | Tool | Description |
 |:---|:---|
-| `search_meme` | LLM searches for matching meme candidates with category, scene, scope, and usage hints |
-| `send_meme` | LLM selects and sends a meme from the candidate list; failures include explicit reason codes |
-| `steal_meme` | LLM imports an image when the user asks to collect it or the current message contains a suitable meme; `image_ref` may be omitted to use the first image in the current message, and VLM handles category, tags, description, and scene analysis |
+| `search_meme` | Search candidate memes with category, scene, scope, and usage hints |
+| `send_meme` | Select and send a meme from the candidate list; failures include a reason code |
+| `steal_meme` | Save an image when the user asks for it; omit `image_ref` to use the first image in the current message, while VLM supplies category, tags, description, and scenes |
 
 ## ⚠️ Notes
 
-- **Deleting a category via WebUI** also deletes all associated image files. Use with caution.
-- With `send_meme_as_gif` enabled, very large images converted to GIF may cause memory spikes. Turn it off on low-memory environments.
-- A **vision model (VLM)** is required. Without one, the plugin's core functions won't work.
+- Deleting a category in the WebUI also deletes its image files.
+- With `send_meme_as_gif` enabled, converting a very large image can cause a transient memory spike; disable it on low-memory systems.
+- A working vision model is required for image classification, auto-collection, and VLM re-analysis.
 
-### 📝 Prompt Format Update
+### 📝 Prompts and GIFs
 
-Since `v2.4.5+`, the core classification prompt uses a **strict JSON output format** for more stable and accurate parsing.
+- The VLM classification prompt uses strict JSON with category, emotions, description, tags, scenes, and visible text.
+- Custom VLM and emotion-analysis prompts are configurable; blank values use the bundled templates.
+- GIF analysis samples nine evenly spaced frames in chronological order, builds a 3×3 storyboard, and removes temporary sample files.
+- Legacy pipe-delimited responses remain supported, while JSON is more robust.
 
-Starting with v2.9.0, the VLM classification prompts and the lightweight LLM emotion-analysis prompt are configurable again: a non-empty custom value overrides the bundled prompt, while leaving it blank uses the built-in template.
+## 🚢 Maintainer Release Flow
 
-The old pipe-delimited format is still compatible, but the JSON format is more reliable.
+1. Update the version in `metadata.yaml` and add a dated section for that version to `CHANGELOG.md`.
+2. Run pytest, Ruff, Python compilation, dashboard syntax checks, and the release-script validation locally.
+3. Commit and push the change to `master` or `main`, including the `metadata.yaml` change (for example, `git commit -m "release: vX.Y.Z"` followed by `git push origin master`).
+4. The Release Action responds only when the pushed commit changes `metadata.yaml`. It requires a strictly higher version, runs the full checks, builds the ZIP and `.sha256`, creates the `vX.Y.Z` tag and GitHub Release, and downloads the asset again to verify its hash.
+5. A manual Release run with `publish=false` validates and packages the selected `ref`, uploading a seven-day dry-run artifact without creating a tag or release. Use `publish=true` only after that check succeeds.
+
+Ordinary code commits and pull requests still use CI; changing other files alone does not start the publishing workflow.
 
 ## 📄 License
 
-This project is open-source under the [MIT](LICENSE) license.
+This project is open source under the [MIT](LICENSE) license.
 
 ---
 
@@ -282,6 +300,6 @@ This project is open-source under the [MIT](LICENSE) license.
 
 If you find this useful, please give it a ⭐ Star — thank you!
 
-Report issues at [GitHub Issues](https://github.com/nagatoquin33/astrbot_plugin_stealer/issues) or find me in the community group.
+Report issues at [GitHub Issues](https://github.com/nagatoquin33/astrbot_plugin_stealer/issues).
 
 </div>
