@@ -3,6 +3,7 @@
 import os
 from typing import Any
 
+from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain
 from astrbot.api.message_components import Image
 
@@ -13,7 +14,9 @@ async def send_qq_image_as_sticker(
     summary: str = "[动画表情]",
     plugin: Any = None,
 ) -> bool:
-    """在 QQ (aiocqhttp) 平台发送表情包时修改 summary 外显。"""
+    """在 QQ (aiocqhttp) 平台以自定义表情类型发送图片。"""
+    if not getattr(plugin, "send_meme_as_qq_sticker", True):
+        return False
     try:
         from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import (
             AiocqhttpMessageEvent,
@@ -35,10 +38,13 @@ async def send_qq_image_as_sticker(
                 encoded = await image_processor._file_to_gif_base64(file_path)
                 if encoded:
                     file_source = f"base64://{encoded}"
-        chain = MessageChain(chain=[Image(file=file_source)])
+        chain = MessageChain([Image(file=file_source)])
         onebot_message = await event._parse_onebot_json(chain)
         onebot_message[0]["data"]["summary"] = summary
+        # NapCat: 0 为普通图片，1 为自定义表情；summary 只修改摘要。
+        onebot_message[0]["data"]["sub_type"] = 1
         await event.bot.send(event.message_obj.raw_message, onebot_message)
         return True
-    except Exception:
+    except Exception as e:
+        logger.warning(f"[Stealer] QQ 表情发送失败，回退为普通图片: {e}")
         return False

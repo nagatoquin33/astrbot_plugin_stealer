@@ -18,6 +18,7 @@ class PluginConfig(BaseModel):
     steal_chance: float = 0.3  # 概率模式下的偷图概率
     auto_send_meme: bool = True
     meme_chance: float = 0.2
+    send_meme_as_qq_sticker: bool = True
     send_meme_as_gif: bool = False
     meme_send_char_delay: float = 0.3
     meme_send_delay: float = 5.0
