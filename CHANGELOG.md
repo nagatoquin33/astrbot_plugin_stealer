@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### changed
+- 发布流程改为 CI 门禁与 SemVer 标签驱动，自动校验版本/Changelog、构建可安装插件包并附带 SHA-256
+
 ### fixed
 - 统一 Linux 与 Windows 的路径规范化行为，修复跨平台检索去重测试失败
 

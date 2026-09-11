@@ -212,6 +212,13 @@ HTTP 源默认只接受 HTTPS，并拒绝本机、私网与危险重定向。启
 
 管理页面通过 AstrBot Dashboard 插件页面系统提供，在插件详情中点击「表情管理」即可访问，无需额外配置端口或密码。
 
+### 维护者发布流程
+
+1. 在 `metadata.yaml` 更新版本，并把说明写入 `CHANGELOG.md` 对应的日期小节。
+2. 本地运行 `python -m pytest -p no:cacheprovider -q`、Ruff、编译和前端语法检查。
+3. 提交后创建并推送 SemVer 标签：`git tag -a vX.Y.Z -m "release: vX.Y.Z"`、`git push origin vX.Y.Z`。
+4. GitHub Release 工作流会再次验证、生成 `astrbot_plugin_stealer-vX.Y.Z.zip` 与 `.sha256`，并从 Changelog 生成发布说明。
+
 > 开发中（随 2.9.0 发布）：VLM 会抄录图上文字（`overlay_text`）；无法判断时归入最接近的情绪类，不再使用 `other`。自动发送改为检索句 + 情绪先验，分类不再当硬门。VLM 分类提示词和 LLM 小模型情绪分析提示词都可在配置页自定义，留空使用内置模板。2C2G 环境不要上本地 CLIP。角色在 WebUI 手工归档，与情绪分类独立。
 >
 > v2.8.2 起每张表情包记录图片元数据（尺寸/格式/字节数/来源 URL/原始文件名/入库方式/审核时间），WebUI 预览面板可直接查看；VLM 打标统一为 tags 0~3 个、scenes 1~2 个（自动去重截断），并在切换视觉模型后自动失效旧分类缓存。文字距离融合权重可在「智能选择」配置分组选择预设（均衡 / 关键词优先 / 语义优先 / 严格匹配），无需手动调 5 个小权重。

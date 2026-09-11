@@ -198,6 +198,13 @@ All settings can be modified in the AstrBot admin panel.
 
 The management page is served through the AstrBot Dashboard plugin page system. Click "Emoji Manager" in the plugin detail panel to access it. No additional port or password configuration is needed.
 
+### Maintainer release flow
+
+1. Update the version in `metadata.yaml` and add the dated section to `CHANGELOG.md`.
+2. Run the full local checks: `python -m pytest -p no:cacheprovider -q`, Ruff, compilation, and dashboard syntax checks.
+3. After committing, create and push a SemVer tag: `git tag -a vX.Y.Z -m "release: vX.Y.Z"`, then `git push origin vX.Y.Z`.
+4. The GitHub Release workflow revalidates the tag, builds `astrbot_plugin_stealer-vX.Y.Z.zip` plus `.sha256`, and uses the Changelog section as release notes.
+
 Since v2.8.8, theme choices made in the WebUI are persisted. When `webui_theme` is changed in the plugin configuration, the previous page-level choice is invalidated automatically and the new configured default takes effect without clearing browser storage.
 
 ## 🔄 Emotion Analysis Modes
