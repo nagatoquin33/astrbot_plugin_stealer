@@ -73,7 +73,18 @@ def extract_changelog(version: str, root: Path = ROOT) -> str:
     return match.group("body").strip()
 
 
-def validate(version: str | None = None, tag: str | None = None, root: Path = ROOT) -> str:
+def _version_tuple(version: str) -> tuple[int, int, int]:
+    if not SEMVER_RE.fullmatch(version):
+        raise ReleaseError(f"version is not stable SemVer: {version}")
+    return tuple(int(part) for part in version.split("."))  # type: ignore[return-value]
+
+
+def validate(
+    version: str | None = None,
+    tag: str | None = None,
+    previous_version: str | None = None,
+    root: Path = ROOT,
+) -> str:
     actual_version = read_version(root)
     if version and version != actual_version:
         raise ReleaseError(
@@ -98,7 +109,16 @@ def validate(version: str | None = None, tag: str | None = None, root: Path = RO
         if tag != expected_tag:
             raise ReleaseError(f"tag {tag} does not match metadata version {expected_tag}")
 
-    print(f"release validation passed: version={version}, tag={tag or '(none)'}")
+    if previous_version and _version_tuple(version) <= _version_tuple(previous_version):
+        raise ReleaseError(
+            f"metadata version {version} must be greater than {previous_version}"
+        )
+
+    print(
+        "release validation passed: "
+        f"version={version}, tag={tag or '(none)'}, "
+        f"previous={previous_version or '(none)'}"
+    )
     return version
 
 
@@ -174,6 +194,7 @@ def _parser() -> argparse.ArgumentParser:
     validate_parser = subparsers.add_parser("validate")
     validate_parser.add_argument("--version")
     validate_parser.add_argument("--tag")
+    validate_parser.add_argument("--previous-version")
 
     notes_parser = subparsers.add_parser("notes")
     notes_parser.add_argument("--version", required=True)
@@ -189,7 +210,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         if args.command == "validate":
-            validate(args.version, args.tag)
+            validate(args.version, args.tag, args.previous_version)
         elif args.command == "notes":
             validate(args.version)
             write_notes(args.version, args.output)

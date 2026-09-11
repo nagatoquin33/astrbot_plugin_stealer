@@ -2,20 +2,29 @@ name: Release
 
 on:
   push:
-    tags:
-      - "v*.*.*"
+    branches:
+      - master
+      - main
+    paths:
+      - "metadata.yaml"
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Existing release tag, for example v3.0.2"
+      ref:
+        description: "Commit, branch or tag to validate"
         required: true
+        default: "master"
         type: string
+      publish:
+        description: "Create the tag and GitHub Release"
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ inputs.tag || github.ref_name }}
+  group: release-${{ github.repository }}
   cancel-in-progress: false
 
 jobs:
@@ -25,14 +34,14 @@ jobs:
     permissions:
       contents: write
     env:
-      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      BEFORE_SHA: ${{ github.event.before }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Check out release tag
+      - name: Check out release source
         # v7.0.1
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ inputs.ref || github.sha }}
           fetch-depth: 0
 
       - name: Set up Python
@@ -50,12 +59,37 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt -r requirements-dev.txt
 
-      - name: Resolve and validate tag
+      - name: Resolve and validate metadata version
         run: |
-          VERSION="${RELEASE_TAG#v}"
+          VERSION=$(python -c 'from scripts.release import read_version; print(read_version())')
+          RELEASE_TAG="v${VERSION}"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          python scripts/release.py validate --version "$VERSION" --tag "$RELEASE_TAG"
-          test "$(git rev-parse "${RELEASE_TAG}^{commit}")" = "$(git rev-parse HEAD)"
+          echo "RELEASE_TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
+          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            PREVIOUS_VERSION=$(git show "${BEFORE_SHA}:metadata.yaml" | awk '/^version:/ { print $2; exit }')
+            test -n "$PREVIOUS_VERSION"
+            python scripts/release.py validate \
+              --version "$VERSION" \
+              --tag "$RELEASE_TAG" \
+              --previous-version "$PREVIOUS_VERSION"
+          else
+            python scripts/release.py validate --version "$VERSION" --tag "$RELEASE_TAG"
+          fi
+
+      - name: Check release destination
+        if: github.event_name == 'push' || inputs.publish
+        run: |
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release already exists: $RELEASE_TAG" >&2
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            git fetch --force --quiet origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+            test "$(git rev-parse "${RELEASE_TAG}^{commit}")" = "$(git rev-parse HEAD)"
+            echo "TAG_EXISTS=true" >> "$GITHUB_ENV"
+          else
+            echo "TAG_EXISTS=false" >> "$GITHUB_ENV"
+          fi
 
       - name: Run release test suite
         run: python -m pytest -p no:cacheprovider -q
@@ -80,12 +114,32 @@ jobs:
             echo "- The attached ZIP is the curated runtime plugin package; its SHA-256 file is provided alongside it."
           } >> dist/release-notes.md
 
-      - name: Create GitHub Release
+      - name: Upload dry-run package
+        if: github.event_name == 'workflow_dispatch' && !inputs.publish
+        # v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-dry-run-${{ env.RELEASE_TAG }}
+          path: |
+            dist/*.zip
+            dist/*.sha256
+            dist/release-notes.md
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Create release tag
+        if: github.event_name == 'push' || inputs.publish
         run: |
-          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release already exists: $RELEASE_TAG" >&2
-            exit 1
+          if [[ "${TAG_EXISTS:-false}" != "true" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$RELEASE_TAG" -m "Release $RELEASE_TAG" HEAD
+            git push origin "$RELEASE_TAG"
           fi
+
+      - name: Create GitHub Release
+        if: github.event_name == 'push' || inputs.publish
+        run: |
           gh release create "$RELEASE_TAG" \
             "dist/astrbot_plugin_stealer-${RELEASE_TAG}.zip" \
             "dist/astrbot_plugin_stealer-${RELEASE_TAG}.zip.sha256" \
@@ -97,6 +151,7 @@ jobs:
             --generate-notes
 
       - name: Verify published assets
+        if: github.event_name == 'push' || inputs.publish
         run: |
           mkdir -p verify
           gh release download "$RELEASE_TAG" \

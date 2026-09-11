@@ -217,8 +217,9 @@ HTTP 源默认只接受 HTTPS，并拒绝本机、私网与危险重定向。启
 
 1. 在 `metadata.yaml` 更新版本，并把说明写入 `CHANGELOG.md` 对应的日期小节。
 2. 本地运行 `python -m pytest -p no:cacheprovider -q`、Ruff、编译和前端语法检查。
-3. 提交后创建并推送 SemVer 标签：`git tag -a vX.Y.Z -m "release: vX.Y.Z"`、`git push origin vX.Y.Z`。
-4. GitHub Release 工作流会再次验证、生成 `astrbot_plugin_stealer-vX.Y.Z.zip` 与 `.sha256`，并从 Changelog 生成发布说明。
+3. 提交并推送包含 `metadata.yaml` 版本变化的 commit，例如 `git commit -m "release: vX.Y.Z"` 后执行 `git push origin master`。
+4. GitHub Release 工作流会验证版本确实递增，随后执行完整检查、创建 `vX.Y.Z` 标签，生成 `astrbot_plugin_stealer-vX.Y.Z.zip` 与 `.sha256`，并从 Changelog 生成发布说明。
+5. 可在 Actions 页面手动运行 Release，保持 `publish=false` 即可只检查和打包，不创建标签或正式发布。
 
 > 开发中（随 2.9.0 发布）：VLM 会抄录图上文字（`overlay_text`）；无法判断时归入最接近的情绪类，不再使用 `other`。自动发送改为检索句 + 情绪先验，分类不再当硬门。VLM 分类提示词和 LLM 小模型情绪分析提示词都可在配置页自定义，留空使用内置模板。2C2G 环境不要上本地 CLIP。角色在 WebUI 手工归档，与情绪分类独立。
 >

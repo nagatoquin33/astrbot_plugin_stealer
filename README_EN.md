@@ -203,8 +203,9 @@ The management page is served through the AstrBot Dashboard plugin page system. 
 
 1. Update the version in `metadata.yaml` and add the dated section to `CHANGELOG.md`.
 2. Run the full local checks: `python -m pytest -p no:cacheprovider -q`, Ruff, compilation, and dashboard syntax checks.
-3. After committing, create and push a SemVer tag: `git tag -a vX.Y.Z -m "release: vX.Y.Z"`, then `git push origin vX.Y.Z`.
-4. The GitHub Release workflow revalidates the tag, builds `astrbot_plugin_stealer-vX.Y.Z.zip` plus `.sha256`, and uses the Changelog section as release notes.
+3. Commit and push the `metadata.yaml` version change, for example `git commit -m "release: vX.Y.Z"` followed by `git push origin master`.
+4. The GitHub Release workflow verifies that the version increased, runs all checks, creates the `vX.Y.Z` tag, builds `astrbot_plugin_stealer-vX.Y.Z.zip` plus `.sha256`, and uses the Changelog section as release notes.
+5. A manual Release run with `publish=false` performs validation and packaging without creating a tag or publishing a release.
 
 Since v2.8.8, theme choices made in the WebUI are persisted. When `webui_theme` is changed in the plugin configuration, the previous page-level choice is invalidated automatically and the new configured default takes effect without clearing browser storage.
 
