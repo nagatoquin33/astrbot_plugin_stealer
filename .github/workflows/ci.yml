@@ -51,7 +51,7 @@ jobs:
         run: python -m pytest -p no:cacheprovider -q
 
       - name: Lint Python
-        run: python -m ruff check main.py plugin_api.py cache_service.py task_scheduler.py core tests scripts
+        run: python -m ruff check --config ruff.toml main.py plugin_api.py cache_service.py task_scheduler.py core tests scripts
 
       - name: Compile Python
         run: python -m compileall -q main.py plugin_api.py cache_service.py task_scheduler.py core tests scripts
