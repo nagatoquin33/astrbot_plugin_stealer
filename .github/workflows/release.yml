@@ -1,50 +1,112 @@
-name: Auto Release
+name: Release
 
 on:
   push:
-    branches:
-      - master
-      - main
-    paths:
-      - 'metadata.yaml'
+    tags:
+      - "v*.*.*"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag, for example v3.0.2"
+        required: true
+        type: string
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
   release:
+    name: Validate, package and publish
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Check out release tag
+        # v7.0.1
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          fetch-depth: 2
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
 
-      - name: Get version from metadata.yaml
-        id: version
-        run: |
-          VERSION=$(grep '^version:' metadata.yaml | sed 's/version: *//')
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Current version: $VERSION"
+      - name: Set up Python
+        # v7.0.0
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
 
-      - name: Check if tag exists
-        id: check_tag
+      - name: Install dependencies
         run: |
-          if git rev-parse "v${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Resolve and validate tag
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          python scripts/release.py validate --version "$VERSION" --tag "$RELEASE_TAG"
+          test "$(git rev-parse "${RELEASE_TAG}^{commit}")" = "$(git rev-parse HEAD)"
+
+      - name: Run release test suite
+        run: python -m pytest -p no:cacheprovider -q
+
+      - name: Lint and compile
+        run: |
+          python -m ruff check main.py plugin_api.py cache_service.py task_scheduler.py core tests scripts
+          python -m compileall -q main.py plugin_api.py cache_service.py task_scheduler.py core tests scripts
+          node --check pages/dashboard/app.js
+          node --check pages/dashboard/template.js
+
+      - name: Build installable plugin package
+        run: |
+          python scripts/release.py package --version "$VERSION" --output-dir dist
+          python scripts/release.py notes --version "$VERSION" --output dist/release-notes.md
+          {
+            echo
+            echo "## Verification"
+            echo
+            echo "- Full pytest suite passed."
+            echo "- Ruff, Python compilation, dashboard JavaScript syntax and release contracts passed."
+            echo "- The attached ZIP is the curated runtime plugin package; its SHA-256 file is provided alongside it."
+          } >> dist/release-notes.md
+
+      - name: Create GitHub Release
+        run: |
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release already exists: $RELEASE_TAG" >&2
+            exit 1
           fi
+          gh release create "$RELEASE_TAG" \
+            "dist/astrbot_plugin_stealer-${RELEASE_TAG}.zip" \
+            "dist/astrbot_plugin_stealer-${RELEASE_TAG}.zip.sha256" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --fail-on-no-commits \
+            --title "Release $RELEASE_TAG" \
+            --notes-file dist/release-notes.md \
+            --generate-notes
 
-      - name: Create Release
-        if: steps.check_tag.outputs.exists == 'false'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ steps.version.outputs.version }}
-          name: Release v${{ steps.version.outputs.version }}
-          generate_release_notes: true
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify published assets
+        run: |
+          mkdir -p verify
+          gh release download "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "astrbot_plugin_stealer-${RELEASE_TAG}.zip" \
+            --dir verify \
+            --clobber
+          (
+            cd verify
+            sha256sum -c "../dist/astrbot_plugin_stealer-${RELEASE_TAG}.zip.sha256"
+          )
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --json tagName,name,isDraft,isPrerelease,assets,url

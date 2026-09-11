@@ -1,0 +1,9 @@
+# Keep the installable release archive focused on runtime plugin files.
+/.github export-ignore
+/CLAUDE.md export-ignore
+/scripts export-ignore
+/tests export-ignore
+/ruff.toml export-ignore
+/requirements-dev.txt export-ignore
+/.gitignore export-ignore
+/.gitattributes export-ignore
