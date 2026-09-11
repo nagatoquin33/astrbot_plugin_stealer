@@ -7,9 +7,10 @@
 **让 Bot 自动偷走群友的表情包，分类入库，聊天时看心情自动发出来。**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-![Python Version](https://img.shields.io/badge/Python-3.10%2B-blue)
+![Python Version](https://img.shields.io/badge/Python-3.12%2B-blue)
 ![AstrBot](https://img.shields.io/badge/AstrBot-%E2%89%A54.24.1-green)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-lightgrey)
+[![CI](https://github.com/nagatoquin33/astrbot_plugin_stealer/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/nagatoquin33/astrbot_plugin_stealer/actions/workflows/ci.yml)
 [![Last Commit](https://img.shields.io/github/last-commit/nagatoquin33/astrbot_plugin_stealer)](https://github.com/nagatoquin33/astrbot_plugin_stealer/commits/master)
 
 **Language / 语言**
