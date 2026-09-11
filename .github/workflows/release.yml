@@ -164,4 +164,4 @@ jobs:
             sha256sum -c "../dist/astrbot_plugin_stealer-${RELEASE_TAG}.zip.sha256"
           )
           gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
-            --json tagName,name,isDraft,isPrerelease,assets,url
+            --json tagName,name,publishedAt,isDraft,isPrerelease,assets
