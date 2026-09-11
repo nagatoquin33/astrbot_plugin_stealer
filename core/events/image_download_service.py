@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import shutil
 import tempfile
 from typing import Any
 
@@ -61,7 +62,9 @@ class ImageDownloadService:
             return ".gif", True
         if "png" in content_type or content[:8] == b"\x89PNG\r\n\x1a\n":
             return ".png", False
-        if "webp" in content_type or (content[:4] == b"RIFF" and content[8:12] == b"WEBP"):
+        if "webp" in content_type or (
+            content[:4] == b"RIFF" and content[8:12] == b"WEBP"
+        ):
             return ".webp", False
         if "jpeg" in content_type or "jpg" in content_type:
             return ".jpg", False
@@ -114,8 +117,9 @@ class ImageDownloadService:
     async def download_original_image(self, img: Any) -> tuple[str | None, bool]:
         """下载原始图片文件。
 
-        优先使用图片组件的本地路径（file/url 如果是本地路径），
-        仅对远程 HTTP URL 发起下载请求。
+        优先从图片组件的本地路径复制出插件自有临时文件，
+        仅对远程 HTTP URL 发起下载请求。调用方会把返回路径作为临时文件
+        移动或删除，因此不能直接返回由 AstrBot 事件生命周期管理的原路径。
 
         Args:
             img: 图片组件
@@ -133,7 +137,7 @@ class ImageDownloadService:
                 content_type = ""
                 try:
                     with open(candidate, "rb") as f:
-                        header = f.read(8)
+                        header = f.read(12)
                     if header[:6] in (b"GIF89a", b"GIF87a"):
                         content_type = "image/gif"
                     elif header[:8] == b"\x89PNG\r\n\x1a\n":
@@ -143,11 +147,30 @@ class ImageDownloadService:
                 except OSError:
                     logger.warning(f"无法读取本地图片文件: {candidate}")
                     continue
-                _, is_gif = self.detect_file_type(content_type, b"")
+
+                ext, is_gif = self.detect_file_type(content_type, header)
+                temp_fd, temp_path = tempfile.mkstemp(suffix=ext)
+                os.close(temp_fd)
+                try:
+                    await asyncio.to_thread(shutil.copyfile, candidate, temp_path)
+                except asyncio.CancelledError:
+                    try:
+                        os.unlink(temp_path)
+                    except OSError:
+                        pass
+                    raise
+                except OSError as e:
+                    try:
+                        os.unlink(temp_path)
+                    except OSError:
+                        pass
+                    logger.warning(f"复制本地图片失败: {candidate}, {e}")
+                    continue
                 logger.debug(
-                    f"图片已是本地文件，跳过下载: {candidate} (is_gif={is_gif})"
+                    f"已复制本地图片到插件临时文件: {candidate} -> {temp_path} "
+                    f"(is_gif={is_gif})"
                 )
-                return candidate, is_gif
+                return temp_path, is_gif
 
         # 回退到 HTTP 下载
         url = img_url or img_file
