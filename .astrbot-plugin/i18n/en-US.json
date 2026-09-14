@@ -306,6 +306,7 @@
             "modal": {
                 "edit": "Edit",
                 "edit_pending": "Edit Pending Sticker",
+                "review_pending": "Review Sticker",
                 "details": "Details",
                 "add_sticker": "Add Sticker",
                 "batch_import": "Batch Import Stickers",
@@ -495,6 +496,7 @@
             },
             "kbd": {
                 "navigate": "Navigate",
+                "preview": "Preview",
                 "clear_focus": "Clear focus"
             },
             "characters": {

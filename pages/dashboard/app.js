@@ -148,6 +148,7 @@ createApp({
 
         const previewOpen = ref(false);
         const previewItem = ref(null);
+        const previewSource = ref('library');
         const isEditing = ref(false);
         const editForm = reactive({ category: '', tags: '', scene: '', desc: '', overlay_text: '', character: '', scope_mode: 'public' });
         const vlmReanalysisLoading = ref(false);
@@ -1421,6 +1422,7 @@ createApp({
         const nextPage = () => currentPage.value * pageSize.value < total.value && fetchImages(currentPage.value + 1);
 
         const openPreview = (img) => {
+            previewSource.value = 'library';
             previewItem.value = img;
             previewOpen.value = true;
             vlmReanalysisError.value = '';
@@ -1429,9 +1431,19 @@ createApp({
             requestOriginalForPreview(img?.hash);
         };
 
+        const openPendingPreview = (item) => {
+            if (!item) return;
+            previewSource.value = 'pending';
+            previewItem.value = item;
+            previewOpen.value = true;
+            resetPreviewZoom();
+            requestOriginalForPreview(item.hash);
+        };
+
         const closePreview = () => {
             previewOpen.value = false;
             previewItem.value = null;
+            previewSource.value = 'library';
             isEditing.value = false;
             vlmReanalysisError.value = '';
             vlmReanalysisResult.value = null;
@@ -1440,12 +1452,59 @@ createApp({
             pruneOriginalUrls();
         };
 
+        // 审核动作前先取好下一张：approve/reject 会刷新列表，动作后再找就找不到了
+        const nextPendingAfter = (id) => {
+            const list = pendingImages.value;
+            const idx = list.findIndex((i) => i.id === id);
+            return list[idx + 1] || list[idx - 1] || null;
+        };
+
+        const settlePendingPreview = (actedId) => {
+            const next = nextPendingAfter(actedId);
+            if (next) {
+                previewItem.value = next;
+                resetPreviewZoom();
+                requestOriginalForPreview(next.hash);
+            } else {
+                closePreview();
+            }
+        };
+
+        const approvePreviewPending = async () => {
+            const id = previewItem.value?.id;
+            if (id == null) return;
+            settlePendingPreview(id);
+            await approvePending(id);
+        };
+
+        const rejectPreviewPending = async (blacklist = false) => {
+            const id = previewItem.value?.id;
+            if (id == null) return;
+            settlePendingPreview(id);
+            await rejectPending(id, blacklist);
+        };
+
+        const editPreviewPending = () => {
+            const item = previewItem.value;
+            if (!item || item.id == null) return;
+            closePreview();
+            openPendingEdit(item);
+        };
+
+        const previewListLength = computed(() => (
+            previewSource.value === 'pending' ? pendingImages.value.length : images.value.length
+        ));
+
         const navigateImage = (direction) => {
             if (!previewItem.value) return;
-            const idx = images.value.findIndex((i) => i.hash === previewItem.value.hash);
+            const isPending = previewSource.value === 'pending';
+            const list = isPending ? pendingImages.value : images.value;
+            const idx = list.findIndex((i) => (
+                isPending ? i.id === previewItem.value.id : i.hash === previewItem.value.hash
+            ));
             const nextIdx = idx + direction;
-            if (nextIdx >= 0 && nextIdx < images.value.length) {
-                previewItem.value = images.value[nextIdx];
+            if (nextIdx >= 0 && nextIdx < list.length) {
+                previewItem.value = list[nextIdx];
                 vlmReanalysisError.value = '';
                 vlmReanalysisResult.value = null;
                 resetPreviewZoom();
@@ -1572,7 +1631,22 @@ createApp({
 
         const handleKeydown = (e) => {
             if (isTypingTarget(e)) return;
+            if (e.key === 'Escape') {
+                // 只关最上层弹窗，按堆叠顺序判断，避免一次 Esc 关掉好几层
+                if (confirmOpen.value) { onConfirmNo(); return; }
+                if (promptOpen.value) { onPromptCancel(); return; }
+                if (pendingEditOpen.value) { closePendingEdit(); return; }
+                if (uploadOpen.value) { closeUploadModal(); return; }
+                if (batchUploadOpen.value) { closeBatchUploadModal(); return; }
+                if (sourceOpen.value) { closeSourceModal(); return; }
+                if (emotionsOpen.value) { closeEmotionsModal(); return; }
+                if (charactersOpen.value) { closeCharactersModal(); return; }
+                if (batchMoveOpen.value) { closeBatchMoveModal(); return; }
+                if (batchCharacterOpen.value) { closeBatchCharacterModal(); return; }
+                if (batchScopeOpen.value) { closeBatchScopeModal(); return; }
+            }
             if (previewOpen.value) {
+                if (anyModalOpen()) return;
                 if (isEditing.value) return;
                 if (e.key === 'ArrowLeft') prevImage();
                 else if (e.key === 'ArrowRight') nextImage();
@@ -1590,6 +1664,11 @@ createApp({
                 case 'ArrowLeft':
                 case 'ArrowUp': e.preventDefault(); movePendingFocus(-1); break;
                 case 'Escape': focusedPendingId.value = null; break;
+                case 'Enter': {
+                    const item = pendingImages.value.find((i) => i.id === focusedPendingId.value);
+                    if (item) openPendingPreview(item);
+                    break;
+                }
                 case 'a':
                 case 'A':
                     if (focusedPendingId.value != null) { approvePending(focusedPendingId.value); focusedPendingId.value = null; }
@@ -1678,14 +1757,16 @@ createApp({
                     method: 'POST',
                     body: JSON.stringify({ hash: img.hash, blacklist }),
                 });
-                if (res.ok) {
+                // apiFetch 只要不抛异常就恒为 ok:true，必须读 body 里的 success
+                const data = await res.json().catch(() => ({}));
+                if (res.ok && data.success) {
                     closePreview();
                     if (images.value.length === 1 && currentPage.value > 1) {
                         currentPage.value--;
                     }
                     refreshView();
                 } else {
-                    showAlert(t('pages.dashboard.alerts.delete_failed', 'Delete failed.'));
+                    showAlert(data.error || t('pages.dashboard.alerts.delete_failed', 'Delete failed.'));
                 }
             } catch (e) {
                 showAlert(t('pages.dashboard.alerts.action_failed', 'Action failed.'));
@@ -2661,6 +2742,8 @@ createApp({
 
             previewOpen,
             previewItem,
+            previewSource,
+            previewListLength,
             isEditing,
             editForm,
             vlmReanalysisLoading,
@@ -2668,9 +2751,13 @@ createApp({
             vlmReanalysisError,
             vlmReanalysisResult,
             openPreview,
+            openPendingPreview,
             closePreview,
             prevImage,
             nextImage,
+            approvePreviewPending,
+            rejectPreviewPending,
+            editPreviewPending,
             startEdit,
             cancelEdit,
             saveEdit,

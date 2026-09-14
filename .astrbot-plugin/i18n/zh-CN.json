@@ -306,6 +306,7 @@
             "modal": {
                 "edit": "编辑",
                 "edit_pending": "编辑待审核表情包",
+                "review_pending": "审核表情包",
                 "details": "详情",
                 "add_sticker": "添加表情包",
                 "batch_import": "批量导入表情包",
@@ -495,6 +496,7 @@
             },
             "kbd": {
                 "navigate": "选择",
+                "preview": "预览",
                 "clear_focus": "取消聚焦"
             },
             "characters": {

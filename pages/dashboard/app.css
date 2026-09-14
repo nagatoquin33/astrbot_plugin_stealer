@@ -21,7 +21,7 @@
     --favorite: #fbbf24;
     --text-primary: #f8fafc;
     --text-secondary: #a1a7b6;
-    --text-tertiary: #5e6577;
+    --text-tertiary: #828da3;
     --text-main: var(--text-primary);
     --text-muted: var(--text-secondary);
     --glass-bg: rgba(17, 21, 32, 0.75);
@@ -48,6 +48,20 @@
     --sidebar-width: 180px;
     --sidebar-expanded: 220px;
     --header-height: 72px;
+    /* ── 排版尺度：全站文字只允许这 7 级，行高三档 ── */
+    --font-display: 'Cinzel', 'Noto Sans SC', -apple-system, 'Segoe UI', sans-serif;
+    --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+    --fs-2xs: 0.6875rem;   /* 11px 徽标 · 角标 · kbd */
+    --fs-xs: 0.75rem;      /* 12px 元信息 · 标签 */
+    --fs-sm: 0.8125rem;    /* 13px 次要文本 · 紧凑控件 */
+    --fs-md: 0.875rem;     /* 14px 正文默认 */
+    --fs-lg: 1rem;         /* 16px 输入框 · 强调正文 */
+    --fs-xl: 1.125rem;     /* 18px 弹窗标题 · 区块头 */
+    --fs-2xl: 1.375rem;    /* 22px 页面标题 · 统计大数 */
+    --lh-tight: 1.25;      /* 标题 / 数值 */
+    --lh-snug: 1.4;        /* 元信息 / 标签 */
+    --lh-normal: 1.6;      /* 正文 */
+    --ls-caps: 0.08em;     /* 微标签字距 */
     color-scheme: dark;
 }
 
@@ -80,9 +94,9 @@ html {
 body {
     background-color: var(--bg-base);
     color: var(--text-primary);
-    font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    font-size: 15px;
-    line-height: 1.7;
+    font-family: var(--font-ui);
+    font-size: var(--fs-md);
+    line-height: var(--lh-normal);
     background-image: url("data:image/svg+xml,%3Csvg width='100' height='100' viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
     margin: 0;
     padding: 0;
@@ -100,8 +114,10 @@ body {
 
 
 h1, h2, h3 {
-    font-family: 'Cinzel', serif;
+    /* Cinzel 只覆盖拉丁字形；中文落到无衬线，避免 Windows 下变成粗糙的加粗宋体 */
+    font-family: var(--font-display);
     font-weight: 700;
+    line-height: var(--lh-tight);
     color: var(--gold-primary);
     text-transform: uppercase;
     letter-spacing: 2px;
@@ -115,17 +131,27 @@ h1, h2, h3 {
 }
 
 h1 {
-    font-size: 1.6rem;
+    font-size: var(--fs-2xl);
     border-bottom: 3px double var(--gold-dim);
     padding-bottom: 12px;
     margin: 0 0 20px 0;
 }
 
 h2 {
-    font-size: 1.2rem;
+    font-size: var(--fs-xl);
     border-bottom: 1px solid var(--gold-dim);
     padding-bottom: 8px;
     margin: 0 0 16px 0;
+}
+
+/* 计数/翻页等数字一律等宽，数值跳动时版面不再抖动 */
+.stat-value,
+.category-count,
+.character-chip-count,
+.capacity-count,
+.page-info,
+.source-metrics span {
+    font-variant-numeric: tabular-nums;
 }
 
 
@@ -151,18 +177,26 @@ h2 {
     -webkit-backdrop-filter: blur(var(--glass-blur));
     border-bottom: 1px solid var(--glass-border);
     padding: 0 20px;
-    display: flex;
-    justify-content: space-between;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
     align-items: center;
     z-index: 100;
 }
 .codex-header::before, .codex-header::after { display: none; }
 
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
 .header-title {
     display: flex;
     align-items: center;
     gap: 16px;
-    flex: 1;
+    flex: 0 1 auto;
+    min-width: 0;
     padding: 6px 0;
 }
 
@@ -174,8 +208,8 @@ h2 {
     display: flex;
     align-items: center;
     gap: 16px;
-    flex: 1;
     justify-content: flex-end;
+    justify-self: end;
 }
 
 .stats-bar {
@@ -185,7 +219,7 @@ h2 {
     border: 1px solid var(--glass-border);
     padding: 4px;
     border-radius: 8px;
-    margin: 0 auto;
+    justify-self: center;
 }
 
 .header-icon {
@@ -210,15 +244,15 @@ h2 {
     border: none;
     padding: 0;
     margin: 0 0 4px 0;
-    font-size: 1.4rem;
-    line-height: 1.2;
+    font-size: var(--fs-2xl);
+    line-height: var(--lh-tight)
 }
 
 .header-text p {
     margin: 0;
     color: var(--text-secondary);
-    font-size: 0.8rem;
-    line-height: 1.3;
+    font-size: var(--fs-sm);
+    line-height: var(--lh-snug)
     letter-spacing: 0.15em;
     text-transform: uppercase;
 }
@@ -237,17 +271,17 @@ h2 {
 }
 
 .stat-value {
-    font-family: 'Cinzel', serif;
-    font-size: 1.4rem;
+    font-family: var(--font-display);
+    font-size: var(--fs-2xl);
     font-weight: 700;
-    line-height: 1.1;
+    line-height: var(--lh-tight);
     color: var(--gold-bright);
     text-shadow: 0 0 10px rgba(var(--accent-soft-rgb), 0.3);
 }
 
 .stat-label {
-    font-size: 0.65rem;
-    line-height: 1.2;
+    font-size: var(--fs-2xs);
+    line-height: var(--lh-tight)
     color: var(--text-secondary);
     text-transform: uppercase;
     letter-spacing: 0.1em;
@@ -283,7 +317,7 @@ h2 {
     z-index: 50;
 }
 .sidebar-title {
-    font-size: 0.8rem;
+    font-size: var(--fs-sm);
     font-weight: 600;
     color: var(--gold-primary);
     text-transform: uppercase;
@@ -305,12 +339,17 @@ h2 {
     display: flex;
     align-items: center;
     gap: 12px;
+    width: 100%;
     padding: 10px 12px;
     border-radius: 8px;
     cursor: pointer;
     white-space: nowrap;
     transition: all 0.2s ease;
+    background: none;
+    border: none;
     border-left: 3px solid transparent;
+    font: inherit;
+    text-align: left;
     position: relative;
 }
 .category-item + .category-item::before {
@@ -333,7 +372,7 @@ h2 {
 
 .category-name {
     color: var(--text-primary);
-    font-size: 0.9rem;
+    font-size: var(--fs-md);
     flex: 1;
     min-width: 0;
     overflow: hidden;
@@ -347,7 +386,7 @@ h2 {
 .category-count {
     font-family: inherit;
     font-variant-numeric: tabular-nums;
-    font-size: 0.75rem;
+    font-size: var(--fs-xs);
     color: var(--text-secondary);
     background: var(--bg-base);
     padding: 2px 8px;
@@ -427,7 +466,7 @@ h2 {
 
 .toolbar-search {
     position: relative;
-    flex: 0 1 320px;
+    flex: 1 1 320px;
     min-width: 200px;
 }
 
@@ -437,8 +476,8 @@ h2 {
     background: var(--bg-base);
     border: 1px solid var(--glass-border);
     color: var(--text-primary);
-    font-family: 'Noto Sans SC', sans-serif;
-    font-size: 0.9rem;
+    font-family: var(--font-ui);
+    font-size: var(--fs-lg);
     outline: none;
     transition: all 0.3s;
 }
@@ -448,11 +487,23 @@ h2 {
     box-shadow: 0 0 8px rgba(var(--accent-soft-rgb), 0.2);
 }
 
+/* 浏览行：搜索撑满，排序/视图切换靠右 */
+.toolbar-controls {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-left: auto;
+}
+
+/* 操作行：批量/分类靠左，添加/导入等主要操作靠右 */
 .toolbar-actions {
     display: flex;
     gap: 10px;
     flex-wrap: wrap;
     align-items: center;
+    flex: 1 1 100%;
+    justify-content: space-between;
 }
 
 
@@ -484,7 +535,7 @@ h2 {
 }
 
 .character-filter-label {
-    font-size: 0.75rem;
+    font-size: var(--fs-xs);
     color: var(--text-muted);
     letter-spacing: 0.08em;
     white-space: nowrap;
@@ -499,7 +550,7 @@ h2 {
     background: transparent;
     color: var(--text-primary);
     cursor: pointer;
-    font-size: 0.8rem;
+    font-size: var(--fs-sm);
     font-family: inherit;
 }
 
@@ -510,7 +561,7 @@ h2 {
 }
 
 .character-chip-count {
-    font-size: 0.7rem;
+    font-size: var(--fs-2xs);
     color: var(--text-muted);
 }
 
@@ -525,8 +576,8 @@ h2 {
     z-index: 5;
     max-width: calc(100% - 52px);
     padding: 2px 8px;
-    font-size: 0.68rem;
-    line-height: 1.4;
+    font-size: var(--fs-2xs);
+    line-height: var(--lh-snug)
     color: var(--gold-bright);
     background: rgba(0, 0, 0, 0.55);
     border: 1px solid var(--gold-dim);
@@ -544,7 +595,7 @@ h2 {
     display: inline-block;
     margin-left: 6px;
     padding: 0 5px;
-    font-size: 0.68rem;
+    font-size: var(--fs-2xs);
     border: 1px solid var(--gold-dim);
     color: var(--gold-bright);
     vertical-align: middle;
@@ -576,8 +627,11 @@ h2 {
 .inventory-grid {
     flex: 1;
     padding: 20px;
-    columns: var(--slot-size);
-    column-gap: 16px;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-content: flex-start;
+    gap: 16px;
     overflow-y: auto;
 }
 
@@ -593,9 +647,7 @@ h2 {
     flex-direction: column;
     transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
     box-shadow: 0 2px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.05);
-    break-inside: avoid;
-    -webkit-column-break-inside: avoid;
-    margin-bottom: 16px;
+    width: var(--slot-size);
     contain: layout style paint;
 }
 .item-slot:hover {
@@ -620,8 +672,8 @@ h2 {
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 14px;
-    font-weight: bold;
+    font-size: var(--fs-md);
+    font-weight: 700;
     z-index: 10;
     box-shadow: 0 2px 4px rgba(0,0,0,0.3);
 }
@@ -630,17 +682,20 @@ h2 {
 .item-image {
     flex: 0 0 auto;
     width: 100%;
+    aspect-ratio: 1 / 1;
     min-height: 110px;
     display: flex;
     align-items: center;
     justify-content: center;
     overflow: hidden;
+    background: var(--bg-base);
 }
 
 .item-image img {
-    width: 100%;
+    width: auto;
     height: auto;
     max-width: 100%;
+    max-height: 100%;
     object-fit: contain;
     filter: brightness(0.95);
     transition: filter 0.2s;
@@ -718,8 +773,8 @@ h2 {
 
 .item-category {
     color: var(--gold-primary);
-    font-family: 'Noto Sans SC', sans-serif;
-    font-size: 0.75rem;
+    font-family: var(--font-ui);
+    font-size: var(--fs-xs);
     font-weight: 500;
     white-space: nowrap;
     overflow: hidden;
@@ -738,7 +793,7 @@ h2 {
     justify-content: center;
     padding: 2px 8px;
     border-radius: 999px;
-    font-size: 0.68rem;
+    font-size: var(--fs-2xs);
     letter-spacing: 0.04em;
     border: 1px solid rgba(var(--accent-soft-rgb), 0.35);
     color: var(--gold-bright);
@@ -759,7 +814,7 @@ h2 {
 
 .form-hint {
     margin-top: 8px;
-    font-size: 0.78rem;
+    font-size: var(--fs-xs);
     color: var(--text-secondary);
 }
 
@@ -776,9 +831,9 @@ h2 {
 }
 
 .page-info {
-    font-family: 'Cinzel', serif;
+    font-family: var(--font-ui);
     color: var(--gold-primary);
-    font-size: 0.9rem;
+    font-size: var(--fs-md);
     min-width: 100px;
     text-align: center;
 }
@@ -788,12 +843,13 @@ h2 {
     background: var(--btn-gradient);
     border: 1px solid var(--gold-dim);
     color: var(--gold-primary);
-    padding: 10px 20px;
-    font-family: 'Cinzel', serif;
-    font-size: 0.85rem;
-    font-weight: 700;
+    padding: 8px 16px;
+    /* 按钮是操作控件，用 UI 字体保证小字号可读；展示字体只留给标题和大数字 */
+    font-family: var(--font-ui);
+    font-size: var(--fs-sm);
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.1em;
+    letter-spacing: 0.05em;
     cursor: pointer;
     transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
     box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.05);
@@ -805,7 +861,7 @@ h2 {
     overflow: hidden;
     user-select: none;
     white-space: nowrap;
-    min-height: 42px;
+    min-height: 36px;
     border-radius: 4px;
 }
 
@@ -842,7 +898,7 @@ h2 {
     color: #05080f;
     border-color: var(--gold-bright);
     text-shadow: 0 1px 1px rgba(255,255,255,0.3);
-    font-weight: 800;
+    font-weight: 700;
 }
 
 .codex-btn.primary::before {
@@ -976,7 +1032,7 @@ h2 {
     border: none;
     padding: 0;
     margin: 0;
-    font-size: 1.1rem;
+    font-size: var(--fs-xl);
 }
 
 .modal-close {
@@ -1044,7 +1100,7 @@ h2 {
     left: 50%;
     transform: translateX(-50%);
     padding: 4px 10px;
-    font-size: 0.72rem;
+    font-size: var(--fs-2xs);
     letter-spacing: 0.08em;
     color: var(--text-secondary);
     background: var(--bar-solid);
@@ -1070,14 +1126,14 @@ h2 {
 .theme-save-hint {
     margin: 0 0 8px;
     padding: 0 10px 8px;
-    font-size: 0.72rem;
-    line-height: 1.4;
+    font-size: var(--fs-2xs);
+    line-height: var(--lh-snug)
     color: var(--text-tertiary);
     border-bottom: 1px solid var(--glass-border);
 }
 .theme-default-tag {
     margin-left: auto;
-    font-size: 0.62rem;
+    font-size: var(--fs-2xs);
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--gold-primary);
@@ -1141,7 +1197,7 @@ h2 {
 
 .stat-name {
     color: var(--text-secondary);
-    font-size: 0.8rem;
+    font-size: var(--fs-sm);
     text-transform: uppercase;
     letter-spacing: 0.05em;
     font-weight: 500;
@@ -1149,9 +1205,9 @@ h2 {
 
 .stat-value {
     color: var(--gold-primary);
-    font-family: 'Noto Sans SC', sans-serif;
+    font-family: var(--font-ui);
     font-weight: 600;
-    font-size: 0.95rem;
+    font-size: var(--fs-md);
 }
 
 .item-tags {
@@ -1165,7 +1221,7 @@ h2 {
     background: rgba(var(--accent-soft-rgb), 0.08);
     border: 1px solid var(--glass-border);
     padding: 6px 14px;
-    font-size: 0.85rem;
+    font-size: var(--fs-sm);
     color: var(--gold-dim);
     border-radius: 4px;
     transition: all 0.2s ease;
@@ -1193,14 +1249,14 @@ h2 {
 
 .analysis-result-title {
     color: var(--gold-primary);
-    font-size: 0.8rem;
+    font-size: var(--fs-sm);
     letter-spacing: 0.08em;
     text-transform: uppercase;
 }
 
 .analysis-result-subtitle {
     color: var(--text-secondary);
-    font-size: 0.78rem;
+    font-size: var(--fs-xs);
 }
 
 .scene-tag {
@@ -1246,8 +1302,8 @@ h2 {
     border: 1px solid var(--glass-border);
     color: var(--text-primary);
     padding: 12px 16px;
-    font-family: 'Noto Sans SC', sans-serif;
-    font-size: 0.95rem;
+    font-family: var(--font-ui);
+    font-size: var(--fs-lg);
     width: 100%;
     outline: none;
     transition: all 0.3s;
@@ -1333,7 +1389,7 @@ select.codex-input {
 .upload-preview-name {
     margin: 0 0 6px 0;
     color: var(--gold-primary);
-    font-family: 'Cinzel', serif;
+    font-family: var(--font-ui);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1342,7 +1398,7 @@ select.codex-input {
 .upload-preview-size {
     margin: 0;
     color: var(--text-secondary);
-    font-size: 0.85rem;
+    font-size: var(--fs-sm);
 }
 
 .modal-footer-actions {
@@ -1366,7 +1422,7 @@ select.codex-input {
 .upload-area.roomy { min-height: 150px; }
 
 .form-label {
-    font-size: 0.75rem;
+    font-size: var(--fs-xs);
     text-transform: uppercase;
     letter-spacing: 0.1em;
     color: var(--text-muted);
@@ -1374,7 +1430,7 @@ select.codex-input {
     margin-bottom: 8px;
 }
 .form-label.sm {
-    font-size: 0.7rem;
+    font-size: var(--fs-2xs);
     margin-bottom: 6px;
 }
 .form-label.inline {
@@ -1394,13 +1450,13 @@ select.codex-input {
 }
 
 .hint-text {
-    font-size: 0.85rem;
+    font-size: var(--fs-sm);
     color: var(--text-muted);
 }
 
 .error-banner {
     color: #ef4444;
-    font-size: 0.875rem;
+    font-size: var(--fs-sm);
     border: 1px solid rgba(239, 68, 68, 0.3);
     background: rgba(239, 68, 68, 0.1);
     padding: 12px;
@@ -1517,7 +1573,9 @@ select.codex-input {
     }
     
     .codex-header {
+        display: flex;
         flex-direction: column;
+        align-items: stretch;
         gap: 8px;
         padding: 8px 16px;
         height: auto;
@@ -1525,7 +1583,7 @@ select.codex-input {
     }
     
     .header-title h1 {
-        font-size: 1.1rem;
+        font-size: var(--fs-xl);
     }
     
     .header-icon {
@@ -1550,7 +1608,7 @@ select.codex-input {
     }
     
     .stat-value {
-        font-size: 1.2rem;
+        font-size: var(--fs-xl);
     }
     
     .sidebar {
@@ -1619,7 +1677,7 @@ select.codex-input {
     }
     
     .item-category {
-        font-size: 0.65rem;
+        font-size: var(--fs-2xs);
     }
     
     .modal-overlay {
@@ -1631,7 +1689,7 @@ select.codex-input {
     }
     
     .modal-header h2 {
-        font-size: 1rem;
+        font-size: var(--fs-lg);
     }
     
     .item-preview {
@@ -1663,7 +1721,7 @@ select.codex-input {
     .modal-actions .codex-btn {
         min-width: 60px;
         padding: 10px 12px;
-        font-size: 0.75rem;
+        font-size: var(--fs-xs);
     }
     
     .batch-bar {
@@ -1681,7 +1739,7 @@ select.codex-input {
     
     .page-info {
         min-width: 80px;
-        font-size: 0.85rem;
+        font-size: var(--fs-sm);
     }
 }
 
@@ -1944,7 +2002,7 @@ select.codex-input {
 
 .vlm-reanalysis-title {
     color: var(--gold-primary);
-    font-size: 0.9rem;
+    font-size: var(--fs-md);
     letter-spacing: 0.08em;
     text-transform: uppercase;
 }
@@ -1952,8 +2010,8 @@ select.codex-input {
 .vlm-reanalysis-hint,
 .vlm-reanalysis-preserve {
     color: var(--text-secondary);
-    font-size: 0.78rem;
-    line-height: 1.5;
+    font-size: var(--fs-xs);
+    line-height: var(--lh-normal)
 }
 
 .vlm-reanalysis-error {
@@ -1963,7 +2021,7 @@ select.codex-input {
     border: 1px solid rgba(248, 113, 113, 0.35);
     border-radius: 6px;
     background: rgba(127, 29, 29, 0.16);
-    font-size: 0.8rem;
+    font-size: var(--fs-sm);
 }
 
 .vlm-compare-grid {
@@ -1989,7 +2047,7 @@ select.codex-input {
 .vlm-compare-label {
     margin-bottom: 10px;
     color: var(--gold-primary);
-    font-size: 0.78rem;
+    font-size: var(--fs-xs);
     font-weight: 700;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -2010,15 +2068,15 @@ select.codex-input {
 
 .vlm-compare-card dt {
     color: var(--text-tertiary);
-    font-size: 0.72rem;
+    font-size: var(--fs-2xs);
 }
 
 .vlm-compare-card dd {
     min-width: 0;
     margin: 0;
     color: var(--text-main);
-    font-size: 0.82rem;
-    line-height: 1.45;
+    font-size: var(--fs-sm);
+    line-height: var(--lh-snug)
     overflow-wrap: anywhere;
 }
 
@@ -2219,7 +2277,7 @@ input, select, textarea {
 }
 
 .batch-file-name {
-    font-size: 0.7rem;
+    font-size: var(--fs-2xs);
     color: var(--text-secondary);
     max-width: 80px;
     overflow: hidden;
@@ -2229,7 +2287,7 @@ input, select, textarea {
 }
 
 .batch-file-more {
-    font-size: 0.8rem;
+    font-size: var(--fs-sm);
     color: var(--text-secondary);
     text-align: center;
     padding: 8px;
@@ -2347,8 +2405,8 @@ input, select, textarea {
     color: var(--text-primary);
     padding: 12px 24px;
     border-radius: 8px;
-    font-family: 'Cinzel', serif;
-    font-size: 0.9rem;
+    font-family: var(--font-ui);
+    font-size: var(--fs-md);
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
     cursor: pointer;
     animation: toast-in 0.3s ease-out;
@@ -2420,6 +2478,15 @@ input, select, textarea {
         max-width: none;
     }
 
+    .toolbar-controls {
+        width: 100%;
+        margin-left: 0;
+    }
+
+    .toolbar-actions {
+        justify-content: flex-start;
+    }
+
     .toolbar-group {
         border-left: none;
         padding: 0 4px;
@@ -2428,7 +2495,7 @@ input, select, textarea {
     .toolbar-actions .codex-btn {
         padding: 8px 10px;
         min-height: 36px;
-        font-size: 0.75rem;
+        font-size: var(--fs-xs);
     }
 
     
@@ -2453,7 +2520,7 @@ input, select, textarea {
         right: 12px;
         transform: none;
         bottom: 80px;
-        font-size: 0.8rem;
+        font-size: var(--fs-sm);
         padding: 10px 16px;
     }
 
@@ -2485,7 +2552,7 @@ input, select, textarea {
     .toolbar-actions .codex-btn {
         padding: 6px 8px;
         min-height: 32px;
-        font-size: 0.7rem;
+        font-size: var(--fs-2xs);
         gap: 4px;
     }
 
@@ -2496,7 +2563,7 @@ input, select, textarea {
 
     .codex-input {
         padding: 8px 10px;
-        font-size: 0.85rem;
+        font-size: var(--fs-sm);
     }
 }
 
@@ -2555,7 +2622,7 @@ input, select, textarea {
     border-left-color: var(--favorite) !important;
 }
 .favorite-category .category-icon {
-    font-size: 1.1rem;
+    font-size: var(--fs-xl);
     filter: drop-shadow(0 0 4px rgba(251, 191, 36, 0.4));
 }
 .favorite-category.active .category-name {
@@ -2585,7 +2652,7 @@ input, select, textarea {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 0.8rem;
+    font-size: var(--fs-sm);
     color: var(--text-secondary);
 }
 .health-dot {
@@ -2761,7 +2828,7 @@ input, select, textarea {
     }
 
     .header-text h1 {
-        font-size: 1rem;
+        font-size: var(--fs-lg);
         line-height: 1.15;
     }
 
@@ -2805,12 +2872,12 @@ input, select, textarea {
     }
 
     .stat-value {
-        font-size: 1rem;
+        font-size: var(--fs-lg);
         line-height: 1.1;
     }
 
     .stat-label {
-        font-size: 0.68rem;
+        font-size: var(--fs-2xs);
     }
 
     .main-container {
@@ -2884,24 +2951,62 @@ input, select, textarea {
     }
 
     .codex-title {
-        font-size: 18px;
+        font-size: var(--fs-xl);
     }
 }
 
 
 
 
-.section-switcher {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    padding: 10px;
+/* 顶部分区导航：桌面端出现在页头，fallout 仍用 Pip-Boy 顶部标签 */
+.header-nav {
+    display: none;
+    align-items: center;
+    gap: 6px;
+    margin-left: 10px;
+}
+
+.header-nav .section-tab {
+    width: auto;
+    min-height: 38px;
+    padding: 8px 14px;
+    border-radius: 8px;
+    white-space: nowrap;
+}
+
+.header-nav .section-tab-label {
+    flex: 0 1 auto;
+}
+
+/* ≥769px：分区导航归页头；侧栏 switcher 仅在移动端抽屉出现 */
+@media (min-width: 769px) {
+    .header-nav {
+        display: flex;
+    }
+}
+
+
+@media (max-width: 768px) {
+    .section-switcher {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        padding: 10px;
+    }
+}
+
+/* 桌面端：分区导航在页头，侧栏不再重复 */
+@media (min-width: 769px) {
+    .section-switcher {
+        display: none;
+    }
 }
 
 .section-tab {
     display: flex;
     align-items: center;
     gap: 8px;
+    width: 100%;
     padding: 11px 8px;
     border-radius: 10px;
     cursor: pointer;
@@ -2910,6 +3015,8 @@ input, select, textarea {
     user-select: none;
     background: transparent;
     border: 1px solid transparent;
+    font: inherit;
+    text-align: left;
     min-height: 44px;
 }
 
@@ -2940,7 +3047,7 @@ input, select, textarea {
 }
 
 .section-tab-label {
-    font-size: 13px;
+    font-size: var(--fs-sm);
     letter-spacing: 0.03em;
     flex: 1;
     min-width: 0;
@@ -2948,7 +3055,7 @@ input, select, textarea {
 }
 
 .section-badge {
-    font-size: 11px;
+    font-size: var(--fs-2xs);
     font-weight: 700;
     background: var(--danger);
     color: #fff;
@@ -2956,7 +3063,7 @@ input, select, textarea {
     padding: 2px 8px;
     min-width: 22px;
     text-align: center;
-    line-height: 1.3;
+    line-height: var(--lh-snug)
     flex-shrink: 0;
 }
 
@@ -2980,7 +3087,7 @@ input, select, textarea {
 }
 
 .capacity-label {
-    font-size: 12px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     color: var(--text-secondary);
     text-transform: uppercase;
@@ -2988,7 +3095,7 @@ input, select, textarea {
 }
 
 .capacity-count {
-    font-size: 18px;
+    font-size: var(--fs-xl);
     font-weight: 700;
     color: var(--text-primary);
     font-variant-numeric: tabular-nums;
@@ -3020,7 +3127,7 @@ input, select, textarea {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    font-size: 11px;
+    font-size: var(--fs-2xs);
     color: var(--text-muted);
 }
 
@@ -3064,7 +3171,7 @@ input, select, textarea {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    font-size: 13px;
+    font-size: var(--fs-sm);
     font-weight: 500;
     color: var(--text-secondary);
 }
@@ -3072,7 +3179,7 @@ input, select, textarea {
 .progress-paused-label {
     color: var(--danger);
     font-weight: 600;
-    font-size: 12px;
+    font-size: var(--fs-xs);
     animation: pulse-warn 2s infinite;
 }
 
@@ -3083,18 +3190,20 @@ input, select, textarea {
 
 
 .pending-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-content: flex-start;
     gap: 16px;
     padding: 16px;
     overflow-y: auto;
     flex: 1;
-    align-content: start;
 }
 
 
 .pending-card {
     --pending-card-size: clamp(96px, 16vw, 160px);
+    width: min(380px, 100%);
     display: flex;
     flex-direction: row;
     background: var(--bg-card);
@@ -3185,7 +3294,7 @@ input, select, textarea {
 }
 
 .pending-category-badge {
-    font-size: 11px;
+    font-size: var(--fs-2xs);
     font-weight: 700;
     padding: 2px 10px;
     border-radius: 9999px;
@@ -3197,16 +3306,16 @@ input, select, textarea {
 }
 
 .pending-source {
-    font-size: 12px;
+    font-size: var(--fs-xs);
     opacity: 0.6;
 }
 
 .pending-desc {
     grid-row: 2;
-    font-size: 13px;
+    font-size: var(--fs-sm);
     font-weight: 500;
     color: var(--text-primary);
-    line-height: 1.35;
+    line-height: var(--lh-snug)
     overflow: hidden;
     display: -webkit-box;
     -webkit-line-clamp: 2;
@@ -3227,7 +3336,7 @@ input, select, textarea {
     display: inline-flex;
     align-items: center;
     height: 20px;
-    font-size: 10px !important;
+    font-size: var(--fs-2xs) !important;
     line-height: 1;
     padding: 2px 7px !important;
     background: var(--bg-card-hover) !important;
@@ -3283,9 +3392,9 @@ input, select, textarea {
     background: var(--bg-elevated);
     color: var(--text-primary);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
-    font-size: 11px;
+    font-size: var(--fs-2xs);
     font-weight: 500;
-    line-height: 1.2;
+    line-height: var(--lh-tight)
     white-space: nowrap;
     pointer-events: none;
     opacity: 0;
@@ -3377,7 +3486,7 @@ input, select, textarea {
 .select-all-btn {
     border-color: var(--text-muted) !important;
     color: var(--text-muted) !important;
-    font-size: 0.8rem;
+    font-size: var(--fs-sm);
 }
 
 .select-all-btn:hover {
@@ -3403,7 +3512,6 @@ input, select, textarea {
 
 @media (max-width: 768px) {
     .pending-grid {
-        grid-template-columns: 1fr;
         gap: 10px;
         padding: 10px;
     }
@@ -3418,7 +3526,7 @@ input, select, textarea {
     }
 
     .pending-desc {
-        font-size: 13px;
+        font-size: var(--fs-sm);
         -webkit-line-clamp: 1;
     }
 
@@ -3445,7 +3553,6 @@ input, select, textarea {
 
 @media (max-width: 420px) {
     .pending-grid {
-        grid-template-columns: 1fr;
         gap: 8px;
         padding: 8px;
     }
@@ -3499,13 +3606,18 @@ input, select, textarea {
     display: flex;
     align-items: center;
     gap: 10px;
+    width: 100%;
     padding: 9px 10px;
     border-radius: 8px;
     cursor: pointer;
-    font-size: 0.85rem;
+    font-size: var(--fs-sm);
     color: var(--text-secondary);
     transition: background 0.15s ease, color 0.15s ease;
     user-select: none;
+    background: none;
+    border: none;
+    font-family: inherit;
+    text-align: left;
 }
 .theme-option:hover { background: var(--gold-glow); color: var(--text-primary); }
 .theme-option.active {
@@ -3531,9 +3643,9 @@ input, select, textarea {
 
 /* ── 列表视图 ────────────────────────────────────────────── */
 .inventory-grid.list-mode {
-    columns: auto;
     display: flex;
     flex-direction: column;
+    justify-content: flex-start;
     gap: 8px;
     padding: 12px 20px;
     max-width: 1100px;
@@ -3541,6 +3653,7 @@ input, select, textarea {
     width: 100%;
 }
 .inventory-grid.list-mode .item-slot {
+    width: 100%;
     flex-direction: row;
     align-items: stretch;
     margin-bottom: 0;
@@ -3569,7 +3682,7 @@ input, select, textarea {
 .inventory-grid.list-mode .item-slot:hover .item-info { transform: none; }
 .list-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .list-desc {
-    font-size: 0.85rem;
+    font-size: var(--fs-sm);
     font-weight: 500;
     color: var(--text-primary);
     overflow: hidden;
@@ -3583,7 +3696,7 @@ input, select, textarea {
     max-height: 20px;
 }
 .list-tag {
-    font-size: 0.68rem !important;
+    font-size: var(--fs-2xs) !important;
     padding: 2px 7px !important;
     white-space: nowrap;
 }
@@ -3592,7 +3705,7 @@ input, select, textarea {
     align-items: center;
     gap: 12px;
     flex-shrink: 0;
-    font-size: 0.72rem;
+    font-size: var(--fs-2xs);
     color: var(--text-muted);
     font-variant-numeric: tabular-nums;
 }
@@ -3655,7 +3768,7 @@ input, select, textarea {
     gap: 10px;
     flex-wrap: wrap;
     padding: 8px 20px 0;
-    font-size: 0.72rem;
+    font-size: var(--fs-2xs);
     color: var(--text-tertiary);
 }
 .kbd-hints kbd {
@@ -3669,7 +3782,7 @@ input, select, textarea {
     background: var(--bg-card);
     color: var(--text-secondary);
     font-family: inherit;
-    font-size: 0.68rem;
+    font-size: var(--fs-2xs);
     margin-right: 3px;
 }
 .kbd-hints span { white-space: nowrap; }
@@ -3691,7 +3804,7 @@ input, select, textarea {
     background: rgba(0, 0, 0, 0.55);
     border: 1px solid var(--glass-border);
     color: var(--text-secondary);
-    font-size: 0.72rem;
+    font-size: var(--fs-2xs);
     pointer-events: none;
     backdrop-filter: blur(6px);
 }
@@ -3711,6 +3824,32 @@ input, select, textarea {
 .toast-notification.success .toast-icon { color: var(--success); }
 .toast-notification.error { border-color: var(--danger); }
 .toast-notification.error .toast-icon { color: var(--danger); }
+
+/* ── 卡片入场：按序号错峰浮现（延迟由模板内联 animation-delay 给出） ── */
+@keyframes cardIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+.item-slot,
+.pending-card {
+    animation: cardIn 0.32s ease both;
+}
+
+/* ── 无障碍：键盘焦点可见 ────────────────────────────────── */
+.codex-btn:focus-visible,
+.category-item:focus-visible,
+.section-tab:focus-visible,
+.theme-option:focus-visible,
+.item-slot:focus-visible,
+.character-chip:focus-visible,
+.view-toggle-btn:focus-visible,
+.favorite-btn:focus-visible,
+.pending-btn:focus-visible,
+.modal-close:focus-visible,
+.nav-btn:focus-visible {
+    outline: 2px solid var(--gold-primary);
+    outline-offset: 2px;
+}
 
 /* ── 无障碍：减弱动态效果 ────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
@@ -3755,7 +3894,7 @@ input, select, textarea {
 .item-stack-count { display: none; }
 .theme-group-label {
     padding: 8px 10px 4px;
-    font-size: 0.68rem;
+    font-size: var(--fs-2xs);
     letter-spacing: 0.14em;
     text-transform: uppercase;
     color: var(--text-tertiary);
@@ -3850,7 +3989,7 @@ html[data-theme="minecraft"],
 [data-theme="minecraft"] .header-icon svg { color: #404040; }
 [data-theme="minecraft"] .header-text h1 {
     color: #404040;
-    font-size: 1.15rem;
+    font-size: var(--fs-xl);
 }
 [data-theme="minecraft"] .header-text p {
     color: #5a5a5a;
@@ -3875,7 +4014,7 @@ html[data-theme="minecraft"],
     font-family: var(--mc-pixel);
     color: #ffffa0;
     text-shadow: var(--mc-outline);
-    font-size: 1.15rem;
+    font-size: var(--fs-xl);
     -webkit-font-smoothing: none;
 }
 [data-theme="minecraft"] .stat-label {
@@ -4118,7 +4257,7 @@ html[data-theme="minecraft"],
 [data-theme="minecraft"] .inventory-grid:not(.list-mode) .item-category {
     color: #fff;
     text-shadow: var(--mc-outline);
-    font-size: 0.78rem;
+    font-size: var(--fs-xs);
     white-space: normal;
 }
 [data-theme="minecraft"] .inventory-grid:not(.list-mode) .scope-pill {
@@ -4135,7 +4274,7 @@ html[data-theme="minecraft"],
     bottom: 2px;
     z-index: 8;
     font-family: var(--mc-pixel);
-    font-size: 0.95rem;
+    font-size: var(--fs-md);
     line-height: 1;
     color: #fff;
     text-shadow: var(--mc-outline);
@@ -4514,7 +4653,7 @@ html[data-theme="minecraft"],
     padding: 6px 4px 5px;
     border-bottom: 1px solid var(--fo-line);
     font-family: var(--fo-mono);
-    font-size: 0.58rem;
+    font-size: var(--fs-2xs);
     letter-spacing: 0.16em;
     color: #0e8a4c;
     text-transform: uppercase;
@@ -4580,14 +4719,14 @@ html[data-theme="minecraft"],
 }
 [data-theme="fallout"] .fo-title-os {
     font-family: var(--fo-font);
-    font-size: 1.02rem;
+    font-size: var(--fs-lg);
     font-weight: 700;
     letter-spacing: 0.2em;
     color: #39ff88;
     text-shadow: 0 0 8px rgba(57, 255, 136, 0.4);
 }
 [data-theme="fallout"] .fo-title-sub {
-    font-size: 0.62rem;
+    font-size: var(--fs-2xs);
     letter-spacing: 0.18em;
     color: #148a54;
 }
@@ -4607,7 +4746,7 @@ html[data-theme="minecraft"],
     border: 0;
     color: #0e8a4c;
     font-family: var(--fo-font);
-    font-size: 0.82rem;
+    font-size: var(--fs-sm);
     font-weight: 700;
     letter-spacing: 0.18em;
     text-align: center;
@@ -4629,7 +4768,7 @@ html[data-theme="minecraft"],
     color: #148a54;
     letter-spacing: 0.1em;
     text-transform: uppercase;
-    font-size: 0.68rem;
+    font-size: var(--fs-2xs);
 }
 [data-theme="fallout"] .health-dot { border-radius: 0; box-shadow: 0 0 6px currentColor; }
 
@@ -4659,6 +4798,8 @@ html[data-theme="minecraft"],
     width: auto;
 }
 [data-theme="fallout"] .section-switcher { display: none; }
+[data-theme="fallout"] .header-left { display: contents; }
+[data-theme="fallout"] .header-nav { display: none; }
 [data-theme="fallout"] .sidebar-title {
     font-family: var(--fo-mono);
     color: #39ff88;
@@ -4689,7 +4830,7 @@ html[data-theme="minecraft"],
 [data-theme="fallout"] .category-item.active .category-count { color: #02140c; }
 [data-theme="fallout"] .category-name {
     color: inherit;
-    font-size: 0.78rem;
+    font-size: var(--fs-xs);
     letter-spacing: 0.04em;
     text-transform: uppercase;
     display: flex;
@@ -4803,11 +4944,12 @@ html[data-theme="minecraft"],
 
 [data-theme="fallout"] .inventory-grid:not(.list-mode) {
     columns: unset;
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(var(--slot-size), 1fr));
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-content: flex-start;
     gap: 8px;
     padding: 12px;
-    align-content: start;
 }
 [data-theme="fallout"] .inventory-grid:not(.list-mode) .item-slot {
     margin-bottom: 0;
@@ -4848,14 +4990,14 @@ html[data-theme="minecraft"],
     color: #39ff88;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    font-size: 0.7rem;
+    font-size: var(--fs-2xs);
     font-family: var(--fo-mono);
 }
 [data-theme="fallout"] .scope-pill {
     border-radius: 0;
     letter-spacing: 0.1em;
     text-transform: uppercase;
-    font-size: 0.6rem;
+    font-size: var(--fs-2xs);
 }
 [data-theme="fallout"] .scope-pill.local {
     color: #ff8a8a;
@@ -4875,7 +5017,7 @@ html[data-theme="minecraft"],
     top: 8px;
     z-index: 8;
     font-family: var(--fo-mono);
-    font-size: 0.78rem;
+    font-size: var(--fs-xs);
     color: #39ff88;
     pointer-events: none;
 }
@@ -5117,7 +5259,7 @@ html[data-theme="minecraft"],
 [data-theme="fallout"] .fo-hud-k {
     color: #148a54;
     letter-spacing: 0.12em;
-    font-size: 0.72rem;
+    font-size: var(--fs-2xs);
 }
 [data-theme="fallout"] .fo-hud-v {
     color: #39ff88;
@@ -5148,7 +5290,7 @@ html[data-theme="minecraft"],
 .source-header-sub {
     margin: 4px 0 0;
     color: var(--text-muted);
-    font-size: 0.75rem;
+    font-size: var(--fs-xs);
     letter-spacing: 0.08em;
 }
 .source-layout {
@@ -5165,7 +5307,7 @@ html[data-theme="minecraft"],
     border: 1px solid color-mix(in srgb, var(--gold-primary) 45%, transparent);
     background: color-mix(in srgb, var(--gold-primary) 8%, var(--bg-main));
     color: var(--text-muted);
-    font-size: 0.82rem;
+    font-size: var(--fs-sm);
 }
 .source-safety-note strong { color: var(--gold-primary); white-space: nowrap; }
 .source-input-grid {
@@ -5194,8 +5336,9 @@ html[data-theme="minecraft"],
 .source-input-card input[type="file"] { width: 100%; color: var(--text-muted); }
 .source-card-kicker {
     color: var(--gold-primary);
-    font-family: 'Cinzel', serif;
-    font-size: 0.68rem;
+    font-family: var(--font-ui);
+    font-size: var(--fs-2xs);
+    font-weight: 600;
     letter-spacing: 0.14em;
 }
 .source-api-row { display: flex; gap: 8px; }
@@ -5206,8 +5349,8 @@ html[data-theme="minecraft"],
     padding: 10px 12px;
     border: 1px dashed color-mix(in srgb, var(--gold-dark) 80%, transparent);
     color: var(--text-muted);
-    font-size: 0.76rem;
-    line-height: 1.5;
+    font-size: var(--fs-xs);
+    line-height: var(--lh-normal)
 }
 .source-format-note strong { color: var(--text-main); white-space: nowrap; }
 .source-loading-line {
@@ -5237,7 +5380,7 @@ html[data-theme="minecraft"],
     padding: 7px 9px;
     background: var(--bg-main);
     color: var(--text-muted);
-    font-size: 0.76rem;
+    font-size: var(--fs-xs);
 }
 .source-metrics b { color: var(--gold-primary); }
 .source-license-note {
@@ -5246,7 +5389,7 @@ html[data-theme="minecraft"],
     gap: 10px;
     margin-top: 10px;
     color: var(--text-muted);
-    font-size: 0.78rem;
+    font-size: var(--fs-xs);
 }
 .source-warning {
     margin-top: 12px;
@@ -5254,7 +5397,7 @@ html[data-theme="minecraft"],
     border-left: 3px solid #d9a441;
     background: color-mix(in srgb, #d9a441 10%, transparent);
     color: var(--text-muted);
-    font-size: 0.8rem;
+    font-size: var(--fs-sm);
 }
 .source-map-grid {
     margin-top: 14px;
@@ -5268,7 +5411,7 @@ html[data-theme="minecraft"],
     align-items: center;
     gap: 8px;
     color: var(--text-muted);
-    font-size: 0.78rem;
+    font-size: var(--fs-xs);
 }
 .source-options {
     margin-top: 14px;
@@ -5282,13 +5425,13 @@ html[data-theme="minecraft"],
     align-items: center;
     gap: 8px;
     color: var(--text-muted);
-    font-size: 0.82rem;
+    font-size: var(--fs-sm);
 }
 .source-options select { width: auto; min-width: 110px; }
 .source-origin-input { width: min(260px, 100%); }
 .source-character-input { width: min(240px, 100%); }
 .source-character-toggle { margin-left: 4px; }
-.source-character-hint { flex-basis: 100%; color: var(--text-muted); font-size: 0.78rem; margin-top: -4px; }
+.source-character-hint { flex-basis: 100%; color: var(--text-muted); font-size: var(--fs-xs); margin-top: -4px; }
 .source-options .primary { margin-left: auto; }
 .source-job { border-color: color-mix(in srgb, var(--gold-primary) 65%, var(--gold-dark)); }
 .source-job-head { margin-bottom: 10px; color: var(--gold-primary); }
@@ -5299,7 +5442,7 @@ html[data-theme="minecraft"],
     gap: 12px;
     margin-top: 10px;
     color: var(--text-muted);
-    font-size: 0.78rem;
+    font-size: var(--fs-xs);
 }
 .source-job-stats button { margin-left: auto; }
 .source-ok { color: #36b37e; }
@@ -5309,7 +5452,7 @@ html[data-theme="minecraft"],
     margin-top: 10px;
     overflow: auto;
     color: #ef6060;
-    font-size: 0.75rem;
+    font-size: var(--fs-xs);
 }
 .source-registry { display: flex; flex-direction: column; gap: 8px; }
 .source-row {
@@ -5334,18 +5477,18 @@ html[data-theme="minecraft"],
     padding: 4px 7px;
     border: 1px solid var(--gold-dark);
     color: var(--text-muted);
-    font-size: 0.68rem;
+    font-size: var(--fs-2xs);
     text-transform: uppercase;
 }
 .source-status.is-ready { color: #36b37e; border-color: #36b37e; }
 .source-status.is-error { color: #ef6060; border-color: #ef6060; }
 .source-row-actions { display: flex; gap: 6px; }
-.source-row-actions .codex-btn { padding: 7px 9px; font-size: 0.72rem; }
+.source-row-actions .codex-btn { padding: 7px 9px; font-size: var(--fs-2xs); }
 .source-empty {
     padding: 18px;
     text-align: center;
     color: var(--text-muted);
-    font-size: 0.82rem;
+    font-size: var(--fs-sm);
 }
 
 [data-theme="fallout"] .source-input-card,
@@ -5426,9 +5569,11 @@ html[data-theme="minecraft"],
     [data-theme="fallout"] .fo-bezel-b { display: none; }
     [data-theme="fallout"] .fo-boot span:last-child { display: none; }
     [data-theme="fallout"] .fo-pip-tab.is-chrome { display: none; }
-    [data-theme="fallout"] .inventory-grid:not(.list-mode),
     [data-theme="fallout"] .skeleton-grid {
         grid-template-columns: repeat(auto-fill, minmax(var(--slot-size), 1fr));
+    }
+
+    [data-theme="fallout"] .inventory-grid:not(.list-mode) {
         gap: 6px;
     }
 }
