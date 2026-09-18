@@ -135,7 +135,7 @@
         },
         "external_sources_enabled": {
             "description": "Enable external meme sources",
-                "hint": "Supports Meme Manager / AstrBot Meme Pack, GitHub repositories, and constrained JSON APIs. Imports are copied into this plugin."
+            "hint": "Supports Meme Manager / AstrBot Meme Pack, GitHub repositories, and constrained JSON APIs. Imports are copied into this plugin."
         },
         "external_source_allow_http": {
             "description": "Allow plaintext HTTP sources",
@@ -217,6 +217,7 @@
                 "library": "Library"
             },
             "categories": {
+                "key_hint": "Keys start with a letter and use lowercase letters, numbers, underscores, or hyphens (48 characters maximum). Display names may use any language.",
                 "title": "Categories",
                 "favorites": "Favorites",
                 "all": "All",
@@ -238,7 +239,8 @@
                 "newest": "Newest",
                 "oldest": "Oldest",
                 "most_used": "Most Used",
-                "last_used": "Last Used"
+                "last_used": "Last Used",
+                "least_used": "Least used"
             },
             "actions": {
                 "done": "Done",
@@ -284,7 +286,15 @@
                 "characters": "Manage characters",
                 "sources": "Sources",
                 "assign_character": "Assign Character",
-                "open_navigation": "Open navigation"
+                "open_navigation": "Open navigation",
+                "collapse_sidebar": "Collapse sidebar",
+                "expand_sidebar": "Expand sidebar",
+                "more": "More actions"
+            },
+            "context_menu": {
+                "preview": "View details",
+                "select": "Add to batch selection",
+                "unselect": "Remove from selection"
             },
             "empty": {
                 "library_title": "No stickers yet",
@@ -461,7 +471,10 @@
                 "reanalyze_apply_failed": "Failed to apply VLM result.",
                 "reanalyze_applied": "VLM result applied.",
                 "no_valid_info": "No valid information recognized.",
-                "add_failed": "Add failed."
+                "add_failed": "Add failed.",
+                "invalid_category_key": "Category keys must start with a letter and contain only lowercase letters, numbers, underscores, or hyphens (48 characters maximum).",
+                "reserved_category_key": "This category key is reserved by the operating system. Choose another key.",
+                "duplicate_category_name": "This category display name is already in use."
             },
             "confirm": {
                 "pending_approve_batch": "Approve {count} pending item(s)?",
@@ -502,7 +515,7 @@
             "characters": {
                 "title": "Characters",
                 "all": "All characters",
-                "unassigned": "Unassigned",
+                "unassigned": "General library",
                 "hint": "You assign characters in the dashboard. VLM does not detect them. Create a character first, then edit a card or batch-assign.",
                 "manage": "Manage characters",
                 "bar_hint": "Filter the library by character. Use Manage characters to add or remove them."
@@ -535,6 +548,25 @@
                 "empty": "No registered sources. Same-instance Meme Manager packs appear automatically.",
                 "forget": "Forget",
                 "forget_confirm": "Forget this source? Imported images will remain in your library."
+            },
+            "libraries": {
+                "all": "All stickers",
+                "general": "General library",
+                "favorites": "Favorites",
+                "characters": "Character library",
+                "quota": "Automatic eviction quota",
+                "hint": "Only ordinary general stickers are automatically evicted. Favorites, character stickers and protected imports are managed separately. Removing favorite or character protection returns ordinary stickers to the quota."
+            },
+            "layout": {
+                "libraries": "Libraries",
+                "emotions": "Emotions in this library",
+                "all_emotions": "All emotions",
+                "collection": "STICKER COLLECTION",
+                "all_characters": "All characters",
+                "favorite": "Favorite protected",
+                "character": "Character protected",
+                "protected": "Protected copy",
+                "automatic": "Automatic eviction"
             }
         }
     }

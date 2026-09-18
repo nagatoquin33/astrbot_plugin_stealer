@@ -88,6 +88,17 @@ def test_grid_does_not_prefetch_originals_on_hover():
     assert "requestOriginalForPreview" in app_js
 
 
+def test_library_cards_expose_context_menu_and_collapsible_sidebar():
+    template = (DASHBOARD_DIR / "template.js").read_text(encoding="utf-8")
+    app_js = (DASHBOARD_DIR / "app.js").read_text(encoding="utf-8")
+    css = (DASHBOARD_DIR / "app.css").read_text(encoding="utf-8")
+    assert '@contextmenu.prevent.stop="openContextMenu($event, img)"' in template
+    assert 'role="menu"' in template and "runContextAction('blacklist')" in template
+    assert "sidebarCollapsed" in template and "toggleSidebarCollapsed" in template
+    assert "const openContextMenu" in app_js and "const runContextAction" in app_js
+    assert ".item-context-menu" in css and ".sidebar.is-collapsed" in css
+
+
 def test_preview_exposes_vlm_reanalysis_and_ab_apply_controls():
     template = (DASHBOARD_DIR / "template.js").read_text(encoding="utf-8")
     app_js = (DASHBOARD_DIR / "app.js").read_text(encoding="utf-8")
@@ -155,21 +166,29 @@ def test_server_theme_overrides_host_query_after_prefs_load():
 
 
 @pytest.mark.asyncio
-async def test_prefs_persist_theme_and_view():
+async def test_prefs_persist_theme_view_and_sidebar():
     state = PreviewState(seed=False)
     async with _client(state) as client:
         before = await (await client.get(f"{PLUGIN_BASE}/prefs")).json()
         assert before["success"] is True
         assert before["theme"] == "auto"
+        assert before["sidebar"] == "expanded"
 
         saved = await (await client.post(
-            f"{PLUGIN_BASE}/prefs", json={"theme": "fallout", "view": "list"}
+            f"{PLUGIN_BASE}/prefs",
+            json={"theme": "fallout", "view": "list", "sidebar": "collapsed"},
         )).json()
-        assert saved == {"success": True, "theme": "fallout", "view": "list"}
+        assert saved == {
+            "success": True,
+            "theme": "fallout",
+            "view": "list",
+            "sidebar": "collapsed",
+        }
 
         again = await (await client.get(f"{PLUGIN_BASE}/prefs")).json()
         assert again["theme"] == "fallout"
         assert again["view"] == "list"
+        assert again["sidebar"] == "collapsed"
 
         ignored = await (await client.post(
             f"{PLUGIN_BASE}/prefs", json={"theme": "not-a-theme"}
@@ -209,6 +228,27 @@ async def test_images_list_pagination_and_categories():
         hashes1 = {i["hash"] for i in data["images"]}
         hashes2 = {i["hash"] for i in page2["images"]}
         assert hashes1.isdisjoint(hashes2)
+
+
+@pytest.mark.asyncio
+async def test_category_create_validation_and_persistence():
+    state = PreviewState(seed=True)
+    async with _client(state) as client:
+        current = (await (await client.get(f"{PLUGIN_BASE}/emotions")).json())["emotions"]
+        created = await client.post(
+            f"{PLUGIN_BASE}/categories",
+            json={"categories": current + [{"key": " Custom_Tag ", "name": "自定义", "desc": "测试"}]},
+        )
+        assert (await created.json())["success"] is True
+        refreshed = (await (await client.get(f"{PLUGIN_BASE}/emotions")).json())["emotions"]
+        assert refreshed[-1] == {"key": "custom_tag", "name": "自定义", "desc": "测试"}
+
+        rejected = await client.post(
+            f"{PLUGIN_BASE}/categories",
+            json={"categories": refreshed + [{"key": "../escape", "name": "危险"}]},
+        )
+        assert (await rejected.json())["success"] is False
+        assert state.emotions == refreshed
 
 
 @pytest.mark.asyncio

@@ -530,13 +530,14 @@ class DatabaseService:
         entry["character"] = str(entry.get("character") or "").strip()
         return entry
 
-    def get_character_counts(self) -> dict[str, int]:
+    def get_character_counts(self, *, exclude_favorites: bool = False) -> dict[str, int]:
         with self._get_connection() as conn:
             rows = conn.execute(
                 """
                 SELECT COALESCE(character, '') as character, COUNT(*) as cnt
-                FROM emoji GROUP BY COALESCE(character, '')
-                """
+                FROM emoji WHERE (? = 0 OR COALESCE(is_favorite, 0) = 0)
+                GROUP BY COALESCE(character, '')
+                """, (int(exclude_favorites),)
             ).fetchall()
             return {str(r["character"] or ""): int(r["cnt"]) for r in rows}
 
@@ -1714,9 +1715,28 @@ class DatabaseService:
     _VALID_ORDER_FIELDS = {
         "newest": "e.created_at DESC, e.path DESC",
         "oldest": "e.created_at ASC, e.path ASC",
+        "least_used": "e.use_count ASC, e.created_at ASC, e.path ASC",
         "most_used": "e.use_count DESC, e.last_used_at DESC, e.path ASC",
         "last_used": "e.last_used_at DESC, e.use_count DESC, e.path ASC",
     }
+
+    _LIBRARY_CLAUSES = {
+        "general": "COALESCE(e.is_favorite, 0) = 0 AND TRIM(COALESCE(e.character, '')) = ''",
+        "favorites": "e.is_favorite = 1",
+        "characters": "COALESCE(e.is_favorite, 0) = 0 AND TRIM(COALESCE(e.character, '')) != ''",
+    }
+
+    def get_library_counts(self) -> dict[str, int]:
+        with self._get_connection() as conn:
+            counts = {
+                key: conn.execute(f"SELECT COUNT(*) FROM emoji e WHERE {clause}").fetchone()[0]
+                for key, clause in self._LIBRARY_CLAUSES.items()
+            }
+            counts["automatic"] = conn.execute(
+                "SELECT COUNT(*) FROM emoji e WHERE " + self._LIBRARY_CLAUSES["general"]
+                + " AND TRIM(COALESCE(e.retention_class, 'native')) NOT IN ('external', 'pinned')"
+            ).fetchone()[0]
+            return counts
 
     def get_emojis_paginated(
         self,
@@ -1728,6 +1748,7 @@ class DatabaseService:
         scope_target: str | None = None,
         favorite_only: bool = False,
         character: str | None = None,
+        library: str = "",
     ) -> tuple[list[dict[str, Any]], int, dict[str, int]]:
         """分页获取表情包列表，支持过滤、搜索和排序。
 
@@ -1752,6 +1773,11 @@ class DatabaseService:
             params: list[Any] = []
             category_count_where_clauses: list[str] = []
             category_count_params: list[Any] = []
+
+            library_clause = self._LIBRARY_CLAUSES.get(library)
+            if library_clause:
+                where_clauses.append(library_clause)
+                category_count_where_clauses.append(library_clause)
 
             # 分类过滤
             if category:

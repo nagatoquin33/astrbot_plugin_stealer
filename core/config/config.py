@@ -8,7 +8,11 @@ from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent
 from astrbot.api.star import Context, StarTools
 
-from ..util.normalization import normalize_character_key, normalize_label_list
+from ..util.normalization import (
+    normalize_category_key,
+    normalize_character_key,
+    normalize_label_list,
+)
 
 
 class PluginConfig(BaseModel):
@@ -48,6 +52,7 @@ class PluginConfig(BaseModel):
 
     # === 内部常量/高级配置 ===
     max_reg_num: int = 100
+    eviction_usage_weight: float = 0.7
     content_filtration: bool = False  # 内容审核开关
     content_filtration_fail_open: bool = False
     storage_cleanup_strategy: str = "balanced"
@@ -555,7 +560,10 @@ class PluginConfig(BaseModel):
         return result
 
     def ensure_category_dir(self, category: str) -> Path:
-        category_dir = self.categories_dir / str(category)
+        safe_key = normalize_category_key(category)
+        category_dir = (self.categories_dir / safe_key).resolve()
+        if category_dir.parent != self.categories_dir.resolve():
+            raise ValueError("分类目录超出允许范围")
         category_dir.mkdir(parents=True, exist_ok=True)
         return category_dir
 

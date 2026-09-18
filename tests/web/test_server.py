@@ -17,6 +17,7 @@ import colorsys
 import io
 import json
 import random
+import re
 import time
 import uuid
 from pathlib import Path
@@ -143,9 +144,10 @@ class PreviewState:
     def __init__(self, seed: bool = True) -> None:
         self.library: list[dict] = []
         self.pending: list[dict] = []
+        self.emotions: list[dict] = [dict(item) for item in EMOTIONS]
         self.blacklist: set[str] = set()
         self.batch_tasks: dict[str, dict] = {}
-        self.prefs: dict[str, str] = {"theme": "auto", "view": "grid"}
+        self.prefs: dict[str, str] = {"theme": "auto", "view": "grid", "sidebar": "expanded"}
         self._next_pending_id = 1
         self._now = int(time.time())
         if seed:
@@ -212,6 +214,7 @@ class PreviewState:
             "origin_target": str(kwargs.get("origin_target") or ""),
             "created_at": ts,
             "is_favorite": int(kwargs.get("is_favorite") or 0),
+            "character": str(kwargs.get("character") or ""),
             "use_count": int(kwargs.get("use_count") or 0),
             "last_used_at": int(kwargs.get("last_used_at") or 0),
             "width": 240,
@@ -455,6 +458,8 @@ class PreviewServer:
                 self.state.prefs["theme"] = theme
             if "view" in payload:
                 self.state.prefs["view"] = "list" if payload.get("view") == "list" else "grid"
+            if "sidebar" in payload:
+                self.state.prefs["sidebar"] = "collapsed" if payload.get("sidebar") == "collapsed" else "expanded"
         return {"success": True, **self.state.prefs}
 
     def api_stats(self, request, payload):
@@ -481,14 +486,23 @@ class PreviewServer:
             category = ""
             favorite_only = True
 
-        items = [m for m in st.library if st._match(m, q=q, category=category, favorite_only=favorite_only)]
+        library = str(request.query.get("library", ""))
+        character = str(request.query.get("character", ""))
+        def group(item):
+            return "favorites" if item.get("is_favorite") else "characters" if item.get("character") else "general"
+        counts = {key: sum(group(m) == key for m in st.library) for key in ("general", "favorites", "characters")}
+        counts["automatic"] = sum(group(m) == "general" and m.get("retention_class") not in {"external", "pinned"} for m in st.library)
+        items = [m for m in st.library if st._match(m, q=q, category=category, favorite_only=favorite_only)
+                 and (not library or group(m) == library)
+                 and (not character or m.get("character") == character)]
         sort_keys = {
+            "least_used": lambda m: (m.get("use_count", 0), m.get("created_at", 0), m["hash"]),
             "oldest": lambda m: (m.get("created_at", 0), m["hash"]),
             "most_used": lambda m: (m.get("use_count", 0), m.get("last_used_at", 0)),
             "recent_used": lambda m: (m.get("last_used_at", 0), m.get("use_count", 0)),
         }
         if sort_order in sort_keys:
-            items.sort(key=sort_keys[sort_order], reverse=(sort_order != "oldest"))
+            items.sort(key=sort_keys[sort_order], reverse=(sort_order not in {"oldest", "least_used"}))
         else:
             items.sort(key=lambda m: (m.get("created_at", 0), m["hash"]), reverse=True)
 
@@ -502,6 +516,8 @@ class PreviewServer:
             "images": [self._library_view(m) for m in paged],
             "categories": st._categories_list(st.library),
             "favorite_count": sum(1 for m in st.library if m.get("is_favorite")),
+            "libraries": counts,
+            "automatic_limit": 100,
         }
 
     @staticmethod
@@ -529,9 +545,31 @@ class PreviewServer:
         return {"success": True, "hash": img_hash, "url": to_data_url(self._png_for(item, 480))}
 
     def api_emotions(self, request, payload):
-        return {"success": True, "emotions": [dict(e) for e in EMOTIONS]}
+        return {"success": True, "emotions": [dict(e) for e in self.state.emotions]}
 
     def api_categories(self, request, payload):
+        if request.method == "POST":
+            items = payload.get("categories")
+            if not isinstance(items, list) or not items:
+                return {"success": False, "error": "分类列表无效"}
+            normalized = []
+            keys = set()
+            names = set()
+            for item in items:
+                key = str((item or {}).get("key", "")).strip().lower()
+                name = str((item or {}).get("name", "")).strip()[:40]
+                if not re.fullmatch(r"[a-z][a-z0-9_-]{0,47}", key):
+                    return {"success": False, "error": "分类 key 无效"}
+                if key in {"con", "prn", "aux", "nul", "other", "unknown"} or re.fullmatch(r"(?:com|lpt)[1-9]", key):
+                    return {"success": False, "error": "分类 key 是保留名称"}
+                if key in keys or (name and name.casefold() in names):
+                    return {"success": False, "error": "分类 key 或显示名称重复"}
+                keys.add(key)
+                if name:
+                    names.add(name.casefold())
+                normalized.append({"key": key, "name": name or key, "desc": str(item.get("desc", "")).strip()[:200]})
+            self.state.emotions = normalized
+            return {"success": True, "categories": [item["key"] for item in normalized]}
         return {"success": True, "categories": self.state._categories_list(self.state.library)}
 
     def api_categories_delete(self, request, payload):
@@ -540,6 +578,7 @@ class PreviewServer:
             return {"success": False, "error": "缺少分类 key"}
         if any(m["category"] == key for m in self.state.library):
             return {"success": False, "error": "分类下仍有表情包，无法删除"}
+        self.state.emotions = [item for item in self.state.emotions if item["key"] != key]
         return {"success": True}
 
     def api_pending(self, request, payload):

@@ -39,6 +39,7 @@ createApp({
     setup() {
         const activeSection = ref('library');
         const sidebarOpen = ref(false);
+        const sidebarCollapsed = ref(false);
         const images = ref([]);
         const categories = ref([]);
         const stats = reactive({ total: 0, categories: 0, today: 0 });
@@ -46,6 +47,9 @@ createApp({
         const searchQuery = ref('');
         const selectedCategory = ref('');
         const selectedCharacter = ref('');
+        const selectedLibrary = ref('');
+        const libraries = reactive({ general: 0, favorites: 0, characters: 0, automatic: 0 });
+        const automaticLimit = ref(100);
         const characters = ref([]);
         const unassignedCharacterCount = ref(0);
         const sortBy = ref('newest');
@@ -172,6 +176,7 @@ createApp({
 
         const isBatchMode = ref(false);
         const selectedImages = ref(new Set());
+        const contextMenu = reactive({ open: false, x: 0, y: 0, img: null });
         const batchMoveOpen = ref(false);
         const batchTargetCategory = ref('');
         const batchScopeOpen = ref(false);
@@ -372,6 +377,7 @@ createApp({
 
         const THEME_STORAGE_KEY = 'stealer_theme_mode';
         const VIEW_STORAGE_KEY = 'stealer_view_mode';
+        const SIDEBAR_STORAGE_KEY = 'stealer_sidebar_mode';
         const readStored = (key) => {
             try { return localStorage.getItem(key); } catch (e) { return null; }
         };
@@ -429,11 +435,19 @@ createApp({
         const closeThemePicker = () => { themePickerOpen.value = false; };
 
         const viewMode = ref(readStored(VIEW_STORAGE_KEY) === 'list' ? 'list' : 'grid');
+        sidebarCollapsed.value = readStored(SIDEBAR_STORAGE_KEY) === 'collapsed';
         const setViewMode = (mode, persist = true) => {
             viewMode.value = mode === 'list' ? 'list' : 'grid';
             writeStored(VIEW_STORAGE_KEY, viewMode.value);
             if (persist) persistPrefs({ view: viewMode.value });
         };
+        const setSidebarCollapsed = (collapsed, persist = true) => {
+            sidebarCollapsed.value = Boolean(collapsed);
+            const mode = sidebarCollapsed.value ? 'collapsed' : 'expanded';
+            writeStored(SIDEBAR_STORAGE_KEY, mode);
+            if (persist) persistPrefs({ sidebar: mode });
+        };
+        const toggleSidebarCollapsed = () => setSidebarCollapsed(!sidebarCollapsed.value);
         const loadDashboardPrefs = async () => {
             const requestRevision = themePreferenceRevision;
             try {
@@ -447,6 +461,9 @@ createApp({
                 if (data.view === 'list' || data.view === 'grid') {
                     viewMode.value = data.view;
                     writeStored(VIEW_STORAGE_KEY, data.view);
+                }
+                if (data.sidebar === 'collapsed' || data.sidebar === 'expanded') {
+                    setSidebarCollapsed(data.sidebar === 'collapsed', false);
                 }
             } catch (e) { /* 保留 localStorage */ }
         };
@@ -1051,10 +1068,9 @@ createApp({
             } catch (e) { healthStatus.value = 'error'; }
         };
 
-        let isFetching = false;
+        let imageRequestId = 0;
         const fetchImages = async (page = 1) => {
-            if (isFetching) return;
-            isFetching = true;
+            const requestId = ++imageRequestId;
             loading.value = true;
             try {
                 const params = new URLSearchParams({
@@ -1063,6 +1079,7 @@ createApp({
                     q: searchQuery.value,
                     category: selectedCategory.value === '__favorite__' ? '' : selectedCategory.value,
                     sort: sortBy.value,
+                    library: selectedLibrary.value,
                 });
                 if (selectedCategory.value === '__favorite__') {
                     params.set('favorite_only', 'true');
@@ -1072,12 +1089,12 @@ createApp({
                 }
                 const res = await apiFetch('api/images?' + params.toString());
                 const data = await res.json();
+                if (requestId !== imageRequestId) return;
                 const nextImages = data.images || [];
                 const nextTotal = Number(data.total || 0);
                 const lastPage = Math.max(1, Math.ceil(nextTotal / pageSize.value));
 
                 if (page > lastPage && nextTotal > 0) {
-                    isFetching = false;
                     return await fetchImages(lastPage);
                 }
 
@@ -1088,6 +1105,8 @@ createApp({
                 characters.value = Array.isArray(data.characters) ? data.characters : [];
                 unassignedCharacterCount.value = Number(data.unassigned_character_count || 0);
                 favoriteCount.value = Number(data.favorite_count || 0);
+                Object.assign(libraries, data.libraries || {});
+                automaticLimit.value = Number(data.automatic_limit || 100);
                 const currentHashes = new Set(nextImages.map(img => img.hash));
                 for (const hash of Object.keys(imageDataUrls)) {
                     if (!currentHashes.has(hash)) delete imageDataUrls[hash];
@@ -1107,8 +1126,7 @@ createApp({
                 console.error(e);
                 return [];
             } finally {
-                loading.value = false;
-                isFetching = false;
+                if (requestId === imageRequestId) loading.value = false;
             }
         };
 
@@ -1181,6 +1199,20 @@ createApp({
             }
         };
 
+        const libraryTitle = (library) => t('pages.dashboard.libraries.' + (library || 'all'), library || '全部表情');
+        const retentionLabel = (img) => {
+            const key = img.is_favorite ? 'favorite' : img.character ? 'character' : ['external', 'pinned'].includes(img.retention_class) ? 'protected' : 'automatic';
+            return t('pages.dashboard.layout.' + key, key);
+        };
+        const selectLibrary = (library) => {
+            sidebarOpen.value = false;
+            selectedLibrary.value = library;
+            selectedCharacter.value = '';
+            selectedCategory.value = '';
+            selectedImages.value = new Set();
+            fetchImages(1);
+        };
+
         const selectLibraryCategory = (category) => {
             selectedCategory.value = category;
             sidebarOpen.value = false;
@@ -1189,6 +1221,8 @@ createApp({
 
         const selectLibraryCharacter = (character) => {
             selectedCharacter.value = character;
+            selectedLibrary.value = character === '__none__' ? 'general' : character ? 'characters' : '';
+            if (selectedCategory.value === '__favorite__') selectedCategory.value = '';
             sidebarOpen.value = false;
             fetchImages(1);
         };
@@ -1431,6 +1465,25 @@ createApp({
             requestOriginalForPreview(img?.hash);
         };
 
+        const closeContextMenu = () => {
+            contextMenu.open = false;
+            contextMenu.img = null;
+        };
+        const openContextMenu = (event, img) => {
+            if (!img) return;
+            event?.preventDefault?.();
+            event?.stopPropagation?.();
+            const rect = event?.currentTarget?.getBoundingClientRect?.();
+            const rawX = Number(event?.clientX) || (rect ? rect.right - 8 : 12);
+            const rawY = Number(event?.clientY) || (rect ? rect.top + 8 : 12);
+            const menuWidth = 224;
+            const menuHeight = 320;
+            contextMenu.x = Math.max(8, Math.min(rawX, window.innerWidth - menuWidth - 8));
+            contextMenu.y = Math.max(8, Math.min(rawY, window.innerHeight - menuHeight - 8));
+            contextMenu.img = img;
+            contextMenu.open = true;
+        };
+
         const openPendingPreview = (item) => {
             if (!item) return;
             previewSource.value = 'pending';
@@ -1632,6 +1685,7 @@ createApp({
         const handleKeydown = (e) => {
             if (isTypingTarget(e)) return;
             if (e.key === 'Escape') {
+                if (contextMenu.open) { closeContextMenu(); return; }
                 // 只关最上层弹窗，按堆叠顺序判断，避免一次 Esc 关掉好几层
                 if (confirmOpen.value) { onConfirmNo(); return; }
                 if (promptOpen.value) { onPromptCancel(); return; }
@@ -1966,11 +2020,27 @@ createApp({
                 if (data.success) {
                     img.is_favorite = newValue;
                     favoriteCount.value += newValue ? 1 : -1;
-                    if (selectedCategory.value === '__favorite__' && !newValue) {
-                        await fetchImages(currentPage.value);
-                    }
+                    await fetchImages(currentPage.value);
                 } else { showAlert(data.error || t('pages.dashboard.alerts.action_failed', 'Action failed.')); }
             } catch (e) { showAlert(`${t('pages.dashboard.alerts.favorite_failed', 'Favorite update failed')}: ${e.message}`, 'error'); }
+        };
+
+        const runContextAction = async (action) => {
+            const img = contextMenu.img;
+            if (!img) return;
+            closeContextMenu();
+            if (action === 'preview') openPreview(img);
+            else if (action === 'edit') {
+                openPreview(img);
+                await nextTick();
+                startEdit();
+            } else if (action === 'favorite') await toggleFavorite(img);
+            else if (action === 'select') {
+                if (!isBatchMode.value) isBatchMode.value = true;
+                toggleSelection(img);
+            } else if (action === 'download') await downloadImage(img);
+            else if (action === 'delete') await deleteImage(img, false);
+            else if (action === 'blacklist') await deleteImage(img, true);
         };
 
         const batchSetFavorite = async (favorite) => {
@@ -2444,13 +2514,29 @@ createApp({
         };
 
         const addEmotion = async () => {
-            const key = String(newEmotion.key || '').trim();
+            const key = String(newEmotion.key || '').trim().toLowerCase();
             if (!key) return;
+            if (!/^[a-z][a-z0-9_-]{0,47}$/.test(key)) {
+                showAlert(t('pages.dashboard.alerts.invalid_category_key', '分类 key 需以英文字母开头，仅含小写字母、数字、_、-，最长48字符。'));
+                return;
+            }
+            if (/^(con|prn|aux|nul|other|unknown|com[1-9]|lpt[1-9])$/.test(key)) {
+                showAlert(t('pages.dashboard.alerts.reserved_category_key', '该分类 key 是系统保留名称，请更换。'));
+                return;
+            }
+            const displayName = String(newEmotion.name || '').trim();
+            const duplicateName = displayName && availableEmotions.value.some(
+                (item) => item.key !== key && String(item.name || '').trim().toLocaleLowerCase() === displayName.toLocaleLowerCase()
+            );
+            if (duplicateName) {
+                showAlert(t('pages.dashboard.alerts.duplicate_category_name', '分类显示名称已被使用。'));
+                return;
+            }
             addingEmotion.value = true;
             try {
                 const newCat = {
                     key,
-                    name: String(newEmotion.name || '').trim(),
+                    name: displayName,
                     desc: String(newEmotion.desc || '').trim(),
                 };
                 const currentList = [...availableEmotions.value];
@@ -2491,7 +2577,7 @@ createApp({
         };
 
         const characterLabel = (key) => {
-            if (!key) return t('pages.dashboard.characters.unassigned', '未分配');
+            if (!key) return t('pages.dashboard.characters.unassigned', '通用表情库');
             const found = characters.value.find((item) => item.key === key);
             return found ? found.name : key;
         };
@@ -2641,6 +2727,7 @@ createApp({
 
         let resizeTimer = null;
         const handleResize = () => {
+            closeContextMenu();
             clearTimeout(resizeTimer);
             resizeTimer = setTimeout(() => {
                 updatePageSize();
@@ -2660,6 +2747,8 @@ createApp({
             window.addEventListener('keydown', handleKeydown);
             window.addEventListener('resize', handleResize);
             window.addEventListener('click', closeThemePicker);
+            window.addEventListener('click', closeContextMenu);
+            window.addEventListener('scroll', closeContextMenu, true);
             imgObserver = new IntersectionObserver((entries) => {
                 entries.forEach((entry) => {
                     if (entry.isIntersecting) {
@@ -2679,6 +2768,8 @@ createApp({
             window.removeEventListener('keydown', handleKeydown);
             window.removeEventListener('resize', handleResize);
             window.removeEventListener('click', closeThemePicker);
+            window.removeEventListener('click', closeContextMenu);
+            window.removeEventListener('scroll', closeContextMenu, true);
             if (imgObserver) imgObserver.disconnect();
             clearTimeout(resizeTimer);
             clearTimeout(searchTimeout);
@@ -2688,6 +2779,8 @@ createApp({
         return {
             activeSection,
             sidebarOpen,
+            sidebarCollapsed,
+            toggleSidebarCollapsed,
             switchSection,
             images,
             categories,
@@ -2696,6 +2789,12 @@ createApp({
             searchQuery,
             selectedCategory,
             selectedCharacter,
+            selectedLibrary,
+            libraryTitle,
+            retentionLabel,
+            selectLibrary,
+            libraries,
+            automaticLimit,
             characters,
             unassignedCharacterCount,
             selectLibraryCharacter,
@@ -2767,6 +2866,10 @@ createApp({
 
             isBatchMode,
             selectedImages,
+            contextMenu,
+            openContextMenu,
+            closeContextMenu,
+            runContextAction,
             batchMoveOpen,
             batchTargetCategory,
             batchScopeOpen,

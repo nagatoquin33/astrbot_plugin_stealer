@@ -1,4 +1,5 @@
 import types
+from types import SimpleNamespace
 
 import pytest
 
@@ -9,11 +10,35 @@ from core.events.event_context import (
 )
 from core.util.blacklist import add_blacklist_hash
 from core.util.normalization import (
+    normalize_category_key,
     canonicalize_path,
     normalize_character_key,
     normalize_label_list,
     normalize_scope_mode,
 )
+from core.config.config import PluginConfig
+
+
+@pytest.mark.parametrize("raw, expected", [(" Happy ", "happy"), ("meme_2", "meme_2"), ("foo-bar", "foo-bar")])
+def test_normalize_category_key_accepts_portable_slugs(raw, expected):
+    assert normalize_category_key(raw) == expected
+
+
+@pytest.mark.parametrize("raw", ["", "../outside", "a/b", "中文", "2happy", "a.b", "con", "COM1", "other", "unknown", "a" * 49])
+def test_normalize_category_key_rejects_unsafe_names(raw):
+    with pytest.raises(ValueError):
+        normalize_category_key(raw)
+
+
+def test_ensure_category_dir_stays_under_storage_root(tmp_path):
+    holder = SimpleNamespace(categories_dir=tmp_path / "categories")
+    holder.categories_dir.mkdir()
+    created = PluginConfig.ensure_category_dir(holder, "custom_tag")
+    assert created == holder.categories_dir / "custom_tag"
+    assert created.is_dir()
+    with pytest.raises(ValueError):
+        PluginConfig.ensure_category_dir(holder, "../outside")
+    assert not (tmp_path / "outside").exists()
 
 
 def test_metadata_normalizers_share_alias_and_list_rules():

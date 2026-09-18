@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING
 
 from astrbot.api import logger
 
+from .retention import library_counts
+
 from ..util.safe_io import safe_remove_file
 
 if TYPE_CHECKING:
@@ -70,7 +72,7 @@ class MaintenanceService:
             try:
                 await asyncio.sleep(self.CAPACITY_CONTROL_INTERVAL_SECONDS)
                 idx = await self.plugin.index_manager.load_index()
-                if len(idx) > self.plugin.plugin_config.max_reg_num:
+                if library_counts(idx)["automatic"] > self.plugin.plugin_config.max_reg_num:
                     handler = getattr(self.plugin, "event_handler", None)
                     if handler:
                         await handler._enforce_capacity(idx)

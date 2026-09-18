@@ -196,7 +196,8 @@ All public settings can be changed in the AstrBot admin panel. Defaults below ma
 
 | Setting | Default | Description |
 |:---|:---|:---|
-| **Maximum meme count** | `100` | Library limit; older memes are evicted according to the cleanup strategy |
+| **General library eviction limit** | `100` | Counts ordinary general stickers only; favorites, character stickers and protected imports are excluded |
+| **Low-usage weight** | `0.7` | `eviction_usage_weight`; creation-age weight is `1 - weight` |
 | **VLM classification prompt** | `""` | Custom VLM prompt; blank uses bundled `prompts.json` |
 | **VLM classification prompt (with filtration)** | `""` | Used when content filtration is enabled; blank uses the bundled template |
 | **Text-distance weight preset** | `balanced` | `balanced`, `keyword`, `semantic`, or `strict` for smart-selection weights |
@@ -303,3 +304,11 @@ If you find this useful, please give it a ⭐ Star — thank you!
 Report issues at [GitHub Issues](https://github.com/nagatoquin33/astrbot_plugin_stealer/issues).
 
 </div>
+
+### Libraries and automatic eviction
+
+The dashboard separates General (formerly Unassigned), Favorites, and Character libraries. Favorited character stickers appear under Favorites while retaining their character assignment. These protected libraries and external/pinned imports neither count toward `max_reg_num` nor participate in automatic eviction. Use Least used or Oldest sorting and batch deletion to manage them manually.
+
+Eligible general stickers receive `score = w * low_usage + (1-w) * old_age`, using min-max normalization of `use_count` and `created_at` within the eligible set. Lower counts and older creation times score higher; a constant component contributes zero. Default `w=0.7`; only the overflow is removed, highest score first. Ties use lower usage, older creation, then path. Weight 0 prioritizes age; weight 1 prioritizes low usage.
+
+Removing favorite/character protection returns ordinary stickers to the quota, preserving their usage and creation history. Scheduled cleanup, `/meme capacity`, and post-rebuild capacity enforcement share these rules.

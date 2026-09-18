@@ -236,7 +236,7 @@
     "invisible": true
   },
   "max_reg_num": {
-    "description": "最大表情包数量",
+    "description": "通用表情库自动淘汰上限",
     "type": "int",
     "default": 100,
     "slider": {
@@ -244,7 +244,14 @@
       "max": 2000,
       "step": 10
     },
-    "hint": "表情包存储上限。达到上限后自动按清理策略淘汰旧表情包。"
+    "hint": "仅计算通用库中未收藏、未指定角色的普通表情；收藏、角色表情及受保护外部导入不占额度。超限按使用次数和入库时间加权淘汰。"
+  },
+  "eviction_usage_weight": {
+    "description": "淘汰评分：低使用次数权重",
+    "type": "float",
+    "default": 0.7,
+    "slider": {"min": 0, "max": 1, "step": 0.05},
+    "hint": "默认 0.7，入库时间权重为 1 减此值。两项归一化后加权，使用越少、入库越旧越优先淘汰；0 仅按最旧，1 仅按使用最少。"
   },
   "custom_meme_classification_prompt": {
     "description": "VLM 分类提示词",

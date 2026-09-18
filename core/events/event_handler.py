@@ -11,6 +11,7 @@ from astrbot.api.event import AstrMessageEvent, MessageChain
 from astrbot.api.message_components import Image, Plain
 
 from ..util.safe_io import safe_remove_file
+from ..maintenance.retention import eviction_candidates
 from .background_steal_queue import BackgroundStealQueue
 from .event_context import get_event_session_key
 from .platform_detector import PlatformDetector
@@ -179,55 +180,15 @@ class EventHandler:
         return True
 
     def _select_items_for_removal(self, image_index: dict) -> list[tuple[str, int]]:
-        """从索引中选出需要移除的条目（按创建时间从旧到新排序后取最旧的）。
-
-        收藏表情包和外部源托管副本不参与自动清理。
-
-        Returns:
-            需要移除的 (file_path, created_at) 列表；若无需移除则返回空列表。
-        """
+        """仅对通用库普通表情按使用次数和入库时间加权淘汰。"""
+        cfg = self.plugin.plugin_config
         try:
-            max_reg = int(self.plugin.plugin_config.max_reg_num)
+            limit = int(cfg.max_reg_num)
         except (TypeError, ValueError):
-            max_reg = 500  # 默认值
-
-        if max_reg <= 0:
-            logger.warning(f"容量控制上限无效: max_reg_num={max_reg}，跳过")
             return []
-
-        native_total = sum(
-            1
-            for image_info in image_index.values()
-            if not isinstance(image_info, dict)
-            or str(image_info.get("retention_class", "native") or "native")
-            not in {"external", "pinned"}
+        return eviction_candidates(
+            image_index, limit, getattr(cfg, "eviction_usage_weight", 0.7)
         )
-        if native_total <= max_reg:
-            return []
-
-        image_items: list[tuple[str, int]] = []
-        for file_path, image_info in image_index.items():
-            if isinstance(image_info, dict) and image_info.get("is_favorite"):
-                continue
-            if isinstance(image_info, dict) and str(
-                image_info.get("retention_class", "native") or "native"
-            ) in {"external", "pinned"}:
-                continue
-            created_at = int(image_info.get("created_at", 0)) if isinstance(image_info, dict) else 0
-            image_items.append((file_path, created_at))
-
-        if not image_items:
-            return []
-
-        image_items.sort(key=lambda x: x[1])
-        overflow = native_total - max_reg
-        remove_count = min(max(0, overflow), len(image_items))
-        if overflow > len(image_items):
-            logger.warning(
-                f"[capacity] Need to remove {overflow} entries, but only "
-                f"{len(image_items)} native non-favorite entries are eligible"
-            )
-        return image_items[:remove_count]
 
     def _resolve_index_file_path(self, path_str: str, image_info: dict | None) -> str | None:
         candidates: list[Path] = []
@@ -287,7 +248,7 @@ class EventHandler:
         return rekeyed, stale_removed
 
     async def _enforce_capacity(self, image_index: dict) -> list[str]:
-        """容量控制，删除超出限制的最旧表情包（文件+索引一起清理）。
+        """容量控制，按加权排序删除超出通用库限制的表情包（文件+索引一起清理）。
 
         Args:
             image_index: 索引字典
@@ -309,7 +270,7 @@ class EventHandler:
             if not items_to_remove:
                 return files_actually_deleted
 
-            logger.info(f"[容量控制-索引] 将删除 {len(items_to_remove)} 个最旧条目")
+            logger.info(f"[容量控制-索引] 将删除 {len(items_to_remove)} 个通用库加权淘汰条目")
 
             for remove_path, _ in items_to_remove:
                 if remove_path not in image_index:

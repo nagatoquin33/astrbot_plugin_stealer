@@ -11,6 +11,11 @@ from typing import Any
 
 _METADATA_SEPARATOR_RE = re.compile(r"[,，、;；\n\t]+")
 _CSV_SEPARATOR_RE = re.compile(r",")
+_CATEGORY_KEY_RE = re.compile(r"^[a-z][a-z0-9_-]{0,47}$")
+_WINDOWS_RESERVED_NAMES = frozenset(
+    {"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10)), *(f"lpt{i}" for i in range(1, 10))}
+)
+_PLUGIN_RESERVED_CATEGORY_KEYS = frozenset({"other", "unknown"})
 
 _PUBLIC_SCOPE_ALIASES = frozenset({"public", "global", "all"})
 _LOCAL_SCOPE_ALIASES = frozenset({"local", "private", "scoped"})
@@ -47,6 +52,24 @@ def normalize_scope_mode(
 def normalize_character_key(value: object) -> str:
     """规范化角色键。"""
     return str(value or "").strip().lower()
+
+
+def normalize_category_key(value: object) -> str:
+    """Return a safe category directory key or raise ``ValueError``.
+
+    Category keys are persisted as directory names and model labels, so keep
+    them portable and stable across Windows/Linux and case-insensitive stores.
+    """
+    key = str(value or "").strip().lower()
+    if not key:
+        raise ValueError("分类 key 不能为空")
+    if not _CATEGORY_KEY_RE.fullmatch(key):
+        raise ValueError("分类 key 需以英文字母开头，仅含小写字母、数字、_、-，最长48字符")
+    if key in _WINDOWS_RESERVED_NAMES:
+        raise ValueError("分类 key 是系统保留名称，请更换")
+    if key in _PLUGIN_RESERVED_CATEGORY_KEYS:
+        raise ValueError("分类 key 是插件保留名称，请更换")
+    return key
 
 
 def normalize_label_list(

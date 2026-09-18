@@ -8,6 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest
+import astrbot_plugin_stealer.plugin_api as plugin_api_module
 
 from astrbot_plugin_stealer.plugin_api import PluginAPI
 from astrbot_plugin_stealer.core.sources.models import ExternalSourceSecurityError
@@ -17,6 +18,77 @@ def _build_api(category_info):
     cfg = types.SimpleNamespace(get_category_info=lambda: category_info)
     plugin = types.SimpleNamespace(plugin_config=cfg)
     return PluginAPI(plugin)
+
+
+class TestCategoryUpdateSafety:
+    @staticmethod
+    def _api(monkeypatch, payload):
+        class FakeRequest:
+            async def get_json(self):
+                return payload
+
+        config = types.SimpleNamespace(
+            category_info={"happy": {"name": "开心", "desc": ""}},
+            ensure_category_dirs=lambda keys: None,
+            save_category_info=lambda: None,
+        )
+        updates = []
+        plugin = types.SimpleNamespace(
+            plugin_config=config,
+            update_config=lambda value: updates.append(value),
+        )
+        monkeypatch.setattr(plugin_api_module, "request", FakeRequest())
+        monkeypatch.setattr(plugin_api_module, "jsonify", lambda value: value)
+        return PluginAPI(plugin), updates
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("key", ["../escape", "a/b", "中文", "2bad", "con", "other", "unknown", "x" * 49])
+    async def test_update_rejects_unsafe_category_key(self, monkeypatch, key):
+        api, updates = self._api(monkeypatch, {"categories": [{"key": key}]})
+        body, status = await api._categories_update()
+        assert status == 400
+        assert body["success"] is False
+        assert updates == []
+
+    @pytest.mark.asyncio
+    async def test_update_rejects_case_insensitive_duplicate(self, monkeypatch):
+        api, updates = self._api(
+            monkeypatch,
+            {"categories": [{"key": "Happy"}, {"key": "happy"}]},
+        )
+        body, status = await api._categories_update()
+        assert status == 400
+        assert "重复" in body["error"]
+        assert updates == []
+
+    @pytest.mark.asyncio
+    async def test_update_normalizes_key_and_bounds_display_fields(self, monkeypatch):
+        api, updates = self._api(
+            monkeypatch,
+            {"categories": [{"key": " Custom_Tag ", "name": "名" * 60, "desc": "述" * 260}]},
+        )
+        body = await api._categories_update()
+        assert body["success"] is True
+        assert body["categories"] == ["custom_tag"]
+        assert updates == [{"categories": ["custom_tag"]}]
+        assert len(api._cfg.category_info["custom_tag"]["name"]) == 40
+        assert len(api._cfg.category_info["custom_tag"]["desc"]) == 200
+
+    @pytest.mark.asyncio
+    async def test_update_rejects_duplicate_display_names(self, monkeypatch):
+        api, updates = self._api(
+            monkeypatch,
+            {
+                "categories": [
+                    {"key": "cat_one", "name": "开心"},
+                    {"key": "cat_two", "name": "开心"},
+                ]
+            },
+        )
+        body, status = await api._categories_update()
+        assert status == 400
+        assert "显示名称重复" in body["error"]
+        assert updates == []
 
 
 class TestBuildCategoriesList:
@@ -112,19 +184,23 @@ class TestDashboardPrefs:
         loaded = await api._load_dashboard_prefs()
         assert loaded["theme"] == "minecraft"
         assert loaded["view"] == "grid"
+        assert loaded["sidebar"] == "expanded"
 
-        updated = await api._update_dashboard_prefs({"theme": "fallout", "view": "list"})
-        assert updated == {"theme": "fallout", "view": "list"}
+        updated = await api._update_dashboard_prefs(
+            {"theme": "fallout", "view": "list", "sidebar": "collapsed"}
+        )
+        assert updated == {"theme": "fallout", "view": "list", "sidebar": "collapsed"}
         loaded = await api._load_dashboard_prefs()
         assert loaded == updated
         assert store[api.DASHBOARD_PREFS_KEY]["theme"] == "fallout"
 
         config.webui_theme = "dark"
         loaded = await api._load_dashboard_prefs()
-        assert loaded == {"theme": "fallout", "view": "list"}
+        assert loaded == {"theme": "fallout", "view": "list", "sidebar": "collapsed"}
         assert store[api.DASHBOARD_PREFS_KEY] == {
             "theme": "fallout",
             "view": "list",
+            "sidebar": "collapsed",
         }
 
     @pytest.mark.asyncio
@@ -145,7 +221,7 @@ class TestDashboardPrefs:
         api = PluginAPI(plugin)
 
         loaded = await api._load_dashboard_prefs()
-        assert loaded == {"theme": "auto", "view": "list"}
+        assert loaded == {"theme": "auto", "view": "list", "sidebar": "expanded"}
         assert store[api.DASHBOARD_PREFS_KEY] == {"theme": "auto", "view": "list"}
 
     @pytest.mark.asyncio
@@ -163,6 +239,7 @@ class TestDashboardPrefs:
         assert await api._load_dashboard_prefs() == {
             "theme": "fallout",
             "view": "list",
+            "sidebar": "expanded",
         }
 
     @pytest.mark.asyncio
@@ -193,3 +270,5 @@ class TestDashboardPrefs:
         assert api._normalize_theme("nope") == "auto"
         assert api._normalize_view("list") == "list"
         assert api._normalize_view("other") == "grid"
+        assert api._normalize_sidebar("collapsed") == "collapsed"
+        assert api._normalize_sidebar("other") == "expanded"

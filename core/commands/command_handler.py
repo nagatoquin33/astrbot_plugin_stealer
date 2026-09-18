@@ -3,7 +3,10 @@ from collections import Counter
 from typing import Any
 
 from astrbot.api import logger
+
 from astrbot.api.event import AstrMessageEvent
+
+from ..maintenance.retention import library_counts
 
 
 class CommandHandler:
@@ -219,7 +222,10 @@ class CommandHandler:
 
             # 构建统计信息
             status_text += "📊 表情包统计:\n"
-            status_text += f"总数量: {total_count}/{self.plugin.plugin_config.max_reg_num} ({total_count / self.plugin.plugin_config.max_reg_num * 100:.1f}%)\n\n"
+            counts = library_counts(image_index)
+            status_text += f"总数量: {total_count}\n"
+            status_text += f"通用库自动淘汰计数: {counts['automatic']}/{self.plugin.plugin_config.max_reg_num}\n"
+            status_text += f"收藏: {counts['favorites']}；角色表情库: {counts['characters']}（均不参与自动淘汰）\n\n"
 
             # 分类统计 - 只显示前5个最多的分类
             status_text += "📂 分类统计 (前5):\n"
@@ -317,32 +323,32 @@ class CommandHandler:
         return 0
 
     async def enforce_capacity(self, event: AstrMessageEvent):
-        """手动执行容量控制，删除最旧的表情包以控制总数量。"""
+        """手动执行容量控制，按加权评分控制通用库数量。"""
         try:
             # 加载图片索引
             image_index = await self.plugin.index_manager.load_index()
 
-            current_count = len(image_index)
+            current_count = library_counts(image_index)["automatic"]
             max_count = self.plugin.plugin_config.max_reg_num
 
             if current_count <= max_count:
                 yield event.plain_result(
-                    f"当前表情包数量 {current_count} 未超过限制 {max_count}，无需清理"
+                    f"当前通用库自动淘汰计数 {current_count} 未超过限制 {max_count}，无需清理"
                 )
                 return
 
             # 执行容量控制
-            await self.plugin.event_handler._enforce_capacity(image_index)
+            deleted_files = await self.plugin.event_handler._enforce_capacity(image_index)
             await self.plugin.index_manager.save_index(image_index)
 
             # 重新统计
-            new_count = len(image_index)
-            removed_count = current_count - new_count
+            new_count = library_counts(image_index)["automatic"]
+            removed_count = len(deleted_files)
 
             yield event.plain_result(
                 f"容量控制完成\n"
-                f"删除了 {removed_count} 个最旧的表情包\n"
-                f"当前数量: {new_count}/{max_count}"
+                f"删除了 {removed_count} 个通用表情包\n"
+                f"通用库自动淘汰计数: {new_count}/{max_count}（收藏和角色库另行管理）"
             )
         except Exception as e:
             logger.error(f"容量控制失败: {e}")

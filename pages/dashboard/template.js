@@ -122,9 +122,17 @@ export const TEMPLATE = `
     </nav>
 </header>
 
-<div class="main-container">
+<div class="main-container" :class="{ 'sidebar-collapsed': sidebarCollapsed }">
     <div v-if="sidebarOpen" class="mobile-sidebar-backdrop" @click="sidebarOpen = false"></div>
-    <aside class="sidebar" :class="{ 'is-open': sidebarOpen }">
+    <aside class="sidebar" :class="{ 'is-open': sidebarOpen, 'is-collapsed': sidebarCollapsed }">
+        <button type="button" class="sidebar-collapse-btn" @click="toggleSidebarCollapsed"
+            :aria-label="sidebarCollapsed ? t('pages.dashboard.actions.expand_sidebar', '展开侧栏') : t('pages.dashboard.actions.collapse_sidebar', '折叠侧栏')"
+            :title="sidebarCollapsed ? t('pages.dashboard.actions.expand_sidebar', '展开侧栏') : t('pages.dashboard.actions.collapse_sidebar', '折叠侧栏')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                <path v-if="sidebarCollapsed" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                <path v-else stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 5l-7 7 7 7" />
+            </svg>
+        </button>
         <div class="section-switcher">
             <button type="button" class="section-tab" :class="{ active: activeSection === 'pending' }" @click="switchSection('pending')">
                 <svg class="section-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
@@ -145,18 +153,24 @@ export const TEMPLATE = `
 
         <template v-if="activeSection === 'library'">
             <div class="sidebar-divider"></div>
-            <div class="sidebar-title">{{ t('pages.dashboard.categories.title', 'Categories') }}</div>
-            <div class="category-list">
-                <button type="button" class="category-item favorite-category" :class="{ active: selectedCategory === '__favorite__' }"
-                    @click="selectLibraryCategory('__favorite__')">
-                    <span class="category-icon">⭐</span>
-                    <span class="category-name">{{ t('pages.dashboard.categories.favorites', 'Favorites') }}</span>
-                    <span class="category-count">{{ favoriteCount }}</span>
+            <div class="sidebar-title">{{ t('pages.dashboard.layout.libraries', '表情库') }}</div>
+            <nav class="library-navigation" :aria-label="t('pages.dashboard.layout.libraries', '表情库')">
+                <button v-for="key in ['', 'general', 'favorites', 'characters']" :key="key" type="button"
+                    class="library-nav-item" :class="{ active: selectedLibrary === key }"
+                    :aria-current="selectedLibrary === key ? 'page' : undefined"
+                    :aria-label="libraryTitle(key) + ' ' + (key ? libraries[key] : libraries.general + libraries.favorites + libraries.characters)"
+                    :title="libraryTitle(key)" @click="selectLibrary(key)">
+                    <span class="library-nav-mark" aria-hidden="true">{{ key === 'favorites' ? '☆' : key === 'characters' ? '♙' : key === 'general' ? '▦' : '◫' }}</span>
+                    <span class="library-nav-label">{{ libraryTitle(key) }}</span>
+                    <span class="library-nav-count">{{ key ? libraries[key] : libraries.general + libraries.favorites + libraries.characters }}</span>
                 </button>
-                <button type="button" class="category-item" :class="{ active: selectedCategory === '' }"
-                    @click="selectLibraryCategory('')">
-                    <span class="category-name">{{ t('pages.dashboard.categories.all', 'All') }}</span>
-                    <span class="category-count">{{ stats.total || 0 }}</span>
+            </nav>
+            <div class="sidebar-divider"></div>
+            <div class="sidebar-title">{{ t('pages.dashboard.layout.emotions', '当前库 · 情绪分类') }}</div>
+            <div class="category-list">
+                <button type="button" class="category-item" :class="{ active: selectedCategory === '' }" @click="selectLibraryCategory('')">
+                    <span class="category-name">{{ t('pages.dashboard.layout.all_emotions', '全部情绪') }}</span>
+                    <span class="category-count">{{ categories.reduce((sum, cat) => sum + (Number(cat.count) || 0), 0) }}</span>
                 </button>
                 <button v-for="cat in categories" :key="cat.key" type="button" class="category-item"
                     :class="{ active: selectedCategory === cat.key }" :style="catAccent(cat.key)"
@@ -208,6 +222,21 @@ export const TEMPLATE = `
         <div class="modal-panel-corner-br"></div>
 
         <template v-if="activeSection === 'library'">
+            <header class="library-heading">
+                <div class="library-heading-main">
+                    <span class="library-eyebrow">{{ t('pages.dashboard.layout.collection', '表情收藏册') }}</span>
+                    <h2>{{ libraryTitle(selectedLibrary) }} <span class="library-result-count">{{ total }}</span></h2>
+                    <div class="library-location">
+                        <span>{{ selectedCharacter ? characterLabel(selectedCharacter) : t('pages.dashboard.layout.all_characters', '全部角色') }}</span>
+                        <span aria-hidden="true">/</span>
+                        <span>{{ selectedCategory ? getCategoryName(selectedCategory) : t('pages.dashboard.layout.all_emotions', '全部情绪') }}</span>
+                    </div>
+                </div>
+                <details class="library-policy">
+                    <summary>{{ t('pages.dashboard.libraries.quota', '自动淘汰计数') }} <strong>{{ libraries.automatic }} / {{ automaticLimit }}</strong></summary>
+                    <p>{{ t('pages.dashboard.libraries.hint', '仅通用库普通表情参与自动淘汰，收藏和角色库另行管理。') }}</p>
+                </details>
+            </header>
             <div class="inventory-toolbar">
                 <div class="toolbar-search">
                     <svg style="width:16px;height:16px;position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--text-muted)"
@@ -223,7 +252,6 @@ export const TEMPLATE = `
                     <div class="toolbar-group mobile-category-select">
                         <select v-model="selectedCategory" @change="fetchImages(1)" class="codex-input">
                             <option value="">{{ t('pages.dashboard.categories.all', 'All') }}</option>
-                            <option value="__favorite__">⭐ {{ t('pages.dashboard.categories.favorites', 'Favorites') }}</option>
                             <option v-for="cat in categories" :key="cat.key" :value="cat.key">{{ cat.name }}</option>
                         </select>
                     </div>
@@ -232,6 +260,7 @@ export const TEMPLATE = `
                         <select v-model="sortBy" @change="fetchImages(1)" class="codex-input toolbar-sort-select">
                             <option value="newest">{{ t('pages.dashboard.sort.newest', 'Newest') }}</option>
                             <option value="oldest">{{ t('pages.dashboard.sort.oldest', 'Oldest') }}</option>
+                            <option value="least_used">{{ t('pages.dashboard.sort.least_used', '使用最少') }}</option>
                             <option value="most_used">{{ t('pages.dashboard.sort.most_used', 'Most Used') }}</option>
                             <option value="last_used">{{ t('pages.dashboard.sort.last_used', 'Last Used') }}</option>
                         </select>
@@ -313,16 +342,11 @@ export const TEMPLATE = `
                 </div>
             </div>
 
-            <div class="character-filter-bar">
+            <div v-if="selectedLibrary === 'characters'" class="character-filter-bar">
                 <span class="character-filter-label">{{ t('pages.dashboard.characters.title', '角色') }}</span>
                 <button type="button" class="character-chip" :class="{ active: !selectedCharacter }"
-                    @click="selectLibraryCharacter('')">
+                    @click="selectLibrary('characters')">
                     {{ t('pages.dashboard.characters.all', '全部角色') }}
-                </button>
-                <button type="button" class="character-chip" :class="{ active: selectedCharacter === '__none__' }"
-                    @click="selectLibraryCharacter('__none__')">
-                    {{ t('pages.dashboard.characters.unassigned', '未分配') }}
-                    <span class="character-chip-count">{{ unassignedCharacterCount }}</span>
                 </button>
                 <button v-for="item in characters" :key="item.key" type="button" class="character-chip"
                     :class="{ active: selectedCharacter === item.key }"
@@ -353,13 +377,14 @@ export const TEMPLATE = `
                 <p style="font-size:var(--fs-md);margin-top:8px;color:var(--text-muted)">{{ t('pages.dashboard.empty.library_hint', 'Click "Add" to upload a new sticker.') }}</p>
             </div>
 
-            <div v-else class="inventory-grid" :class="{ 'list-mode': viewMode === 'list' }">
+            <div v-else class="inventory-grid library-grid" :class="{ 'list-mode': viewMode === 'list' }">
                 <div v-for="(img, idx) in images" :key="img.hash" class="item-slot"
                     :class="{ selected: selectedImages.has(img.hash) }"
                     :style="{ animationDelay: Math.min(idx * 24, 420) + 'ms' }"
                     role="button" tabindex="0"
                     :aria-label="img.desc || getCategoryName(img.category)"
                     @mouseenter="onItemSlotEnter($event)"
+                    @contextmenu.prevent.stop="openContextMenu($event, img)"
                     @click="isBatchMode ? toggleSelection(img) : openPreview(img)"
                     @keydown.enter.prevent="isBatchMode ? toggleSelection(img) : openPreview(img)"
                     @keydown.space.prevent="isBatchMode ? toggleSelection(img) : openPreview(img)">
@@ -370,7 +395,18 @@ export const TEMPLATE = `
                         </svg>
                     </div>
 
-                    <button class="favorite-btn" :class="{ active: img.is_favorite }" @click.stop="toggleFavorite(img)"
+                    <button class="item-more-btn" type="button" @click.stop="openContextMenu($event, img)"
+                        @contextmenu.prevent.stop="openContextMenu($event, img)"
+                        :aria-label="t('pages.dashboard.actions.more', '更多操作')"
+                        :title="t('pages.dashboard.actions.more', '更多操作')">
+                        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                            <circle cx="12" cy="5" r="1.8" />
+                            <circle cx="12" cy="12" r="1.8" />
+                            <circle cx="12" cy="19" r="1.8" />
+                        </svg>
+                    </button>
+
+                    <button @keydown.enter.stop @keydown.space.stop class="favorite-btn" :class="{ active: img.is_favorite }" @click.stop="toggleFavorite(img)"
                         :aria-label="img.is_favorite ? t('pages.dashboard.actions.unfavorite', 'Remove favorite') : t('pages.dashboard.actions.favorite', 'Favorite')"
                         :title="img.is_favorite ? t('pages.dashboard.actions.unfavorite', 'Remove favorite') : t('pages.dashboard.actions.favorite', 'Favorite')">
                         <svg viewBox="0 0 24 24">
@@ -385,8 +421,6 @@ export const TEMPLATE = `
                         <img v-else :src="imageDataUrls[img.hash]" loading="lazy" decoding="async"
                             :alt="img.desc" class="fade-in">
                     </div>
-                    <span v-if="img.character" class="item-character-badge">{{ characterLabel(img.character) }}</span>
-                    <span v-if="(img.use_count || 0) > 1" class="item-stack-count">{{ img.use_count }}</span>
 
                     <div class="item-info">
                         <div class="list-main">
@@ -407,8 +441,12 @@ export const TEMPLATE = `
                                 getScopeLabel(img.scope_mode) }}</span>
                         </div>
                         <div v-else class="item-meta-row">
-                            <span class="scope-pill" :class="img.scope_mode === 'local' ? 'local' : 'public'">{{
-                                getScopeLabel(img.scope_mode) }}</span>
+                            <span class="card-usage">{{ t('pages.dashboard.fields.use_count', '使用次数') }} {{ img.use_count || 0 }}</span>
+                            <span class="scope-pill" :class="img.scope_mode === 'local' ? 'local' : 'public'">{{ getScopeLabel(img.scope_mode) }}</span>
+                        </div>
+                        <div v-if="viewMode !== 'list'" class="card-bottom-row">
+                            <span :title="retentionLabel(img)">{{ retentionLabel(img) }}</span>
+                            <time :title="t('pages.dashboard.fields.created_at', '入库时间')">{{ formatDate(img.created_at) }}</time>
                         </div>
                     </div>
                 </div>
@@ -606,6 +644,26 @@ export const TEMPLATE = `
             </div>
         </template>
     </main>
+</div>
+
+<div v-if="contextMenu.open && contextMenu.img" class="item-context-menu" role="menu"
+    :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }" @click.stop @contextmenu.prevent>
+    <div class="context-menu-head">
+        <span>{{ getCategoryName(contextMenu.img.category) }}</span>
+        <small>{{ contextMenu.img.use_count || 0 }}×</small>
+    </div>
+    <button type="button" role="menuitem" @click="runContextAction('preview')">{{ t('pages.dashboard.context_menu.preview', '查看详情') }}</button>
+    <button type="button" role="menuitem" @click="runContextAction('edit')">{{ t('pages.dashboard.actions.edit', '编辑') }}</button>
+    <button type="button" role="menuitem" @click="runContextAction('favorite')">
+        {{ contextMenu.img.is_favorite ? t('pages.dashboard.actions.unfavorite', '取消收藏') : t('pages.dashboard.actions.favorite', '收藏') }}
+    </button>
+    <button type="button" role="menuitem" @click="runContextAction('select')">
+        {{ selectedImages.has(contextMenu.img.hash) ? t('pages.dashboard.context_menu.unselect', '取消选择') : t('pages.dashboard.context_menu.select', '加入批量选择') }}
+    </button>
+    <button type="button" role="menuitem" @click="runContextAction('download')">{{ t('pages.dashboard.actions.download', '下载') }}</button>
+    <div class="context-menu-separator"></div>
+    <button type="button" role="menuitem" class="danger" @click="runContextAction('delete')">{{ t('pages.dashboard.actions.delete', '删除') }}</button>
+    <button type="button" role="menuitem" class="danger" @click="runContextAction('blacklist')">{{ t('pages.dashboard.actions.delete_blacklist', '删除并拉黑') }}</button>
 </div>
 
 <div class="fo-vaultboy fo-vaultboy-mascot" role="img" aria-label="Vault Boy"></div>
@@ -910,7 +968,7 @@ export const TEMPLATE = `
                     <div style="margin-bottom:20px">
                         <label class="form-label">{{ t('pages.dashboard.fields.character', '角色') }}</label>
                         <select v-model="editForm.character" class="codex-input">
-                            <option value="">{{ t('pages.dashboard.characters.unassigned', '未分配') }}</option>
+                            <option value="">{{ t('pages.dashboard.characters.unassigned', '通用表情库') }}</option>
                             <option v-for="item in characters" :key="item.key" :value="item.key">{{ item.name }}</option>
                         </select>
                     </div>
@@ -1121,7 +1179,7 @@ export const TEMPLATE = `
             <div class="mt-16">
                 <label class="form-label">{{ t('pages.dashboard.fields.character', '角色') }}</label>
                 <select v-model="uploadForm.character" class="codex-input">
-                    <option value="">{{ t('pages.dashboard.characters.unassigned', '未分配') }}</option>
+                    <option value="">{{ t('pages.dashboard.characters.unassigned', '通用表情库') }}</option>
                     <option v-for="item in characters" :key="item.key" :value="item.key">{{ item.name }}</option>
                 </select>
             </div>
@@ -1229,7 +1287,7 @@ export const TEMPLATE = `
                 <div class="mt-16">
                     <label class="form-label">{{ t('pages.dashboard.fields.character', '角色') }}</label>
                     <select v-model="batchUploadForm.character" class="codex-input">
-                        <option value="">{{ t('pages.dashboard.characters.unassigned', '未分配') }}</option>
+                        <option value="">{{ t('pages.dashboard.characters.unassigned', '通用表情库') }}</option>
                         <option v-for="item in characters" :key="item.key" :value="item.key">{{ item.name }}</option>
                     </select>
                     <p class="hint-text" style="margin:8px 0 0">{{ t('pages.dashboard.batch.character_hint', '这批图会打上该角色标记。可稍后在图库里再改。') }}</p>
@@ -1535,13 +1593,15 @@ export const TEMPLATE = `
             <div style="background:var(--bg-main);padding:16px;margin-bottom:20px;border:1px solid var(--gold-dark)">
                 <h3 style="margin:0 0 16px 0;font-size:0.9rem;color:var(--gold-primary);font-family:'Cinzel','Noto Sans SC',sans-serif">{{ t('pages.dashboard.categories.add_new', 'Add Category') }}</h3>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:12px">
-                    <input v-model="newEmotion.key" :placeholder="t('pages.dashboard.placeholders.category_key', 'Key (e.g. happy)')" class="codex-input">
-                    <input v-model="newEmotion.name" :placeholder="t('pages.dashboard.placeholders.category_name', 'Name (e.g. Happy)')" class="codex-input">
-                    <input v-model="newEmotion.desc" :placeholder="t('pages.dashboard.placeholders.category_desc', 'Description (optional)')" class="codex-input">
+                    <input v-model="newEmotion.key" maxlength="48" autocapitalize="none" spellcheck="false"
+                        pattern="[a-z][a-z0-9_-]{0,47}" :placeholder="t('pages.dashboard.placeholders.category_key', 'Key (e.g. happy)')" class="codex-input">
+                    <input v-model="newEmotion.name" maxlength="40" :placeholder="t('pages.dashboard.placeholders.category_name', 'Name (e.g. Happy)')" class="codex-input">
+                    <input v-model="newEmotion.desc" maxlength="200" :placeholder="t('pages.dashboard.placeholders.category_desc', 'Description (optional)')" class="codex-input">
                     <button @click="addEmotion" :disabled="!newEmotion.key || addingEmotion" class="codex-btn primary">
                         {{ addingEmotion ? '...' : t('pages.dashboard.actions.add', 'Add') }}
                     </button>
                 </div>
+                <p class="hint-text" style="margin:10px 0 0">{{ t('pages.dashboard.categories.key_hint', 'Key 以英文字母开头，仅使用小写字母、数字、_、-，最长48字符。显示名称可以使用中文。') }}</p>
             </div>
 
             <div style="display:flex;flex-direction:column;gap:8px;max-height:400px;overflow-y:auto">
@@ -1653,7 +1713,7 @@ export const TEMPLATE = `
         <div class="modal-pad">
             <label class="form-label">{{ t('pages.dashboard.fields.character', '角色') }}</label>
             <select v-model="batchTargetCharacter" class="codex-input" style="margin-bottom:20px">
-                <option value="">{{ t('pages.dashboard.characters.unassigned', '未分配') }}</option>
+                <option value="">{{ t('pages.dashboard.characters.unassigned', '通用表情库') }}</option>
                 <option v-for="item in characters" :key="item.key" :value="item.key">{{ item.name }}</option>
             </select>
             <div style="display:flex;gap:12px">
@@ -1796,7 +1856,7 @@ export const TEMPLATE = `
                     <div style="margin-bottom:16px">
                         <label class="form-label sm">{{ t('pages.dashboard.fields.character', '角色') }}</label>
                         <select v-model="pendingEditForm.character" class="codex-input">
-                            <option value="">{{ t('pages.dashboard.characters.unassigned', '未分配') }}</option>
+                            <option value="">{{ t('pages.dashboard.characters.unassigned', '通用表情库') }}</option>
                             <option v-for="item in characters" :key="item.key" :value="item.key">{{ item.name }}</option>
                         </select>
                     </div>

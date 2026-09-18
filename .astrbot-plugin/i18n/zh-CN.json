@@ -135,7 +135,7 @@
         },
         "external_sources_enabled": {
             "description": "启用外部表情包源",
-                "hint": "支持 Meme Manager / AstrBot Meme Pack、GitHub 资源包仓库和受限 JSON API。导入内容会复制到本插件目录。"
+            "hint": "支持 Meme Manager / AstrBot Meme Pack、GitHub 资源包仓库和受限 JSON API。导入内容会复制到本插件目录。"
         },
         "external_source_allow_http": {
             "description": "允许明文 HTTP 外部源",
@@ -217,6 +217,7 @@
                 "library": "表情包库"
             },
             "categories": {
+                "key_hint": "Key 以英文字母开头，仅使用小写字母、数字、_、-，最长48字符。显示名称可以使用中文。",
                 "title": "分类",
                 "favorites": "收藏",
                 "all": "全部",
@@ -238,7 +239,8 @@
                 "newest": "最新入库",
                 "oldest": "最早入库",
                 "most_used": "最常发送",
-                "last_used": "最近发送"
+                "last_used": "最近发送",
+                "least_used": "使用最少"
             },
             "actions": {
                 "done": "完成",
@@ -284,7 +286,15 @@
                 "characters": "角色管理",
                 "sources": "外部源",
                 "assign_character": "分配角色",
-                "open_navigation": "打开导航"
+                "open_navigation": "打开导航",
+                "collapse_sidebar": "折叠侧栏",
+                "expand_sidebar": "展开侧栏",
+                "more": "更多操作"
+            },
+            "context_menu": {
+                "preview": "查看详情",
+                "select": "加入批量选择",
+                "unselect": "取消选择"
             },
             "empty": {
                 "library_title": "暂无表情包",
@@ -461,7 +471,10 @@
                 "reanalyze_apply_failed": "应用 VLM 结果失败。",
                 "reanalyze_applied": "VLM 结果已应用。",
                 "no_valid_info": "未能识别有效信息。",
-                "add_failed": "添加失败。"
+                "add_failed": "添加失败。",
+                "invalid_category_key": "分类 key 需以英文字母开头，仅含小写字母、数字、_、-，最长48字符。",
+                "reserved_category_key": "该分类 key 是系统保留名称，请更换。",
+                "duplicate_category_name": "分类显示名称已被使用。"
             },
             "confirm": {
                 "pending_approve_batch": "确认通过 {count} 条待审核项？",
@@ -502,7 +515,7 @@
             "characters": {
                 "title": "角色",
                 "all": "全部角色",
-                "unassigned": "未分配",
+                "unassigned": "通用表情库",
                 "hint": "角色由你在管理面板手工归档，VLM 不会识别角色。先创建角色，再点卡片编辑或用批量分配。",
                 "manage": "角色管理",
                 "bar_hint": "点角色筛选图库；「角色管理」里新增或删除角色。"
@@ -535,6 +548,25 @@
                 "empty": "尚无已注册外部源。同一 AstrBot 实例中的 Meme Manager 资源包会自动显示。",
                 "forget": "移除记录",
                 "forget_confirm": "移除此外部源记录？已经导入的图片会继续保留在图库中。"
+            },
+            "libraries": {
+                "all": "全部表情",
+                "general": "通用表情库",
+                "favorites": "收藏",
+                "characters": "角色表情库",
+                "quota": "自动淘汰计数",
+                "hint": "仅通用库普通表情参与加权自动淘汰；收藏、角色库及受保护外部导入另行管理。取消收藏或移除角色后，普通表情重新计入额度。"
+            },
+            "layout": {
+                "libraries": "表情库",
+                "emotions": "当前库 · 情绪分类",
+                "all_emotions": "全部情绪",
+                "collection": "表情收藏册",
+                "all_characters": "全部角色",
+                "favorite": "收藏保护",
+                "character": "角色保护",
+                "protected": "独立保留",
+                "automatic": "参与自动淘汰"
             }
         }
     }

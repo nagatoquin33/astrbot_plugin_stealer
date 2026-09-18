@@ -21,8 +21,10 @@ except ImportError:
 from astrbot.api import logger
 
 from .core.util.blacklist import add_blacklist_hash
+from .core.maintenance.retention import library_counts, library_group
 from .core.util.normalization import (
     canonicalize_path,
+    normalize_category_key,
     normalize_character_key,
     normalize_label_list,
     normalize_scope_mode,
@@ -688,6 +690,7 @@ class PluginAPI:
             sort_order = request.args.get("sort", "newest")
             favorite_only = request.args.get("favorite_only", "false").lower() == "true"
             character_filter = str(request.args.get("character", "") or "")
+            library = str(request.args.get("library", "") or "")
 
             db = self._db
             get_paginated = getattr(db, "get_emojis_paginated", None) if db else None
@@ -701,12 +704,13 @@ class PluginAPI:
                     search_query=search if search else None,
                     favorite_only=favorite_only,
                     character=character_filter or None,
+                    **({"library": library} if library else {}),
                 )
                 images = [
                     item for item in (self._build_image_item(i["path"], i) for i in raw) if item
                 ]
                 cats = self._build_categories_list(cat_counts)
-                char_counts = db.get_character_counts() if hasattr(db, "get_character_counts") else {}
+                char_counts = db.get_character_counts(exclude_favorites=True) if library == "characters" else db.get_character_counts()
                 return jsonify(
                     {
                         "success": True,
@@ -718,6 +722,8 @@ class PluginAPI:
                         "characters": self._build_characters_list(char_counts),
                         "unassigned_character_count": int(char_counts.get("", 0) or 0),
                         "favorite_count": self._count_favorites(),
+                        "libraries": db.get_library_counts(),
+                        "automatic_limit": self.plugin.plugin_config.max_reg_num,
                     }
                 )
 
@@ -737,6 +743,8 @@ class PluginAPI:
                     or any(search in str(s).lower() for s in item.get("scenes", []))
                 ):
                     continue
+                if library in {"general", "favorites", "characters"} and library_group(item) != library:
+                    continue
                 cat = item["category"]
                 cat_counts[cat] = cat_counts.get(cat, 0) + 1
                 if cat_filter and item["category"] != cat_filter:
@@ -750,9 +758,15 @@ class PluginAPI:
                     continue
                 images.append(item)
 
+            sort_fields = {
+                "least_used": ("use_count", "created_at"),
+                "most_used": ("use_count", "last_used_at"),
+                "last_used": ("last_used_at", "use_count"),
+            }.get(sort_order, ("created_at",))
             images.sort(
-                key=lambda x: (int(x.get("created_at", 0) or 0), str(x.get("hash", ""))),
-                reverse=(sort_order != "oldest"),
+                key=lambda x: tuple(int(x.get(field, 0) or 0) for field in sort_fields)
+                + (str(x.get("hash", "")),),
+                reverse=sort_order not in {"oldest", "least_used"},
             )
 
             total = len(images)
@@ -762,6 +776,8 @@ class PluginAPI:
             char_counts: dict[str, int] = {}
             for path_str, meta in index.items():
                 if isinstance(meta, dict):
+                    if library == "characters" and meta.get("is_favorite"):
+                        continue
                     key = str(meta.get("character", "") or "")
                     char_counts[key] = char_counts.get(key, 0) + 1
 
@@ -776,6 +792,8 @@ class PluginAPI:
                     "characters": self._build_characters_list(char_counts),
                     "unassigned_character_count": int(char_counts.get("", 0) or 0),
                     "favorite_count": self._count_favorites(),
+                    "libraries": library_counts(index),
+                    "automatic_limit": self.plugin.plugin_config.max_reg_num,
                 }
             )
         except Exception as e:
@@ -814,6 +832,10 @@ class PluginAPI:
     @staticmethod
     def _normalize_view(raw: Any) -> str:
         return "list" if str(raw or "").strip() == "list" else "grid"
+
+    @staticmethod
+    def _normalize_sidebar(raw: Any) -> str:
+        return "collapsed" if str(raw or "").strip() == "collapsed" else "expanded"
 
     def _config_default_theme(self) -> str:
         cfg = getattr(self.plugin, "plugin_config", None)
@@ -860,6 +882,7 @@ class PluginAPI:
         return {
             "theme": self._normalize_theme(theme),
             "view": self._normalize_view(stored.get("view")),
+            "sidebar": self._normalize_sidebar(stored.get("sidebar")),
         }
 
     async def _load_dashboard_prefs(self) -> dict[str, str]:
@@ -887,12 +910,14 @@ class PluginAPI:
                 stored["theme"] = theme
         if "view" in payload:
             stored["view"] = self._normalize_view(payload.get("view"))
+        if "sidebar" in payload:
+            stored["sidebar"] = self._normalize_sidebar(payload.get("sidebar"))
 
         await self._save_dashboard_prefs(stored)
         return self._resolve_dashboard_prefs(stored, config_theme)
 
     async def handle_prefs(self):
-        """WebUI 主题 / 视图偏好：KV 持久化，配置变更会淘汰旧主题覆盖。"""
+        """WebUI 主题、视图和侧栏偏好：KV 持久化。"""
         if request.method == "GET":
             prefs = await self._load_dashboard_prefs()
             return jsonify({"success": True, **prefs})
@@ -2205,21 +2230,38 @@ class PluginAPI:
             keys: list[str] = []
             info: dict[str, dict] = {}
             seen: set[str] = set()
+            seen_names: dict[str, str] = {}
             for item in items:
                 if isinstance(item, dict) and item.get("key"):
-                    key = str(item["key"]).strip()
-                    if not key or key in seen:
-                        continue
+                    try:
+                        key = normalize_category_key(item["key"])
+                    except ValueError as exc:
+                        return jsonify({"success": False, "error": str(exc)}), 400
+                    if key in seen:
+                        return jsonify({"success": False, "error": f"分类 key 重复: {key}"}), 400
                     seen.add(key)
                     keys.append(key)
-                    name = str(item.get("name", "")).strip()
-                    desc = str(item.get("desc", "")).strip()
+                    name = str(item.get("name", "")).strip()[:40]
+                    desc = str(item.get("desc", "")).strip()[:200]
+                    name_key = name.casefold()
+                    if name_key and name_key in seen_names:
+                        return jsonify(
+                            {
+                                "success": False,
+                                "error": f"分类显示名称重复: {name}（{seen_names[name_key]} / {key}）",
+                            }
+                        ), 400
+                    if name_key:
+                        seen_names[name_key] = key
                     if name or desc:
                         info[key] = {"name": name, "desc": desc}
                 elif isinstance(item, str):
-                    key = item.strip()
-                    if not key or key in seen:
-                        continue
+                    try:
+                        key = normalize_category_key(item)
+                    except ValueError as exc:
+                        return jsonify({"success": False, "error": str(exc)}), 400
+                    if key in seen:
+                        return jsonify({"success": False, "error": f"分类 key 重复: {key}"}), 400
                     seen.add(key)
                     keys.append(key)
 
@@ -2241,9 +2283,10 @@ class PluginAPI:
     async def handle_delete_category(self):
         try:
             data = await request.get_json() or {}
-            key = str(data.get("key", "")).strip()
-            if not key:
-                return jsonify({"success": False, "error": "分类Key无效"})
+            try:
+                key = normalize_category_key(data.get("key", ""))
+            except ValueError as exc:
+                return jsonify({"success": False, "error": str(exc)}), 400
 
             cur_cats = list(self._cfg.categories or [])
             if key not in cur_cats:

@@ -6,7 +6,10 @@ from pathlib import Path
 from typing import Any
 
 from astrbot.api import logger
+
 from astrbot.api.event import AstrMessageEvent
+
+from ..maintenance.retention import library_counts
 
 
 class IndexRebuildCommand:
@@ -170,6 +173,12 @@ class IndexRebuildCommand:
                     restored = True
 
                 for key in (
+                    "is_favorite",
+                    "character",
+                    "retention_class",
+                    "use_count",
+                    "last_used_at",
+                    "created_at",
                     "source_message",
                     "source",
                     "origin_target",
@@ -204,8 +213,8 @@ class IndexRebuildCommand:
             # --- 智能合并逻辑结束 ---
 
             # 重建后若超过容量限制，先执行容量控制清理
-            max_reg = getattr(self.plugin, "max_reg_num", 0)
-            if max_reg > 0 and len(final_index) > max_reg:
+            max_reg = getattr(self.plugin.plugin_config, "max_reg_num", getattr(self.plugin, "max_reg_num", 0))
+            if max_reg > 0 and library_counts(final_index)["automatic"] > max_reg:
                 logger.info(
                     f"[rebuild_index] 重建后数量 {len(final_index)} 超过限制 {max_reg}，"
                     f"执行容量控制清理"

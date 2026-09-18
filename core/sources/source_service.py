@@ -19,7 +19,11 @@ from PIL import Image, UnidentifiedImageError
 
 from astrbot.api import logger
 
-from ..util.normalization import normalize_character_key, normalize_scope_mode
+from ..util.normalization import (
+    normalize_category_key,
+    normalize_character_key,
+    normalize_scope_mode,
+)
 from ..util.safe_io import safe_remove_file
 from .github_source import GitHubSource
 from .http_source import HTTPSource
@@ -39,7 +43,6 @@ _FORMAT_SUFFIX = {
     "WEBP": ".webp",
     "BMP": ".bmp",
 }
-_UNSAFE_CATEGORY_RE = re.compile(r"[\\/:*?\"<>|\x00-\x1f]")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
 
 
@@ -902,14 +905,10 @@ class SourceService:
 
     @staticmethod
     def _is_safe_category(category: str) -> bool:
-        value = str(category or "").strip()
-        return bool(
-            value
-            and len(value) <= 80
-            and value not in {".", ".."}
-            and ".." not in value
-            and not _UNSAFE_CATEGORY_RE.search(value)
-        )
+        try:
+            return normalize_category_key(category) == str(category or "").strip().lower()
+        except ValueError:
+            return False
 
     def _category_dir(self, category: str) -> Path:
         if not self._is_safe_category(category):
