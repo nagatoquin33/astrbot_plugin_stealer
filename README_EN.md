@@ -6,7 +6,7 @@
 
 **Let your Bot collect memes from chat, understand their mood, and send the right one at the right moment.**
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 ![Python Version](https://img.shields.io/badge/Python-3.12%2B-blue)
 ![AstrBot](https://img.shields.io/badge/AstrBot-%E2%89%A54.24.1-green)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-lightgrey)
@@ -281,6 +281,14 @@ All commands use the `/meme` prefix.
 - GIF analysis samples nine evenly spaced frames in chronological order, builds a 3×3 storyboard, and removes temporary sample files.
 - Legacy pipe-delimited responses remain supported, while JSON is more robust.
 
+### Libraries and automatic eviction
+
+The dashboard separates General (formerly Unassigned), Favorites, and Character libraries. Favorited character stickers appear under Favorites while retaining their character assignment. These protected libraries and external/pinned imports neither count toward `max_reg_num` nor participate in automatic eviction. Use Least used or Oldest sorting and batch deletion to manage them manually.
+
+Eligible general stickers receive `score = w * low_usage + (1-w) * old_age`, using min-max normalization of `use_count` and `created_at` within the eligible set. Lower counts and older creation times score higher; a constant component contributes zero. Default `w=0.7`; only the overflow is removed, highest score first. Ties use lower usage, older creation, then path. Weight 0 prioritizes age; weight 1 prioritizes low usage.
+
+Removing favorite/character protection returns ordinary stickers to the quota, preserving their usage and creation history. Scheduled cleanup, `/meme capacity`, and post-rebuild capacity enforcement share these rules.
+
 ## 🚢 Maintainer Release Flow
 
 1. Update the version in `metadata.yaml` and add a dated section for that version to `CHANGELOG.md`.
@@ -293,7 +301,7 @@ Ordinary code commits and pull requests still use CI; changing other files alone
 
 ## 📄 License
 
-This project is open source under the [MIT](LICENSE) license.
+This project is open source under the [GNU AGPL v3.0](LICENSE) license.
 
 ---
 
@@ -304,11 +312,3 @@ If you find this useful, please give it a ⭐ Star — thank you!
 Report issues at [GitHub Issues](https://github.com/nagatoquin33/astrbot_plugin_stealer/issues).
 
 </div>
-
-### Libraries and automatic eviction
-
-The dashboard separates General (formerly Unassigned), Favorites, and Character libraries. Favorited character stickers appear under Favorites while retaining their character assignment. These protected libraries and external/pinned imports neither count toward `max_reg_num` nor participate in automatic eviction. Use Least used or Oldest sorting and batch deletion to manage them manually.
-
-Eligible general stickers receive `score = w * low_usage + (1-w) * old_age`, using min-max normalization of `use_count` and `created_at` within the eligible set. Lower counts and older creation times score higher; a constant component contributes zero. Default `w=0.7`; only the overflow is removed, highest score first. Ties use lower usage, older creation, then path. Weight 0 prioritizes age; weight 1 prioritizes low usage.
-
-Removing favorite/character protection returns ordinary stickers to the quota, preserving their usage and creation history. Scheduled cleanup, `/meme capacity`, and post-rebuild capacity enforcement share these rules.
