@@ -16,14 +16,13 @@ AstrBot loads `main.py` as the entry point. The `Main` class (inheriting from `a
 Main (main.py)
 ├── PluginConfig (core/config/config.py)      -- Pydantic-backed config, wraps AstrBotConfig
 ├── DatabaseService (core/db/database_service.py) -- SQLite with WAL, stores emoji index
-├── CacheService (cache_service.py)             -- In-memory caches (index, image, cooldown)
 ├── CommandHandler (core/commands/command_handler.py) -- /meme commands
 ├── EventHandler (core/events/event_handler.py) -- Message listeners, image download, force-capture window
 ├── ImageProcessorService (core/processing/image_processor_service.py) -- VLM classification, dedup, tagging
 ├── MemeSelector (core/search/meme_selector.py) -- Search, selection strategy, BM25 + fuzzy matching
 ├── MemeSenderEngine (core/events/meme_sender_engine.py) -- Auto-send decision and cooldowns
 ├── EventContext / EmojiDelivery (core/events/) -- Shared event identity and platform delivery helpers
-├── SmartEmotionMatcher (core/processing/natural_emotion_analyzer.py) -- LLM-based emotion analysis
+├── NaturalEmotionAnalyzer (core/processing/natural_emotion_analyzer.py) -- LLM-based emotion analysis
 ├── PluginAPI (plugin_api.py)                   -- Web API routes for the dashboard page
 ├── Shared utilities (core/util/)               -- Path/metadata normalization, blacklist writes, safe IO
 └── TaskScheduler (task_scheduler.py)         -- Periodic tasks (cleanup, capacity control)
@@ -34,7 +33,16 @@ Main (main.py)
 1. **Collection**: `EventHandler` listens to messages → downloads images → `ImageProcessorService` computes perceptual hash and calls VLM for category/tags → `DatabaseService` stores metadata in SQLite.
 2. **Selection**: `MemeSelector` uses `MemeSearchEngine` (BM25 pre-filter + fuzzy re-ranking) and `MemeSelectionStrategy` (recent-usage penalty + randomness) to pick a matching emoji.
 3. **Sending**: `MemeSenderEngine` intercepts LLM responses via `on_decorating_result`, decides whether to send an emoji based on cooldowns and probability, and dispatches the selected image asynchronously.
-4. **WebUI**: `PluginAPI` registers routes under `/astrbot_plugin_stealer/*` via `context.register_web_api()`. The frontend is in `pages/表情管理/`.
+4. **WebUI**: `PluginAPI` registers routes under `/astrbot_plugin_stealer/*` via `context.register_web_api()`. The frontend is in `pages/dashboard/`.
+
+### Service ownership
+
+- Registered commands call their responsible command handler directly.
+- `ImageRenderService` owns rendering/encoding; `ImageProcessorService` owns classification/storage.
+- `MemeSearchEngine` owns its BM25 document cache file. `IndexManager` owns legacy index/blacklist migration and file scans. SQLite is the only live blacklist store.
+- `IndexManager` centralizes search invalidation/vector refresh after commits; explicit deletion uses `delete_index_paths`. Incremental `sync_index` never infers deletions from missing rows.
+- WebUI pending/library details share the item serializer and details template; all emotion displays use `EmotionLabels`.
+- Tests install AstrBot stubs once in `tests/conftest.py`; individual tests must not replace the shared modules globally.
 
 ### Key Design Patterns
 
@@ -61,7 +69,7 @@ pytest tests/test_database_service.py::test_some_function -v
 
 ### Linting / Formatting
 
-There is no configured linter or formatter in this repository. Follow the existing style (PEP 8, 4-space indentation, type hints where appropriate).
+Run `python -m ruff check --isolated --select E4,E7,E9,F --ignore E402 main.py plugin_api.py task_scheduler.py core tests scripts`. Follow the existing style (PEP 8, 4-space indentation, type hints where appropriate).
 
 ### Running the Plugin
 
@@ -74,10 +82,11 @@ This is an AstrBot plugin, not a standalone application. To develop and test:
 
 ### Dependencies
 
-Only extra dependency declared in `requirements.txt`:
+Extra dependencies declared in `requirements.txt`:
 
 ```
 Pillow>=10.0.0
+faiss-cpu>=1.8.0
 ```
 
 AstrBot itself provides `aiohttp`, `pydantic`, and other core libraries. Do not add heavy dependencies without consideration.
@@ -85,9 +94,9 @@ AstrBot itself provides `aiohttp`, `pydantic`, and other core libraries. Do not 
 ## Important Files and Conventions
 
 - **`_conf_schema.json`**: AstrBot configuration schema. When adding new user-facing settings, update both `_conf_schema.json` and `core/config/config.py`.
-- **`prompts.json`**: VLM prompts for classification. Fallback prompts exist in `ImageProcessorService` if the file is missing.
+- **`prompts.json`**: VLM prompts for classification. Fallback prompts exist in `PromptManager` if the file is missing.
 - **Database migrations**: `DatabaseService` uses `SCHEMA_VERSION` and `_init_schema()` for table creation. For schema changes, increment `SCHEMA_VERSION` and add migration logic.
-- **`pages/表情管理/`**: WebUI frontend (HTML/JS). Backend API routes are in `plugin_api.py` and must match the frontend's expected endpoints.
+- **`pages/dashboard/`**: WebUI frontend (HTML/JS). Backend API routes are in `plugin_api.py` and must match the frontend's expected endpoints.
 - **i18n**: Translations are in `.astrbot-plugin/i18n/`. Keys must stay in sync with `core/commands/command_handler.py` and other user-facing strings.
 
 ## Testing Notes

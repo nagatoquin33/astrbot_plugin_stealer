@@ -10,61 +10,10 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 
-def _install_astrbot_stubs():
-    # 检查是否已安装兼容的 stubs (由 conftest.py 安装)
-    if "astrbot.api.message_components" in sys.modules:
-        existing_image = sys.modules["astrbot.api.message_components"].Image
-        if hasattr(existing_image, "fromBase64") and hasattr(
-            existing_image, "convert_to_file_path"
-        ):
-            test_result = existing_image.fromBase64("test")
-            if test_result == "b64:test":
-                return  # stubs 已兼容，跳过安装
-
-    logger = types.SimpleNamespace(
-        info=lambda *args, **kwargs: None,
-        debug=lambda *args, **kwargs: None,
-        warning=lambda *args, **kwargs: None,
-        error=lambda *args, **kwargs: None,
-    )
-
-    astrbot_module = sys.modules.get("astrbot") or types.ModuleType("astrbot")
-    api_module = sys.modules.get("astrbot.api") or types.ModuleType("astrbot.api")
-    event_module = sys.modules.get("astrbot.api.event") or types.ModuleType("astrbot.api.event")
-    star_module = sys.modules.get("astrbot.api.star") or types.ModuleType("astrbot.api.star")
-    message_components_module = (
-        sys.modules.get("astrbot.api.message_components")
-        or types.ModuleType("astrbot.api.message_components")
-    )
-
-    api_module.logger = logger
-    event_module.AstrMessageEvent = object
-    event_module.MessageChain = list
-    star_module.Context = object
-    star_module.StarTools = object
-    class Image:
-        @classmethod
-        def fromBase64(cls, value):
-            return f"b64:{value}"
-
-        async def convert_to_file_path(self):
-            return ""
-
-    message_components_module.Image = Image
-    message_components_module.Plain = object
-
-    sys.modules["astrbot"] = astrbot_module
-    sys.modules["astrbot.api"] = api_module
-    sys.modules["astrbot.api.event"] = event_module
-    sys.modules["astrbot.api.star"] = star_module
-    sys.modules["astrbot.api.message_components"] = message_components_module
-
-
-_install_astrbot_stubs()
-
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.search.meme_selector import MemeSelector
+from core.util.normalization import canonicalize_path
 
 
 class MockPluginConfig:
@@ -76,26 +25,47 @@ class MockPluginConfig:
         return self.keyword_map
 
 
-class MockCacheService:
-    def __init__(self):
-        self._index = {}
-        self._cache = {}
-
-    def get_index_cache_readonly(self):
-        return self._index
-
-    def get_cache(self, cache_name):
-        return self._cache.get(cache_name)
-
-    async def set_cache(self, cache_name, cache_data, persist=True):
-        self._cache[cache_name] = cache_data
-
-
 class MockPlugin:
     def __init__(self):
         self.categories = ["happy", "sad", "angry", "tired", "dumb", "confused"]
         self.plugin_config = MockPluginConfig()
-        self.cache_service = MockCacheService()
+        self.index = {}
+
+
+def test_bm25_cache_survives_restart_without_tokenizing_again(tmp_path, monkeypatch):
+    import asyncio
+
+    plugin = MockPlugin()
+    plugin.cache_dir = tmp_path
+    index = {"/happy.png": {"category": "happy", "desc": "开心大笑", "tags": ["笑"]}}
+    first = MemeSelector(plugin)._search_engine
+    asyncio.run(first._build_bm25_index(index))
+    expected = first._bm25_index.get_top_k(("开心",), k=1)
+
+    def unexpected_rebuild(_text):
+        raise AssertionError("有效磁盘缓存应直接复用")
+
+    monkeypatch.setattr("core.search.meme_search_engine.tokenize_for_bm25", unexpected_rebuild)
+    restarted = MemeSelector(plugin)._search_engine
+    asyncio.run(restarted._build_bm25_index(index))
+    assert restarted._bm25_doc_paths == ["/happy.png"]
+    assert restarted._bm25_index.get_top_k(("开心",), k=1) == expected
+
+
+def test_corrupt_bm25_cache_is_rebuilt_from_current_index(tmp_path):
+    import asyncio
+    import json
+
+    plugin = MockPlugin()
+    plugin.cache_dir = tmp_path
+    cache = tmp_path / "bm25_cache.json"
+    cache.write_text("{incomplete", encoding="utf-8")
+    index = {"/fresh.png": {"category": "happy", "desc": "新的表情包"}}
+    engine = MemeSelector(plugin)._search_engine
+    asyncio.run(engine._build_bm25_index(index))
+    assert engine._bm25_doc_paths == ["/fresh.png"]
+    assert json.loads(cache.read_text(encoding="utf-8"))["doc_paths"] == ["/fresh.png"]
+    assert not list(tmp_path.glob("*.tmp"))
 
 
 class TestRecentUsage:
@@ -106,31 +76,31 @@ class TestRecentUsage:
         self.selector = MemeSelector(self.plugin)
 
     def test_update_recent_usage_adds_new_entry(self):
-        self.selector._update_recent_usage("happy", "/path/to/emoji1.png")
-        recent = self.selector._get_recent_usage("happy")
+        self.selector._selection_strategy._update_recent_usage("happy", "/path/to/emoji1.png")
+        recent = self.selector._selection_strategy._get_recent_usage("happy")
         assert "/path/to/emoji1.png" in recent
 
     def test_update_recent_usage_removes_duplicate(self):
-        self.selector._update_recent_usage("happy", "/path/to/emoji1.png")
-        self.selector._update_recent_usage("happy", "/path/to/emoji2.png")
-        self.selector._update_recent_usage("happy", "/path/to/emoji1.png")
-        recent = self.selector._get_recent_usage("happy")
+        self.selector._selection_strategy._update_recent_usage("happy", "/path/to/emoji1.png")
+        self.selector._selection_strategy._update_recent_usage("happy", "/path/to/emoji2.png")
+        self.selector._selection_strategy._update_recent_usage("happy", "/path/to/emoji1.png")
+        recent = self.selector._selection_strategy._get_recent_usage("happy")
         assert recent.count("/path/to/emoji1.png") == 1
         assert recent[-1] == "/path/to/emoji1.png"
 
     def test_update_recent_usage_respects_max_limit(self):
         for i in range(15):
-            self.selector._update_recent_usage("happy", f"/path/emoji_{i}.png")
-        recent = self.selector._get_recent_usage("happy")
+            self.selector._selection_strategy._update_recent_usage("happy", f"/path/emoji_{i}.png")
+        recent = self.selector._selection_strategy._get_recent_usage("happy")
         assert len(recent) <= self.selector.MAX_RECENT_USAGE
 
     def test_different_categories_have_separate_history(self):
-        self.selector._update_recent_usage("happy", "/path/to/happy_emoji.png")
-        self.selector._update_recent_usage("sad", "/path/to/sad_emoji.png")
-        assert len(self.selector._get_recent_usage("happy")) == 1
-        assert len(self.selector._get_recent_usage("sad")) == 1
-        assert self.selector._get_recent_usage("happy")[0] == "/path/to/happy_emoji.png"
-        assert self.selector._get_recent_usage("sad")[0] == "/path/to/sad_emoji.png"
+        self.selector._selection_strategy._update_recent_usage("happy", "/path/to/happy_emoji.png")
+        self.selector._selection_strategy._update_recent_usage("sad", "/path/to/sad_emoji.png")
+        assert len(self.selector._selection_strategy._get_recent_usage("happy")) == 1
+        assert len(self.selector._selection_strategy._get_recent_usage("sad")) == 1
+        assert self.selector._selection_strategy._get_recent_usage("happy")[0] == "/path/to/happy_emoji.png"
+        assert self.selector._selection_strategy._get_recent_usage("sad")[0] == "/path/to/sad_emoji.png"
 
 
 class TestRecentPenalty:
@@ -141,30 +111,30 @@ class TestRecentPenalty:
         self.selector = MemeSelector(self.plugin)
 
     def test_no_penalty_for_first_use(self):
-        penalty = self.selector._calculate_recent_penalty("happy", "/path/to/emoji.png")
+        penalty = self.selector._selection_strategy._calculate_recent_penalty("happy", "/path/to/emoji.png")
         assert penalty == 0.0
 
     def test_penalty_for_recently_used(self):
         for i in range(5):
-            self.selector._update_recent_usage("happy", f"/path/to/emoji_{i}.png")
-        penalty = self.selector._calculate_recent_penalty("happy", "/path/to/emoji_4.png")
+            self.selector._selection_strategy._update_recent_usage("happy", f"/path/to/emoji_{i}.png")
+        penalty = self.selector._selection_strategy._calculate_recent_penalty("happy", "/path/to/emoji_4.png")
         assert penalty > 0
 
     def test_penalty_decreases_with_recency(self):
         for i in range(4):
-            self.selector._update_recent_usage("happy", f"/path/to/emoji_{i}.png")
-        penalty_recent = self.selector._calculate_recent_penalty("happy", "/path/to/emoji_3.png")
-        penalty_old = self.selector._calculate_recent_penalty("happy", "/path/to/emoji_0.png")
+            self.selector._selection_strategy._update_recent_usage("happy", f"/path/to/emoji_{i}.png")
+        penalty_recent = self.selector._selection_strategy._calculate_recent_penalty("happy", "/path/to/emoji_3.png")
+        penalty_old = self.selector._selection_strategy._calculate_recent_penalty("happy", "/path/to/emoji_0.png")
         assert penalty_recent > penalty_old
 
     def test_no_penalty_for_unused_path(self):
-        self.selector._update_recent_usage("happy", "/path/to/emoji1.png")
-        penalty = self.selector._calculate_recent_penalty("happy", "/path/to/emoji2.png")
+        self.selector._selection_strategy._update_recent_usage("happy", "/path/to/emoji1.png")
+        penalty = self.selector._selection_strategy._calculate_recent_penalty("happy", "/path/to/emoji2.png")
         assert penalty == 0.0
 
     def test_no_penalty_for_different_category(self):
-        self.selector._update_recent_usage("happy", "/path/to/emoji.png")
-        penalty = self.selector._calculate_recent_penalty("sad", "/path/to/emoji.png")
+        self.selector._selection_strategy._update_recent_usage("happy", "/path/to/emoji.png")
+        penalty = self.selector._selection_strategy._calculate_recent_penalty("sad", "/path/to/emoji.png")
         assert penalty == 0.0
 
 
@@ -176,19 +146,19 @@ class TestCandidateCategories:
         self.selector = MemeSelector(self.plugin)
 
     def test_exact_match_returns_self(self):
-        cats = self.selector._get_candidate_categories("happy")
+        cats = self.selector._selection_strategy._get_candidate_categories("happy")
         assert "happy" in cats
 
     def test_fuzzy_match_returns_similar(self):
-        cats = self.selector._get_candidate_categories("开心")
+        cats = self.selector._selection_strategy._get_candidate_categories("开心")
         assert len(cats) > 0
 
     def test_limit_respected(self):
-        cats = self.selector._get_candidate_categories("a", limit=2)
+        cats = self.selector._selection_strategy._get_candidate_categories("a", limit=2)
         assert len(cats) <= 2
 
     def test_empty_input_returns_empty(self):
-        cats = self.selector._get_candidate_categories("")
+        cats = self.selector._selection_strategy._get_candidate_categories("")
         assert cats == []
 
 
@@ -200,16 +170,16 @@ class TestCanonPath:
         self.selector = MemeSelector(self.plugin)
 
     def test_backslash_to_forward_slash(self):
-        result = self.selector._canon_path("C:\\path\\to\\emoji.png")
+        result = canonicalize_path("C:\\path\\to\\emoji.png")
         assert "\\" not in result
 
     def test_case_insensitive(self):
-        result1 = self.selector._canon_path("/Path/To/Emoji.png")
-        result2 = self.selector._canon_path("/path/to/emoji.png")
+        result1 = canonicalize_path("/Path/To/Emoji.png")
+        result2 = canonicalize_path("/path/to/emoji.png")
         assert result1 == result2
 
     def test_slash_normalized(self):
-        result = self.selector._canon_path("/path/to\\emoji.png")
+        result = canonicalize_path("/path/to\\emoji.png")
         assert "\\" not in result
 
 
@@ -219,7 +189,7 @@ class TestSearchImagesDeduplication:
     def setup_method(self):
         self.plugin = MockPlugin()
         self.selector = MemeSelector(self.plugin)
-        self.plugin.cache_service._index = {
+        self.plugin.index = {
             "/path/happy_1.png": {
                 "category": "happy",
                 "desc": "开心大笑",
@@ -239,23 +209,23 @@ class TestSearchImagesDeduplication:
                 "scenes": ["伤心"],
             },
         }
-        self.selector._bm25_dirty = True
+        self.selector._search_engine._bm25_dirty = True
 
     def test_recently_used_paths_excluded_from_search(self):
-        self.selector._update_recent_usage("happy", "/path/happy_1.png")
-        self.selector._bm25_dirty = True
+        self.selector._selection_strategy._update_recent_usage("happy", "/path/happy_1.png")
+        self.selector._search_engine._bm25_dirty = True
         import asyncio
         results = asyncio.run(
-            self.selector.search_images("开心", limit=3, idx=self.plugin.cache_service._index)
+            self.selector.search_images("开心", limit=3, idx=self.plugin.index)
         )
         result_paths = [r[0] for r in results]
         assert "/path/happy_1.png" not in result_paths
 
     def test_unused_paths_included_in_search(self):
-        self.selector._bm25_dirty = True
+        self.selector._search_engine._bm25_dirty = True
         import asyncio
         results = asyncio.run(
-            self.selector.search_images("开心", limit=3, idx=self.plugin.cache_service._index)
+            self.selector.search_images("开心", limit=3, idx=self.plugin.index)
         )
         assert len(results) > 0
 
@@ -264,7 +234,7 @@ class TestBm25Signature:
     def setup_method(self):
         self.plugin = MockPlugin()
         self.selector = MemeSelector(self.plugin)
-        self.plugin.cache_service._index = {
+        self.plugin.index = {
             "/path/happy_1.png": {
                 "category": "happy",
                 "desc": "旧描述",
@@ -274,11 +244,11 @@ class TestBm25Signature:
         }
 
     def test_signature_changes_when_searchable_content_changes(self):
-        original = self.selector._compute_bm25_signature(self.plugin.cache_service._index)
-        self.plugin.cache_service._index["/path/happy_1.png"]["desc"] = "新描述"
-        self.plugin.cache_service._index["/path/happy_1.png"]["tags"] = ["新标签1", "新标签2"]
+        original = self.selector._search_engine._compute_bm25_signature(self.plugin.index)
+        self.plugin.index["/path/happy_1.png"]["desc"] = "新描述"
+        self.plugin.index["/path/happy_1.png"]["tags"] = ["新标签1", "新标签2"]
 
-        updated = self.selector._compute_bm25_signature(self.plugin.cache_service._index)
+        updated = self.selector._search_engine._compute_bm25_signature(self.plugin.index)
         assert original != updated
 
 
@@ -305,14 +275,16 @@ class TestBm25IndexBuild:
                 }
 
         self.plugin.db_service = FakeDbService()
-        self.plugin.cache_service._cache["bm25_cache"] = {
-            "signature": "db-signature",
-            "documents": [["old", "cached", "doc"]],
-            "doc_paths": ["/db/path.png"],
-        }
-
-    def test_explicit_idx_rebuilds_instead_of_reusing_db_cached_signature(self):
+    def test_explicit_idx_rebuilds_instead_of_reusing_db_cached_signature(self, tmp_path):
         import asyncio
+        import json
+
+        engine = self.selector._search_engine
+        engine._cache_path = tmp_path / "bm25_cache.json"
+        engine._cache_path.write_text(json.dumps({
+            "version": 3, "signature": "db-signature",
+            "documents": [["old", "cached", "doc"]], "doc_paths": ["/db/path.png"],
+        }), encoding="utf-8")
 
         explicit_idx = {
             "/fresh/path.png": {
@@ -323,10 +295,10 @@ class TestBm25IndexBuild:
             }
         }
 
-        asyncio.run(self.selector._build_bm25_index(explicit_idx))
+        asyncio.run(self.selector._search_engine._build_bm25_index(explicit_idx))
 
-        assert self.selector._bm25_doc_paths == ["/fresh/path.png"]
-        assert self.selector._bm25_signature != "db-signature"
+        assert self.selector._search_engine._bm25_doc_paths == ["/fresh/path.png"]
+        assert self.selector._search_engine._bm25_signature != "db-signature"
 
 
 class TestFallbackSearch:
@@ -335,7 +307,7 @@ class TestFallbackSearch:
     def setup_method(self):
         self.plugin = MockPlugin()
         self.selector = MemeSelector(self.plugin)
-        self.plugin.cache_service._index = {
+        self.plugin.index = {
             "/path/happy_1.png": {
                 "category": "happy",
                 "desc": "开心大笑",
@@ -351,11 +323,11 @@ class TestFallbackSearch:
         }
 
     def test_recently_used_excluded_in_fallback(self):
-        self.selector._update_recent_usage("happy", "/path/happy_1.png")
+        self.selector._selection_strategy._update_recent_usage("happy", "/path/happy_1.png")
         import asyncio
         results = asyncio.run(
-            self.selector._search_images_fallback(
-                "开心", limit=5, idx=self.plugin.cache_service._index
+            self.selector._search_engine._search_images_fallback(
+                "开心", limit=5, idx=self.plugin.index
             )
         )
         result_paths = [r[0] for r in results]
@@ -445,18 +417,17 @@ class _DummyEvent:
 
 class TestSendPathOptimization:
     def setup_method(self):
-        # 重新安装 stubs 以确保使用正确的版本
-        _install_astrbot_stubs()
+
         self.plugin = MockPlugin()
         self.plugin.send_meme_as_gif = False
-        self.plugin.image_processor_service = types.SimpleNamespace(
-            _file_to_gif_base64=AsyncMock(return_value="encoded-image")
+        self.plugin.image_render_service = types.SimpleNamespace(
+            file_to_gif_base64=AsyncMock(return_value="encoded-image")
         )
-        self.plugin._emoji_turn_state = lambda event: _DummyTurnState()
+        self.plugin._emoji_sender_engine = types.SimpleNamespace(emoji_turn_state=lambda event: _DummyTurnState())
         self.selector = MemeSelector(self.plugin)
         self.selector._check_group_allowed = lambda event: True
         self.selector.record_emoji_usage = AsyncMock()
-        self.selector._try_send_telegram_sticker = AsyncMock(return_value=False)
+        self.selector._smart_select_service._try_send_telegram_sticker = AsyncMock(return_value=False)
 
     def test_send_emoji_with_text_prefers_file_image_when_supported(self, tmp_path):
         image_path = tmp_path / "emoji.png"
@@ -469,7 +440,7 @@ class TestSendPathOptimization:
 
         assert len(event.sent) == 1
         assert event.sent[0].file_images == [str(image_path)]
-        self.plugin.image_processor_service._file_to_gif_base64.assert_not_awaited()
+        self.plugin.image_render_service.file_to_gif_base64.assert_not_awaited()
 
     def test_send_emoji_with_text_falls_back_to_base64_for_aiocqhttp(self, tmp_path):
         image_path = tmp_path / "emoji.png"
@@ -481,7 +452,7 @@ class TestSendPathOptimization:
         asyncio.run(self.selector.send_emoji_with_text(event, str(image_path), "hello"))
 
         assert event.sent == [["b64:encoded-image"]]
-        self.plugin.image_processor_service._file_to_gif_base64.assert_awaited_once()
+        self.plugin.image_render_service.file_to_gif_base64.assert_awaited_once()
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

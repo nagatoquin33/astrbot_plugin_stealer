@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from astrbot.api import logger
+from ..db.index_manager import delete_index_paths
 from astrbot.api.event import AstrMessageEvent, MessageChain
 from astrbot.api.message_components import Image, Plain
 
@@ -61,50 +62,15 @@ class EventHandler:
         if queue is not None:
             await queue.stop()
 
-    # ===== 门面委托：子服务方法 =====
-
-    def _normalize_str(self, value: object) -> str:
-        """规范化字符串值，委托给 PlatformDetector。"""
-        return self._platform_detector._normalize_str(value)
-
-    def _get_event_platform_name(self, event: AstrMessageEvent | None = None) -> str:
-        """获取事件平台名（小写），失败时返回空字符串。"""
-        return self._platform_detector.get_platform_name(event)
-
-    def _is_telegram_event(self, event: AstrMessageEvent | None = None) -> bool:
-        """判断事件是否来自 Telegram 平台。"""
-        return self._platform_detector.is_telegram_event(event)
-
-    def _check_platform_emoji_metadata(self, *args, **kwargs) -> bool:
-        """检查图片元信息，判断是否为平台标记的表情包。"""
-        return self._platform_detector.check_platform_emoji_metadata(*args, **kwargs)
-
     def _extract_store_emoji_urls(self, event: AstrMessageEvent) -> list[str]:
         """从 OneBot raw_message 里提取 QQ 商城表情的可下载 URL。"""
         return self._platform_detector.extract_store_emoji_urls(event)
-
-    async def _get_aiohttp_session(self) -> None:
-        """获取或创建共享的 aiohttp session（已迁移到 ImageDownloadService）。"""
-        return await self._image_download_service.get_session()
-
-    async def close_aiohttp_session(self) -> None:
-        """关闭共享的 aiohttp session（已迁移到 ImageDownloadService）。"""
-        await self._image_download_service.close()
-
-    @staticmethod
-    def _detect_download_file_type(content_type: str, content: bytes) -> tuple[str, bool]:
-        """检测下载文件类型（已迁移到 ImageDownloadService）。"""
-        return ImageDownloadService.detect_file_type(content_type, content)
 
     async def _download_to_temp(
         self, url: str, *, log_download: bool = False
     ) -> tuple[str | None, bool]:
         """从 URL 下载文件到临时文件（已迁移到 ImageDownloadService）。"""
         return await self._image_download_service.download_to_temp(url, log_download=log_download)
-
-    async def _download_original_image(self, img: Image) -> tuple[str | None, bool]:
-        """下载原始图片文件（已迁移到 ImageDownloadService）。"""
-        return await self._image_download_service.download_original_image(img)
 
     async def _download_url_to_temp(self, url: str) -> tuple[str | None, bool]:
         """从 URL 下载文件到临时文件（已迁移到 ImageDownloadService）。"""
@@ -317,6 +283,7 @@ class EventHandler:
 
                 # 只有文件确实被清理后才从索引中删除，避免产生新的"僵尸文件"
                 if file_gone:
+                    await delete_index_paths(self.plugin, [remove_path])
                     del image_index[remove_path]
                 else:
                     logger.warning(f"[容量控制] 文件删除失败，保留索引条目: {remove_path}")
@@ -517,7 +484,7 @@ class EventHandler:
                     data = seg.get("data", {}) or {}
                     if not isinstance(data, dict):
                         continue
-                    seg_file = self._normalize_str(data.get("file", ""))
+                    seg_file = self._platform_detector._normalize_str(data.get("file", ""))
                     if seg_file and seg_file not in raw_image_file_map:
                         raw_image_file_map[seg_file] = data
                 logger.debug(f"提取到 {len(raw_image_segments)} 个原始图片段, {len(raw_image_file_map)} 个文件映射")
@@ -543,7 +510,7 @@ class EventHandler:
         imgs_to_process: list[tuple[int, Image, dict]] = []
         for i, img in enumerate(imgs):
             try:
-                is_platform_emoji = self._check_platform_emoji_metadata(
+                is_platform_emoji = self._platform_detector.check_platform_emoji_metadata(
                     img,
                     event,
                     img_index=i,
@@ -565,8 +532,8 @@ class EventHandler:
                             "source": "qq_store",
                             "qq_emoji_id": str(data.get("emoji_id") or ""),
                             "qq_emoji_package_id": str(data.get("emoji_package_id") or ""),
-                            "origin_url": self._normalize_str(data.get("url", "")),
-                            "qq_key": self._normalize_str(data.get("key", "")),
+                            "origin_url": self._platform_detector._normalize_str(data.get("url", "")),
+                            "qq_key": self._platform_detector._normalize_str(data.get("key", "")),
                         }
                 except Exception:
                     extra_meta = None
@@ -602,7 +569,7 @@ class EventHandler:
                         }
                     )
             for url in store_urls[:3]:
-                extra_meta = {"source": "qq_store", "origin_url": self._normalize_str(url)}
+                extra_meta = {"source": "qq_store", "origin_url": self._platform_detector._normalize_str(url)}
                 if origin_target_str:
                     extra_meta["origin_target"] = origin_target_str
                 descriptors.append(
@@ -620,7 +587,7 @@ class EventHandler:
         if imgs_to_process:
             logger.debug(f"开始并行下载 {len(imgs_to_process)} 张图片")
             download_results = await asyncio.gather(
-                *[self._download_original_image(item[1]) for item in imgs_to_process],
+                *[self._image_download_service.download_original_image(item[1]) for item in imgs_to_process],
                 return_exceptions=True,
             )
             process_tasks = []
@@ -675,7 +642,7 @@ class EventHandler:
                 temp_path, url = result
                 if not temp_path or not Path(temp_path).exists():
                     continue
-                extra_meta = {"source": "qq_store", "origin_url": self._normalize_str(url)}
+                extra_meta = {"source": "qq_store", "origin_url": self._platform_detector._normalize_str(url)}
                 if origin_target_str:
                     extra_meta["origin_target"] = origin_target_str
                 store_process_tasks.append(
@@ -713,7 +680,7 @@ class EventHandler:
 
             if imgs:
                 img = imgs[0]
-                result = await self._download_original_image(img)
+                result = await self._image_download_service.download_original_image(img)
                 # _download_original_image 固定返回二元组 (temp_path, is_gif)
                 temp_path, is_gif = result
                 if not temp_path:
@@ -772,7 +739,7 @@ class EventHandler:
     async def cleanup_async(self) -> None:
         """异步清理资源。"""
         await self.stop_background_workers()
-        await self.close_aiohttp_session()
+        await self._image_download_service.close()
 
     def cleanup(self):
         """清理资源。"""

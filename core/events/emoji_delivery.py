@@ -33,9 +33,9 @@ async def send_qq_image_as_sticker(
     try:
         file_source: str = file_path
         if plugin and getattr(plugin, "send_meme_as_gif", False):
-            image_processor = getattr(plugin, "image_processor_service", None)
-            if image_processor:
-                encoded = await image_processor._file_to_gif_base64(file_path)
+            renderer = getattr(plugin, "image_render_service", None)
+            if renderer:
+                encoded = await renderer.file_to_gif_base64(file_path)
                 if encoded:
                     file_source = f"base64://{encoded}"
         chain = MessageChain([Image(file=file_source)])

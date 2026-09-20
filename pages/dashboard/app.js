@@ -1,4 +1,4 @@
-import { TEMPLATE } from './template.js';
+import { TEMPLATE, EMOTION_LABELS_TEMPLATE } from './template.js';
 const { createApp, ref, reactive, computed, onMounted, onUnmounted, nextTick } = Vue;
 
 const PLACEHOLDER = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
@@ -35,7 +35,30 @@ function hashToColor(hash) {
     return `hsl(${h}, ${s}%, ${l}%)`;
 }
 
+const parseListField = (value) => {
+    if (Array.isArray(value)) {
+        return value.map((v) => String(v || '').trim()).filter(Boolean);
+    }
+    return String(value || '')
+        .split(/[,，]/)
+        .map((v) => v.trim())
+        .filter(Boolean);
+};
+
+
+const emotionKeys = (item) => [...new Set(
+    [item?.category, ...parseListField(item?.emotions)]
+        .map((value) => String(value || '').trim()).filter(Boolean)
+)];
+
 createApp({
+    components: {
+        EmotionLabels: {
+            props: ['item', 'label', 'compact'],
+            computed: { keys() { return emotionKeys(this.item); } },
+            template: EMOTION_LABELS_TEMPLATE,
+        },
+    },
     setup() {
         const activeSection = ref('library');
         const sidebarOpen = ref(false);
@@ -1257,16 +1280,6 @@ createApp({
         };
 
         // issue #87：审核区编辑
-        const parseListField = (value) => {
-            if (Array.isArray(value)) {
-                return value.map((v) => String(v || '').trim()).filter(Boolean);
-            }
-            return String(value || '')
-                .split(/[,，]/)
-                .map((v) => v.trim())
-                .filter(Boolean);
-        };
-
         const openPendingEdit = async (item) => {
             if (!item || item.id == null) return;
             pendingEditId.value = item.id;
@@ -1567,22 +1580,13 @@ createApp({
         const prevImage = () => navigateImage(-1);
         const nextImage = () => navigateImage(1);
 
-        const buildAnalysisSnapshot = (item) => ({
-            category: String(item?.category || ''),
-            tags: parseListField(item?.tags),
-            description: String(item?.desc || ''),
-            overlay_text: String(item?.overlay_text || ''),
-            scenes: parseSceneList(Array.isArray(item?.scenes) ? item.scenes.join(', ') : item?.scenes),
-            emotions: parseListField(item?.emotions),
-        });
-
         const normalizeVlmResult = (data) => ({
             category: String(data?.category || ''),
             tags: parseListField(data?.tags),
             description: String(data?.description || data?.desc || ''),
             overlay_text: String(data?.overlay_text || ''),
             scenes: parseSceneList(Array.isArray(data?.scenes) ? data.scenes.join(', ') : data?.scenes),
-            emotions: parseListField(data?.emotions),
+            emotions: emotionKeys(data),
         });
 
         const formatAnalysisValue = (value) => {
@@ -1612,7 +1616,7 @@ createApp({
                 if (previewItem.value?.hash === hash) {
                     vlmReanalysisResult.value = {
                         hash,
-                        before: buildAnalysisSnapshot(item),
+                        before: normalizeVlmResult(item),
                         after: normalizeVlmResult(data),
                     };
                 }

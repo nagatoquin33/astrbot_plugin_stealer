@@ -11,6 +11,7 @@ from typing import Any
 from ..util.normalization import normalize_label_list
 
 EMBEDDING_TEXT_VERSION = "v2"
+SEARCH_METADATA_FIELDS = frozenset({"category", "tags", "desc", "scenes", "overlay_text", "emotions", "emotions_json", "character"})
 
 MAX_TAGS = 3
 MAX_SCENES = 2

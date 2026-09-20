@@ -148,6 +148,20 @@ def test_build_image_item_includes_emotions_for_reanalysis_comparison():
     assert item["emotions"] == ["happy", "surprised"]
 
 
+def test_pending_and_library_share_multi_emotion_fields():
+    api = _build_api([])
+    metadata = {
+        "path": "sample.png", "hash": "sample", "category": "dumb",
+        "emotions": ["dumb", "sigh", "tired"], "overlay_text": "算了",
+        "desc": "三种情绪", "tags": ["熊猫头"], "scenes": ["不想干了"], "id": 7,
+    }
+    pending = api._build_pending_item(metadata)
+    stored = api._build_image_item(metadata["path"], metadata)
+    for field in ("category", "emotions", "desc", "tags", "scenes", "overlay_text"):
+        assert pending[field] == stored[field] == metadata[field]
+    assert pending["id"] == 7
+
+
 class TestExternalSourceUpload:
     def test_bounded_stream_write(self, tmp_path):
         target = tmp_path / "pack.zip"

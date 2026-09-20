@@ -39,9 +39,9 @@ async def test_qq_sticker_type_with_enabled_or_legacy_config(
     qq_delivery, setting, as_gif
 ):
     event, path = qq_delivery
-    processor = types.SimpleNamespace(_file_to_gif_base64=AsyncMock(return_value="gif"))
+    renderer = types.SimpleNamespace(file_to_gif_base64=AsyncMock(return_value="gif"))
     plugin = types.SimpleNamespace(
-        send_meme_as_gif=as_gif, image_processor_service=processor
+        send_meme_as_gif=as_gif, image_render_service=renderer
     )
     if setting is not None:
         plugin.send_meme_as_qq_sticker = setting

@@ -2,9 +2,32 @@
 
 import ast
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.mark.asyncio
+async def test_real_startup_registers_api_and_list_command_works_with_empty_database():
+    from astrbot_plugin_stealer.main import Main
+
+    routes = {}
+
+    def register(path, handler, methods, description):
+        routes[path] = handler
+
+    plugin = Main(SimpleNamespace(register_web_api=register))
+    messages = [
+        message async for message in plugin.list_images(
+            SimpleNamespace(plain_result=lambda text: text)
+        )
+    ]
+    assert routes["/astrbot_plugin_stealer/analyze"] == plugin.plugin_api.handle_analyze_image
+    assert messages and "暂无" in messages[0]
+    assert plugin.db_service.count_total() == 0
 
 
 def _main_tree() -> ast.Module:
@@ -39,7 +62,7 @@ def test_meme_command_group_and_expected_subcommands_are_registered():
     }
 
 
-def test_registered_command_methods_delegate_to_command_handler():
+def test_registered_command_methods_route_to_their_handlers():
     source = (ROOT / "main.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
     delegated = set()
@@ -47,7 +70,7 @@ def test_registered_command_methods_delegate_to_command_handler():
         if not isinstance(node, ast.AsyncFunctionDef):
             continue
         segment = ast.get_source_segment(source, node) or ""
-        if "self.command_handler." in segment:
+        if any(f"self.{name}." in segment for name in ("command_handler", "image_commands", "index_commands", "target_commands")):
             delegated.add(node.name)
     assert {
         "meme_on", "meme_off", "auto_on", "auto_off", "group_filter", "capture",

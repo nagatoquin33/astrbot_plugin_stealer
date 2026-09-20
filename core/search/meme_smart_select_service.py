@@ -13,31 +13,24 @@ from ..events.event_context import get_event_platform_name, unwrap_event
 
 from .text_similarity import calculate_hybrid_similarity, tokenize_for_bm25, _extract_words
 from .embedding_service import EmbeddingService
+from ..util.normalization import canonicalize_path
+from .search_features import entry_category, parse_tags, prepare_entry_text_features
 
 class MemeSmartSelectService:
     """负责智能选择表情包。"""
 
-    # 从 MemeSelector 同步的常量（供内部方法直接使用，避免通过 _selector 委托）
-    SMART_FAST_PREFILTER_MIN_CANDIDATES = 48
-    SMART_FAST_PREFILTER_TOP_K = 120
-    SMART_FAST_PREFILTER_FUZZY_RESERVE = 24
     SMART_BM25_BONUS_WEIGHT = 0.2
     SMART_RECALL_K = 48
     SMART_OVERLAY_RECALL_LIMIT = 16
 
-    def __init__(self, plugin_instance: Any = None) -> None:
+    def __init__(
+        self, plugin_instance: Any, search_engine, selection_strategy, scope_service
+    ) -> None:
         self.plugin = plugin_instance
-        self._selector = None
-        self._search_engine = None
-
-        # ── Embedding ──
+        self._search_engine = search_engine
+        self._selection_strategy = selection_strategy
+        self._scope_service = scope_service
         self._embedding_service = EmbeddingService(plugin_instance) if plugin_instance else None
-
-    def __getattr__(self, name: str):
-        """将缺失的属性/方法委托给 MemeSelector。"""
-        if self._selector is not None:
-            return getattr(self._selector, name)
-        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
     def _overlay_recall_paths(
         self,
@@ -54,7 +47,7 @@ class MemeSmartSelectService:
         for file_path, data in idx.items():
             if not isinstance(data, dict):
                 continue
-            if not self._is_entry_allowed_for_event(data, event):
+            if not self._scope_service._is_entry_allowed_for_event(data, event):
                 continue
             overlay = str(data.get("overlay_text") or "").strip().lower()
             if len(overlay) < 2:
@@ -86,9 +79,9 @@ class MemeSmartSelectService:
         for file_path, data in idx.items():
             if not isinstance(data, dict):
                 continue
-            if not self._is_entry_allowed_for_event(data, event):
+            if not self._scope_service._is_entry_allowed_for_event(data, event):
                 continue
-            for scene in self._parse_tags(data.get("scenes", [])):
+            for scene in parse_tags(data.get("scenes", [])):
                 scene_l = str(scene or "").strip().lower()
                 if len(scene_l) < 2:
                     continue
@@ -140,7 +133,7 @@ class MemeSmartSelectService:
         for file_path, data in idx.items():
             if not isinstance(data, dict):
                 continue
-            if not self._is_entry_allowed_for_event(data, event):
+            if not self._scope_service._is_entry_allowed_for_event(data, event):
                 continue
             if self._character_match_score(ctx, data) >= 1.0:
                 hits.append(file_path)
@@ -162,13 +155,13 @@ class MemeSmartSelectService:
 
         def _add(paths: list[str]) -> None:
             for path in paths:
-                canon = self._canon_path(path)
+                canon = canonicalize_path(path)
                 if not path or canon in seen:
                     continue
                 data = idx.get(path) or idx.get(canon)
                 if not isinstance(data, dict):
                     continue
-                if not self._is_entry_allowed_for_event(data, event):
+                if not self._scope_service._is_entry_allowed_for_event(data, event):
                     continue
                 seen.add(canon)
                 recalled.append(path)
@@ -184,7 +177,7 @@ class MemeSmartSelectService:
                 )
                 emb_paths: list[str] = []
                 for path, score in emb_results:
-                    embedding_paths[self._canon_path(path)] = score
+                    embedding_paths[canonicalize_path(path)] = score
                     emb_paths.append(path)
                 _add(emb_paths)
                 if embedding_paths:
@@ -217,7 +210,7 @@ class MemeSmartSelectService:
             for file_path, data in idx.items():
                 if not isinstance(data, dict):
                     continue
-                if self._get_category_from_data(data) not in prior_categories:
+                if entry_category(data) not in prior_categories:
                     continue
                 _add([file_path])
                 if len(recalled) >= self.SMART_RECALL_K:
@@ -234,7 +227,7 @@ class MemeSmartSelectService:
     ) -> str | None:
         """智能选择表情包实现（内部方法）。"""
         try:
-            idx = self._get_index()
+            idx = self._search_engine.get_index()
             if not idx:
                 return None
 
@@ -258,12 +251,12 @@ class MemeSmartSelectService:
                 tuple[str, dict[str, Any], str, list[str], list[str], tuple[str, ...], float]
             ] = []
             for file_path in recalled_paths:
-                data = idx.get(file_path) or idx.get(self._canon_path(file_path))
+                data = idx.get(file_path) or idx.get(canonicalize_path(file_path))
                 if not isinstance(data, dict):
                     continue
-                entry_category = self._get_category_from_data(data)
-                tags = self._parse_tags(data.get("tags", []))
-                scenes = self._parse_tags(data.get("scenes", []))
+                entry_category = entry_category(data)
+                tags = parse_tags(data.get("tags", []))
+                scenes = parse_tags(data.get("scenes", []))
                 overlay = str(data.get("overlay_text") or "")
                 entry_text = " ".join(
                     [overlay, entry_category, str(data.get("desc", "") or "")] + tags + scenes
@@ -282,7 +275,7 @@ class MemeSmartSelectService:
             SMART_EARLY_STOP_THRESHOLD = 0.7
 
             for file_path, data, entry_category, tags, scenes, _, fast_score in prefiltered_entries:
-                desc, tag_words, scene_words, _, _ = self._prepare_entry_text_features(
+                desc, tag_words, scene_words, _, _ = prepare_entry_text_features(
                     entry_category,
                     str(data.get("desc", "")),
                     tuple(tags),
@@ -329,7 +322,7 @@ class MemeSmartSelectService:
                         if hits:
                             overlay_score = min(1.0, hits / max(len(pieces), 1) + 0.35)
 
-                entry_emotions = set(self._parse_tags(data.get("emotions", [])))
+                entry_emotions = set(parse_tags(data.get("emotions", [])))
                 if not entry_emotions and entry_category:
                     entry_emotions = {entry_category}
                 if entry_category in allowed_categories or (entry_emotions & allowed_categories):
@@ -341,7 +334,7 @@ class MemeSmartSelectService:
                 favorite_bonus = 0.3 if data.get("is_favorite") else 0.0
                 character_score = self._character_match_score(context_lower, data)
                 embedding_bonus = embedding_paths.get(
-                    self._canon_path(file_path), 0.0
+                    canonicalize_path(file_path), 0.0
                 ) * 0.25
                 base_score = (
                     overlay_score * 0.28
@@ -358,8 +351,8 @@ class MemeSmartSelectService:
 
                 if base_score < 0.15:
                     if desc_score > 0.1:
-                        history_penalty = self._calculate_recent_penalty(
-                            entry_category, self._canon_path(file_path)
+                        history_penalty = self._selection_strategy._calculate_recent_penalty(
+                            entry_category, canonicalize_path(file_path)
                         )
                         adjusted_score = max(0.0, desc_score - history_penalty)
                         if adjusted_score > 0.05:
@@ -376,8 +369,8 @@ class MemeSmartSelectService:
                     continue
 
                 diversity_bonus = random.uniform(0, 0.15)
-                canon_path = self._canon_path(file_path)
-                history_penalty = self._calculate_recent_penalty(entry_category, canon_path)
+                canon_path = canonicalize_path(file_path)
+                history_penalty = self._selection_strategy._calculate_recent_penalty(entry_category, canon_path)
 
                 final_score = max(0.0, base_score + diversity_bonus - history_penalty)
                 if final_score > 0.1:
@@ -410,11 +403,11 @@ class MemeSmartSelectService:
                 total_weight = sum(weights)
                 if total_weight > 0:
                     selected = random.choices(top_candidates, weights=weights, k=1)[0]
-                    self._update_recent_usage(selected[5], selected[0])
+                    self._selection_strategy._update_recent_usage(selected[5], selected[0])
                     return selected[0]
 
             result = candidates[0]
-            self._update_recent_usage(result[5], result[0])
+            self._selection_strategy._update_recent_usage(result[5], result[0])
             logger.debug(
                 f"[智能选择] 分类={category}, 候选数={len(candidates)}, "
                 f"结果={result[5]}, 分数={result[1]:.2f} (desc={result[2]:.2f}, tag={result[3]:.2f}, scene={result[4]:.2f})"
@@ -424,15 +417,6 @@ class MemeSmartSelectService:
         except Exception as e:
             logger.error(f"智能选择失败: {e}")
             return None
-
-    @staticmethod
-    def _parse_tags(raw_tags: Any) -> list[str]:
-        """安全解析 tags 字段，兼容字符串和列表类型。"""
-        if isinstance(raw_tags, str):
-            return [t.strip().lower() for t in raw_tags.split(",") if t.strip()]
-        if isinstance(raw_tags, list):
-            return [str(t).lower() for t in raw_tags if t]
-        return []
 
     # ═══════════════════════════════════════════════════
     #  嵌入检索
@@ -459,7 +443,7 @@ class MemeSmartSelectService:
         """根据查询词搜索图片（图上文字/角色 → 嵌入 → BM25）。"""
         try:
             if idx is None:
-                idx = self._get_index()
+                idx = self._search_engine.get_index()
             results: list[tuple[str, str, str, str]] = []
             seen_paths: set[str] = set()
 
@@ -469,12 +453,12 @@ class MemeSmartSelectService:
                 data = idx.get(file_path, {}) if idx else {}
                 if not isinstance(data, dict):
                     return False
-                if not self._is_entry_allowed_for_event(data, event):
+                if not self._scope_service._is_entry_allowed_for_event(data, event):
                     return False
                 seen_paths.add(file_path)
                 desc = str(data.get("desc", "") or "")
-                category = self._get_category_from_data(data)
-                tags = self._parse_tags(data.get("tags", []))
+                category = entry_category(data)
+                tags = parse_tags(data.get("tags", []))
                 results.append((file_path, desc, category, ", ".join(tags)))
                 return len(results) >= limit
 
@@ -492,7 +476,7 @@ class MemeSmartSelectService:
                 if embedding_results:
 
                     recently_used_paths: set[str] = set()
-                    for cat_paths in self._recent_usage.values():
+                    for cat_paths in self._selection_strategy._recent_usage.values():
                         recently_used_paths.update(cat_paths)
 
                     for file_path, _cos_sim in embedding_results:
@@ -521,7 +505,7 @@ class MemeSmartSelectService:
             if not need_rebuild:
                 try:
                     current_sig = self._search_engine._compute_bm25_signature(
-                        idx if idx is not None else self._selector._get_index(),
+                        idx if idx is not None else self._search_engine.get_index(),
                         prefer_db_signature=True,
                     )
                     if current_sig and current_sig != self._search_engine._bm25_signature:
@@ -544,10 +528,10 @@ class MemeSmartSelectService:
             )
 
             if not idx:
-                idx = self._get_index()
+                idx = self._search_engine.get_index()
 
             recently_used_paths: set[str] = set()
-            for cat_paths in self._recent_usage.values():
+            for cat_paths in self._selection_strategy._recent_usage.values():
                 recently_used_paths.update(cat_paths)
 
             for doc_idx, bm25_score in bm25_results:
@@ -577,21 +561,6 @@ class MemeSmartSelectService:
     ) -> list[tuple[str, str, str, str]]:
         """委托给 MemeSearchEngine。"""
         return await self._search_engine._search_images_fallback(query, limit, idx, event)
-
-    def _score_entry(
-        self,
-        query_lower: str,
-        query_tokens: list[str],
-        category: str,
-        desc: str,
-        tags: list[str],
-        max_str_len: int,
-        tag_words: frozenset[str] | None = None,
-    ) -> int:
-        """委托给 MemeSearchEngine。"""
-        return self._search_engine._score_entry(
-            query_lower, query_tokens, category, desc, tags, max_str_len, tag_words
-        )
 
     async def smart_search(
         self,
@@ -661,19 +630,11 @@ class MemeSmartSelectService:
                 return results
 
         # 最后模糊匹配到分类。
-        best_match = self._find_best_category_match(query, threshold=0.4)
+        best_match = self._search_engine._find_best_category_match(query, threshold=0.4)
         if best_match:
             results = await self.search_images(best_match, limit=limit, idx=idx, event=event)
 
         return results
-
-    def _find_best_category_match(self, query: str, threshold: float = 0.4) -> str | None:
-        """委托给 MemeSearchEngine。"""
-        return self._search_engine._find_best_category_match(query, threshold)
-
-    def find_similar_categories(self, query: str, top_n: int = 3) -> list[str]:
-        """委托给 MemeSearchEngine。"""
-        return self._search_engine.find_similar_categories(query, top_n)
 
     async def _encode_emoji(self, emoji_path: str) -> str | None:
         """将表情包文件编码为 base64，失败返回 None。"""
@@ -683,12 +644,12 @@ class MemeSmartSelectService:
         if not os.path.exists(emoji_path):
             logger.warning(f"表情包文件不存在: {emoji_path}")
             return None
-        image_processor = self.plugin.image_processor_service
-        if not image_processor:
-            logger.warning("[表情包编码] image_processor_service 未初始化")
+        renderer = self.plugin.image_render_service
+        if not renderer:
+            logger.warning("[表情包编码] image_render_service 未初始化")
             return None
         try:
-            return await image_processor._file_to_gif_base64(emoji_path)
+            return await renderer.file_to_gif_base64(emoji_path)
         except Exception as e:
             logger.error(f"编码表情包失败: {emoji_path}, {e}")
             return None
@@ -813,75 +774,3 @@ class MemeSmartSelectService:
 
         await event.send(MessageChain([ImageComponent.fromBase64(b64)]))
         return "base64_image"
-
-    async def send_emoji_with_text(
-        self, event: AstrMessageEvent, emoji_path: str, cleaned_text: str
-    ) -> bool:
-        """Send one emoji message in the fastest compatible format."""
-        event = unwrap_event(event)
-        try:
-            # active_sent means an emoji was actually sent, not merely auto-claimed.
-            if self.plugin._emoji_turn_state(event).is_active_sent():
-                logger.debug("[Stealer] 已主动发送过表情包，跳过自动发送")
-                return False
-
-            if not self._check_group_allowed(event):
-                return False
-
-            send_mode = await self.send_emoji_message(event, emoji_path)
-            if not send_mode:
-                return False
-
-            try:
-                await self.record_emoji_usage(emoji_path, trigger="auto")
-            except Exception as e:
-                logger.debug(f"[Stealer] 记录表情包使用失败: {e}")
-            logger.debug(f"[Stealer] 已发送表情包 ({send_mode}): {emoji_path}")
-            return True
-
-        except Exception as e:
-            logger.error(f"发送表情包失败: {e}", exc_info=True)
-            return False
-
-    async def try_send_emoji(
-        self,
-        event: AstrMessageEvent,
-        emotions: list[str],
-        cleaned_text: str,
-    ) -> bool:
-        """尝试发送表情包。多个情绪作为先验一次召回，不再按桶逐个试。
-
-        注意：概率判定由 Main 在调用前通过 _resolve_auto_emoji_turn_permission 完成，
-        本方法只负责选图和发图。
-        """
-        event = unwrap_event(event)
-        if not self._check_group_allowed(event):
-            return False
-
-        if self.plugin._emoji_turn_state(event).is_active_sent():
-            logger.debug("[Stealer] 检测到已发送，跳过表情发送")
-            return False
-
-        priors = [item for item in (emotions or []) if item]
-        primary = priors[0] if priors else ""
-        emoji_path = await self.plugin.meme_selector.select_emoji(
-            primary,
-            cleaned_text,
-            event=event,
-            extra_categories=priors,
-        )
-        if emoji_path:
-            sent = await self.send_emoji_with_text(event, emoji_path, cleaned_text)
-            if sent:
-                if priors:
-                    logger.debug(
-                        "已发送表情包：情绪先验=["
-                        + ", ".join(priors)
-                        + "]，按文本/图上文字/角色/BM25 综合匹配"
-                    )
-                else:
-                    logger.debug("已发送表情包：情绪先验=无，按文本/图上文字/角色/BM25 匹配")
-                return True
-
-        logger.debug("[Stealer] 未匹配到表情包")
-        return False

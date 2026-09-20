@@ -9,43 +9,12 @@
 
 import asyncio
 import json
-import tempfile
 import pytest
 import sys
-import types
 from pathlib import Path
 
-# 安装 astrbot stubs
-def _install_stubs():
-    package_name = Path(__file__).resolve().parents[1].name
 
-    logger = types.SimpleNamespace(
-        info=lambda *args, **kwargs: None,
-        debug=lambda *args, **kwargs: None,
-        warning=lambda *args, **kwargs: None,
-        error=lambda *args, **kwargs: None,
-    )
-
-    api_module = types.ModuleType("astrbot.api")
-    api_module.logger = logger
-    api_module.AstrBotConfig = object
-
-    sys.modules["astrbot.api"] = api_module
-
-    # StarTools stub
-    star_tools = types.SimpleNamespace(
-        get_data_dir=lambda name: str(Path(tempfile.gettempdir()) / "astrbot_test" / name)
-    )
-    star_module = types.ModuleType("astrbot.api.star")
-    star_module.StarTools = star_tools
-    star_module.Context = object
-    star_module.Star = object
-
-    sys.modules["astrbot.api.star"] = star_module
-
-    return package_name
-
-PACKAGE_NAME = _install_stubs()
+PACKAGE_NAME = Path(__file__).resolve().parents[1].name
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from core.db.database_service import DatabaseService
@@ -111,10 +80,6 @@ class TestBasicCRUD:
         return DatabaseService(db_path)
 
 
-
-
-
-
     def test_get_all_paths(self, db: DatabaseService):
         asyncio.run(db.insert_batch([
             {"path": "/test/a.gif", "hash": "hash_a", "category": "happy"},
@@ -127,7 +92,6 @@ class TestBasicCRUD:
         assert "/test/a.gif" in paths
         assert "/test/b.gif" in paths
         assert "/test/c.gif" in paths
-
 
 
     def test_count_total(self, db: DatabaseService):
@@ -319,12 +283,6 @@ class TestPendingUpdate:
         assert same["id"] == pid
         assert same["category"] == "happy"
         assert same["desc"] == "hi"
-
-
-
-
-
-
 
 
 class TestLegacyCompatibility:
@@ -568,8 +526,6 @@ class TestConcurrency:
     def db(self, tmp_path: Path):
         db_path = tmp_path / "test.db"
         return DatabaseService(db_path)
-
-
 
 
 class TestStats:

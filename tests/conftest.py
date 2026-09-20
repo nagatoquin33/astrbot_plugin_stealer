@@ -4,8 +4,14 @@ pytest 配置文件 - 统一管理 astrbot API stubs
 """
 
 import sys
+import tempfile
+from itertools import count
+
+import pytest
 import types
 from pathlib import Path
+
+sys.modules.setdefault("tests.conftest", sys.modules[__name__])
 
 # 确保项目路径可用
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -103,7 +109,9 @@ def _install_compatible_stubs() -> None:
 
     star_module.Context = object
     star_module.Star = Star
-    star_module.StarTools = object
+    star_module.StarTools = types.SimpleNamespace(
+        get_data_dir=lambda name: Path(tempfile.gettempdir()) / "astrbot_test" / name
+    )
 
     # 创建 astrbot.core.agent.message stub
     agent_message_module = types.ModuleType("astrbot.core.agent.message")
@@ -156,65 +164,22 @@ def _install_compatible_stubs() -> None:
     sys.modules["astrbot.api.message_components"] = message_components_module
     sys.modules["astrbot.api.star"] = star_module
 
-    # 重新加载已导入的模块以使用新的 stubs
-    import importlib
-
-    package_name = Path(__file__).parent.parent.name
-    modules_to_reload = [
-        f"{package_name}.core.events.event_handler",
-        f"{package_name}.core.events.platform_detector",
-        f"{package_name}.core.events.image_download_service",
-        f"{package_name}.core.events.meme_sender_engine",
-        f"{package_name}.core.search.meme_selector",
-        f"{package_name}.core.search.meme_search_engine",
-        f"{package_name}.core.search.meme_selection_strategy",
-        f"{package_name}.core.search.meme_smart_select_service",
-        f"{package_name}.core.search.meme_scope_service",
-        f"{package_name}.core.search.text_similarity",
-        f"{package_name}.core.commands.command_handler",
-        f"{package_name}.core.commands.target_filter_command",
-        f"{package_name}.core.commands.image_mgmt_command",
-        f"{package_name}.core.commands.index_rebuild_command",
-        f"{package_name}.core.processing.image_processor_service",
-        f"{package_name}.core.processing.image_render_service",
-        f"{package_name}.core.processing.phash_dedup_service",
-        f"{package_name}.core.processing.prompt_manager",
-        f"{package_name}.core.processing.classification_parser",
-        f"{package_name}.core.processing.vlm_call_service",
-        f"{package_name}.core.processing.natural_emotion_analyzer",
-        f"{package_name}.core.db.database_service",
-        f"{package_name}.core.db.index_manager",
-        f"{package_name}.core.sources.pack_source",
-        f"{package_name}.core.sources.http_source",
-        f"{package_name}.core.sources.github_source",
-        f"{package_name}.core.sources.source_service",
-        f"{package_name}.core.config.config",
-        f"{package_name}.api.image_handler",
-        f"{package_name}.api.batch_handler",
-        f"{package_name}.api.category_handler",
-        f"{package_name}.plugin_api",
-        f"{package_name}.cache_service",
-        f"{package_name}.task_scheduler",
-        f"{package_name}.main",
-    ]
-    for module_name in modules_to_reload:
-        if module_name in sys.modules:
-            try:
-                importlib.reload(sys.modules[module_name])
-            except Exception:
-                pass
-
-
-def pytest_configure(config):
-    """pytest hook - 在收集测试前安装 stubs"""
-    _install_compatible_stubs()
-
-
 # 导出共享类供其他测试模块使用
 SHARED_IMAGE_CLASS = _SharedImage
 SHARED_PLAIN_CLASS = _SharedPlain
 SHARED_MESSAGE_CHAIN_CLASS = _SharedMessageChain
 
 
-# 立即安装 stubs（在 pytest_configure 之前）
+# 测试收集前安装一次共享框架替身。
 _install_compatible_stubs()
+
+
+@pytest.fixture(autouse=True)
+def isolated_plugin_data(tmp_path, monkeypatch):
+    """每个配置实例使用独立临时目录，共用一套稳定的框架替身。"""
+    sequence = count()
+    monkeypatch.setattr(
+        sys.modules["astrbot.api.star"].StarTools,
+        "get_data_dir",
+        lambda name: tmp_path / f"{name}-{next(sequence)}",
+    )

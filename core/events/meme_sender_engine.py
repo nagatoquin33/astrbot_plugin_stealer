@@ -337,12 +337,11 @@ class MemeSenderEngine:
 
             search_text = text
             if getattr(self.plugin, "enable_natural_emotion_analysis", False) and hasattr(
-                self.plugin, "smart_emotion_matcher"
+                self.plugin, "emotion_analyzer"
             ):
-                analyzed = await self.plugin.smart_emotion_matcher.analyze_and_match_emotion(
+                analyzed = await self.plugin.emotion_analyzer.analyze_for_reply(
                     event,
                     text,
-                    use_natural_analysis=True,
                     user_message=user_message,
                 )
                 if isinstance(analyzed, EmotionQuery):

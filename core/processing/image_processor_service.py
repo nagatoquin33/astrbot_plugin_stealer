@@ -73,31 +73,6 @@ class ImageProcessorService:
         # 正在处理中的哈希集合，防止同一图片被并发重复处理
         self._processing_hashes: set[str] = set()
 
-        # 提示词配置：正常运行时由 prompts.json 加载并通过 update_config 注入，
-        # 以下仅为 prompts.json 缺失时的最小化 fallback
-        _FALLBACK_PROMPT = (
-            "分析表情包：从 `{emotion_list}` 中选择情绪分类，每个分类机会均等。"
-            '返回JSON格式：{"category": "分类名", "tags": [], '
-            '"description": "画面描述", "overlay_text": "", "scenes": []}'
-            "tags 没有则 []。"
-        )
-        _FALLBACK_FILTER_PROMPT = (
-            '审核图片是否含不当内容，不当则返回{"approved": false, "reason": "审核不通过"}。'
-            "否则从 `{emotion_list}` 中选择情绪分类，每个分类机会均等。"
-            '返回JSON格式：{"approved": true, "category": "分类名", "tags": [], '
-            '"description": "画面描述", "overlay_text": "", "scenes": []}'
-            "tags 没有则 []。"
-        )
-
-        self.emoji_classification_prompt = getattr(
-            plugin_instance, "EMOJI_CLASSIFICATION_PROMPT", _FALLBACK_PROMPT
-        )
-        self.emoji_classification_with_filter_prompt = getattr(
-            plugin_instance,
-            "EMOJI_CLASSIFICATION_WITH_FILTER_PROMPT",
-            _FALLBACK_FILTER_PROMPT,
-        )
-
         # 配置参数（初始值从 plugin_config 读取，后续通过 update_config 更新）
         self.categories = list(self.plugin_config.categories or []) if self.plugin_config else []
         self.content_filtration = (
@@ -105,22 +80,14 @@ class ImageProcessorService:
             if self.plugin_config
             else False
         )
-        self.vision_provider_id = (
-            str(self.plugin_config.vision_provider_id or "") if self.plugin_config else ""
-        )
-        # 框架 VLM provider 缓存，None 表示未查询过
-        self._cached_framework_vlm_id: str | None = None
-
         # 子服务（职责拆分）
         from .prompt_manager import PromptManager
         from .phash_dedup_service import PHashDedupService
-        from .image_render_service import ImageRenderService
         from .classification_parser import ClassificationParser
         from .vlm_call_service import VLMCallService
 
         self._prompt_manager = PromptManager(plugin_instance)
         self._phash_service = PHashDedupService(plugin_instance)
-        self._render_service = ImageRenderService(plugin_instance)
         self._classification_parser = ClassificationParser(plugin_instance)
         self._vlm_call_service = VLMCallService(plugin_instance)
 
@@ -247,13 +214,7 @@ class ImageProcessorService:
         if content_filtration is not None:
             self.content_filtration = content_filtration
         if vision_provider_id is not None:
-            self.vision_provider_id = vision_provider_id
-            # 插件 provider 变更时，重置框架缓存以便重新解析
-            self._cached_framework_vlm_id = None
-        if emoji_classification_prompt is not None:
-            self.emoji_classification_prompt = emoji_classification_prompt
-        if emoji_classification_with_filter_prompt is not None:
-            self.emoji_classification_with_filter_prompt = emoji_classification_with_filter_prompt
+            self._vlm_call_service.vision_provider_id = str(vision_provider_id or "").strip()
         # 同步到子服务
         self._prompt_manager.update_config(
             categories=categories,
@@ -360,21 +321,6 @@ class ImageProcessorService:
             entry["original_name"] = original_name
         entry["add_method"] = add_method
         idx[cat_path] = entry
-
-        if not getattr(self.plugin, "enable_embedding_search", False):
-            return True, idx
-
-        # 入库后写入嵌入向量（失败不阻塞）
-        try:
-            smart_service = getattr(
-                getattr(self.plugin, "meme_selector", None),
-                "_smart_select_service", None
-            )
-            if smart_service and smart_service._embedding_service:
-                await smart_service._embedding_service.insert_emoji(cat_path, entry)
-                smart_service._invalidate_embedding_index()
-        except Exception as e:
-            logger.debug(f"嵌入写入失败（不阻塞入库）: {e}")
 
         return True, idx
 
@@ -562,7 +508,7 @@ class ImageProcessorService:
 
         try:
             # 3. 缓存检查（锁外；缓存带 VLM model_sig，换模型即失效）
-            model_sig = str(await self._resolve_vision_provider(event) or "")
+            model_sig = str(await self._vlm_call_service._resolve_vision_provider(event) or "")
             cached = self._get_valid_cache(hash_val, model_sig)
             if cached is not None:
                 async with self._process_lock:
@@ -672,65 +618,22 @@ class ImageProcessorService:
             if is_temp and os.path.exists(file_path):
                 await safe_remove_file(file_path)
 
-        # 持久化索引
-        if hasattr(self.plugin, "cache_service"):
-            db_service = getattr(self.plugin, "db_service", None)
-
-            # 1) SHA256 精确匹配 — SQL 替代全量索引
-            if db_service and db_service.hash_exists(hash_val):
-                logger.debug(f"[去重] SHA256 精确匹配命中: {hash_val[:16]}...")
+        db = getattr(self.plugin, "db_service", None)
+        if db is not None:
+            if db.hash_exists(hash_val) or hash_val in db.blacklisted_hashes():
                 await _cleanup_temp()
                 return True
-
-            # 2) 感知哈希视觉相似度匹配 — 只查 pHash 映射
-            _phash = phash_val or await self._phash_service.compute_phash(file_path)
-            if _phash and db_service:
-                phash_map = db_service.get_phash_map()
-                for entry_path, existing_phash in phash_map.items():
-                    distance = self._phash_service.hamming_distance(_phash, existing_phash)
+            image_phash = phash_val or await self._phash_service.compute_phash(file_path)
+            if image_phash:
+                for existing_phash in db.get_phash_map().values():
+                    distance = self._phash_service.hamming_distance(image_phash, existing_phash)
                     if distance <= self._phash_service.PHASH_HAMMING_THRESHOLD:
-                        logger.info(
-                            f"[去重] 感知哈希相似度匹配命中: "
-                            f"距离={distance}, 阈值={self._phash_service.PHASH_HAMMING_THRESHOLD}, "
-                            f"已有={entry_path}"
-                        )
+                        logger.debug(f"[去重] 感知哈希命中: 距离={distance}")
                         await _cleanup_temp()
                         return True
-
-            # 3) 黑名单检查
-            db = getattr(self.plugin, "db_service", None)
-            if db is not None and hasattr(db, "blacklisted_hashes"):
-                blacklist = db.blacklisted_hashes()
-            else:
-                blacklist = self.plugin.cache_service.get_cache("blacklist_cache")
-            if blacklist and hash_val in blacklist:
-                logger.debug(f"[去重] 图片在黑名单中: {hash_val[:16]}...")
-                await _cleanup_temp()
-                return True
-        else:
-            # 无 cache_service 时回退到传入的 idx
-            db_service = getattr(self.plugin, "db_service", None)
-            if db_service and db_service.hash_exists(hash_val):
-                logger.debug(f"[去重] SHA256 匹配命中 (DB): {hash_val[:16]}...")
-                await _cleanup_temp()
-                return True
-
-            for v in idx.values():
-                if isinstance(v, dict) and v.get("hash") == hash_val:
-                    logger.debug(f"[去重] SHA256 匹配命中 (idx): {hash_val[:16]}...")
-                    await _cleanup_temp()
-                    return True
-
-            if phash_val and db_service:
-                phash_map = db_service.get_phash_map()
-                for entry_path, existing_phash in phash_map.items():
-                    distance = self._phash_service.hamming_distance(phash_val, existing_phash)
-                    if distance <= self._phash_service.PHASH_HAMMING_THRESHOLD:
-                        logger.info(
-                            f"[去重] 感知哈希匹配命中 (DB): 距离={distance}, 已有={entry_path}"
-                        )
-                        await _cleanup_temp()
-                        return True
+        elif any(isinstance(meta, dict) and meta.get("hash") == hash_val for meta in idx.values()):
+            await _cleanup_temp()
+            return True
 
         return False
 
@@ -974,7 +877,7 @@ class ImageProcessorService:
         file_path: str,
         categories=None,
         content_filtration=None,
-    ) -> tuple[str, list[str], str, str, list[str]]:
+    ) -> tuple[str, list[str], str, str, list[str], str, list[str]]:
         """使用视觉模型对图片进行分类并返回详细信息。
 
         Args:
@@ -1007,10 +910,13 @@ class ImageProcessorService:
             )
 
             # 调用视觉模型
-            response = await self._call_vision_model(event, file_path, prompt)
+            response = await self._vlm_call_service._call_vision_model(
+                event, file_path, prompt,
+                validate_response=self._classification_parser.validate_response,
+            )
 
             # 解析JSON响应
-            return self._parse_classification_response(response, file_path)
+            return self._classification_parser._parse_classification_response(response, file_path)
 
         except (FileNotFoundError, ValueError):
             # 配置错误 / 文件不存在，直接抛出不吞异常
@@ -1018,95 +924,6 @@ class ImageProcessorService:
         except Exception as e:
             logger.error(f"图片分类失败 [{file_path}]: {e}")
             return "", [], "", "", [], "", []
-
-    def _normalize_category(self, raw: str, *, fallback_other: bool = True) -> str:
-        """将 VLM 返回的分类文本规范化为有效分类名。
-
-        无法识别时收到最接近的已有情绪类，不再使用 other。
-        支持处理带前缀的格式（如 "审核通过：surprised"），提取冒号后的内容。
-        """
-        raw = self._sanitize_model_scalar(raw).lower()
-        allowed = [key for key in (self.categories or []) if key != "other"]
-
-        def _fallback() -> str:
-            if self.plugin_config:
-                return self.plugin_config.closest_category(raw)
-            return "confused"
-
-        if not raw or raw == "unknown" or raw == "other":
-            if fallback_other:
-                mapped = _fallback()
-                logger.debug(f"[分类规范化] {raw!r} 归入 {mapped}")
-                return mapped
-            logger.debug(f"[分类规范化] 分类失败: {raw!r}")
-            return ""
-
-        if "：" in raw or ":" in raw:
-            normalized_raw = raw.replace("：", ":")
-            if ":" in normalized_raw:
-                _, _, category_part = normalized_raw.partition(":")
-                raw = category_part.strip()
-
-        if self.plugin_config:
-            try:
-                normalized = self.plugin_config.normalize_category_strict(raw)
-                if normalized and normalized != "other":
-                    if normalized in allowed:
-                        return normalized
-            except Exception as e:
-                logger.debug(f"[分类规范化] 异常: {e}")
-
-        if raw in allowed:
-            return raw
-
-        if fallback_other:
-            mapped = _fallback()
-            logger.info(f"无法识别情绪分类: {raw!r}，归入 {mapped}")
-            return mapped
-        logger.debug(f"无法识别情绪分类: {raw!r}")
-        return ""
-
-    # ===== 门面委托：ClassificationParser =====
-
-    def _parse_classification_response(self, response: str, file_path: str):
-        """Parse the classification payload returned by the VLM（已迁移到 ClassificationParser）。"""
-        return self._classification_parser._parse_classification_response(response, file_path)
-
-    def _sanitize_model_scalar(self, value):
-        """Normalize single-value model outputs（已迁移到 ClassificationParser）。"""
-        return self._classification_parser._sanitize_model_scalar(value)
-
-    def _extract_json_payload(self, response: str):
-        """Extract JSON payload from VLM response（已迁移到 ClassificationParser）。"""
-        return self._classification_parser._extract_json_payload(response)
-
-    def _try_parse_json_candidate(self, text: str):
-        """Try to parse JSON candidate（已迁移到 ClassificationParser）。"""
-        return self._classification_parser._try_parse_json_candidate(text)
-
-    def _parse_legacy_format(self, response: str):
-        """Parse legacy format（已迁移到 ClassificationParser）。"""
-        return self._classification_parser._parse_legacy_format(response)
-
-    # ===== 门面委托：VLMCallService =====
-
-    async def _call_vision_model(self, event, img_path: str, prompt: str):
-        """Call vision model（已迁移到 VLMCallService）。"""
-        return await self._vlm_call_service._call_vision_model(event, img_path, prompt)
-
-    async def _prepare_image_for_vlm(self, img_path: str):
-        """Prepare image for VLM（已迁移到 VLMCallService）。"""
-        return await self._vlm_call_service._prepare_image_for_vlm(img_path)
-
-    async def _do_vlm_call(self, provider_id: str, prompt: str, file_url: str):
-        """Execute VLM call（已迁移到 VLMCallService）。"""
-        return await self._vlm_call_service._do_vlm_call(provider_id, prompt, file_url)
-
-    async def _llm_generate_with_image_compat(self, provider_id: str, prompt: str, file_url: str):
-        """Compat wrapper for llm_generate（已迁移到 VLMCallService）。"""
-        return await self._vlm_call_service._llm_generate_with_image_compat(
-            provider_id, prompt, file_url
-        )
 
     @staticmethod
     def _probe_image_metadata(file_path: str) -> dict[str, Any]:
@@ -1182,133 +999,4 @@ class ImageProcessorService:
     def cleanup(self):
         """清理资源。"""
         self._image_cache.clear()
-        self._render_service.cleanup()
         logger.debug("ImageProcessorService 资源已清理")
-
-    async def _file_to_base64(self, file_path: str) -> str:
-        """将文件转换为 base64 编码（门面方法，委托给 ImageRenderService）。"""
-        return await self._render_service.file_to_base64(file_path)
-
-    async def _file_to_gif_base64(self, file_path: str) -> str:
-        """将文件转换为 GIF 格式的 base64 编码（门面方法，委托给 ImageRenderService）。"""
-        return await self._render_service.file_to_gif_base64(file_path)
-
-    async def _resolve_vision_provider(self, event=None) -> str | None:
-        """统一的视觉模型 provider 解析逻辑。
-
-        优先级：
-        1. 插件配置的 vision_provider_id
-        2. AstrBot 框架配置的 default_image_caption_provider_id（视觉描述模型）
-        3. 都未配置时返回 None
-
-        Args:
-            event: 消息事件对象（可选）
-
-        Returns:
-            str | None: 提供商ID，未配置时返回 None
-        """
-        # 1. 优先使用插件配置的视觉模型
-        if self.vision_provider_id:
-            logger.debug(f"[视觉模型] 使用插件配置的提供商: {self.vision_provider_id}")
-            return self.vision_provider_id
-        else:
-            logger.debug("[视觉模型] 插件未配置 vision_provider_id，尝试使用框架全局配置")
-
-        # 2. 使用缓存的框架 VLM provider（避免每次都读配置）
-        if self._cached_framework_vlm_id is not None:
-            # 空字符串表示已查询过但没有配置
-            return self._cached_framework_vlm_id or None
-
-        # 3. 首次查询：从 AstrBot 框架配置获取 default_image_caption_provider_id
-        framework_vlm_id = ""
-        try:
-            if hasattr(self.plugin, "context"):
-                astrbot_config = self.plugin.context.get_config()
-                provider_settings = astrbot_config.get("provider_settings", {})
-                framework_vlm_id = str(
-                    provider_settings.get("default_image_caption_provider_id", "") or ""
-                )
-        except Exception as e:
-            logger.debug(f"读取框架视觉模型配置失败: {e}")
-
-        # 缓存结果（update_config 时会重置为 None 以便重新查询）
-        self._cached_framework_vlm_id = framework_vlm_id
-
-        if framework_vlm_id:
-            logger.info(f"使用框架全局图片描述模型: {framework_vlm_id}")
-            return framework_vlm_id
-
-        logger.warning(
-            "未配置视觉模型，无法进行图片分类。"
-            "请在插件配置中设置 vision_provider_id，"
-            "或在 AstrBot 全局配置中设置 default_image_caption_provider_id。"
-        )
-        return None
-
-    # ── 渲染门面方法（委托给 ImageRenderService）────────────────
-
-    async def render_emoji_list_page_file(
-        self,
-        *,
-        items: list[dict],
-        page: int,
-        total_pages: int,
-        total_filtered: int,
-        total_all: int,
-        category: str,
-        per_page: int,
-    ) -> str:
-        """使用 AstrBot 内置 html-to-pic 渲染列表，返回本地图片文件路径（门面方法）。"""
-        return await self._render_service.render_emoji_list_page_file(
-            items=items,
-            page=page,
-            total_pages=total_pages,
-            total_filtered=total_filtered,
-            total_all=total_all,
-            category=category,
-            per_page=per_page,
-        )
-
-    async def render_emoji_list_page_url(
-        self,
-        *,
-        items: list[dict],
-        page: int,
-        total_pages: int,
-        total_filtered: int,
-        total_all: int,
-        category: str,
-        per_page: int,
-    ) -> str:
-        """使用 AstrBot 内置 html-to-pic 渲染列表，返回可公网访问的图片 URL（门面方法）。"""
-        return await self._render_service.render_emoji_list_page_url(
-            items=items,
-            page=page,
-            total_pages=total_pages,
-            total_filtered=total_filtered,
-            total_all=total_all,
-            category=category,
-            per_page=per_page,
-        )
-
-    async def render_emoji_list_page_base64(
-        self,
-        *,
-        items: list[dict],
-        page: int,
-        total_pages: int,
-        total_filtered: int,
-        total_all: int,
-        category: str,
-        per_page: int,
-    ) -> str:
-        """把表情包列表渲染成一张 PNG，并返回 base64（门面方法）。"""
-        return await self._render_service.render_emoji_list_page_base64(
-            items=items,
-            page=page,
-            total_pages=total_pages,
-            total_filtered=total_filtered,
-            total_all=total_all,
-            category=category,
-            per_page=per_page,
-        )

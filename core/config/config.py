@@ -1,4 +1,6 @@
 import json
+import hashlib
+import re
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -363,15 +365,124 @@ class PluginConfig(BaseModel):
             else {}
         )
 
+        categories, merged_info, migrations = self._normalize_legacy_category_state(
+            categories, info
+        )
+        object.__setattr__(self, "_legacy_category_key_map", migrations)
+
         # 使用 BaseModel.__setattr__ 绕过自定义 __setattr__ 中的写文件逻辑，
         # 避免初始化期间重复写文件（最后统一写一次即可）
         BaseModel.__setattr__(self, "categories", list(categories))
-        merged_info = dict(self.DEFAULT_CATEGORY_INFO)
-        merged_info.update(info)
         BaseModel.__setattr__(self, "category_info", merged_info)
         self.save_categories()
         self.save_category_info()
         self._load_character_state()
+
+    def _normalize_legacy_category_state(
+        self,
+        categories: list[Any],
+        info: dict[str, Any],
+    ) -> tuple[list[str], dict[str, dict[str, str]], dict[str, str]]:
+        """将旧版中文/不安全分类 key 收敛为安全 key，保留中文显示信息。
+
+        3.1.0 开始分类 key 用作目录名并执行便携路径校验。旧版本允许中文
+        key，直接在启动时校验会阻止整个插件加载，因此这里先生成稳定迁移名。
+        已知情绪名称优先复用现有英文 key；无法推断的自定义 key 使用内容哈希，
+        避免引入拼音依赖或产生不稳定的 transliteration。
+        """
+        raw_keys: list[str] = []
+        for value in [*(categories or []), *((info or {}).keys())]:
+            key = str(value or "").strip()
+            if key and key not in raw_keys:
+                raw_keys.append(key)
+
+        used: set[str] = set()
+        migrations: dict[str, str] = {}
+
+        def choose_key(raw_key: str) -> str:
+            lowered = raw_key.lower()
+            try:
+                safe = normalize_category_key(lowered)
+                if safe not in used:
+                    used.add(safe)
+                return safe
+            except ValueError:
+                pass
+
+            raw_info = info.get(raw_key, {}) if isinstance(info, dict) else {}
+            candidates = [raw_key]
+            if isinstance(raw_info, dict):
+                candidates.extend(
+                    [str(raw_info.get("name") or ""), str(raw_info.get("desc") or "")]
+                )
+            for candidate in candidates:
+                alias = self.DEFAULT_CATEGORY_ALIASES.get(candidate.strip())
+                if alias:
+                    try:
+                        alias = normalize_category_key(alias)
+                    except ValueError:
+                        alias = ""
+                    if alias:
+                        used.add(alias)
+                        return alias
+
+            ascii_hint = re.sub(r"[^a-z0-9_-]+", "_", lowered).strip("_-")
+            if ascii_hint and re.fullmatch(r"[a-z][a-z0-9_-]{0,47}", ascii_hint):
+                candidate = ascii_hint
+            else:
+                digest = hashlib.sha256(raw_key.encode("utf-8")).hexdigest()[:12]
+                candidate = f"legacy_{digest}"
+            suffix = 2
+            base = candidate[:48]
+            candidate = base
+            while candidate in used:
+                tail = f"_{suffix}"
+                candidate = f"{base[:48 - len(tail)]}{tail}"
+                suffix += 1
+            used.add(candidate)
+            return candidate
+
+        for raw_key in raw_keys:
+            safe_key = choose_key(raw_key)
+            if raw_key != safe_key:
+                migrations[raw_key] = safe_key
+
+        normalized_categories: list[str] = []
+        for raw_key in categories or []:
+            safe_key = migrations.get(str(raw_key), str(raw_key).strip().lower())
+            if safe_key and safe_key not in normalized_categories:
+                normalized_categories.append(safe_key)
+
+        merged_info: dict[str, dict[str, str]] = {
+            key: dict(value) for key, value in self.DEFAULT_CATEGORY_INFO.items()
+        }
+        for raw_key, raw_value in (info or {}).items():
+            raw_key = str(raw_key)
+            safe_key = migrations.get(raw_key, raw_key.strip().lower())
+            existing = dict(merged_info.get(safe_key, {}))
+            if isinstance(raw_value, dict):
+                display_name = str(raw_value.get("name") or "").strip()
+                description = str(raw_value.get("desc") or "").strip()
+                if display_name:
+                    existing["name"] = display_name
+                elif raw_key != safe_key and "name" not in existing:
+                    existing["name"] = raw_key
+                if description:
+                    existing["desc"] = description
+            elif raw_key != safe_key and "name" not in existing:
+                existing["name"] = raw_key
+            merged_info[safe_key] = existing
+
+        if migrations:
+            logger.warning(
+                "检测到旧版不安全分类 key，已自动迁移并保留中文显示名: "
+                + ", ".join(f"{old}->{new}" for old, new in migrations.items())
+            )
+        return normalized_categories, merged_info, migrations
+
+    def get_legacy_category_key_map(self) -> dict[str, str]:
+        """返回本次启动发现的旧分类 key 映射。"""
+        return dict(getattr(self, "_legacy_category_key_map", {}) or {})
 
     def get_categories(self) -> list[str]:
         """返回当前分类列表；为空时回退到 DEFAULT_CATEGORIES。
@@ -599,6 +710,10 @@ class PluginConfig(BaseModel):
             return None
 
         category = category.lower().strip()
+
+        legacy_alias = (getattr(self, "_legacy_category_key_map", {}) or {}).get(category)
+        if legacy_alias:
+            return legacy_alias
 
         # 1. 直接匹配当前配置的分类列表（包括用户自定义分类）
         if category in self.categories:

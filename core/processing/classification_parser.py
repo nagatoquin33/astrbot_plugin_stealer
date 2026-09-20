@@ -66,29 +66,49 @@ class ClassificationParser:
         return cleaned
 
     def _normalize_category(self, raw: str, *, fallback_other: bool = True) -> str:
-        """将 VLM 返回的分类文本规范化为有效分类名（委托到 ImageProcessorService）。"""
-        if self.plugin and hasattr(self.plugin, "image_processor_service"):
-            normalizer = getattr(
-                self.plugin.image_processor_service, "_normalize_category", None
-            )
-            if callable(normalizer):
-                try:
-                    return normalizer(raw, fallback_other=fallback_other)
-                except TypeError:
-                    result = normalizer(raw)
-                    if result:
-                        return result
-                    return self._fallback_category() if fallback_other else ""
-        text = str(raw or "").strip().lower()
-        if not text:
-            return self._fallback_category() if fallback_other else ""
-        return text
+        """按当前配置归一化分类，兼容带前缀的旧模型输出。"""
+        raw = self._sanitize_model_scalar(raw).lower()
+        cfg = getattr(self.plugin, "plugin_config", None)
+        if cfg is None:
+            return raw or ("confused" if fallback_other else "")
+        allowed = [key for key in (cfg.categories or []) if key != "other"]
+        if not raw or raw in {"unknown", "other"}:
+            return cfg.closest_category(raw) if fallback_other else ""
+        if "：" in raw or ":" in raw:
+            raw = raw.replace("：", ":").partition(":")[2].strip()
+        try:
+            normalized = cfg.normalize_category_strict(raw)
+            if normalized in allowed:
+                return normalized
+        except Exception as e:
+            logger.debug(f"[分类规范化] 异常: {e}")
+        if raw in allowed:
+            return raw
+        return cfg.closest_category(raw) if fallback_other else ""
 
-    def _fallback_category(self) -> str:
-        cfg = getattr(self.plugin, "plugin_config", None) if self.plugin else None
-        if cfg and hasattr(cfg, "closest_category"):
-            return cfg.closest_category("")
-        return "confused"
+    def validate_response(self, response: str) -> None:
+        """拒绝无法作为分类结果解析的响应，让调用层执行有限重试。"""
+        data = self._extract_json_payload(response)
+        if data is None:
+            if self.CATEGORY_FILTERED in response or "审核不通过" in response:
+                return
+            parts = [part.strip() for part in response.split("|")]
+            if len(parts) >= 3 and parts[0] and parts[2]:
+                return  # 保留用户自定义提示词的旧管道格式。
+            raise ValueError("VLM 未返回有效分类结果")
+        approved = data.get("approved")
+        if approved is False or str(approved).strip().lower() in {"false", "0", "no", "rejected"}:
+            return
+        for field in ("category", "description"):
+            if not isinstance(data.get(field), str) or not data[field].strip():
+                raise ValueError(f"VLM 分类结果缺少有效 {field}")
+        if not isinstance(data.get("tags"), (list, str)):
+            raise ValueError("VLM 分类结果缺少有效 tags")
+        for field in ("scenes", "emotions", "emotion_labels"):
+            if field in data and not isinstance(data[field], (list, str)):
+                raise ValueError(f"VLM 分类结果的 {field} 类型无效")
+        if "overlay_text" in data and not isinstance(data["overlay_text"], str):
+            raise ValueError("VLM 分类结果的 overlay_text 类型无效")
 
     def _parse_classification_response(
         self, response: str, file_path: str

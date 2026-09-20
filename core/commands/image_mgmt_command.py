@@ -7,6 +7,7 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
 from ..util.blacklist import add_blacklist_hash
+from ..db.index_manager import delete_index_paths
 from ..util.normalization import normalize_scope_mode
 from ..util.safe_io import safe_remove_file
 
@@ -172,9 +173,9 @@ class ImageManagementCommand:
             display_images = filtered_images[start : start + per_page]
 
         # 渲染输出
-        if getattr(self.plugin, "image_processor_service", None):
+        if getattr(self.plugin, "image_render_service", None):
             if event.get_platform_name() == "aiocqhttp":
-                url = await self.plugin.image_processor_service.render_emoji_list_page_url(
+                url = await self.plugin.image_render_service.render_emoji_list_page_url(
                     items=display_images,
                     page=page_num,
                     total_pages=total_pages,
@@ -187,7 +188,7 @@ class ImageManagementCommand:
                     yield event.image_result(url).stop_event()
                     return
 
-            file_path = await self.plugin.image_processor_service.render_emoji_list_page_file(
+            file_path = await self.plugin.image_render_service.render_emoji_list_page_file(
                 items=display_images,
                 page=page_num,
                 total_pages=total_pages,
@@ -201,7 +202,7 @@ class ImageManagementCommand:
                     yield event.make_result().file_image(file_path).stop_event()
                     return
 
-            b64 = await self.plugin.image_processor_service.render_emoji_list_page_base64(
+            b64 = await self.plugin.image_render_service.render_emoji_list_page_base64(
                 items=display_images,
                 page=page_num,
                 total_pages=total_pages,
@@ -242,6 +243,18 @@ class ImageManagementCommand:
         result_text += "\n用法: /meme list [分类] [每页数量] [页码]"
         yield event.plain_result(result_text).stop_event()
 
+    async def _delete_indexed_image(self, image_index: dict, target: dict) -> bool:
+        if not await self._delete_image_files(target["path"]):
+            return False
+        image_hash = str(target.get("hash") or "").strip()
+        paths = [path for path, meta in image_index.items() if path == target["path"] or (
+            image_hash and isinstance(meta, dict) and meta.get("hash") == image_hash
+        )]
+        await delete_index_paths(self.plugin, paths)
+        for path in paths:
+            image_index.pop(path, None)
+        return True
+
     async def delete_image(self, event: AstrMessageEvent, identifier: str = ""):
         """删除指定的表情包。
 
@@ -269,19 +282,8 @@ class ImageManagementCommand:
             )
             return
 
-        # 执行删除操作
-        success = await self._delete_image_files(target_image["path"])
-
+        success = await self._delete_indexed_image(image_index, target_image)
         if success:
-            # 从索引中移除
-            target_hash = str(target_image.get("hash", "") or "").strip()
-            for path, meta in list(image_index.items()):
-                if path == target_image["path"] or (
-                    target_hash and isinstance(meta, dict) and meta.get("hash") == target_hash
-                ):
-                    del image_index[path]
-            await self.plugin.index_manager.save_index(image_index)
-
             yield event.plain_result(
                 f"✅ 已删除表情包:\n文件: {target_image['name']}\n分类: {target_image['category']}"
             )
@@ -318,17 +320,9 @@ class ImageManagementCommand:
             yield event.plain_result(f"❌ 拉黑失败: {target_image['name']} 无法写入黑名单")
             return
 
-        success = await self._delete_image_files(target_image["path"])
-        if not success:
+        if not await self._delete_indexed_image(image_index, target_image):
             yield event.plain_result(f"❌ 拉黑失败: {target_image['name']}")
             return
-
-        for path, meta in list(image_index.items()):
-            if path == target_image["path"] or (
-                target_hash and isinstance(meta, dict) and meta.get("hash") == target_hash
-            ):
-                del image_index[path]
-        await self.plugin.index_manager.save_index(image_index)
 
         logger.info(f"已加入黑名单: {target_hash}")
 

@@ -1,3 +1,8 @@
+export const EMOTION_LABELS_TEMPLATE = `
+<span class="emotion-labels" :class="{ compact }" :title="keys.map(label).join(' · ')">
+    <span v-for="(key, index) in keys" :key="key" class="emotion-chip" :class="{ primary: index === 0 }">{{ label(key) }}</span>
+</span>`;
+
 export const TEMPLATE = `
 <div class="fo-chassis" aria-hidden="true">
     <div class="fo-bezel fo-bezel-l">
@@ -425,8 +430,7 @@ export const TEMPLATE = `
                     <div class="item-info">
                         <div class="list-main">
                             <div class="item-category">
-                                <span class="cat-dot" :style="catAccent(img.category)"></span>
-                                {{ getCategoryName(img.category) }}
+                                <emotion-labels :item="img" :label="getCategoryName" :compact="true" />
                                 <span v-if="img.character" class="item-character-tag">{{ characterLabel(img.character) }}</span>
                             </div>
                             <div v-if="viewMode === 'list'" class="list-desc">{{ img.desc || t('pages.dashboard.messages.no_description', 'No description') }}</div>
@@ -569,7 +573,7 @@ export const TEMPLATE = `
 
                     <div class="pending-info">
                         <div class="pending-meta">
-                            <span class="pending-category-badge">{{ getCategoryName(item.category) }}</span>
+                            <emotion-labels :item="item" :label="getCategoryName" :compact="true" />
                             <span v-if="item.character" class="item-character-tag">{{ characterLabel(item.character) }}</span>
                             <span v-if="item.scope_mode === 'local'" class="scope-pill local">{{ t('pages.dashboard.scope.local_short', 'Local') }}</span>
                             <span class="pending-source">{{ item.source === 'auto' ? '🤖' : '👤' }}</span>
@@ -732,77 +736,10 @@ export const TEMPLATE = `
                     <div v-if="previewZoom > 1" class="zoom-indicator">{{ Math.round(previewZoom * 100) }}%</div>
                 </div>
 
-                <div v-if="previewSource === 'pending'" class="item-stats">
+                <div class="item-stats">
                     <div class="stat-row">
-                        <span class="stat-name">{{ t('pages.dashboard.fields.category', 'Category') }}</span>
-                        <span class="stat-value">{{ getCategoryName(previewItem?.category) }}</span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-name">{{ t('pages.dashboard.fields.scope', 'Scope') }}</span>
-                        <span class="stat-value">
-                            <span class="scope-pill"
-                                :class="previewItem?.scope_mode === 'local' ? 'local' : 'public'">{{
-                                getScopeLabel(previewItem?.scope_mode) }}</span>
-                        </span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-name">{{ t('pages.dashboard.fields.character', '角色') }}</span>
-                        <span class="stat-value">{{ characterLabel(previewItem?.character) }}</span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-name">{{ t('pages.dashboard.fields.origin', 'Origin') }}</span>
-                        <span class="stat-value">{{ formatOriginTarget(previewItem?.origin_target) }}</span>
-                    </div>
-                    <div v-if="previewItem?.width || previewItem?.format || previewItem?.bytes" class="stat-row">
-                        <span class="stat-name">{{ t('pages.dashboard.fields.image_meta', 'Image') }}</span>
-                        <span class="stat-value">{{ [previewItem?.width && previewItem?.height ? previewItem.width + '×' + previewItem.height : '', previewItem?.format ? String(previewItem.format).toUpperCase() : '', formatBytes(previewItem?.bytes)].filter(Boolean).join(' · ') }}</span>
-                    </div>
-                    <div v-if="previewItem?.source_url" class="stat-row">
-                        <span class="stat-name">{{ t('pages.dashboard.fields.source', 'Source') }}</span>
-                        <span class="stat-value" style="word-break:break-all">{{ previewItem.source_url }}</span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-name">{{ t('pages.dashboard.fields.description', 'Description') }}</span>
-                    </div>
-                    <div class="desc-quote">
-                        <p style="margin:0;color:var(--text-main);font-style:italic">
-                            {{ previewItem?.desc || t('pages.dashboard.messages.no_description', 'No description') }}
-                        </p>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-name">{{ t('pages.dashboard.fields.overlay_text', '图上文字') }}</span>
-                        <span class="stat-value">{{ previewItem?.overlay_text || t('pages.dashboard.messages.no_overlay_text', '无') }}</span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-name">{{ t('pages.dashboard.fields.tags', 'Tags') }}</span>
-                    </div>
-                    <div class="item-tags" style="margin-bottom:12px">
-                        <span v-for="tag in (previewItem?.tags || [])" :key="tag" class="tag">
-                            {{ tag }}
-                        </span>
-                        <span v-if="!(previewItem?.tags || []).length"
-                            style="font-size:var(--fs-sm);color:var(--text-muted)">{{ t('pages.dashboard.messages.no_tags', 'No tags') }}</span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-name">{{ t('pages.dashboard.fields.scenes', 'Scenes') }}</span>
-                    </div>
-                    <div class="item-tags" style="margin-bottom:12px">
-                        <span v-for="scene in (previewItem?.scenes || [])" :key="scene" class="tag scene-tag">
-                            {{ scene }}
-                        </span>
-                        <span v-if="!(previewItem?.scenes || []).length"
-                            style="font-size:var(--fs-sm);color:var(--text-muted)">{{ t('pages.dashboard.messages.no_scenes', 'No scenes') }}</span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-name">{{ t('pages.dashboard.fields.created_at', 'Added At') }}</span>
-                        <span class="stat-value">{{ formatDate(previewItem?.created_at) }}</span>
-                    </div>
-                </div>
-
-                <div v-else class="item-stats">
-                    <div class="stat-row">
-                        <span class="stat-name">{{ t('pages.dashboard.fields.category', 'Category') }}</span>
-                        <span class="stat-value">{{ getCategoryName(previewItem?.category) }}</span>
+                        <span class="stat-name">{{ t('pages.dashboard.fields.emotions', 'Emotions') }}</span>
+                        <emotion-labels :item="previewItem" :label="getCategoryName" />
                     </div>
                     <div class="stat-row">
                         <span class="stat-name">{{ t('pages.dashboard.fields.scope', 'Scope') }}</span>
@@ -812,15 +749,15 @@ export const TEMPLATE = `
                                 getScopeLabel(previewItem?.scope_mode) }}</span>
                         </span>
                     </div>
-                    <div class="stat-row">
+                    <div v-if="previewSource !== 'pending'" class="stat-row">
                         <span class="stat-name">{{ t('pages.dashboard.fields.use_count', 'Use Count') }}</span>
                         <span class="stat-value">{{ previewItem?.use_count || 0 }} {{ t('pages.dashboard.units.times', 'times') }}</span>
                     </div>
-                    <div class="stat-row">
+                    <div v-if="previewSource !== 'pending'" class="stat-row">
                         <span class="stat-name">{{ t('pages.dashboard.fields.last_used', 'Last Used') }}</span>
                         <span class="stat-value">{{ previewItem?.last_used_at ? formatDate(previewItem.last_used_at) : t('pages.dashboard.messages.never_used', 'Never used') }}</span>
                     </div>
-                    <div class="stat-row">
+                    <div v-if="previewSource !== 'pending'" class="stat-row">
                         <span class="stat-name">{{ t('pages.dashboard.fields.favorite', 'Favorite') }}</span>
                         <button class="favorite-toggle-btn" :class="{ active: previewItem?.is_favorite }"
                             @click="toggleFavorite(previewItem)">
@@ -853,7 +790,7 @@ export const TEMPLATE = `
                     </div>
                     <div class="stat-row">
                         <span class="stat-name">{{ t('pages.dashboard.fields.character', '角色') }}</span>
-                        <span class="stat-value">{{ characterLabel(previewItem?.character) }}{{ previewItem?.character && previewItem?.category ? ' : ' + previewItem.category : '' }}</span>
+                        <span class="stat-value">{{ characterLabel(previewItem?.character) }}</span>
                     </div>
                     <div class="stat-row">
                         <span class="stat-name">{{ t('pages.dashboard.fields.overlay_text', '图上文字') }}</span>
@@ -905,26 +842,14 @@ export const TEMPLATE = `
                     <div v-if="vlmReanalysisError" class="vlm-reanalysis-error">{{ vlmReanalysisError }}</div>
 
                     <div v-if="vlmReanalysisResult" class="vlm-compare-grid">
-                        <section class="vlm-compare-card">
-                            <div class="vlm-compare-label">A · {{ t('pages.dashboard.analysis.current', 'Current') }}</div>
+                        <section v-for="side in ['before', 'after']" :key="side" class="vlm-compare-card" :class="{ proposed: side === 'after' }">
+                            <div class="vlm-compare-label">{{ side === 'before' ? 'A · ' + t('pages.dashboard.analysis.current', 'Current') : 'B · ' + t('pages.dashboard.analysis.new_result', 'New VLM result') }}</div>
                             <dl>
-                                <div><dt>{{ t('pages.dashboard.fields.category', 'Category') }}</dt><dd>{{ getCategoryName(vlmReanalysisResult.before.category) }}</dd></div>
-                                <div><dt>{{ t('pages.dashboard.fields.description', 'Description') }}</dt><dd>{{ formatAnalysisValue(vlmReanalysisResult.before.description) }}</dd></div>
-                                <div><dt>{{ t('pages.dashboard.fields.overlay_text', 'Overlay text') }}</dt><dd>{{ formatAnalysisValue(vlmReanalysisResult.before.overlay_text) }}</dd></div>
-                                <div><dt>{{ t('pages.dashboard.fields.tags', 'Tags') }}</dt><dd>{{ formatAnalysisValue(vlmReanalysisResult.before.tags) }}</dd></div>
-                                <div><dt>{{ t('pages.dashboard.fields.scenes', 'Scenes') }}</dt><dd>{{ formatAnalysisValue(vlmReanalysisResult.before.scenes) }}</dd></div>
-                                <div><dt>{{ t('pages.dashboard.fields.emotions', 'Emotions') }}</dt><dd>{{ formatAnalysisValue(vlmReanalysisResult.before.emotions) }}</dd></div>
-                            </dl>
-                        </section>
-                        <section class="vlm-compare-card proposed">
-                            <div class="vlm-compare-label">B · {{ t('pages.dashboard.analysis.new_result', 'New VLM result') }}</div>
-                            <dl>
-                                <div><dt>{{ t('pages.dashboard.fields.category', 'Category') }}</dt><dd>{{ getCategoryName(vlmReanalysisResult.after.category) }}</dd></div>
-                                <div><dt>{{ t('pages.dashboard.fields.description', 'Description') }}</dt><dd>{{ formatAnalysisValue(vlmReanalysisResult.after.description) }}</dd></div>
-                                <div><dt>{{ t('pages.dashboard.fields.overlay_text', 'Overlay text') }}</dt><dd>{{ formatAnalysisValue(vlmReanalysisResult.after.overlay_text) }}</dd></div>
-                                <div><dt>{{ t('pages.dashboard.fields.tags', 'Tags') }}</dt><dd>{{ formatAnalysisValue(vlmReanalysisResult.after.tags) }}</dd></div>
-                                <div><dt>{{ t('pages.dashboard.fields.scenes', 'Scenes') }}</dt><dd>{{ formatAnalysisValue(vlmReanalysisResult.after.scenes) }}</dd></div>
-                                <div><dt>{{ t('pages.dashboard.fields.emotions', 'Emotions') }}</dt><dd>{{ formatAnalysisValue(vlmReanalysisResult.after.emotions) }}</dd></div>
+                                <div><dt>{{ t('pages.dashboard.fields.emotions', 'Emotions') }}</dt><dd><emotion-labels :item="vlmReanalysisResult[side]" :label="getCategoryName" /></dd></div>
+                                <div v-for="field in ['description', 'overlay_text', 'tags', 'scenes']" :key="field">
+                                    <dt>{{ t('pages.dashboard.fields.' + field, field) }}</dt>
+                                    <dd>{{ formatAnalysisValue(vlmReanalysisResult[side][field]) }}</dd>
+                                </div>
                             </dl>
                         </section>
                     </div>

@@ -18,6 +18,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from PIL import Image, UnidentifiedImageError
 
 from astrbot.api import logger
+from ..db.index_manager import invalidate_search, refresh_search_entry
 
 from ..util.normalization import (
     normalize_category_key,
@@ -605,7 +606,7 @@ class SourceService:
                     item_count=len(inspection.items),
                     last_sync_at=int(time.time()),
                 )
-            self._invalidate_search()
+            invalidate_search(self.plugin)
         except asyncio.CancelledError:
             job.update(status="cancelled", completed_at=time.time(), updated_at=time.time())
             if source_id and self.db and hasattr(self.db, "update_source_status"):
@@ -668,6 +669,7 @@ class SourceService:
                 and not str((existing[1] or {}).get("character") or "").strip()
             ):
                 await self.db.update_path(existing[0], {"character": character})
+                await refresh_search_entry(self.plugin, existing[0])
             await self._link_item(source, item, image_hash, existing[0])
             return "duplicates"
         if self.db and hasattr(self.db, "get_pending_by_hash"):
@@ -737,6 +739,7 @@ class SourceService:
             await safe_remove_file(str(target))
             raise ExternalSourceError("failed to insert image metadata")
         await self._link_item(source, item, image_hash, str(target))
+        await refresh_search_entry(self.plugin, str(target), metadata)
         return "imported"
 
     def _prepare_character(self, spec: dict[str, Any]) -> str:
@@ -1095,14 +1098,3 @@ class SourceService:
             spec.setdefault("name", source.get("name"))
             return spec
         return None
-
-    def _invalidate_search(self) -> None:
-        try:
-            selector = getattr(self.plugin, "meme_selector", None)
-            if selector is not None:
-                selector._invalidate_bm25_index()
-            smart = getattr(selector, "_smart_select_service", None) if selector else None
-            if smart is not None and hasattr(smart, "_invalidate_embedding_index"):
-                smart._invalidate_embedding_index()
-        except Exception as exc:
-            logger.debug(f"[Source] 检索缓存失效失败: {exc}")

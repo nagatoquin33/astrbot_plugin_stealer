@@ -6,80 +6,12 @@ import time
 import types
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 
-def _install_astrbot_stubs() -> None:
-    # 使用 conftest.py 的共享 stubs 类
-    from tests.conftest import (
-        SHARED_IMAGE_CLASS,
-        SHARED_PLAIN_CLASS,
-        SHARED_MESSAGE_CHAIN_CLASS,
-    )
-
-    logger = types.SimpleNamespace(
-        info=lambda *args, **kwargs: None,
-        debug=lambda *args, **kwargs: None,
-        warning=lambda *args, **kwargs: None,
-        error=lambda *args, **kwargs: None,
-    )
-
-    class AstrMessageEvent:
-        pass
-
-    class MessageChain(list):
-        pass
-
-    astrbot_module = types.ModuleType("astrbot")
-    api_module = types.ModuleType("astrbot.api")
-    api_module.logger = logger
-    api_module.AstrBotConfig = object
-
-    event_module = types.ModuleType("astrbot.api.event")
-    event_module.AstrMessageEvent = AstrMessageEvent
-    event_module.MessageChain = SHARED_MESSAGE_CHAIN_CLASS
-
-    star_module = types.ModuleType("astrbot.api.star")
-    star_module.Context = object
-    star_module.StarTools = object
-
-    message_components_module = types.ModuleType("astrbot.api.message_components")
-    message_components_module.Image = SHARED_IMAGE_CLASS
-    message_components_module.Plain = SHARED_PLAIN_CLASS
-
-    # 创建 astrbot.core.agent.message stub
-    agent_message_module = types.ModuleType("astrbot.core.agent.message")
-    agent_message_module.TextPart = object
-    sys.modules["astrbot.core"] = types.ModuleType("astrbot.core")
-    sys.modules["astrbot.core.agent"] = types.ModuleType("astrbot.core.agent")
-    sys.modules["astrbot.core.agent.message"] = agent_message_module
-
-    sys.modules["astrbot"] = astrbot_module
-    sys.modules["astrbot.api"] = api_module
-    sys.modules["astrbot.api.event"] = event_module
-    sys.modules["astrbot.api.star"] = star_module
-    sys.modules["astrbot.api.message_components"] = message_components_module
-
-
-_install_astrbot_stubs()
-
-from core.commands.command_handler import CommandHandler
+from core.commands.image_mgmt_command import ImageManagementCommand
+from core.commands.index_rebuild_command import IndexRebuildCommand
 from core.search.meme_selector import MemeSelector
-
-
-class DummyCacheService:
-    def __init__(self, index_map=None):
-        self.index_map = dict(index_map or {})
-        self.kv = {}
-
-    def get_index_cache_readonly(self):
-        return self.index_map
-
-    async def update_index(self, updater):
-        updater(self.index_map)
-
-    async def set(self, cache_name, key, value, persist=False):
-        self.kv[(cache_name, key)] = value
 
 
 class DummyConfig:
@@ -161,7 +93,6 @@ class DummyPlugin:
     def __init__(self, index_map=None, target="group:100"):
         self.saved_index = None
         self.index_map = dict(index_map or {})
-        self.cache_service = DummyCacheService(self.index_map)
         self.plugin_config = DummyConfig(target=target)
         self.smart_meme_selection = False
         self.emoji_chance = 1.0
@@ -195,7 +126,6 @@ class DummyPlugin:
     async def _save_index(self, index_map):
         self.saved_index = dict(index_map)
         self.index_map = index_map
-        self.cache_service.index_map = index_map
 
     async def _safe_remove_file(self, path):
         if os.path.exists(path):
@@ -292,8 +222,8 @@ class ScopeFeatureTests(unittest.IsolatedAsyncioTestCase):
         async def fake_download(_img):
             return temp_path, False
 
-        handler._download_original_image = fake_download
-        handler._check_platform_emoji_metadata = lambda *args, **kwargs: True
+        handler._image_download_service.download_original_image = fake_download
+        handler._platform_detector.check_platform_emoji_metadata = lambda *args, **kwargs: True
         handler._should_process_image = lambda: True
 
         try:
@@ -314,7 +244,7 @@ class ScopeFeatureTests(unittest.IsolatedAsyncioTestCase):
         event = DummyEvent(target="group:123", messages=[image_cls()])
         checks = []
         handler._should_process_image = lambda: checks.append(True) or True
-        handler._check_platform_emoji_metadata = lambda *args, **kwargs: False
+        handler._platform_detector.check_platform_emoji_metadata = lambda *args, **kwargs: False
 
         await handler.on_message(event)
 
@@ -334,7 +264,7 @@ class ScopeFeatureTests(unittest.IsolatedAsyncioTestCase):
                 order.append("queue")
 
         handler._background_queue = DummyQueue()
-        handler._check_platform_emoji_metadata = lambda *args, **kwargs: order.append("detect") or True
+        handler._platform_detector.check_platform_emoji_metadata = lambda *args, **kwargs: order.append("detect") or True
         handler._should_process_image = lambda: order.append("probability") or True
 
         with patch(
@@ -350,7 +280,7 @@ class ScopeFeatureTests(unittest.IsolatedAsyncioTestCase):
         handler = self._create_handler(plugin)
         image_cls = self._get_shared_image_class()
         event = DummyEvent(target="group:123", messages=[image_cls()])
-        handler._check_platform_emoji_metadata = lambda *args, **kwargs: True
+        handler._platform_detector.check_platform_emoji_metadata = lambda *args, **kwargs: True
         handler._should_process_image = lambda: False
 
         with patch("core.events.event_handler.logger.info") as info_log:
@@ -377,7 +307,7 @@ class ScopeFeatureTests(unittest.IsolatedAsyncioTestCase):
         async def fake_download(_img):
             return temp_path, False
 
-        handler._download_original_image = fake_download
+        handler._image_download_service.download_original_image = fake_download
         try:
             await handler.on_message(event)
         finally:
@@ -434,8 +364,8 @@ class ScopeFeatureTests(unittest.IsolatedAsyncioTestCase):
         async def fake_download(_img):
             return temp_paths.pop(0), False
 
-        handler._download_original_image = fake_download
-        handler._check_platform_emoji_metadata = lambda *args, **kwargs: True
+        handler._image_download_service.download_original_image = fake_download
+        handler._platform_detector.check_platform_emoji_metadata = lambda *args, **kwargs: True
         handler._should_process_image = lambda: True
 
         try:
@@ -465,7 +395,7 @@ class ScopeFeatureTests(unittest.IsolatedAsyncioTestCase):
                 }
             }
         )
-        handler = CommandHandler(plugin)
+        handler = ImageManagementCommand(plugin)
 
         try:
             results = await _collect_asyncgen(
@@ -492,7 +422,7 @@ class ScopeFeatureTests(unittest.IsolatedAsyncioTestCase):
                 }
             }
         )
-        handler = CommandHandler(plugin)
+        handler = ImageManagementCommand(plugin)
 
         try:
             results = await _collect_asyncgen(
@@ -600,7 +530,7 @@ class ScopeFeatureTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertIsNone(result)
 
-    async def test_auto_select_returns_none_when_cache_service_is_unavailable(self):
+    async def test_auto_select_returns_none_when_database_is_unavailable(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             category_dir = Path(tmpdir) / "happy"
             category_dir.mkdir(parents=True, exist_ok=True)
@@ -608,7 +538,7 @@ class ScopeFeatureTests(unittest.IsolatedAsyncioTestCase):
             img_path.write_bytes(b"fake")
 
             plugin = DummyPlugin({}, target="group:100")
-            plugin.cache_service = None
+            plugin.db_service = None
             plugin.plugin_config.categories_dir = tmpdir
             selector = MemeSelector(plugin)
 
@@ -617,7 +547,7 @@ class ScopeFeatureTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertIsNone(result)
 
-    async def test_blacklist_image_skips_empty_hash_cache_write(self):
+    async def test_blacklist_image_skips_empty_hash_database_write(self):
         with tempfile.NamedTemporaryFile(delete=False) as fp:
             img_path = fp.name
 
@@ -632,7 +562,8 @@ class ScopeFeatureTests(unittest.IsolatedAsyncioTestCase):
                 }
             }
         )
-        handler = CommandHandler(plugin)
+        plugin.db_service.add_blacklist = AsyncMock()
+        handler = ImageManagementCommand(plugin)
 
         try:
             await _collect_asyncgen(handler.blacklist_image(DummyEvent(), "1"))
@@ -640,7 +571,7 @@ class ScopeFeatureTests(unittest.IsolatedAsyncioTestCase):
             if os.path.exists(img_path):
                 os.remove(img_path)
 
-        self.assertEqual(plugin.cache_service.kv, {})
+        plugin.db_service.add_blacklist.assert_not_awaited()
 
     async def test_rebuild_index_preserves_scope_metadata(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -681,7 +612,7 @@ class ScopeFeatureTests(unittest.IsolatedAsyncioTestCase):
                 return rebuilt
 
             plugin._rebuild_index_from_files = fake_rebuild
-            handler = CommandHandler(plugin)
+            handler = IndexRebuildCommand(plugin)
 
             results = await _collect_asyncgen(handler.rebuild_index(DummyEvent()))
             self.assertTrue(any("重建" in str(item) for item in results))
@@ -733,7 +664,7 @@ class ScopeFeatureTests(unittest.IsolatedAsyncioTestCase):
                 return rebuilt
 
             plugin._rebuild_index_from_files = fake_rebuild
-            handler = CommandHandler(plugin)
+            handler = IndexRebuildCommand(plugin)
 
             await _collect_asyncgen(handler.rebuild_index(DummyEvent()))
             self.assertEqual(plugin.saved_index[new_path]["desc"], "backup-desc")
@@ -796,7 +727,7 @@ class ScopeFeatureTests(unittest.IsolatedAsyncioTestCase):
                 return rebuilt
 
             plugin._rebuild_index_from_files = fake_rebuild
-            handler = CommandHandler(plugin)
+            handler = IndexRebuildCommand(plugin)
 
             await _collect_asyncgen(handler.rebuild_index(DummyEvent()))
             self.assertEqual(plugin.saved_index[new_path]["desc"], "current-desc")
@@ -861,7 +792,7 @@ class ScopeFeatureTests(unittest.IsolatedAsyncioTestCase):
                 return rebuilt
 
             plugin._rebuild_index_from_files = fake_rebuild
-            handler = CommandHandler(plugin)
+            handler = IndexRebuildCommand(plugin)
 
             await _collect_asyncgen(handler.rebuild_index(DummyEvent()))
             self.assertEqual(plugin.saved_index[rebuilt_path]["desc"], "legacy-hash-desc")

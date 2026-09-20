@@ -44,58 +44,6 @@ class CommandHandler:
         self._apply_config_updates({"auto_send_meme": False})
         yield event.plain_result("已关闭自动发送")
 
-    # ===== 门面委托：子服务方法 =====
-
-    async def group_filter(self, event, scope="", list_name="", action="", target="", target_id=""):
-        """目标过滤白/黑名单 CRUD（已迁移到 TargetFilterCommand）。"""
-        from .target_filter_command import TargetFilterCommand
-
-        async for result in TargetFilterCommand(self.plugin).group_filter(
-            event, scope, list_name, action, target, target_id
-        ):
-            yield result
-
-    async def list_images(self, event, category="", limit="10", page="1"):
-        """列出表情包（已迁移到 ImageManagementCommand）。"""
-        from .image_mgmt_command import ImageManagementCommand
-
-        async for result in ImageManagementCommand(self.plugin).list_images(
-            event, category, limit, page
-        ):
-            yield result
-
-    async def delete_image(self, event, identifier=""):
-        """删除表情包（已迁移到 ImageManagementCommand）。"""
-        from .image_mgmt_command import ImageManagementCommand
-
-        async for result in ImageManagementCommand(self.plugin).delete_image(event, identifier):
-            yield result
-
-    async def blacklist_image(self, event, identifier=""):
-        """拉黑表情包（已迁移到 ImageManagementCommand）。"""
-        from .image_mgmt_command import ImageManagementCommand
-
-        async for result in ImageManagementCommand(self.plugin).blacklist_image(event, identifier):
-            yield result
-
-    async def set_image_scope(self, event, identifier="", scope_mode=""):
-        """设置表情包作用域（已迁移到 ImageManagementCommand）。"""
-        from .image_mgmt_command import ImageManagementCommand
-
-        async for result in ImageManagementCommand(self.plugin).set_image_scope(
-            event, identifier, scope_mode
-        ):
-            yield result
-
-    async def rebuild_index(self, event):
-        """重建索引（已迁移到 IndexRebuildCommand）。"""
-        from .index_rebuild_command import IndexRebuildCommand
-
-        async for result in IndexRebuildCommand(self.plugin).rebuild_index(event):
-            yield result
-
-    # ===== CommandHandler 核心逻辑 =====
-
     async def capture(self, event: AstrMessageEvent):
         window_seconds = 30
 
@@ -138,7 +86,7 @@ class CommandHandler:
 
             if self.plugin.plugin_config.enable_natural_emotion_analysis:
                 # 智能模式：显示轻量模型分析统计
-                stats = self.plugin.smart_emotion_matcher.get_analyzer_stats()
+                stats = self.plugin.emotion_analyzer.get_stats()
 
                 if "message" in stats:
                     status_text += f"轻量模型分析: {stats['message']}\n"
@@ -173,7 +121,7 @@ class CommandHandler:
     async def clear_emotion_cache(self, event: AstrMessageEvent):
         """清空情绪分析缓存。"""
         try:
-            await self.plugin.smart_emotion_matcher.clear_cache()
+            await self.plugin.emotion_analyzer.clear_cache()
             yield event.plain_result("✅ 情绪分析缓存已清空")
         except Exception as e:
             yield event.plain_result(f"❌ 清空缓存失败: {e}")

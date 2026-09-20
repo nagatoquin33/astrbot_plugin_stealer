@@ -1,16 +1,14 @@
-"""PR #91: NaturalEmotionAnalyzer / SmartEmotionMatcher unit tests.
+"""PR #91: NaturalEmotionAnalyzer unit tests.
 
 Covers:
 - emotion analysis template is the bundled default (user config is ignored)
 - {emotion_list} / {llm_reply} / {user_message} placeholders
 - model "none" abstain behavior (_EMOTION_ABSTAIN / last_analysis_abstained)
 - _parse_emotion_result parsing
-- SmartEmotionMatcher abstain short-circuit
+- reply analysis abstain short-circuit
 """
 
-import os
 import sys
-import tempfile
 import types
 import unittest
 from pathlib import Path
@@ -19,24 +17,10 @@ from unittest.mock import AsyncMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-# PluginConfig.__init__ 调用 StarTools.get_data_dir；给每个实例一个独立临时目录，
-# 避免 categories.json 等状态在不同测试间互相污染。
-_star_module = sys.modules.get("astrbot.api.star")
-if _star_module is not None:
-    def _unique_data_dir(name):
-        # 每个 PluginConfig 实例都使用全新的临时目录，避免上次运行残留的
-        # categories.json / category_info.json 污染本次测试的初始状态。
-        return os.path.join(tempfile.mkdtemp(prefix="astrbot_stealer_cfg_test_"), name)
-
-    _star_module.StarTools = types.SimpleNamespace(get_data_dir=_unique_data_dir)
-    _star_module.Context = object
-    _star_module.Star = object
-
 from core.config.config import PluginConfig
 from core.processing.natural_emotion_analyzer import (
     EmotionQuery,
     NaturalEmotionAnalyzer,
-    SmartEmotionMatcher,
     _EMOTION_ABSTAIN,
     _EMOTION_ANALYSIS_DEFAULT_TEMPLATE,
 )
@@ -294,38 +278,38 @@ class TestAnalyzeEmotion(unittest.IsolatedAsyncioTestCase):
         self.assertIn('{"query": "摸鱼 下班 辛苦了"', call.kwargs["prompt"])
 
 
-class TestSmartEmotionMatcher(unittest.IsolatedAsyncioTestCase):
+class TestReplyAnalysis(unittest.IsolatedAsyncioTestCase):
     def _build_matcher(self, config=None):
-        return SmartEmotionMatcher(_build_plugin(config))
+        return NaturalEmotionAnalyzer(_build_plugin(config))
 
     async def test_short_reply_skips_analysis(self):
         matcher = self._build_matcher()
-        result = await matcher.analyze_and_match_emotion(_dummy_event(), "ok")
+        result = await matcher.analyze_for_reply(_dummy_event(), "ok")
         self.assertIsNone(result)
 
     async def test_disabled_natural_analysis_returns_none(self):
         cfg = PluginConfig({"enable_natural_emotion_analysis": False})
         matcher = self._build_matcher(cfg)
-        result = await matcher.analyze_and_match_emotion(_dummy_event(), "reply text here")
+        result = await matcher.analyze_for_reply(_dummy_event(), "reply text here")
         self.assertIsNone(result)
 
     async def test_abstain_propagates_to_none(self):
         matcher = self._build_matcher()
         with patch.object(
-            matcher.natural_analyzer,
+            matcher,
             "analyze_emotion",
             new=AsyncMock(return_value=None),
         ):
-            result = await matcher.analyze_and_match_emotion(_dummy_event(), "reply text here")
+            result = await matcher.analyze_for_reply(_dummy_event(), "reply text here")
         self.assertIsNone(result)
 
     async def test_emotion_returned_from_analyzer(self):
         matcher = self._build_matcher()
         with patch.object(
-            matcher.natural_analyzer,
+            matcher,
             "analyze_emotion",
             new=AsyncMock(return_value=EmotionQuery(True, "happy reply", ["happy"])),
         ):
-            result = await matcher.analyze_and_match_emotion(_dummy_event(), "reply text here")
+            result = await matcher.analyze_for_reply(_dummy_event(), "reply text here")
         self.assertIsInstance(result, EmotionQuery)
         self.assertEqual(result.primary, "happy")

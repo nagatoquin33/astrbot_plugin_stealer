@@ -32,14 +32,11 @@ def test_parser_reads_overlay_and_emotions():
 
 
 def test_parser_unknown_category_falls_back_to_closest():
-    class _Proc:
-        def _normalize_category(self, raw, fallback_other=True):
-            text = str(raw or "").strip().lower()
-            if text in {"happy", "sad"}:
-                return text
-            return "confused" if fallback_other else ""
-
-    plugin = types.SimpleNamespace(image_processor_service=_Proc())
+    plugin = types.SimpleNamespace(plugin_config=types.SimpleNamespace(
+        categories=["happy", "sad", "confused"],
+        normalize_category_strict=lambda raw: raw if raw in {"happy", "sad", "confused"} else None,
+        closest_category=lambda raw: "confused",
+    ))
     parser = ClassificationParser(plugin_instance=plugin)
     category, *_rest, overlay, emotions = parser._parse_classification_response(
         '{"category": "whatever", "description": "文字梗", "overlay_text": "我不听"}',
@@ -126,8 +123,9 @@ def test_embedding_service_uses_overlay_in_search_text():
 
 
 def test_overlay_recall_matches_context_substring():
-    svc = MemeSmartSelectService(plugin_instance=None)
-    svc._is_entry_allowed_for_event = lambda data, event: True  # type: ignore[method-assign]
+    svc = MemeSmartSelectService(
+        None, None, None, types.SimpleNamespace(_is_entry_allowed_for_event=lambda data, event: True)
+    )
     idx = {
         "/a.png": {"overlay_text": "算了", "category": "sigh"},
         "/b.png": {"overlay_text": "我超爱", "category": "love"},
@@ -138,8 +136,9 @@ def test_overlay_recall_matches_context_substring():
 
 
 def test_scene_recall_matches_context_substring():
-    svc = MemeSmartSelectService(plugin_instance=None)
-    svc._is_entry_allowed_for_event = lambda data, event: True  # type: ignore[method-assign]
+    svc = MemeSmartSelectService(
+        None, None, None, types.SimpleNamespace(_is_entry_allowed_for_event=lambda data, event: True)
+    )
     idx = {
         "/a.png": {"scenes": ["又被安排加班"], "category": "sigh"},
         "/b.png": {"scenes": ["哈哈哈哈"], "category": "happy"},

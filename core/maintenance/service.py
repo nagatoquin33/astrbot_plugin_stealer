@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from astrbot.api import logger
 
 from .retention import library_counts
+from ..db.index_manager import delete_index_paths
 
 from ..util.safe_io import safe_remove_file
 
@@ -96,7 +97,7 @@ class MaintenanceService:
                     p for p in all_paths if p and not os.path.isfile(str(p))
                 ]
                 if stale_paths:
-                    await db.delete_paths(stale_paths)
+                    await delete_index_paths(self.plugin, stale_paths)
                     logger.info(
                         f"[Orphan] 清除 {len(stale_paths)} 条失效索引（文件已丢失）"
                     )

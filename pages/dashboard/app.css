@@ -1064,11 +1064,15 @@ h2 {
 
 .item-detail {
     display: flex;
+    flex: none;
     width: 100%;
-    min-height: 500px;
+    height: clamp(320px, 65vh, 680px);
+    min-height: 0;
 }
 
 .preview-stack {
+    flex: none;
+    align-self: flex-start;
     display: flex;
     flex-direction: column;
     width: 100%;
@@ -1076,19 +1080,23 @@ h2 {
 }
 
 .item-preview {
-    flex: 1;
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+    isolation: isolate;
     background: var(--preview-gradient);
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 32px;
     position: relative;
-    min-height: clamp(220px, 52vh, 550px);
+    min-height: 0;
 }
 
 .item-preview img {
-    max-width: 95%;
-    max-height: min(70vh, 640px);
+    display: block;
+    max-width: 100%;
+    max-height: 100%;
     object-fit: contain;
     border-radius: 8px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
@@ -1174,6 +1182,8 @@ h2 {
 
 .item-stats {
     width: 360px;
+    flex-shrink: 0;
+    min-width: 0;
     background: var(--bg-base);
     border-left: 1px solid var(--glass-border);
     padding: 28px;
@@ -1549,16 +1559,17 @@ select.codex-input {
 
     .item-detail {
         flex-direction: column;
+        height: auto;
     }
 
     .item-preview {
-        min-height: 300px;
+        flex: none;
+        height: clamp(240px, 50vh, 390px);
+        min-height: 0;
         padding: 20px;
     }
 
-    .item-preview img {
-        max-height: 350px;
-    }
+
 }
 
 @media (hover: hover) and (min-width: 769px) and (max-width: 1024px) {
@@ -1697,9 +1708,7 @@ select.codex-input {
         padding: 16px;
     }
     
-    .item-preview img {
-        max-height: 280px;
-    }
+
     
     .nav-btn {
         width: 40px;
@@ -5796,3 +5805,14 @@ html[data-theme="minecraft"],
         overflow-y: auto;
     }
 }
+
+/* Shared emotion labels: the first chip is the primary category. */
+.emotion-labels { display: inline-flex; flex-wrap: wrap; gap: 5px; min-width: 0; }
+.emotion-chip { text-shadow: none; padding: 2px 7px; border: 1px solid var(--glass-border); border-radius: 4px; color: var(--text-secondary); font-size: var(--fs-xs); line-height: 1.5; }
+.emotion-chip.primary { color: var(--gold-primary); border-color: var(--gold-dark); background: rgba(var(--accent-soft-rgb), 0.08); }
+.emotion-labels.compact { gap: 3px; }
+.emotion-labels.compact .emotion-chip { text-shadow: none; padding: 0 4px; font-size: var(--fs-2xs); }
+.item-stats > .stat-row { gap: 12px; }
+.item-stats > .stat-row > .emotion-labels { justify-content: flex-end; }
+[data-theme="minecraft"] .emotion-chip { border-radius: 0; color: #353535; border-color: #888; }
+[data-theme="minecraft"] .emotion-chip.primary { color: #212121; border-color: #555; background: #dedede; }

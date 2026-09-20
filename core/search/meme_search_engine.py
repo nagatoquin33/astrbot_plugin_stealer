@@ -1,11 +1,19 @@
 """表情包搜索引擎：负责 BM25 索引构建和搜索辅助方法。"""
 
+import asyncio
 import hashlib
+import json
+import os
+import tempfile
+from pathlib import Path
 from typing import Any
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
+from .search_features import (
+    collect_phrase_words, entry_category, parse_tags, prepare_entry_text_features,
+)
 from ..processing.semantic_schema import build_meme_search_text
 from .text_similarity import (
     BM25,
@@ -20,13 +28,20 @@ class MemeSearchEngine:
 
     SIMILARITY_THRESHOLD = 0.45
 
-    def __init__(self, plugin_instance: Any, selector: Any) -> None:
+    def __init__(self, plugin_instance: Any, selection_strategy, scope_service) -> None:
         self.plugin = plugin_instance
-        self.selector = selector
+        self._selection_strategy = selection_strategy
+        self._scope_service = scope_service
         self._bm25_index: Any | None = None
         self._bm25_doc_paths: list[str] = []
         self._bm25_dirty: bool = True
         self._bm25_signature: str = ""
+        cache_dir = getattr(plugin_instance, "cache_dir", None)
+        self._cache_path = Path(cache_dir) / "bm25_cache.json" if cache_dir else None
+
+    def get_index(self) -> dict[str, Any]:
+        db_service = getattr(self.plugin, "db_service", None)
+        return db_service.get_index_cache_readonly() if db_service else {}
 
     @staticmethod
     def _search_signature_from_index(idx: dict[str, Any]) -> str:
@@ -85,11 +100,10 @@ class MemeSearchEngine:
             return
 
         # 优先使用数据库服务
-        cache_service = getattr(self.plugin, "cache_service", None)
         explicit_idx = idx is not None
 
         if idx is None:
-            idx = self.selector._get_index()
+            idx = self.get_index()
 
         if not idx:
             return
@@ -97,9 +111,9 @@ class MemeSearchEngine:
         signature = self._compute_bm25_signature(idx, prefer_db_signature=not explicit_idx)
 
         # 优先尝试从持久化缓存加载 BM25 文档语料。
-        if cache_service:
+        if self._cache_path and self._cache_path.is_file():
             try:
-                cached = cache_service.get_cache("bm25_cache")
+                cached = json.loads(await asyncio.to_thread(self._cache_path.read_text, encoding="utf-8"))
                 if (
                     isinstance(cached, dict)
                     and cached.get("signature") == signature
@@ -141,20 +155,33 @@ class MemeSearchEngine:
             self._bm25_dirty = False
             logger.debug(f"[BM25] 索引构建完成: {len(documents)} 文档, 示例: {documents[:3]}")
 
-            if cache_service:
+            if self._cache_path:
                 try:
-                    await cache_service.set_cache(
-                        "bm25_cache",
+                    await asyncio.to_thread(
+                        self._save_bm25_cache,
                         {
                             "signature": signature,
                             "documents": [list(doc) for doc in documents],
                             "doc_paths": doc_paths,
                             "version": 3,
                         },
-                        persist=True,
                     )
                 except Exception as e:
                     logger.debug(f"[BM25] 持久化缓存失败: {e}")
+
+    def _save_bm25_cache(self, data: dict) -> None:
+        """原子替换缓存文件，保留现有 JSON 格式供重启复用。"""
+        path = self._cache_path
+        if path is None:
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                json.dump(data, stream, ensure_ascii=False)
+            os.replace(temporary, path)
+        finally:
+            Path(temporary).unlink(missing_ok=True)
 
     def _invalidate_bm25_index(self) -> None:
         self._bm25_dirty = True
@@ -230,7 +257,7 @@ class MemeSearchEngine:
                     score = max(score, word_score)
 
                 # 检查分词在标签中的匹配
-                current_tag_words = tag_words or self.selector._collect_phrase_words(tuple(tags))
+                current_tag_words = tag_words or collect_phrase_words(tuple(tags))
                 tag_overlap = query_words & current_tag_words
                 tag_bigram = sum(1 for w in tag_overlap if len(w) >= 2)
                 tag_unigram = len(tag_overlap) - tag_bigram
@@ -268,12 +295,12 @@ class MemeSearchEngine:
         Returns:
             最佳匹配的分类，无则返回 None
         """
-        if not query or not self.selector.categories:
+        if not query or not getattr(self.plugin, "categories", []):
             return None
 
         best_match = None
         best_score = 0.0
-        for category in self.selector.categories:
+        for category in getattr(self.plugin, "categories", []):
             score = calculate_hybrid_similarity(query, category)
             if score > best_score and score > threshold:
                 best_score = score
@@ -291,11 +318,11 @@ class MemeSearchEngine:
         Returns:
             相似分类列表
         """
-        if not query or not self.selector.categories:
+        if not query or not getattr(self.plugin, "categories", []):
             return []
 
         scores = []
-        for category in self.selector.categories:
+        for category in getattr(self.plugin, "categories", []):
             score = calculate_hybrid_similarity(query, category)
             scores.append((category, score))
 
@@ -312,13 +339,13 @@ class MemeSearchEngine:
         """降级搜索：使用旧的评分算法。"""
         try:
             if idx is None:
-                idx = self.selector._get_index()
+                idx = self.get_index()
 
             if not idx:
                 return []
 
             recently_used_paths: set[str] = set()
-            for cat_paths in self.selector._recent_usage.values():
+            for cat_paths in self._selection_strategy._recent_usage.values():
                 recently_used_paths.update(cat_paths)
 
             query_lower = query.lower()
@@ -332,20 +359,20 @@ class MemeSearchEngine:
             for file_path, data in idx.items():
                 if not isinstance(data, dict):
                     continue
-                if not self.selector._is_entry_allowed_for_event(data, event):
+                if not self._scope_service._is_entry_allowed_for_event(data, event):
                     continue
                 if file_path in recently_used_paths:
                     continue
 
-                tags = self.selector._parse_tags(data.get("tags", []))
-                scenes = self.selector._parse_tags(data.get("scenes", []))
+                tags = parse_tags(data.get("tags", []))
+                scenes = parse_tags(data.get("scenes", []))
                 overlay = str(data.get("overlay_text", "") or "")
                 character = str(data.get("character", "") or "")
                 tags_for_score = tags + scenes
                 tags_str = ", ".join(tags)
-                category = self.selector._get_category_from_data(data)
+                category = entry_category(data)
                 desc, tag_words, _, all_words, all_text = (
-                    self.selector._prepare_entry_text_features(
+                    prepare_entry_text_features(
                         category,
                         str(data.get("desc", "")),
                         tuple(tags_for_score),

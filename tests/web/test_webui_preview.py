@@ -6,6 +6,9 @@
 
 import base64
 import io
+import json
+import shutil
+import subprocess
 
 import pytest
 
@@ -111,6 +114,32 @@ def test_preview_exposes_vlm_reanalysis_and_ab_apply_controls():
     base_rule = css.index(".vlm-reanalysis-panel {")
     responsive_rule = css.rindex("@media (max-width: 1100px)")
     assert responsive_rule > base_rule
+
+
+def test_shared_emotion_component_handles_multiple_and_legacy_labels():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is needed to execute the frontend component")
+    script = r"""
+const fs = require('fs'), vm = require('vm');
+let options;
+const source = fs.readFileSync(process.argv[1], 'utf8').replace(/^import .*?;\r?\n/, '');
+vm.runInNewContext(source, {
+    Vue: { createApp(value) { options = value; return { mount() {} }; } },
+    TEMPLATE: '', EMOTION_LABELS_TEMPLATE: '',
+});
+const items = [
+    {category:'dumb', emotions:['dumb','sigh','tired','sigh']},
+    {category:'happy'},
+    {category:'dumb', emotions:'sigh，tired'},
+    {emotions:['happy','sad']},
+];
+console.log(JSON.stringify(items.map(item => options.components.EmotionLabels.computed.keys.call({item}))));
+"""
+    result = subprocess.run([node, "-e", script, str(DASHBOARD_DIR / "app.js")], capture_output=True, text=True, check=True)
+    assert json.loads(result.stdout) == [
+        ["dumb", "sigh", "tired"], ["happy"], ["dumb", "sigh", "tired"], ["happy", "sad"],
+    ]
 
 
 def test_light_theme_character_filter_uses_readable_surface():

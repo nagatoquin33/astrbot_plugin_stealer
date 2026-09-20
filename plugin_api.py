@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import binascii
+import hashlib
 import inspect
 import os
 import shutil
@@ -21,6 +22,8 @@ except ImportError:
 from astrbot.api import logger
 
 from .core.util.blacklist import add_blacklist_hash
+from .core.db.index_manager import delete_index_paths, invalidate_search, refresh_search_entry
+from .core.processing.semantic_schema import SEARCH_METADATA_FIELDS
 from .core.maintenance.retention import library_counts, library_group
 from .core.util.normalization import (
     canonicalize_path,
@@ -107,10 +110,6 @@ class PluginAPI:
         return self.plugin.base_dir
 
     @property
-    def _cache(self):
-        return self.plugin.cache_service
-
-    @property
     def _db(self):
         return getattr(self.plugin, "db_service", None)
 
@@ -129,46 +128,20 @@ class PluginAPI:
             return db.get_index_cache_readonly()
         return {}
 
-    def _build_full_index_snapshot(self) -> dict[str, Any]:
-        """获取完整索引快照。"""
-        db = self._db
-        if db:
-            return db.get_index_cache_readonly()
-        return {}
-
     def _find_index_entry_by_hash(self, img_hash: str) -> tuple[str, dict[str, Any]] | None:
         db = self._db
         if db and hasattr(db, "get_emoji_by_hash"):
             found = db.get_emoji_by_hash(img_hash)
             if found:
                 return found
-        for path, meta in self._build_full_index_snapshot().items():
+        for path, meta in self._get_index().items():
             if isinstance(meta, dict) and meta.get("hash") == img_hash:
                 return path, dict(meta)
         return None
 
-    def _invalidate_bm25(self) -> None:
-        """写入操作后使 BM25 索引失效，下次搜索时强制重建。
-        防止批量导入/删除/更新后 BM25 仍使用旧语料，导致新表情无法被检索到。
-        """
-        try:
-            selector = getattr(self.plugin, "meme_selector", None)
-            if selector is not None:
-                selector._invalidate_bm25_index()
-        except Exception as e:
-            logger.debug(f"[BM25] 失效索引失败: {e}")
 
     async def _add_blacklist_hash(self, image_hash: str) -> bool:
         return await add_blacklist_hash(self.plugin, image_hash)
-
-    async def _delete_index_paths(self, paths: list[str]) -> None:
-        """通过 db_service 删除索引条目。"""
-        db = self._db
-        if db is None or not hasattr(db, "delete_paths"):
-            logger.warning("[PluginAPI] DB 不可用，跳过索引删除")
-            return
-        await db.delete_paths(paths)
-        self._invalidate_bm25()
 
     async def _update_index_path(self, path: str, updates: dict[str, Any]) -> bool:
         db = self._db
@@ -176,7 +149,10 @@ class PluginAPI:
             return False
         ok = await db.update_path(path, updates)
         if ok:
-            self._invalidate_bm25()
+            if SEARCH_METADATA_FIELDS.intersection(updates):
+                await refresh_search_entry(self.plugin, path)
+            else:
+                invalidate_search(self.plugin)
         return ok
 
     async def _move_index_path(
@@ -191,7 +167,7 @@ class PluginAPI:
             return False
         ok = await db.move_path(old_path, new_path, category, updates or {})
         if ok:
-            self._invalidate_bm25()
+            await refresh_search_entry(self.plugin, new_path, previous_path=old_path)
         return ok
 
     @staticmethod
@@ -248,28 +224,6 @@ class PluginAPI:
         result.sort(key=lambda x: (-int(x.get("count") or 0), x["key"]))
         return result
 
-    async def _refresh_embedding_for_path(self, path: str) -> None:
-        db = self._db
-        if not db or not path:
-            return
-        entry = {}
-        try:
-            entry = db.get_emoji(path) or {}
-        except Exception:
-            entry = {}
-        if not entry:
-            return
-        try:
-            smart = getattr(
-                getattr(self.plugin, "meme_selector", None), "_smart_select_service", None
-            )
-            if smart and getattr(smart, "_embedding_service", None):
-                await smart._embedding_service.delete_by_path(path)
-                await smart._embedding_service.insert_emoji(path, entry)
-                smart._invalidate_embedding_index()
-        except Exception as e:
-            logger.debug(f"[Embedding] 角色更新后重建向量失败: {e}")
-        self._invalidate_bm25()
 
     def _file_base64(self, file_path: str) -> str:
         with open(file_path, "rb") as f:
@@ -367,7 +321,7 @@ class PluginAPI:
         return files
 
     def _build_storage_report(self, *, include_items: bool = False) -> dict[str, Any]:
-        index = self._build_full_index_snapshot()
+        index = self._get_index()
         indexed_paths = {
             self._norm_path_key(path)
             for path in index.keys()
@@ -530,7 +484,7 @@ class PluginAPI:
         file_path = cat_dir / filename
         await asyncio.to_thread(file_path.write_bytes, file_content)
 
-        img_hash = file_hash or self._cache.compute_hash(file_content)
+        img_hash = file_hash or hashlib.sha256(file_content).hexdigest()
         data = {
             "hash": img_hash,
             "path": str(file_path),
@@ -553,7 +507,7 @@ class PluginAPI:
                     await safe_remove_file(str(file_path))
                 finally:
                     raise RuntimeError("insert image metadata failed")
-            self._invalidate_bm25()
+            await refresh_search_entry(self.plugin, str(file_path), data)
         else:
             logger.warning("[PluginAPI] DB 不可用，无法插入图片元数据")
             raise RuntimeError("db_service unavailable for insert_batch")
@@ -1193,36 +1147,11 @@ class PluginAPI:
     # ── Pending (待审核池) ────────────────────────────────────
 
     def _build_pending_item(self, row: dict[str, Any]) -> dict[str, Any] | None:
-        """把 emoji_pending 行构造成前端 item（带 id 供审核定位）。"""
-        try:
-            path_str = str(row.get("path", "") or "")
-            Path(path_str)
-            return {
-                "id": row.get("id"),
-                "hash": str(row.get("hash", "") or ""),
-                "category": str(row.get("category", "") or "unknown"),
-                "tags": list(row.get("tags", []) or []),
-                "desc": str(row.get("desc", "") or ""),
-                "scenes": self._split_scenes(row.get("scenes", [])),
-                "scope_mode": self._norm_scope(row.get("scope_mode")),
-                "origin_target": str(row.get("origin_target", "") or ""),
-                "source": str(row.get("source", "") or ""),
-                "review_status": str(row.get("review_status", "pending") or "pending"),
-                "created_at": int(row.get("created_at", 0) or 0),
-                # v5 元数据列（与正式库 item 对齐，供审核区展示）
-                "width": row.get("width"),
-                "height": row.get("height"),
-                "format": row.get("format"),
-                "bytes": row.get("bytes"),
-                "add_method": row.get("add_method"),
-                "source_url": row.get("source_url"),
-                "original_name": row.get("original_name"),
-                "overlay_text": str(row.get("overlay_text", "") or ""),
-                "character": str(row.get("character", "") or ""),
-                "retention_class": str(row.get("retention_class", "native") or "native"),
-            }
-        except (ValueError, TypeError):
-            return None
+        """待审核记录与图库使用同一套展示字段。"""
+        item = self._build_image_item(str(row.get("path") or ""), row)
+        if item is not None:
+            item.update(id=row.get("id"), review_status=str(row.get("review_status") or "pending"))
+        return item
 
     async def handle_list_pending(self):
         """GET /pending —— 分页返回待审核列表（分类筛选/搜索/sort=newest）。"""
@@ -1359,15 +1288,7 @@ class PluginAPI:
                 await db.promote_source_pending_path(src_path, cat_path)
             db.delete_pending(pending_id)
 
-            # 审核通过后写入嵌入向量（仅在开启嵌入检索时，失败不阻塞）
-            if getattr(self.plugin, "enable_embedding_search", False):
-                try:
-                    smart_service = getattr(getattr(self.plugin, "meme_selector", None), "_smart_select_service", None)
-                    if smart_service and smart_service._embedding_service:
-                        await smart_service._embedding_service.insert_emoji(cat_path, emoji_entry)
-                        smart_service._invalidate_embedding_index()
-                except Exception as embed_err:
-                    logger.debug(f"审核通过后嵌入写入失败（不阻塞）: {embed_err}")
+            await refresh_search_entry(self.plugin, cat_path, emoji_entry)
 
             return True, ""
         except Exception as e:
@@ -1400,14 +1321,6 @@ class PluginAPI:
                     approved += 1
                 elif msg and msg not in ("pending not found",):
                     errors.append(f"id={pending_id}: {msg}")
-
-            # 审核通过后刷新 BM25 缓存索引
-            try:
-                selector = getattr(self.plugin, "meme_selector", None)
-                if selector and hasattr(selector, "_invalidate_bm25_index"):
-                    selector._invalidate_bm25_index()
-            except Exception as e:
-                logger.warning(f"审核后刷新缓存失败: {e}")
 
             return jsonify(
                 {
@@ -1598,7 +1511,7 @@ class PluginAPI:
             new_overlay = data.get("overlay_text")
             new_emotions = data.get("emotions")
             new_character = data.get("character") if "character" in data else None
-            new_scope = self._norm_scope(data.get("scope_mode"))
+            new_scope = self._norm_scope(data["scope_mode"]) if "scope_mode" in data else None
             new_favorite = data.get("is_favorite")
             found = self._find_index_entry_by_hash(str(img_hash))
             if not found:
@@ -1645,12 +1558,9 @@ class PluginAPI:
                             )
                 if not moved:
                     return jsonify({"success": False, "error": "Update index failed"})
-                await self._refresh_embedding_for_path(str(new_path))
             elif updates:
                 if not await self._update_index_path(target, updates):
                     return jsonify({"success": False, "error": "Update index failed"})
-                if "character" in updates or "overlay_text" in updates:
-                    await self._refresh_embedding_for_path(target)
             return jsonify({"success": True})
         except Exception as e:
             logger.error(f"更新图片失败: {e}", exc_info=True)
@@ -1664,7 +1574,7 @@ class PluginAPI:
                 return jsonify({"success": False, "error": "缺少 hash"})
             blacklist = data.get("blacklist", False)
 
-            index = self._build_full_index_snapshot()
+            index = self._get_index()
             removed: list[str] = []
             for p, m in index.items():
                 if isinstance(m, dict) and m.get("hash") == img_hash:
@@ -1682,7 +1592,7 @@ class PluginAPI:
                         logger.warning(f"删除文件失败: {e}")
                 if not deleted_paths:
                     return jsonify({"success": False, "error": "delete file failed"})
-                await self._delete_index_paths(deleted_paths)
+                await delete_index_paths(self.plugin, deleted_paths)
                 if hasattr(self.plugin, "image_processor_service"):
                     self.plugin.image_processor_service.invalidate_cache(img_hash)
                 return jsonify({"success": True, "count": len(deleted_paths)})
@@ -1699,7 +1609,7 @@ class PluginAPI:
             hashes = set(data.get("hashes", []))
             if not hashes:
                 return jsonify({"success": True, "count": 0})
-            index = self._build_full_index_snapshot()
+            index = self._get_index()
             removed_paths = [
                 p for p, m in index.items() if isinstance(m, dict) and m.get("hash") in hashes
             ]
@@ -1711,7 +1621,7 @@ class PluginAPI:
                 except Exception as e:
                     logger.warning(f"删除文件失败 {p}: {e}")
             if deleted_paths:
-                await self._delete_index_paths(deleted_paths)
+                await delete_index_paths(self.plugin, deleted_paths)
             return jsonify({"success": True, "count": len(deleted_paths)})
         except Exception as e:
             logger.error(f"批量删除失败: {e}", exc_info=True)
@@ -1727,7 +1637,7 @@ class PluginAPI:
             moved_count = 0
 
             target_dir = self._cfg.ensure_category_dir(target_cat)
-            index = self._build_full_index_snapshot()
+            index = self._get_index()
             for p, m in list(index.items()):
                 if not isinstance(m, dict) or m.get("hash") not in hashes:
                     continue
@@ -1766,14 +1676,13 @@ class PluginAPI:
             if character and character not in set(self._cfg.get_characters()):
                 return jsonify({"success": False, "error": f"角色无效: {character}"})
             updated = 0
-            index = self._build_full_index_snapshot()
+            index = self._get_index()
             for path, meta in index.items():
                 if not isinstance(meta, dict) or meta.get("hash") not in hashes:
                     continue
                 if str(meta.get("character", "") or "") == character:
                     continue
                 if await self._update_index_path(path, {"character": character}):
-                    await self._refresh_embedding_for_path(path)
                     updated += 1
             return jsonify({"success": True, "count": updated})
         except Exception as e:
@@ -1790,7 +1699,7 @@ class PluginAPI:
             updated = 0
             skipped = 0
 
-            index = self._build_full_index_snapshot()
+            index = self._get_index()
             for p, m in index.items():
                 if not isinstance(m, dict) or m.get("hash") not in hashes:
                     continue
@@ -1813,7 +1722,7 @@ class PluginAPI:
                 return jsonify({"success": True, "count": 0})
             updated = 0
 
-            index = self._build_full_index_snapshot()
+            index = self._get_index()
             for p, m in index.items():
                 if not isinstance(m, dict) or m.get("hash") not in hashes:
                     continue
@@ -1844,7 +1753,7 @@ class PluginAPI:
                             {
                                 "filename": fi.get("name", "upload.png"),
                                 "content": content,
-                                "hash": self._cache.compute_hash(content),
+                                "hash": hashlib.sha256(content).hexdigest(),
                                 "ext": ext,
                             }
                         )
@@ -1868,7 +1777,7 @@ class PluginAPI:
                             {
                                 "filename": f.filename or "upload.png",
                                 "content": content,
-                                "hash": self._cache.compute_hash(content),
+                                "hash": hashlib.sha256(content).hexdigest(),
                                 "ext": ext,
                             }
                         )
@@ -2020,7 +1929,7 @@ class PluginAPI:
 
             updated = 0
             skipped = 0
-            index = self._build_full_index_snapshot()
+            index = self._get_index()
             for path, meta in index.items():
                 if not isinstance(meta, dict):
                     continue
@@ -2085,7 +1994,7 @@ class PluginAPI:
 
             removed: dict[str, int] = {}
             if "stale_index" in sections:
-                index = self._build_full_index_snapshot()
+                index = self._get_index()
                 stale_paths: list[str] = []
                 for path in index.keys():
                     if not isinstance(path, str):
@@ -2099,7 +2008,7 @@ class PluginAPI:
                     if not file_exists:
                         stale_paths.append(path)
                 if stale_paths:
-                    await self._delete_index_paths(stale_paths)
+                    await delete_index_paths(self.plugin, stale_paths)
                 removed["stale_index"] = len(stale_paths)
 
             for key in ("orphan_files", "thumb_cache", "temp_files", "raw_files"):
@@ -2123,6 +2032,7 @@ class PluginAPI:
     # ── VLM Analyze ───────────────────────────────────────────
 
     async def handle_analyze_image(self):
+        tmp_file_to_cleanup = None
         try:
             proc = getattr(self.plugin, "image_processor_service", None)
             if not proc:
@@ -2131,17 +2041,13 @@ class PluginAPI:
             data = await request.get_json() or {}
             img_hash = (data.get("hash", "") or "").strip()
             img_base64 = (data.get("base64", "") or "").strip()
-            tmp_file_to_cleanup = None
 
             file_path = None
 
             # 优先通过 hash 从索引查找文件路径
             if img_hash:
-                index = self._get_index()
-                for p, m in index.items():
-                    if isinstance(m, dict) and m.get("hash") == img_hash:
-                        file_path = p
-                        break
+                found = self._find_index_entry_by_hash(img_hash)
+                file_path = found[0] if found else None
                 if not file_path or not os.path.isfile(file_path):
                     file_path = None
 
@@ -2297,7 +2203,7 @@ class PluginAPI:
             updated = [c for c in cur_cats if c != key]
             deleted = 0
 
-            index = self._build_full_index_snapshot()
+            index = self._get_index()
             deleted_paths: list[str] = []
             for p, m in list(index.items()):
                 if not isinstance(m, dict) or m.get("category") != key:
@@ -2314,7 +2220,7 @@ class PluginAPI:
                     logger.warning(f"删除分类文件失败: {old}, {ex}")
 
             if deleted_paths:
-                await self._delete_index_paths(deleted_paths)
+                await delete_index_paths(self.plugin, deleted_paths)
 
             cat_dir = self._data_dir / "categories" / key
             try:
@@ -2410,7 +2316,7 @@ class PluginAPI:
             self._cfg.character_info = info
             self._cfg.save_characters()
             self._cfg.save_character_info()
-            self._invalidate_bm25()
+            invalidate_search(self.plugin)
             return jsonify({"success": True, "deleted": key, "characters": updated})
         except Exception as e:
             logger.error(f"删除角色失败: {e}", exc_info=True)

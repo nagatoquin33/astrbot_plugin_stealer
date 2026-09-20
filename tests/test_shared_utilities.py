@@ -103,16 +103,7 @@ async def test_blacklist_writer_prefers_database():
 
 
 @pytest.mark.asyncio
-async def test_blacklist_writer_falls_back_to_legacy_cache():
-    calls = []
-
-    class Cache:
-        async def set(self, *args, **kwargs):
-            calls.append((args, kwargs))
-
-    plugin = types.SimpleNamespace(db_service=None, cache_service=Cache())
-    assert await add_blacklist_hash(plugin, "abc", timestamp=456)
-    assert calls == [
-        (("blacklist_cache", "abc", 456), {"persist": True}),
-    ]
+async def test_blacklist_writer_reports_missing_database():
+    plugin = types.SimpleNamespace(db_service=None)
+    assert not await add_blacklist_hash(plugin, "abc", timestamp=456)
     assert not await add_blacklist_hash(plugin, "")

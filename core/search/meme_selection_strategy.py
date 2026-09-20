@@ -6,6 +6,7 @@ from astrbot.api import logger
 
 from ..util.normalization import canonicalize_path
 from .text_similarity import calculate_hybrid_similarity
+from .search_features import normalize_category
 
 
 class MemeSelectionStrategy:
@@ -14,9 +15,8 @@ class MemeSelectionStrategy:
     MAX_RECENT_USAGE = 10  # 最近使用记录最大数量
     MIN_RECENT_USAGE = 3  # 最近使用记录最小数量
 
-    def __init__(self, plugin_instance: Any, selector: Any) -> None:
+    def __init__(self, plugin_instance: Any) -> None:
         self.plugin = plugin_instance
-        self.selector = selector
         self._recent_usage: dict[str, list[str]] = {}  # category -> [canon_path, ...]
 
     def _get_recent_usage(self, category: str) -> list[str]:
@@ -55,7 +55,7 @@ class MemeSelectionStrategy:
         return penalty
 
     def _get_candidate_categories(self, category: str, limit: int = 3) -> list[str]:
-        normalized = self.selector.normalize_category(category) or category.lower().strip()
+        normalized = normalize_category(self.plugin, category) or category.lower().strip()
         if not normalized:
             return []
 
@@ -63,7 +63,7 @@ class MemeSelectionStrategy:
         info_map = getattr(cfg, "category_info", {}) if cfg else {}
         scored: list[tuple[float, str]] = []
 
-        for current in self.selector.categories:
+        for current in getattr(self.plugin, "categories", []):
             if current == normalized:
                 scored.append((10.0, current))
                 continue

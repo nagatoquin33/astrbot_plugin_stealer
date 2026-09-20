@@ -552,57 +552,10 @@ class NaturalEmotionAnalyzer:
             self.analysis_cache.clear()
         logger.info("[情绪分析] 缓存已清空")
 
-
-class SmartEmotionMatcher:
-    """智能情绪匹配器 - 使用自然语言分析"""
-
-    def __init__(self, plugin_instance):
-        self.plugin = plugin_instance
-        self.natural_analyzer = NaturalEmotionAnalyzer(plugin_instance)
-
-    async def analyze_and_match_emotion(
-        self,
-        event: AstrMessageEvent,
-        llm_reply: str,
-        use_natural_analysis: bool = True,
-        *,
-        user_message: str = "",
+    async def analyze_for_reply(
+        self, event: AstrMessageEvent, llm_reply: str, *, user_message: str = ""
     ) -> EmotionQuery | None:
-        """分析并匹配情绪
-
-        Args:
-            event: 消息事件
-            llm_reply: LLM 回复文本
-            use_natural_analysis: 是否使用自然语言分析
-            user_message: 用户原始消息，与 llm_reply 组成对话上下文提升分析准确度
-
-        Returns:
-            EmotionQuery 或 None
-        """
-        if not llm_reply or len(llm_reply.strip()) < 3:
+        """自动发送入口：关闭分析时直接跳过，其余逻辑由分析器统一处理。"""
+        if not self.plugin_config.enable_natural_emotion_analysis:
             return None
-
-        if use_natural_analysis and self.plugin.plugin_config.enable_natural_emotion_analysis:
-            emotion = await self.natural_analyzer.analyze_emotion(
-                event,
-                llm_reply,
-                user_message=user_message,
-            )
-            if emotion:
-                return emotion
-            if self.natural_analyzer.last_analysis_abstained:
-                return None
-            logger.debug(f"[智能匹配] 自然语言分析失败: {llm_reply[:30]}...")
-            return None
-
-        # 如果禁用了自然语言分析，返回None（被动模式依赖标签）
-        logger.debug("[智能匹配] 自然语言分析已禁用")
-        return None
-
-    def get_analyzer_stats(self) -> dict:
-        """获取分析器统计信息"""
-        return self.natural_analyzer.get_stats()
-
-    async def clear_cache(self):
-        """清空分析缓存"""
-        await self.natural_analyzer.clear_cache()
+        return await self.analyze_emotion(event, llm_reply, user_message=user_message)

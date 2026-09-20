@@ -4,6 +4,7 @@ import asyncio
 import os
 import tempfile
 from pathlib import Path
+from collections.abc import Callable
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
@@ -48,7 +49,6 @@ class VLMCallService:
             if self.plugin_config
             else ""
         )
-        self._cached_framework_vlm_id: str | None = None
 
     async def _resolve_vision_provider(self, event=None) -> str | None:
         """统一的视觉模型 provider 解析逻辑。
@@ -60,9 +60,6 @@ class VLMCallService:
         if self.vision_provider_id:
             return self.vision_provider_id
 
-        if self._cached_framework_vlm_id is not None:
-            return self._cached_framework_vlm_id or None
-
         framework_vlm_id = ""
         try:
             if hasattr(self.plugin, "context"):
@@ -73,8 +70,6 @@ class VLMCallService:
                 )
         except Exception as e:
             logger.debug(f"读取框架视觉模型配置失败: {e}")
-
-        self._cached_framework_vlm_id = framework_vlm_id
 
         if framework_vlm_id:
             logger.info(f"使用框架全局图片描述模型: {framework_vlm_id}")
@@ -88,7 +83,8 @@ class VLMCallService:
         return None
 
     async def _call_vision_model(
-        self, event: AstrMessageEvent | None, img_path: str, prompt: str
+        self, event: AstrMessageEvent | None, img_path: str, prompt: str,
+        *, validate_response: Callable[[str], None] | None = None,
     ) -> str:
         """调用视觉模型分析图片。
 
@@ -143,7 +139,9 @@ class VLMCallService:
             if is_animated:
                 actual_prompt = self.ANIMATED_STORYBOARD_PROMPT + prompt
 
-            return await self._do_vlm_call(provider_id, actual_prompt, resolved_img_path)
+            return await self._do_vlm_call(
+                provider_id, actual_prompt, resolved_img_path, validate_response=validate_response
+            )
         finally:
             # 清理临时文件
             if temp_file and os.path.exists(temp_file):
@@ -310,7 +308,10 @@ class VLMCallService:
         scale = min(1.0, max_frame_width / width, max_frame_height / height)
         return max(1, int(width * scale)), max(1, int(height * scale))
 
-    async def _do_vlm_call(self, provider_id: str, prompt: str, file_url: str) -> str:
+    async def _do_vlm_call(
+        self, provider_id: str, prompt: str, file_url: str,
+        *, validate_response: Callable[[str], None] | None = None,
+    ) -> str:
         """执行 VLM 调用（带重试）。
 
         Args:
@@ -323,7 +324,7 @@ class VLMCallService:
         """
         # 重试配置
         try:
-            max_retries = int(getattr(self.plugin, "vision_max_retries", 3))
+            max_retries = max(1, int(getattr(self.plugin, "vision_max_retries", 3)))
         except (TypeError, ValueError):
             max_retries = 3
         try:
@@ -338,15 +339,17 @@ class VLMCallService:
                     f"调用VLM (尝试 {attempt + 1}/{max_retries}), "
                     f"provider={provider_id}, 图片={file_url}"
                 )
-                result = await self._llm_generate_with_image_compat(
-                    provider_id=provider_id,
+                result = await self.plugin.context.llm_generate(
+                    chat_provider_id=provider_id,
                     prompt=prompt,
-                    file_url=file_url,
+                    image_urls=[file_url],
                 )
 
                 # LLMResponse.completion_text 是 @property，自动处理 result_chain
                 text = (result.completion_text or "").strip() if result else ""
                 if text:
+                    if validate_response is not None:
+                        validate_response(text)
                     logger.debug(f"VLM响应: {text[:200]}")
                     return text
 
@@ -382,33 +385,3 @@ class VLMCallService:
                 await asyncio.sleep(retry_delay * (2**attempt))
 
         raise Exception(f"视觉模型调用失败（已重试{max_retries}次）: {last_error}") from last_error
-
-    async def _llm_generate_with_image_compat(self, provider_id: str, prompt: str, file_url: str):
-        """兼容不同 AstrBot 版本对 image_urls 参数形态的处理差异。"""
-        try:
-            # 优先使用列表形态，避免部分版本把字符串按字符拆分成“多张图片”。
-            return await self.plugin.context.llm_generate(
-                chat_provider_id=provider_id,
-                prompt=prompt,
-                image_urls=[file_url],
-            )
-        except Exception as e:
-            # 仅在参数形态/类型不兼容时回退，避免对无关错误重复请求。
-            err = str(e).lower()
-            fallback_markers = (
-                "list object",
-                "startswith",
-                "image_urls",
-                "expected list",
-                "expected str",
-                "typeerror",
-            )
-            if not any(marker in err for marker in fallback_markers):
-                raise
-
-            logger.warning(f"VLM image_urls 参数形态不兼容，回退为字符串模式重试一次: {e}")
-            return await self.plugin.context.llm_generate(
-                chat_provider_id=provider_id,
-                prompt=prompt,
-                image_urls=file_url,
-            )

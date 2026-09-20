@@ -19,6 +19,7 @@ from typing import Any
 from astrbot.api import logger
 
 from ..util.normalization import normalize_label_list, normalize_scope_mode
+from ..processing.semantic_schema import SEARCH_METADATA_FIELDS
 
 
 class DatabaseService:
@@ -1449,21 +1450,28 @@ class DatabaseService:
         await self.clear_all()
         await self.insert_batch(emojis)
 
-    async def sync_index(self, idx: dict[str, Any]) -> None:
+    async def sync_index(self, idx: dict[str, Any]) -> list[str]:
         """增量同步索引到数据库（仅插入/更新，不删除）。
 
         删除已移交 MaintenanceService 通过孤儿扫描处理，
         避免并发 on_message 时误删其他消息刚入库的条目。
         """
         async with self._write_lock:
-            await asyncio.to_thread(self._sync_index_sync, idx)
+            return await asyncio.to_thread(self._sync_index_sync, idx)
 
-    def _sync_index_sync(self, idx: dict[str, Any]) -> None:
+    def _sync_index_sync(self, idx: dict[str, Any]) -> list[str]:
         desired_index = {
-            path: meta
+            path: dict(meta)
             for path, meta in idx.items()
             if isinstance(path, str) and isinstance(meta, dict)
         }
+
+        for meta in desired_index.values():
+            if "emotions" in meta:
+                meta["emotions_json"] = self._dump_emotions_json(meta.pop("emotions"))
+            for field in ("tags", "scenes"):
+                if field in meta:
+                    meta[field] = self._normalize_multi_value(meta[field])
 
         with self._get_connection() as conn:
             transaction_started = False
@@ -1497,6 +1505,7 @@ class DatabaseService:
 
                 desired_paths = set(desired_index.keys())
                 existing_paths = set(current_index.keys())
+                changed_paths = set(desired_paths - existing_paths)
 
                 for path in desired_paths - existing_paths:
                     meta = desired_index[path]
@@ -1525,6 +1534,8 @@ class DatabaseService:
                 for path in desired_paths & existing_paths:
                     meta = desired_index[path]
                     current = current_index[path]
+                    if any(field in meta and (meta[field] or "") != (current.get(field) or "") for field in SEARCH_METADATA_FIELDS):
+                        changed_paths.add(path)
 
                     changed_fields: dict[str, Any] = {}
                     for field in scalar_fields:
@@ -1562,6 +1573,7 @@ class DatabaseService:
                                 )
 
                 conn.execute("COMMIT")
+                return sorted(changed_paths)
             except Exception:
                 if transaction_started and conn.in_transaction:
                     conn.execute("ROLLBACK")

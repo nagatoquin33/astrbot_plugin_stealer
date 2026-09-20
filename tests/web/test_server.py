@@ -164,6 +164,7 @@ class PreviewState:
                 uses = rng.randint(0, 30)
                 item = self._new_library_item(
                     category=emotion["key"],
+                    emotions=[emotion["key"], EMOTIONS[(idx + 1) % len(EMOTIONS)]["key"]],
                     desc=f"{emotion['name']}示例表情包 #{idx}{j}",
                     tags=[emotion["name"], "示例"],
                     scenes=rng.choice([["聊天"], ["群聊", "斗图"], []]),
@@ -181,6 +182,7 @@ class PreviewState:
                     "id": self._next_pending_id,
                     "hash": f"pend{self._next_pending_id:04d}" + uuid.uuid4().hex[:8],
                     "category": emotion["key"],
+                    "emotions": [emotion["key"], EMOTIONS[(k + 1) % len(EMOTIONS)]["key"]],
                     "tags": [emotion["name"], "待审核"],
                     "desc": f"待审核示例 #{k}",
                     "scenes": ["聊天"],

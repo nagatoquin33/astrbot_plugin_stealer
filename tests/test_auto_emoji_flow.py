@@ -9,151 +9,7 @@ from pathlib import Path
 from astrbot_plugin_stealer.core.events.meme_sender_engine import MemeSenderEngine
 
 
-def _install_stubs() -> str:
-    # 检查是否已安装兼容的 stubs (由 conftest.py 安装)
-    if "astrbot.api.message_components" in sys.modules:
-        existing_image = sys.modules["astrbot.api.message_components"].Image
-        if hasattr(existing_image, "fromBase64") and hasattr(
-            existing_image, "convert_to_file_path"
-        ):
-            test_result = existing_image.fromBase64("test")
-            if test_result == "b64:test":
-                package_name = Path(__file__).resolve().parents[1].name
-                return package_name  # stubs 已兼容，跳过安装
-
-    package_name = Path(__file__).resolve().parents[1].name
-    package_prefix = f"{package_name}."
-
-    logger = types.SimpleNamespace(
-        info=lambda *args, **kwargs: None,
-        debug=lambda *args, **kwargs: None,
-        warning=lambda *args, **kwargs: None,
-        error=lambda *args, **kwargs: None,
-    )
-
-    def _decorator(*args, **kwargs):
-        def wrapper(func):
-            return func
-
-        return wrapper
-
-    class _CommandGroup:
-        def __call__(self, func):
-            return self
-
-        def command(self, *args, **kwargs):
-            return _decorator(*args, **kwargs)
-
-    filter_stub = types.SimpleNamespace(
-        on_decorating_result=_decorator,
-        on_llm_tool_respond=_decorator,
-        command_group=lambda *args, **kwargs: _CommandGroup(),
-        permission_type=_decorator,
-        llm_tool=_decorator,
-        event_message_type=_decorator,
-        platform_adapter_type=_decorator,
-    )
-
-    class Star:
-        def __init__(self, context=None):
-            self.context = context
-
-    class MessageChain(list):
-        pass
-
-    class Plain:
-        def __init__(self, text: str = ""):
-            self.text = text
-
-    class Image:
-        @classmethod
-        def fromBase64(cls, value):
-            return f"b64:{value}"
-
-        async def convert_to_file_path(self):
-            return ""
-
-    api_module = types.ModuleType("astrbot.api")
-    api_module.logger = logger
-    api_module.AstrBotConfig = object
-
-    event_module = types.ModuleType("astrbot.api.event")
-    event_module.AstrMessageEvent = object
-    event_module.MessageChain = MessageChain
-    event_module.filter = filter_stub
-
-    event_filter_module = types.ModuleType("astrbot.api.event.filter")
-    event_filter_module.EventMessageType = types.SimpleNamespace(ALL="ALL")
-    event_filter_module.PermissionType = types.SimpleNamespace(ADMIN="ADMIN")
-    event_filter_module.PlatformAdapterType = types.SimpleNamespace(ALL="ALL")
-
-    message_components_module = types.ModuleType("astrbot.api.message_components")
-    message_components_module.Image = Image
-    message_components_module.Plain = Plain
-
-    star_module = types.ModuleType("astrbot.api.star")
-    star_module.Context = object
-    star_module.Star = Star
-
-    sys.modules["astrbot.api"] = api_module
-    sys.modules["astrbot.api.event"] = event_module
-    sys.modules["astrbot.api.event.filter"] = event_filter_module
-    sys.modules["astrbot.api.message_components"] = message_components_module
-    sys.modules["astrbot.api.star"] = star_module
-
-    def _stub_module(name: str, **attrs):
-        module = types.ModuleType(name)
-        for key, value in attrs.items():
-            setattr(module, key, value)
-        sys.modules[name] = module
-
-    _stub_module(package_prefix + "cache_service", CacheService=type("CacheService", (), {}))
-    _stub_module(
-        package_prefix + "task_scheduler",
-        TaskScheduler=type("TaskScheduler", (), {}),
-    )
-    _stub_module(package_prefix + "web_server", WebServer=type("WebServer", (), {}))
-    _stub_module(
-        package_prefix + "core.commands.command_handler",
-        CommandHandler=type("CommandHandler", (), {}),
-    )
-    _stub_module(
-        package_prefix + "core.config.config",
-        PluginConfig=type("PluginConfig", (), {}),
-    )
-    _stub_module(
-        package_prefix + "core.search.meme_selector",
-        MemeSelector=type("MemeSelector", (), {}),
-    )
-    _stub_module(
-        package_prefix + "core.events.event_handler",
-        EventHandler=type("EventHandler", (), {}),
-    )
-    _stub_module(
-        package_prefix + "core.processing.image_processor_service",
-        ImageProcessorService=type("ImageProcessorService", (), {}),
-    )
-    _stub_module(
-        package_prefix + "core.processing.natural_emotion_analyzer",
-        SmartEmotionMatcher=type("SmartEmotionMatcher", (), {}),
-    )
-    _stub_module(
-        package_prefix + "core.db.database_service",
-        DatabaseService=type("DatabaseService", (), {}),
-    )
-    _stub_module(
-        package_prefix + "core.db.index_manager",
-        IndexManager=type("IndexManager", (), {}),
-    )
-    _stub_module(
-        package_prefix + "plugin_api",
-        PluginAPI=type("PluginAPI", (), {}),
-    )
-
-    return package_name
-
-
-PACKAGE_NAME = _install_stubs()
+PACKAGE_NAME = Path(__file__).resolve().parents[1].name
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 Main = importlib.import_module(f"{PACKAGE_NAME}.main").Main
@@ -245,9 +101,9 @@ def _build_main(chance: float) -> Main:
     main._auto_emoji_cooldowns = {}
     main._auto_emoji_cooldowns_lock = asyncio.Lock()
     main._auto_emoji_cooldowns_max = 100
-    main._should_skip_auto_emoji_by_gate = lambda text: False
     main.is_send_enabled_for_event = lambda event: True
     main._emoji_sender_engine = MemeSenderEngine(main)
+    main._emoji_sender_engine.should_skip_auto_emoji_by_gate = lambda text: False
     return main
 
 
@@ -255,7 +111,7 @@ class AutoEmojiFlowTests(unittest.IsolatedAsyncioTestCase):
     async def test_turn_state_wraps_event_extras(self):
         main = _build_main(1.0)
         event = DummyEvent()
-        state = main._emoji_turn_state(event)
+        state = main._emoji_sender_engine.emoji_turn_state(event)
 
         self.assertFalse(state.is_active_sent())
         state.mark_active_sent()
@@ -278,7 +134,7 @@ class AutoEmojiFlowTests(unittest.IsolatedAsyncioTestCase):
         main = _build_main(0.0)
         event = DummyEvent()
 
-        allowed = await main._resolve_auto_emoji_turn_permission(event)
+        allowed = await main._emoji_sender_engine._resolve_with_log(event)
 
         self.assertFalse(allowed)
         self.assertTrue(event.get_extra("stealer_auto_emoji_turn_decided"))
@@ -357,7 +213,7 @@ class AutoEmojiFlowTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(results)
         self.assertNotIn("Auto emoji is disabled for this turn.", results)
-        self.assertIsNotNone(main._emoji_turn_state(event).get_candidates())
+        self.assertIsNotNone(main._emoji_sender_engine.emoji_turn_state(event).get_candidates())
         result_text = "\n".join(results)
         self.assertIn("send_meme(emoji_id=", result_text)
         self.assertNotIn("send_emoji_by_id", result_text)
@@ -387,7 +243,7 @@ class AutoEmojiFlowTests(unittest.IsolatedAsyncioTestCase):
         main._safe_create_task = _safe_create_task
         handled = await main._prepare_emoji_response(event)
 
-        self.assertTrue(main._emoji_turn_state(event).is_active_sent())
+        self.assertTrue(main._emoji_sender_engine.emoji_turn_state(event).is_active_sent())
         self.assertFalse(handled)
         self.assertEqual(scheduled, [])
 
@@ -420,11 +276,11 @@ class AutoEmojiFlowTests(unittest.IsolatedAsyncioTestCase):
         main.meme_selector = MockEmojiSelector()
 
         # 即使概率为 0，如果 Main 已经判定允许（通过 turn_state），MemeSelector 应该尝试发送
-        state = main._emoji_turn_state(event)
+        state = main._emoji_sender_engine.emoji_turn_state(event)
         state.set_auto_decision(allowed=True, reason="forced_by_test")
 
         # 调用 _try_send_emoji
-        await main._try_send_emoji(event, ["happy"], "hello")
+        await main._emoji_sender_engine.try_send_emoji(event, ["happy"], "hello")
 
         # MemeSelector 应被调用，且不检查概率
         self.assertTrue(main.meme_selector.called)
@@ -436,8 +292,8 @@ class AutoEmojiFlowTests(unittest.IsolatedAsyncioTestCase):
         event = DummyEvent()
 
         # 判定应该存储在 turn_state 中
-        allowed = await main._resolve_auto_emoji_turn_permission(event)
-        state = main._emoji_turn_state(event)
+        allowed = await main._emoji_sender_engine._resolve_with_log(event)
+        state = main._emoji_sender_engine.emoji_turn_state(event)
 
         # 验证判定已存储
         self.assertTrue(state.is_auto_decided())
@@ -455,7 +311,7 @@ class AutoEmojiFlowTests(unittest.IsolatedAsyncioTestCase):
             {"path": "/path/a.gif", "desc": "happy", "emotion": "happy"},
             {"path": "/path/b.gif", "desc": "smile", "emotion": "happy"},
         ]
-        state = main._emoji_turn_state(event)
+        state = main._emoji_sender_engine.emoji_turn_state(event)
         state.set_candidates(candidates)
 
         # 验证可以正确获取
@@ -639,7 +495,7 @@ class AutoEmojiFlowTests(unittest.IsolatedAsyncioTestCase):
         """验证所有状态键都通过 _MemeTurnState 集中管理"""
         main = _build_main(1.0)
         event = DummyEvent()
-        state = main._emoji_turn_state(event)
+        state = main._emoji_sender_engine.emoji_turn_state(event)
 
         # 测试所有状态键的封装
         # active_sent
@@ -682,13 +538,13 @@ class AutoEmojiFlowTests(unittest.IsolatedAsyncioTestCase):
                 call_log.append("selector_send")
                 return True
 
-        main._resolve_auto_emoji_turn_permission = mock_resolve
+        main._emoji_sender_engine._resolve_with_log = mock_resolve
         main.meme_selector = MockSelector()
 
         # 执行完整流程
-        allowed = await main._resolve_auto_emoji_turn_permission(event)
+        allowed = await main._emoji_sender_engine._resolve_with_log(event)
         if allowed:
-            await main._try_send_emoji(event, ["happy"], "hello")
+            await main._emoji_sender_engine.try_send_emoji(event, ["happy"], "hello")
 
         # 验证调用顺序：判定先于发送
         self.assertEqual(call_log, ["resolve_permission", "selector_send"])

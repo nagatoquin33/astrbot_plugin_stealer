@@ -1,7 +1,7 @@
 import asyncio
 import json
 import os
-import time
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -17,8 +17,10 @@ from astrbot.api.event.filter import (
 from astrbot.api.message_components import Image as MessageImage
 from astrbot.api.star import Context, Star
 
-from .cache_service import CacheService
 from .core.commands.command_handler import CommandHandler
+from .core.commands.image_mgmt_command import ImageManagementCommand
+from .core.commands.index_rebuild_command import IndexRebuildCommand
+from .core.commands.target_filter_command import TargetFilterCommand
 from .core.config.config import PluginConfig
 from .core.db.database_service import DatabaseService
 from .core.search.meme_selector import MemeSelector
@@ -26,8 +28,9 @@ from .core.events.event_handler import EventHandler
 from .core.events.meme_sender_engine import MemeSenderEngine
 from .core.db.index_manager import IndexManager
 from .core.events.event_context import unwrap_event
-from .core.processing.natural_emotion_analyzer import SmartEmotionMatcher
+from .core.processing.natural_emotion_analyzer import NaturalEmotionAnalyzer
 from .core.processing.image_processor_service import ImageProcessorService
+from .core.processing.image_render_service import ImageRenderService
 from .core.maintenance.service import MaintenanceService
 from .core.sources.source_service import SourceService
 from .core.util.normalization import canonicalize_path, normalize_label_list
@@ -81,21 +84,24 @@ class Main(Star):
         # v2.7.5+ 删除了 _sync_all_config() 实例属性镜像。
 
         # 初始化核心服务类
-        self.cache_service = CacheService(self.cache_dir)
         self.db_service = DatabaseService(self.cache_dir / "emoji.db")
         self.source_service = SourceService(self)
         self.command_handler = CommandHandler(self)
+        self.image_commands = ImageManagementCommand(self)
+        self.index_commands = IndexRebuildCommand(self)
+        self.target_commands = TargetFilterCommand(self)
         self.web_server = None
         self.plugin_api = PluginAPI(self)
         self.plugin_api.register(context)
 
         self.event_handler = EventHandler(self)
         self.image_processor_service = ImageProcessorService(self)
+        self.image_render_service = ImageRenderService(self)
         self.meme_selector = MemeSelector(self)
         self.task_scheduler = TaskScheduler()
 
         # 初始化自然语言情绪分析器（新增）
-        self.smart_emotion_matcher = SmartEmotionMatcher(self)
+        self.emotion_analyzer = NaturalEmotionAnalyzer(self)
 
         self.index_manager = IndexManager(self)
         self._emoji_sender_engine = MemeSenderEngine(self)
@@ -283,6 +289,90 @@ class Main(Star):
         """创建 fire-and-forget task，并复用 TaskScheduler 的异常日志。"""
         return TaskScheduler.create_detached_task(coro, name=name)
 
+    async def _migrate_legacy_category_storage(self) -> None:
+        """迁移旧中文分类目录、SQLite 分类字段和待审核分类。"""
+        mapping = self.plugin_config.get_legacy_category_key_map()
+        if not mapping:
+            return
+
+        db = self.db_service
+        image_exts = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
+        index = db.get_index_cache_readonly() if db else {}
+
+        for old_key, new_key in mapping.items():
+            if old_key == new_key:
+                continue
+            old_dir = self.categories_dir / old_key
+            new_dir = self.plugin_config.ensure_category_dir(new_key)
+
+            for stored_path, meta in list(index.items()):
+                if not isinstance(meta, dict):
+                    continue
+                path_obj = Path(stored_path)
+                in_old_dir = path_obj.parent.name.casefold() == old_key.casefold()
+                if str(meta.get("category", "") or "") != old_key and not in_old_dir:
+                    continue
+
+                target_path = path_obj
+                moved_file = False
+                if in_old_dir:
+                    target_path = new_dir / path_obj.name
+                    if target_path.exists() and target_path.resolve() != path_obj.resolve():
+                        stem, suffix = target_path.stem, target_path.suffix
+                        counter = 1
+                        while target_path.exists():
+                            target_path = new_dir / f"{stem}_legacy{counter}{suffix}"
+                            counter += 1
+                    if path_obj.is_file() and target_path != path_obj:
+                        try:
+                            await asyncio.to_thread(shutil.move, str(path_obj), str(target_path))
+                            moved_file = True
+                        except OSError as exc:
+                            logger.warning(f"旧分类图片迁移失败 {path_obj}: {exc}")
+                            target_path = path_obj
+
+                updates = {"category": new_key}
+                if db:
+                    if str(target_path) != str(path_obj) and moved_file:
+                        if not await db.move_path(str(path_obj), str(target_path), new_key, updates):
+                            await asyncio.to_thread(shutil.move, str(target_path), str(path_obj))
+                            await db.update_path(str(path_obj), updates)
+                    else:
+                        await db.update_path(str(path_obj), updates)
+
+            if old_dir.is_dir():
+                for child in list(old_dir.iterdir()):
+                    if not child.is_file() or child.suffix.lower() not in image_exts:
+                        continue
+                    target = new_dir / child.name
+                    if target.exists():
+                        stem, suffix = target.stem, target.suffix
+                        counter = 1
+                        while target.exists():
+                            target = new_dir / f"{stem}_legacy{counter}{suffix}"
+                            counter += 1
+                    try:
+                        await asyncio.to_thread(shutil.move, str(child), str(target))
+                    except OSError as exc:
+                        logger.warning(f"孤立旧分类图片迁移失败 {child}: {exc}")
+
+            if db:
+                pending_rows, _, _ = db.get_pending_paginated(page=1, page_size=100000)
+                for row in pending_rows:
+                    if str(row.get("category", "") or "") == old_key:
+                        await db.update_pending(int(row["id"]), {"category": new_key})
+
+            try:
+                if old_dir.is_dir() and not any(old_dir.iterdir()):
+                    old_dir.rmdir()
+            except OSError as exc:
+                logger.debug(f"旧分类目录清理跳过 {old_dir}: {exc}")
+
+        logger.info(
+            "旧分类兼容迁移完成: "
+            + ", ".join(f"{old}->{new}" for old, new in mapping.items())
+        )
+
     def _precheck_image_file(self, file_path: str) -> tuple[bool, str]:
         """轻量校验图片，避免明显无效文件进入 VLM 流水线。"""
         path = Path(file_path)
@@ -432,52 +522,6 @@ class Main(Star):
         except Exception as e:
             logger.error(f"更新配置失败: {e}")
 
-    # ===== 门面委托：MemeSenderEngine =====
-    _emoji_turn_state = lambda self, event: self._emoji_sender_engine.emoji_turn_state(event)  # noqa: E731
-    _get_auto_emoji_session_key = (  # noqa: E731
-        lambda self, event: self._emoji_sender_engine.get_auto_emoji_session_key(event)
-    )
-    _should_skip_auto_emoji_by_gate = (  # noqa: E731
-        lambda self, text: self._emoji_sender_engine.should_skip_auto_emoji_by_gate(text)
-    )
-    _is_auto_emoji_cooldown_ready = (  # noqa: E731
-        lambda self, event: self._emoji_sender_engine.is_auto_emoji_cooldown_ready(event)
-    )
-    _normalize_auto_meme_chance = (  # noqa: E731
-        lambda self: self._emoji_sender_engine.normalize_auto_meme_chance()
-    )
-    _resolve_auto_emoji_turn_permission = (  # noqa: E731
-        lambda self, event: self._emoji_sender_engine._resolve_with_log(event)
-    )
-    _claim_auto_emoji_turn = lambda self, event: self._emoji_sender_engine.claim_auto_emoji_turn(  # noqa: E731
-        event
-    )
-    _prune_auto_emoji_cooldowns = (  # noqa: E731
-        lambda self, now: self._emoji_sender_engine.prune_auto_emoji_cooldowns(now)
-    )
-    _mark_auto_emoji_sent = lambda self, event: self._emoji_sender_engine.mark_auto_emoji_sent(  # noqa: E731
-        event
-    )
-    _cancel_pending_auto_emoji = (  # noqa: E731
-        lambda self, event, reason="new_message": self._emoji_sender_engine.cancel_pending_auto_emoji(
-            event, reason
-        )
-    )
-    _schedule_auto_emoji_task = (  # noqa: E731
-        lambda self, event, task: self._emoji_sender_engine.schedule_auto_emoji_task(event, task)
-    )
-    _try_send_emoji = lambda self, event, emotions, text: self._emoji_sender_engine.try_send_emoji(  # noqa: E731
-        event, emotions, text
-    )
-    _get_meme_send_delay = lambda self: self._emoji_sender_engine.get_meme_send_delay()  # noqa: E731
-    _async_analyze_and_send_emoji = (  # noqa: E731
-        lambda self,
-        event,
-        text,
-        emotions,
-        **kw: self._emoji_sender_engine.async_analyze_and_send_emoji(event, text, emotions, **kw)
-    )
-
     @filter.command_group("meme")
     def meme(self):
         """表情包管理指令"""
@@ -523,7 +567,7 @@ class Main(Star):
         target_id: str = "",
     ):
         """管理群聊黑白名单。用法: /meme group <wl|bl> <add|del|clear|show> [群号]"""
-        async for result in self.command_handler.group_filter(
+        async for result in self.target_commands.group_filter(
             event, scope, list_name, action, target, target_id
         ):
             yield result
@@ -591,21 +635,21 @@ class Main(Star):
         page: str = "1",
     ):
         """列出已收集的表情包。用法: /meme list [分类] [数量]"""
-        async for result in self.command_handler.list_images(event, category, limit, page):
+        async for result in self.image_commands.list_images(event, category, limit, page):
             yield result
 
     @filter.permission_type(PermissionType.ADMIN)
     @meme.command("delete")
     async def delete_image(self, event: AstrMessageEvent, identifier: str = ""):
         """删除指定表情包。用法: /meme delete <序号|文件名>"""
-        async for result in self.command_handler.delete_image(event, identifier):
+        async for result in self.image_commands.delete_image(event, identifier):
             yield result
 
     @filter.permission_type(PermissionType.ADMIN)
     @meme.command("blacklist")
     async def blacklist_image(self, event: AstrMessageEvent, identifier: str = ""):
         """拉黑指定表情包。用法: /meme blacklist <序号|文件名>"""
-        async for result in self.command_handler.blacklist_image(event, identifier):
+        async for result in self.image_commands.blacklist_image(event, identifier):
             yield result
 
     @filter.permission_type(PermissionType.ADMIN)
@@ -614,14 +658,14 @@ class Main(Star):
         self, event: AstrMessageEvent, identifier: str = "", scope_mode: str = ""
     ):
         """设置表情包作用域。用法: /meme scope <序号|文件名> <public|local>"""
-        async for result in self.command_handler.set_image_scope(event, identifier, scope_mode):
+        async for result in self.image_commands.set_image_scope(event, identifier, scope_mode):
             yield result
 
     @filter.permission_type(PermissionType.ADMIN)
     @meme.command("rebuild_index")
     async def rebuild_index(self, event: AstrMessageEvent):
         """重建表情包索引，用于修复索引异常或版本迁移。"""
-        async for result in self.command_handler.rebuild_index(event):
+        async for result in self.index_commands.rebuild_index(event):
             yield result
 
     async def _search_meme_candidates(
@@ -669,7 +713,7 @@ class Main(Star):
         query = str(query or "").strip()
         logger.info(f"[Tool] LLM 搜索表情包: {query}")
 
-        turn_state = self._emoji_turn_state(event)
+        turn_state = self._emoji_sender_engine.emoji_turn_state(event)
 
         try:
             if not query:
@@ -793,7 +837,7 @@ class Main(Star):
         """
         event = unwrap_event(event)
         logger.info(f"[Tool] LLM 选择发送表情包编号: {emoji_id}")
-        turn_state = self._emoji_turn_state(event)
+        turn_state = self._emoji_sender_engine.emoji_turn_state(event)
 
         try:
             if not self.is_send_enabled_for_event(event):
@@ -840,7 +884,7 @@ class Main(Star):
             sent_as_sticker = send_mode == "telegram_sticker"
 
             await self.meme_selector.record_emoji_usage(path, trigger="llm_tool")
-            await self._mark_auto_emoji_sent(event)
+            await self._emoji_sender_engine.mark_auto_emoji_sent(event)
             turn_state.mark_active_sent()
 
             mode_desc = "Telegram贴纸" if sent_as_sticker else "图片"
@@ -1180,7 +1224,7 @@ class Main(Star):
         """消息监听：偷取消息中的图片并分类存储。"""
         # 每条新消息到达时重置回合状态，防止上一轮的标记影响当前对话
         if getattr(self, "auto_meme_cancel_on_new_message", True):
-            self._cancel_pending_auto_emoji(event)
+            self._emoji_sender_engine.cancel_pending_auto_emoji(event)
         self._emoji_sender_engine.reset_turn_state(event)
         event_handler = self._get_event_handler(
             log_message="[Stealer] event_handler 未初始化，跳过消息处理",
@@ -1222,7 +1266,7 @@ class Main(Star):
         )
         if not sent_image:
             return
-        self._emoji_turn_state(event).mark_active_sent()
+        self._emoji_sender_engine.emoji_turn_state(event).mark_active_sent()
         logger.debug("[Stealer] LLM 已通过通用消息工具发送图片，跳过本轮被动表情")
 
     async def _schedule_passive_emoji_response(
@@ -1235,14 +1279,14 @@ class Main(Star):
         normalized_text = str(text or "").strip()
         if not normalized_text:
             return False
-        turn_state = self._emoji_turn_state(event)
+        turn_state = self._emoji_sender_engine.emoji_turn_state(event)
         if turn_state.is_active_sent():
             return False
 
-        turn_allowed = await self._resolve_auto_emoji_turn_permission(event)
-        if not turn_allowed or self._should_skip_auto_emoji_by_gate(normalized_text):
+        turn_allowed = await self._emoji_sender_engine._resolve_with_log(event)
+        if not turn_allowed or self._emoji_sender_engine.should_skip_auto_emoji_by_gate(normalized_text):
             return False
-        if not self._claim_auto_emoji_turn(event):
+        if not self._emoji_sender_engine.claim_auto_emoji_turn(event):
             return False
 
         user_message = ""
@@ -1251,7 +1295,7 @@ class Main(Star):
         except Exception:
             pass
         task = self._safe_create_task(
-            self._async_analyze_and_send_emoji(
+            self._emoji_sender_engine.async_analyze_and_send_emoji(
                 event,
                 normalized_text,
                 [],
@@ -1259,7 +1303,7 @@ class Main(Star):
             ),
             name="emoji_analyze_passive",
         )
-        self._schedule_auto_emoji_task(event, task)
+        self._emoji_sender_engine.schedule_auto_emoji_task(event, task)
         return True
 
     @staticmethod
@@ -1320,6 +1364,7 @@ class Main(Star):
             ):
                 raise RuntimeError("event_handler 未初始化")
             self.plugin_config.ensure_base_dirs()
+            await self._migrate_legacy_category_storage()
             self.plugin_config.ensure_category_dirs(
                 list(self.plugin_config.categories or []) or list(
                     self.plugin_config.DEFAULT_CATEGORIES
@@ -1344,7 +1389,7 @@ class Main(Star):
             except Exception as e:
                 logger.error(f"初始化提示词失败: {e}")
             await self.index_manager.load_index()
-            await self._migrate_blacklist_to_db()
+            await self.index_manager.migrate_blacklist()
             await self.maintenance.run_startup_cleanup()
             self._sync_image_processor_from_runtime()
             self._sync_similarity_weights()  # 启动时把持久化的文字距离权重同步到 text_similarity 模块
@@ -1379,11 +1424,6 @@ class Main(Star):
             await self.task_scheduler.cancel_task("capacity_control_loop")
         except Exception:
             pass
-        if self.cache_service:
-            try:
-                await self.cache_service.cleanup()
-            except Exception:
-                pass
         if self.source_service:
             try:
                 await self.source_service.close()
@@ -1405,6 +1445,7 @@ class Main(Star):
         if self.image_processor_service:
             try:
                 self.image_processor_service.cleanup()
+                self.image_render_service.cleanup()
             except Exception:
                 pass
         if self.command_handler:
@@ -1427,28 +1468,3 @@ class Main(Star):
                 pass
         await super().terminate()
         logger.info("[Stealer] 插件资源清理完成")
-
-    async def _migrate_blacklist_to_db(self) -> None:
-        """将旧的 blacklist_cache.json 迁移到数据库 blacklist 表。
-
-        幂等：DB 已有同样 hash 时跳过。迁移后保留 JSON 文件直到下一次写黑名单不再写它，
-        避免在长期运行实例中破坏现有读取链路。
-        """
-        try:
-            db = getattr(self, "db_service", None)
-            if db is None or not hasattr(db, "add_blacklist_batch"):
-                return
-            cached = self.cache_service.get_cache("blacklist_cache") or {}
-            if not isinstance(cached, dict) or not cached:
-                return
-            hashes: dict[str, int] = {}
-            for h, ts in cached.items():
-                try:
-                    hashes[str(h)] = int(ts) if ts else int(time.time())
-                except Exception:
-                    hashes[str(h)] = 0
-            imported = await db.add_blacklist_batch(hashes)
-            if imported > 0:
-                logger.info(f"[DB] 黑名单从缓存迁移完成，新增 {imported} 条")
-        except Exception as e:
-            logger.warning(f"[DB] 黑名单迁移失败: {e}")
