@@ -13,6 +13,7 @@ from .meme_selection_strategy import MemeSelectionStrategy
 from ..events.event_context import unwrap_event
 from .meme_scope_service import MemeScopeService
 from .meme_smart_select_service import MemeSmartSelectService
+from .jev_selector import JevSelector
 from .search_features import entry_category, normalize_category
 
 
@@ -36,6 +37,52 @@ class MemeSelector:
         self._smart_select_service = MemeSmartSelectService(
             plugin_instance, self._search_engine, self._selection_strategy, self._scope_service
         )
+        self._jev_selector = JevSelector(plugin_instance)
+
+    async def select_emoji_with_jev(
+        self, event: AstrMessageEvent, text: str, *, user_message: str = "",
+    ) -> str | None:
+        """相关度粗筛 Top 10 后由 JEV 选图；不提前更新使用记录。"""
+        if not self._check_group_allowed(event):
+            return None
+        history = await self._jev_selector.get_history(event)
+        async with self._selection_lock:
+            ranked = await self._smart_select_service._rank_emoji_candidates(
+                "", f"{user_message[:2000]}\n{text[:2000]}", event=event,
+                deterministic=True,
+            )
+            idx = self._get_index()
+            candidates = []
+            seen = set()
+            for item in ranked:
+                path = item[0]
+                canon = canonicalize_path(path)
+                data = idx.get(path) or idx.get(canon)
+                if canon in seen or not isinstance(data, dict):
+                    continue
+                if not Path(path).is_file() or not self._is_entry_allowed_for_event(data, event):
+                    continue
+                seen.add(canon)
+                candidates.append((path, data))
+                if len(candidates) == JevSelector.TOP_K:
+                    break
+        return await self._jev_selector.select(
+            candidates, history=history, user_message=user_message, reply=text,
+        )
+
+    async def send_jev_selection(self, event: AstrMessageEvent, path: str, text: str) -> bool:
+        """网络请求及延迟后重新核验候选，再走既有发送/计数链路。"""
+        idx = self._get_index()
+        data = idx.get(path) or idx.get(canonicalize_path(path))
+        if not isinstance(data, dict) or not Path(path).is_file():
+            return False
+        if not self._is_entry_allowed_for_event(data, event):
+            return False
+        sent = await self.send_emoji_with_text(event, path, text)
+        if sent:
+            logger.debug(f"[JEV] 已发送图片: {path}")
+            self._selection_strategy._update_recent_usage(entry_category(data), canonicalize_path(path))
+        return sent
 
     def _get_index(self) -> dict[str, Any]:
         return self._search_engine.get_index()

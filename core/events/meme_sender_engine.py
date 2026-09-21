@@ -9,6 +9,7 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
 from ..processing.natural_emotion_analyzer import EmotionQuery
+from ..search.jev_selector import JevSelector, JevSelectionError
 from .event_context import get_event_session_key
 
 
@@ -335,8 +336,22 @@ class MemeSenderEngine:
             task_start = asyncio.get_event_loop().time()
             final_emotions = list(emotions or [])
 
+            jev_path = None
+            use_jev = JevSelector.enabled(self.plugin.plugin_config)
+            if use_jev:
+                try:
+                    jev_path = await self.plugin.meme_selector.select_emoji_with_jev(
+                        event, text, user_message=user_message,
+                    )
+                except JevSelectionError as exc:
+                    logger.warning(f"[JEV] 选图失败，回退小模型链路: {exc}")
+                    use_jev = False
+                else:
+                    if jev_path is None:
+                        return
+
             search_text = text
-            if getattr(self.plugin, "enable_natural_emotion_analysis", False) and hasattr(
+            if not use_jev and getattr(self.plugin, "enable_natural_emotion_analysis", False) and hasattr(
                 self.plugin, "emotion_analyzer"
             ):
                 analyzed = await self.plugin.emotion_analyzer.analyze_for_reply(
@@ -367,7 +382,10 @@ class MemeSenderEngine:
             if delay > 0:
                 await asyncio.sleep(delay)
 
-            sent = await self.try_send_emoji(event, final_emotions, search_text or text)
+            if use_jev:
+                sent = await self.plugin.meme_selector.send_jev_selection(event, jev_path, text)
+            else:
+                sent = await self.try_send_emoji(event, final_emotions, search_text or text)
             if sent:
                 await self.mark_auto_emoji_sent(event)
                 self.emoji_turn_state(event).mark_active_sent()

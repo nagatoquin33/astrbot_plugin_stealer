@@ -147,6 +147,7 @@ class MemeSmartSelectService:
         context_text: str,
         event: AstrMessageEvent | None,
         prior_categories: set[str],
+        *, require_files: bool = False,
     ) -> tuple[list[str], dict[str, float]]:
         """全文召回，分类只作先验。顺序：图上文字 → 文本嵌入 → BM25 → 分类桶兜底。"""
         recalled: list[str] = []
@@ -156,7 +157,7 @@ class MemeSmartSelectService:
         def _add(paths: list[str]) -> None:
             for path in paths:
                 canon = canonicalize_path(path)
-                if not path or canon in seen:
+                if not path or canon in seen or (require_files and not os.path.isfile(path)):
                     continue
                 data = idx.get(path) or idx.get(canon)
                 if not isinstance(data, dict):
@@ -219,17 +220,52 @@ class MemeSmartSelectService:
         return recalled[: max(self.SMART_RECALL_K, self.SMART_OVERLAY_RECALL_LIMIT)], embedding_paths
 
     async def _select_emoji_smart_impl(
+        self, category: str, context_text: str,
+        candidate_categories: list[str] | None = None,
+        event: AstrMessageEvent | None = None,
+    ) -> str | None:
+        """保留小模型链路的前三候选加权随机选择。"""
+        candidates = await self._rank_emoji_candidates(
+            category, context_text, candidate_categories, event,
+        )
+        if not candidates:
+            return None
+        try:
+            top_candidates = candidates[: min(3, len(candidates))]
+            if len(top_candidates) > 1:
+                weights = [item[1] for item in top_candidates]
+                total_weight = sum(weights)
+                if total_weight > 0:
+                    selected = random.choices(top_candidates, weights=weights, k=1)[0]
+                    self._selection_strategy._update_recent_usage(selected[5], selected[0])
+                    return selected[0]
+
+            result = candidates[0]
+            self._selection_strategy._update_recent_usage(result[5], result[0])
+            logger.debug(
+                f"[智能选择] 分类={category}, 候选数={len(candidates)}, "
+                f"结果={result[5]}, 分数={result[1]:.2f} (desc={result[2]:.2f}, tag={result[3]:.2f}, scene={result[4]:.2f})"
+            )
+            return result[0]
+
+        except Exception as e:
+            logger.error(f"智能选择失败: {e}")
+            return None
+
+    async def _rank_emoji_candidates(
         self,
         category: str,
         context_text: str,
         candidate_categories: list[str] | None = None,
         event: AstrMessageEvent | None = None,
-    ) -> str | None:
-        """智能选择表情包实现（内部方法）。"""
+        *,
+        deterministic: bool = False,
+    ) -> list[tuple]:
+        """召回并评分；JEV 模式过滤文件并禁用随机加分和提前停止。"""
         try:
             idx = self._search_engine.get_index()
             if not idx:
-                return None
+                return []
 
             allowed_categories = {
                 item for item in (candidate_categories or [category]) if item
@@ -242,10 +278,10 @@ class MemeSmartSelectService:
             query_token_set = set(query_tokens)
 
             recalled_paths, embedding_paths = await self._recall_candidate_paths(
-                idx, context_text, event, allowed_categories
+                idx, context_text, event, allowed_categories, require_files=deterministic,
             )
             if not recalled_paths:
-                return None
+                return []
 
             prefiltered_entries: list[
                 tuple[str, dict[str, Any], str, list[str], list[str], tuple[str, ...], float]
@@ -254,12 +290,12 @@ class MemeSmartSelectService:
                 data = idx.get(file_path) or idx.get(canonicalize_path(file_path))
                 if not isinstance(data, dict):
                     continue
-                entry_category = entry_category(data)
+                item_category = entry_category(data)
                 tags = parse_tags(data.get("tags", []))
                 scenes = parse_tags(data.get("scenes", []))
                 overlay = str(data.get("overlay_text") or "")
                 entry_text = " ".join(
-                    [overlay, entry_category, str(data.get("desc", "") or "")] + tags + scenes
+                    [overlay, item_category, str(data.get("desc", "") or "")] + tags + scenes
                 )
                 entry_tokens = tokenize_for_bm25(entry_text)
                 fast_score = 0.0
@@ -268,15 +304,15 @@ class MemeSmartSelectService:
                     if overlap:
                         fast_score = len(overlap) / max(1, len(query_token_set))
                 prefiltered_entries.append(
-                    (file_path, data, entry_category, tags, scenes, entry_tokens, fast_score)
+                    (file_path, data, item_category, tags, scenes, entry_tokens, fast_score)
                 )
 
             SMART_EARLY_STOP_COUNT = 5
             SMART_EARLY_STOP_THRESHOLD = 0.7
 
-            for file_path, data, entry_category, tags, scenes, _, fast_score in prefiltered_entries:
+            for file_path, data, item_category, tags, scenes, _, fast_score in prefiltered_entries:
                 desc, tag_words, scene_words, _, _ = prepare_entry_text_features(
-                    entry_category,
+                    item_category,
                     str(data.get("desc", "")),
                     tuple(tags),
                     tuple(scenes),
@@ -323,9 +359,9 @@ class MemeSmartSelectService:
                             overlay_score = min(1.0, hits / max(len(pieces), 1) + 0.35)
 
                 entry_emotions = set(parse_tags(data.get("emotions", [])))
-                if not entry_emotions and entry_category:
-                    entry_emotions = {entry_category}
-                if entry_category in allowed_categories or (entry_emotions & allowed_categories):
+                if not entry_emotions and item_category:
+                    entry_emotions = {item_category}
+                if item_category in allowed_categories or (entry_emotions & allowed_categories):
                     category_bonus = 0.04
                 else:
                     category_bonus = 0.0
@@ -352,7 +388,7 @@ class MemeSmartSelectService:
                 if base_score < 0.15:
                     if desc_score > 0.1:
                         history_penalty = self._selection_strategy._calculate_recent_penalty(
-                            entry_category, canonicalize_path(file_path)
+                            item_category, canonicalize_path(file_path)
                         )
                         adjusted_score = max(0.0, desc_score - history_penalty)
                         if adjusted_score > 0.05:
@@ -363,14 +399,14 @@ class MemeSmartSelectService:
                                     desc_score,
                                     0.0,
                                     0.0,
-                                    entry_category,
+                                    item_category,
                                 )
                             )
                     continue
 
-                diversity_bonus = random.uniform(0, 0.15)
+                diversity_bonus = 0.0 if deterministic else random.uniform(0, 0.15)
                 canon_path = canonicalize_path(file_path)
-                history_penalty = self._selection_strategy._calculate_recent_penalty(entry_category, canon_path)
+                history_penalty = self._selection_strategy._calculate_recent_penalty(item_category, canon_path)
 
                 final_score = max(0.0, base_score + diversity_bonus - history_penalty)
                 if final_score > 0.1:
@@ -381,42 +417,28 @@ class MemeSmartSelectService:
                             desc_score,
                             tag_score,
                             scene_score,
-                            entry_category,
+                            item_category,
                         )
                     )
 
                 # 提前终止：若已有足够高分候选，跳过剩余低相关条目
                 high_quality = [c for c in candidates if c[1] >= SMART_EARLY_STOP_THRESHOLD]
-                if len(high_quality) >= SMART_EARLY_STOP_COUNT:
+                if not deterministic and len(high_quality) >= SMART_EARLY_STOP_COUNT:
                     break
 
-            if not candidates:
+            if deterministic:
+                candidates.extend(low_score_candidates)
+            elif not candidates:
                 candidates = low_score_candidates
 
             if not candidates:
-                return None
+                return []
 
             candidates.sort(key=lambda item: item[1], reverse=True)
-            top_candidates = candidates[: min(3, len(candidates))]
-            if len(top_candidates) > 1:
-                weights = [item[1] for item in top_candidates]
-                total_weight = sum(weights)
-                if total_weight > 0:
-                    selected = random.choices(top_candidates, weights=weights, k=1)[0]
-                    self._selection_strategy._update_recent_usage(selected[5], selected[0])
-                    return selected[0]
-
-            result = candidates[0]
-            self._selection_strategy._update_recent_usage(result[5], result[0])
-            logger.debug(
-                f"[智能选择] 分类={category}, 候选数={len(candidates)}, "
-                f"结果={result[5]}, 分数={result[1]:.2f} (desc={result[2]:.2f}, tag={result[3]:.2f}, scene={result[4]:.2f})"
-            )
-            return result[0]
-
+            return candidates
         except Exception as e:
-            logger.error(f"智能选择失败: {e}")
-            return None
+            logger.error(f"智能候选评分失败: {e}")
+            return []
 
     # ═══════════════════════════════════════════════════
     #  嵌入检索

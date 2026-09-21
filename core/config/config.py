@@ -61,6 +61,9 @@ class PluginConfig(BaseModel):
     image_processing_cooldown: int = 30
     enable_natural_emotion_analysis: bool = True  # 情绪识别模式
     emotion_analysis_provider_id: str = ""  # 情绪分析专用模型
+    enable_jev: bool = False  # 需同时开启小模型分析；使用官方 JEV 决策 Top 10
+    typesafe_api_key: str = ""  # TypeSafe (jev) API key，console.typesafe.ai 获取
+    typesafe_api_base_url: str = "https://api.typesafe.ai"  # 官方地址或兼容代理
     smart_meme_selection: bool = True  # 智能表情包选择
 
     # === 待审核池 / 嵌入检索 ===
@@ -274,7 +277,10 @@ class PluginConfig(BaseModel):
     def __init__(self, config: AstrBotConfig | None, context: Context | None = None):
         # 1. 初始化 Pydantic 模型
         # config 可能是 AstrBotConfig (dict-like) 或 None
-        initial_data = config if config else {}
+        initial_data = dict(config) if config else {}
+        # 兼容旧后端下拉框；显式的新开关优先，关闭后不会被旧值重新开启。
+        if "enable_jev" not in initial_data:
+            initial_data["enable_jev"] = initial_data.get("emotion_backend") == "typesafe"
         super().__init__(**initial_data)
 
         # 2. 保存 AstrBotConfig 引用以便回写

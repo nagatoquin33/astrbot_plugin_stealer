@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.2] - 2026-09-22
+
+### added
+- 新增可选 JEV 表情决策链路：本地相关度粗筛最多 10 张候选，结合最近对话、本轮消息和回复，由 TypeSafe Choice 选择候选或 `none`
+- 新增 JEV 开关、TypeSafe API Key 和 API Base URL 配置；默认使用官方地址，也兼容可信代理的 `/v1` 或完整 endpoint
+
+### changed
+- 保留传统轻量 LLM 查询改写链路；仅在同时开启小模型分析和 JEV 时启用候选决策，JEV 请求失败后回退传统 LLM
+- JEV 选择规则优先保持助手说话立场、指代和互动意图，并将原始响应 JSON 与实际发送路径分开记录为 debug 日志
+- JEV 粗筛按确定性相关度排序，过滤文件缺失、重复及当前会话不可见的候选，发送前再次校验文件和作用域
+
+### fixed
+- 修复智能候选评分中局部变量覆盖 `entry_category()` 函数导致智能选图持续失败并退回随机选择的问题
+
 ## [3.1.1] - 2026-09-20
 
 ### added

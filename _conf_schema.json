@@ -132,13 +132,13 @@
     "invisible": true
   },
   "enable_natural_emotion_analysis": {
-    "description": "智能提取检索词",
+    "description": "启用小模型分析",
     "type": "bool",
     "default": true,
-    "hint": "开启后用轻量模型从 AI 回复中提取检索词和情绪先验，增强表情包匹配；是否发送仍由概率/冷却等原有门控决定。关闭后直接用 AI 回复原文检索。"
+    "hint": "开启后启用模型辅助选图：未勾选 JEV 时使用下方传统 LLM 提取检索词和情绪先验；同时勾选 JEV 时使用官方 JEV 决策。关闭后直接用回复原文检索，JEV 开关也不生效。发送仍受概率和冷却等门控约束。"
   },
   "emotion_analysis_provider_id": {
-    "description": "情绪分析专用模型",
+    "description": "传统 LLM 分析模型",
     "type": "string",
     "hint": "留空则使用当前会话模型。小参数量模型即可胜任，建议使用轻量免费模型以降低延迟和消耗。",
     "_special": "select_provider",
@@ -149,6 +149,24 @@
     "type": "text",
     "default": "你是表情包检索词提取器。根据对话从 AI 回复中提取能搜到表情包的关键词或短句，并给出 1~3 个情绪先验。\n可选情绪分类：{emotion_list}\n\n任务：\n1. 只从回复里摘录关键词或短句，不要总结成抽象概念。\n2. 如果没有明显关键词，就用回复原文。\n3. emotions 从给定分类里选 1~3 个，按相关度排序。每个分类机会均等，不要把某一类当默认。\n\n用户消息：{user_message}\n回复：{llm_reply}\n\n输出示例：\n{\"query\": \"摸鱼 下班 辛苦了\", \"emotions\": [\"tired\", \"sigh\"]}\n",
     "hint": "生成检索词和 1~3 个情绪先验。支持占位符：{emotion_list}、{llm_reply}、{user_message}。为空时使用默认提示词。兼容旧的单分类名输出。"
+  },
+  "enable_jev": {
+    "description": "启用 JEV 选图",
+    "type": "bool",
+    "default": false,
+    "hint": "需同时开启“小模型分析”。未勾选时使用传统 LLM；勾选后由 JEV 从最多 10 张粗筛候选中选图。默认使用官方接口，也可在下方配置可信的 API Base URL；模型固定为 jev-latest。会发送候选元数据、最近约 3 轮文本及本轮对话；选择 none 时不发送，缺少 key 或调用失败时回退 LLM。"
+  },
+  "typesafe_api_key": {
+    "description": "TypeSafe API Key",
+    "type": "string",
+    "default": "",
+    "hint": "在 console.typesafe.ai 创建。同时勾选“小模型分析”和“JEV 选图”后使用；留空时回退传统 LLM。"
+  },
+  "typesafe_api_base_url": {
+    "description": "TypeSafe API Base URL",
+    "type": "string",
+    "default": "https://api.typesafe.ai",
+    "hint": "默认使用 TypeSafe 官方 API。通常只填写到域名；也兼容以 /v1 结尾或完整的 /v1/systemone 地址。API Key 会发送到此地址，请仅配置可信服务。"
   },
   "_model_section": {
     "description": "=== 模型配置 ===",
