@@ -211,6 +211,7 @@ QWEN.md
 AGENTS.md
 AstrBot插件开发深度文档.md
 .playwright-mcp/
+.webui-preview/
 
 # Tests are tracked in version control (tests/)
 .vscode/settings.json

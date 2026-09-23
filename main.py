@@ -449,17 +449,12 @@ class Main(Star):
             return
         event_handler.consume_force_capture(event)
 
-    def _apply_plugin_config_updates(self, config_dict: dict) -> None:
-        """将更新字典写回 PluginConfig，跳过已从 schema 移除的旧键。"""
-        fields = getattr(type(self.plugin_config), "model_fields", None)
-        if fields is None:
-            fields = getattr(type(self.plugin_config), "__fields__", {})
-        for k, v in config_dict.items():
-            if fields is not None and k not in fields:
-                logger.debug(f"[Config] 忽略已移除的配置键: {k}")
-                continue
-            setattr(self.plugin_config, k, v)
+    def _apply_plugin_config_updates(self, config_dict: dict) -> bool:
+        """持久化已知配置项并同步运行时权重。"""
+        if not self.plugin_config.update_config(config_dict):
+            return False
         self._sync_similarity_weights()
+        return True
 
     def _sync_similarity_weights(self) -> None:
         """把文字距离融合权重同步到 text_similarity 模块（魔法数字 → 配置项）。"""
@@ -503,24 +498,26 @@ class Main(Star):
             ),
         )
 
-    def update_config(self, config_dict: dict):
+    def update_config(self, config_dict: dict) -> bool:
         """从配置字典更新插件配置。"""
         if not config_dict:
-            return
+            return False
         try:
-            if self.plugin_config:
-                self._apply_plugin_config_updates(config_dict)
-                self._sync_image_processor_from_runtime()
-                try:
-                    cats = list(self.plugin_config.categories or []) or list(
-                        self.plugin_config.DEFAULT_CATEGORIES
-                    )
-                    self.plugin_config.ensure_category_dirs(cats)
-                except Exception as e:
-                    logger.warning(f"[Config] 创建分类目录失败: {e}")
-                logger.debug("[Config] 配置已更新，下次 LLM 请求将使用新分类")
+            if self.plugin_config is None or not self._apply_plugin_config_updates(config_dict):
+                return False
+            self._sync_image_processor_from_runtime()
+            try:
+                cats = list(self.plugin_config.categories or []) or list(
+                    self.plugin_config.DEFAULT_CATEGORIES
+                )
+                self.plugin_config.ensure_category_dirs(cats)
+            except Exception as e:
+                logger.warning(f"[Config] 创建分类目录失败: {e}")
+            logger.debug("[Config] 配置已保存，后续处理将使用新配置")
+            return True
         except Exception as e:
             logger.error(f"更新配置失败: {e}")
+            return False
 
     @filter.command_group("meme")
     def meme(self):
@@ -566,7 +563,7 @@ class Main(Star):
         target: str = "",
         target_id: str = "",
     ):
-        """管理群聊黑白名单。用法: /meme group <wl|bl> <add|del|clear|show> [群号]"""
+        """管理发送与收集目标名单。用法: /meme group <send|steal> <wl|bl> <add|del|clear|show> [目标]"""
         async for result in self.target_commands.group_filter(
             event, scope, list_name, action, target, target_id
         ):
@@ -634,7 +631,7 @@ class Main(Star):
         limit: str = "10",
         page: str = "1",
     ):
-        """列出已收集的表情包。用法: /meme list [分类] [数量]"""
+        """列出已收集的表情包。用法: /meme list [分类] [每页数量] [页码]"""
         async for result in self.image_commands.list_images(event, category, limit, page):
             yield result
 

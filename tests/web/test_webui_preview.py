@@ -123,7 +123,7 @@ def test_shared_emotion_component_handles_multiple_and_legacy_labels():
     script = r"""
 const fs = require('fs'), vm = require('vm');
 let options;
-const source = fs.readFileSync(process.argv[1], 'utf8').replace(/^import .*?;\r?\n/, '');
+const source = fs.readFileSync(process.argv[1], 'utf8').replace(/^import .*?;\r?\n/gm, '');
 vm.runInNewContext(source, {
     Vue: { createApp(value) { options = value; return { mount() {} }; } },
     TEMPLATE: '', EMOTION_LABELS_TEMPLATE: '',
@@ -140,6 +140,52 @@ console.log(JSON.stringify(items.map(item => options.components.EmotionLabels.co
     assert json.loads(result.stdout) == [
         ["dumb", "sigh", "tired"], ["happy"], ["dumb", "sigh", "tired"], ["happy", "sad"],
     ]
+
+
+def test_external_import_origin_shows_channel_in_preview():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is needed to execute the frontend source formatter")
+    script = r"""
+const { pathToFileURL } = require('url');
+(async () => {
+    const { formatItemOriginLabel } = await import(pathToFileURL(process.argv[1]).href);
+    const labels = {
+        'pages.dashboard.fields.add_method_external': 'External import',
+        'pages.dashboard.fields.source_channel_pack': 'Meme pack',
+        'pages.dashboard.fields.source_channel_github': 'GitHub',
+        'pages.dashboard.fields.source_channel_http_json': 'JSON API',
+    };
+    const t = (key, fallback) => labels[key] || fallback;
+    const formatTarget = (target) => target ? `Group ${target.slice(6)}` : 'Not recorded';
+    const items = [
+        { origin_target: 'group:123', source: 'auto' },
+        { source: 'external:meme_pack', add_method: 'external_import' },
+        { origin_target: 'group:123', source: 'external:github' },
+        { source: 'external:http_json' },
+        { add_method: 'external_import' },
+        { source: 'manual' },
+    ];
+    console.log(JSON.stringify(items.map((item) => formatItemOriginLabel(item, formatTarget, t))));
+})().catch((error) => { console.error(error); process.exit(1); });
+"""
+    result = subprocess.run(
+        [node, "-e", script, str(DASHBOARD_DIR / "source_labels.js")],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    )
+    assert json.loads(result.stdout) == [
+        "Group 123",
+        "External import · Meme pack",
+        "Group 123 · External import · GitHub",
+        "External import · JSON API",
+        "External import",
+        "Not recorded",
+    ]
+    template = (DASHBOARD_DIR / "template.js").read_text(encoding="utf-8")
+    assert template.count("formatItemOrigin(previewItem)") == 2
 
 
 def test_light_theme_character_filter_uses_readable_surface():

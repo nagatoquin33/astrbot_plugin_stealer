@@ -78,3 +78,78 @@ def test_registered_command_methods_route_to_their_handlers():
         "status", "tag_stats", "clean", "enforce_capacity", "list_images",
         "delete_image", "blacklist_image", "set_image_scope", "rebuild_index",
     } <= delegated
+
+
+@pytest.mark.asyncio
+async def test_clean_command_does_not_run_as_part_of_tag_stats():
+    from core.commands.command_handler import CommandHandler
+
+    cleaned = []
+
+    async def clean_raw():
+        cleaned.append(True)
+        return 2
+
+    def get_tag_stats(_top_n):
+        return {
+            "total_emojis": 1,
+            "total_with_tags": 1,
+            "zero_tag_count": 0,
+            "top_tags": [{"tag": "happy", "count": 1}],
+            "single_use_tags": [],
+            "top_scenes": [],
+        }
+
+    plugin = SimpleNamespace(
+        db_service=SimpleNamespace(get_tag_stats=get_tag_stats),
+        event_handler=SimpleNamespace(_clean_raw_directory=clean_raw),
+    )
+    handler = CommandHandler(plugin)
+    event = SimpleNamespace(plain_result=lambda text: text)
+
+    stats = [message async for message in handler.tag_stats(event)]
+    assert len(stats) == 1
+    assert "标签统计" in stats[0]
+    assert cleaned == []
+
+    invalid = [message async for message in handler.clean(event, "categories")]
+    assert "用法: /meme clean" in invalid[0]
+    assert cleaned == []
+
+    results = [message async for message in handler.clean(event)]
+    assert results == ["✅ raw目录清理完成，共删除 2 张原始图片"]
+    assert cleaned == [True]
+
+
+@pytest.mark.asyncio
+async def test_toggle_commands_persist_and_report_save_failure(monkeypatch):
+    from astrbot_plugin_stealer.main import Main
+
+    backing = {
+        "steal_meme": False,
+        "auto_send_meme": False,
+        "enable_natural_emotion_analysis": False,
+    }
+    plugin = Main(SimpleNamespace(register_web_api=lambda *_args: None), backing)
+    event = SimpleNamespace(plain_result=lambda text: text)
+
+    for name, key, expected in (
+        ("meme_on", "steal_meme", True),
+        ("meme_off", "steal_meme", False),
+        ("auto_on", "auto_send_meme", True),
+        ("auto_off", "auto_send_meme", False),
+    ):
+        messages = [message async for message in getattr(plugin, name)(event)]
+        assert messages and not messages[0].startswith("❌")
+        assert backing[key] is expected
+
+    messages = [
+        message async for message in plugin.toggle_natural_analysis(event, "ON")
+    ]
+    assert messages and not messages[0].startswith("❌")
+    assert backing["enable_natural_emotion_analysis"] is True
+
+    monkeypatch.setattr(plugin, "update_config", lambda _updates: False)
+    failed = [message async for message in plugin.meme_off(event)]
+    assert failed and failed[0].startswith("❌")
+    assert backing["steal_meme"] is False

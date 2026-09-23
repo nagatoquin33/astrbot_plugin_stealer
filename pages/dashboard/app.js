@@ -1,30 +1,10 @@
 import { TEMPLATE, EMOTION_LABELS_TEMPLATE } from './template.js';
+import { ImagePreviewClient } from './image_preview_client.js';
+import { createSourceActions } from './source_actions.js';
+import { formatItemOriginLabel } from './source_labels.js';
 const { createApp, ref, reactive, computed, onMounted, onUnmounted, nextTick } = Vue;
 
 const PLACEHOLDER = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
-
-function createLRUCache(maxSize) {
-    const cache = new Map();
-    return {
-        get(key) {
-            if (!cache.has(key)) return null;
-            const value = cache.get(key);
-            cache.delete(key);
-            cache.set(key, value);
-            return value;
-        },
-        set(key, value) {
-            if (cache.has(key)) cache.delete(key);
-            else if (cache.size >= maxSize) {
-                const firstKey = cache.keys().next().value;
-                cache.delete(firstKey);
-            }
-            cache.set(key, value);
-        },
-        has(key) { return cache.has(key); },
-        clear() { cache.clear(); }
-    };
-}
 
 function hashToColor(hash) {
     if (!hash) return '#1e2230';
@@ -98,6 +78,10 @@ createApp({
         const pendingPageSize = ref(24);
         let pendingFetchLock = false;
         const bridge = window.AstrBotPluginPage;
+        const imagePreviewClient = new ImagePreviewClient(
+            (path, params) => bridge.apiGet(path, params),
+            { maxConcurrent: 4 },
+        );
         const localeVersion = ref(0);
 
         const getLocale = () => {
@@ -169,9 +153,6 @@ createApp({
             pageSize.value = targetCols * Math.max(2, Math.floor(rows * 0.75));
             pendingPageSize.value = targetCols * Math.max(2, rows - 1);
         };
-
-        const thumbnailCache = createLRUCache(300);
-        const inflightThumbs = new Map();
 
         const previewOpen = ref(false);
         const previewItem = ref(null);
@@ -305,7 +286,6 @@ createApp({
             max_items: 2000,
         });
         const sourceJob = ref(null);
-        let sourcePollInterval = null;
         let sourceDefaultsApplied = false;
         let imgObserver = null;
 
@@ -350,6 +330,7 @@ createApp({
             if (raw.startsWith('user:')) return `${t('pages.dashboard.messages.origin_user', 'User')} ${raw.slice(5)}`;
             return raw;
         };
+        const formatItemOrigin = (item) => formatItemOriginLabel(item, formatOriginTarget, t);
 
         const getScopeLabel = (scopeMode) => (
             String(scopeMode || 'public').toLowerCase() === 'local'
@@ -582,30 +563,10 @@ createApp({
         const originalDataUrls = reactive({});
 
         const loadImageData = async (hash) => {
-            if (!hash) return;
-            const cached = thumbnailCache.get(hash);
-            if (cached) { imageDataUrls[hash] = cached; return; }
-            if (imageDataUrls[hash]) return;
-            if (inflightThumbs.has(hash)) {
-                const pending = await inflightThumbs.get(hash);
-                if (pending?.url) imageDataUrls[hash] = pending.url;
-                return;
-            }
-            const request = (async () => {
-                try {
-                    return await bridge.apiGet('thumbnail', { hash, size: 300 });
-                } catch (e) {
-                    console.error('Failed to load thumbnail:', hash, e);
-                    return null;
-                } finally {
-                    inflightThumbs.delete(hash);
-                }
-            })();
-            inflightThumbs.set(hash, request);
-            const data = await request;
+            if (!hash || imageDataUrls[hash]) return;
+            const data = await imagePreviewClient.loadThumbnail(hash);
             if (data && data.url) {
                 imageDataUrls[hash] = data.url;
-                thumbnailCache.set(hash, data.url);
             }
         };
 
@@ -636,8 +597,7 @@ createApp({
             placeMcTooltip(event);
         };
 
-        const originalCache = createLRUCache(4);
-        const inflightOriginals = new Map();
+        const originalCache = imagePreviewClient.originalCache;
         const previewLoading = ref(false);
 
         const pruneOriginalUrls = (keepHash = '') => {
@@ -654,28 +614,8 @@ createApp({
                 return cached;
             }
             if (originalDataUrls[hash]) return originalDataUrls[hash];
-            if (inflightOriginals.has(hash)) {
-                const pending = await inflightOriginals.get(hash);
-                if (pending?.url) {
-                    originalCache.set(hash, pending.url);
-                    originalDataUrls[hash] = pending.url;
-                }
-                return pending?.url || null;
-            }
-            const request = (async () => {
-                try {
-                    return await bridge.apiGet('image-data', { hash });
-                } catch (e) {
-                    console.error('Failed to load original image:', hash, e);
-                    return null;
-                } finally {
-                    inflightOriginals.delete(hash);
-                }
-            })();
-            inflightOriginals.set(hash, request);
-            const data = await request;
+            const data = await imagePreviewClient.loadOriginal(hash);
             if (data && data.url) {
-                originalCache.set(hash, data.url);
                 originalDataUrls[hash] = data.url;
                 pruneOriginalUrls(hash);
                 return data.url;
@@ -826,8 +766,7 @@ createApp({
 
         const closeSourceModal = () => {
             sourceOpen.value = false;
-            if (sourcePollInterval) clearInterval(sourcePollInterval);
-            sourcePollInterval = null;
+            sourceActions.stopPolling();
         };
 
         const applySourceInspection = (inspection, selected = null) => {
@@ -842,234 +781,6 @@ createApp({
                 sourceForm.character = selected.config.character || '';
                 sourceForm.assign_character = !!sourceForm.character;
             }
-        };
-
-        const handleSourceFile = async (event) => {
-            const file = event?.target?.files?.[0] || null;
-            sourceFile.value = file;
-            sourceUploadedPath.value = '';
-            sourceSelected.value = null;
-            sourceInspection.value = null;
-            sourceForm.endpoint = '';
-            sourceForm.github = '';
-            if (!file) return;
-            sourceLoading.value = true;
-            sourceError.value = '';
-            try {
-                const form = new FormData();
-                form.append('file', file);
-                const res = await apiFetch('api/sources/upload', { method: 'POST', body: form });
-                const data = await res.json();
-                if (!data?.success) throw new Error(data?.error || 'Pack upload failed');
-                sourceUploadedPath.value = data.path || '';
-                applySourceInspection(data.inspection);
-            } catch (e) {
-                sourceError.value = e.message || String(e);
-            } finally {
-                sourceLoading.value = false;
-            }
-        };
-
-        const inspectExternalApi = async () => {
-            const endpoint = String(sourceForm.endpoint || '').trim();
-            if (!endpoint) return;
-            sourceLoading.value = true;
-            sourceError.value = '';
-            sourceSelected.value = null;
-            sourceUploadedPath.value = '';
-            sourceForm.github = '';
-            try {
-                const res = await apiFetch('api/sources/inspect', {
-                    method: 'POST',
-                    body: JSON.stringify({ source_type: 'http_json', endpoint }),
-                });
-                const data = await res.json();
-                if (!data?.success) throw new Error(data?.error || 'API preflight failed');
-                applySourceInspection(data.inspection);
-            } catch (e) {
-                sourceError.value = e.message || String(e);
-            } finally {
-                sourceLoading.value = false;
-            }
-        };
-
-        const inspectGitHubSource = async () => {
-            const repository = String(sourceForm.github || '').trim();
-            if (!repository) return;
-            sourceLoading.value = true;
-            sourceError.value = '';
-            sourceSelected.value = null;
-            sourceUploadedPath.value = '';
-            sourceForm.endpoint = '';
-            try {
-                const res = await apiFetch('api/sources/inspect', {
-                    method: 'POST',
-                    body: JSON.stringify({ source_type: 'github', repository }),
-                });
-                const data = await res.json();
-                if (!data?.success) throw new Error(data?.error || 'GitHub preflight failed');
-                applySourceInspection(data.inspection);
-            } catch (e) {
-                sourceError.value = e.message || String(e);
-            } finally {
-                sourceLoading.value = false;
-            }
-        };
-
-        const sourcePayloadFor = (source = sourceSelected.value) => {
-            let payload;
-            if (sourceUploadedPath.value) {
-                payload = { source_type: 'meme_pack', path: sourceUploadedPath.value };
-            } else if (source) {
-                payload = source.discovered
-                    ? { source_type: source.source_type, path: source.endpoint }
-                    : { source_id: source.source_id };
-            } else {
-                const github = String(sourceForm.github || '').trim();
-                payload = github
-                    ? { source_type: 'github', repository: github }
-                    : {
-                        source_type: 'http_json',
-                        endpoint: String(sourceForm.endpoint || '').trim(),
-                    };
-            }
-            const mapping = {};
-            for (const [key, value] of Object.entries(sourceCategoryMap)) {
-                if (value) mapping[key] = value;
-            }
-            return {
-                ...payload,
-                category_map: mapping,
-                review: !!sourceForm.review,
-                scope_mode: sourceForm.scope_mode,
-                origin_target: String(sourceForm.origin_target || '').trim(),
-                character: sourceForm.assign_character
-                    ? String(sourceForm.character || '').trim()
-                    : '',
-                create_character: !!sourceForm.assign_character,
-            };
-        };
-
-        const inspectSource = async (source) => {
-            sourceLoading.value = true;
-            sourceError.value = '';
-            sourceUploadedPath.value = '';
-            sourceFile.value = null;
-            try {
-                const payload = source.discovered
-                    ? { source_type: source.source_type, path: source.endpoint }
-                    : { source_id: source.source_id };
-                const res = await apiFetch('api/sources/inspect', {
-                    method: 'POST', body: JSON.stringify(payload),
-                });
-                const data = await res.json();
-                if (!data?.success) throw new Error(data?.error || 'Source preflight failed');
-                applySourceInspection(data.inspection, source);
-            } catch (e) {
-                sourceError.value = e.message || String(e);
-            } finally {
-                sourceLoading.value = false;
-            }
-        };
-
-        const pollSourceJob = async () => {
-            const jobId = sourceJob.value?.job_id;
-            if (!jobId) return;
-            try {
-                const res = await apiFetch(`api/sources/jobs?job_id=${encodeURIComponent(jobId)}`);
-                const data = await res.json();
-                if (!data?.success || !data.job) return;
-                sourceJob.value = data.job;
-                if (['completed', 'failed', 'cancelled'].includes(data.job.status)) {
-                    if (sourcePollInterval) clearInterval(sourcePollInterval);
-                    sourcePollInterval = null;
-                    await fetchSources();
-                    await refreshView();
-                }
-            } catch (e) {
-                sourceError.value = e.message || String(e);
-            }
-        };
-
-        const startSourceImport = async (source = sourceSelected.value) => {
-            sourceLoading.value = true;
-            sourceError.value = '';
-            try {
-                const payload = sourcePayloadFor(source);
-                if (!payload.source_id && !payload.path && !payload.endpoint && !payload.repository) {
-                    throw new Error('Choose a pack, GitHub repository, or enter an API URL first');
-                }
-                const res = await apiFetch('api/sources/import', {
-                    method: 'POST', body: JSON.stringify(payload),
-                });
-                const data = await res.json();
-                if (!data?.success || !data.job) throw new Error(data?.error || 'Import failed to start');
-                sourceJob.value = data.job;
-                if (sourcePollInterval) clearInterval(sourcePollInterval);
-                sourcePollInterval = setInterval(pollSourceJob, 1000);
-                await pollSourceJob();
-            } catch (e) {
-                sourceError.value = e.message || String(e);
-            } finally {
-                sourceLoading.value = false;
-            }
-        };
-
-        const syncSource = async (source) => {
-            sourceSelected.value = source;
-            sourceUploadedPath.value = '';
-            if (source?.discovered) {
-                resetSourceCategoryMap();
-                sourceForm.review = !!sourceDefaults.value.review;
-                sourceForm.scope_mode = 'public';
-                sourceForm.origin_target = '';
-                sourceForm.assign_character = false;
-                sourceForm.character = '';
-                await startSourceImport(source);
-                return;
-            }
-            sourceLoading.value = true;
-            sourceError.value = '';
-            try {
-                const res = await apiFetch('api/sources/sync', {
-                    method: 'POST',
-                    body: JSON.stringify({ source_id: source?.source_id || '' }),
-                });
-                const data = await res.json();
-                if (!data?.success || !data.job) throw new Error(data?.error || 'Sync failed to start');
-                sourceJob.value = data.job;
-                if (sourcePollInterval) clearInterval(sourcePollInterval);
-                sourcePollInterval = setInterval(pollSourceJob, 1000);
-                await pollSourceJob();
-            } catch (e) {
-                sourceError.value = e.message || String(e);
-            } finally {
-                sourceLoading.value = false;
-            }
-        };
-
-        const cancelSourceJob = async () => {
-            if (!sourceJob.value?.job_id) return;
-            await apiFetch('api/sources/jobs/cancel', {
-                method: 'POST',
-                body: JSON.stringify({ job_id: sourceJob.value.job_id }),
-            });
-            await pollSourceJob();
-        };
-
-        const forgetSource = async (source) => {
-            if (!source?.source_id || source.discovered) return;
-            const message = t(
-                'pages.dashboard.sources.forget_confirm',
-                'Forget this source? Imported images will remain in your library.'
-            );
-            if (!await showConfirm(message)) return;
-            const res = await apiFetch('api/sources/delete', {
-                method: 'POST', body: JSON.stringify({ source_id: source.source_id }),
-            });
-            const data = await res.json();
-            if (data?.success) await fetchSources();
-            else sourceError.value = data?.error || 'Failed to forget source';
         };
 
         const fetchStats = async () => {
@@ -1464,6 +1175,36 @@ createApp({
             await fetchImages(currentPage.value);
             await fetchStats();
         };
+
+        const sourceActions = createSourceActions({
+            apiFetch,
+            applySourceInspection,
+            resetSourceCategoryMap,
+            fetchSources,
+            refreshView,
+            showConfirm,
+            t,
+            sourceLoading,
+            sourceError,
+            sourceFile,
+            sourceUploadedPath,
+            sourceSelected,
+            sourceInspection,
+            sourceCategoryMap,
+            sourceForm,
+            sourceDefaults,
+            sourceJob,
+        });
+        const {
+            handleSourceFile,
+            inspectExternalApi,
+            inspectGitHubSource,
+            inspectSource,
+            startSourceImport,
+            syncSource,
+            cancelSourceJob,
+            forgetSource,
+        } = sourceActions;
 
         const prevPage = () => currentPage.value > 1 && fetchImages(currentPage.value - 1);
         const nextPage = () => currentPage.value * pageSize.value < total.value && fetchImages(currentPage.value + 1);
@@ -2715,6 +2456,7 @@ createApp({
                 manual: t('pages.dashboard.fields.add_method_manual', '手动入库'),
                 llm: t('pages.dashboard.fields.add_method_llm', 'LLM 入库'),
                 api: t('pages.dashboard.fields.add_method_api', 'API 入库'),
+                external_import: t('pages.dashboard.fields.add_method_external', 'External import'),
             };
             return map[method] || t('pages.dashboard.fields.add_method_unknown', '未知');
         };
@@ -2777,7 +2519,7 @@ createApp({
             if (imgObserver) imgObserver.disconnect();
             clearTimeout(resizeTimer);
             clearTimeout(searchTimeout);
-            if (sourcePollInterval) clearInterval(sourcePollInterval);
+            sourceActions.stopPolling();
         });
 
         return {
@@ -2994,6 +2736,7 @@ createApp({
             formatBytes,
             formatAddMethod,
             formatOriginTarget,
+            formatItemOrigin,
             getScopeLabel,
             PLACEHOLDER,
             imageDataUrls,

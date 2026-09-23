@@ -679,6 +679,91 @@ class DatabaseService:
                 related_map[row["path"]].append(row[value_column])
         return related_map
 
+    @staticmethod
+    def _insert_related_values_sync(
+        conn: sqlite3.Connection,
+        *,
+        table: str,
+        value_column: str,
+        path: str,
+        values: list[str],
+    ) -> None:
+        for value in values:
+            if value:
+                conn.execute(
+                    f"INSERT OR IGNORE INTO {table} (path, {value_column}) VALUES (?, ?)",
+                    (path, value),
+                )
+
+    def _replace_related_values_sync(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        table: str,
+        value_column: str,
+        path: str,
+        current_values: list[str],
+        desired_values: list[str],
+    ) -> None:
+        desired = [value for value in desired_values if value]
+        if desired == (current_values or []):
+            return
+        conn.execute(f"DELETE FROM {table} WHERE path = ?", (path,))
+        self._insert_related_values_sync(
+            conn,
+            table=table,
+            value_column=value_column,
+            path=path,
+            values=desired,
+        )
+
+    def _sync_existing_emoji_sync(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        path: str,
+        current: dict[str, Any],
+        desired: dict[str, Any],
+    ) -> bool:
+        search_metadata_changed = any(
+            field in desired
+            and (desired[field] or "") != (current.get(field) or "")
+            for field in SEARCH_METADATA_FIELDS
+        )
+
+        changed_fields = {
+            field: desired.get(field)
+            for field in self._EMOJI_SCALAR_COLUMNS
+            if field in desired and desired.get(field) != current.get(field)
+        }
+        if changed_fields:
+            clauses = ", ".join(f"{field} = ?" for field in changed_fields)
+            values = list(changed_fields.values()) + [path]
+            conn.execute(
+                f"UPDATE emoji SET {clauses} WHERE path = ?",
+                values,
+            )
+
+        if "tags" in desired:
+            self._replace_related_values_sync(
+                conn,
+                table="emoji_tag",
+                value_column="tag",
+                path=path,
+                current_values=current.get("tags") or [],
+                desired_values=desired.get("tags") or [],
+            )
+        if "scenes" in desired:
+            self._replace_related_values_sync(
+                conn,
+                table="emoji_scene",
+                value_column="scene",
+                path=path,
+                current_values=current.get("scenes") or [],
+                desired_values=desired.get("scenes") or [],
+            )
+        return search_metadata_changed
+
     def _build_search_signature_from_index(self, idx: dict[str, dict[str, Any]]) -> str:
         if not idx:
             return "empty"
@@ -764,6 +849,14 @@ class DatabaseService:
         with self._get_connection() as conn:
             rows = conn.execute("SELECT path FROM emoji").fetchall()
             return [r["path"] for r in rows]
+
+    def get_paths_sorted_newest(self) -> list[str]:
+        """按列表指令的稳定顺序返回路径，无需加载全量元数据。"""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT path FROM emoji ORDER BY created_at DESC, path DESC"
+            ).fetchall()
+            return [row["path"] for row in rows]
 
     def hash_exists(self, hash_val: str) -> bool:
         """O(1) 哈希查重，不走全量索引加载。"""
@@ -1514,63 +1607,31 @@ class DatabaseService:
                         self._INSERT_EMOJI_SQL,
                         self._emoji_insert_values(path, meta, now=now),
                     )
-
-                    for tag in meta.get("tags") or []:
-                        if tag:
-                            conn.execute(
-                                "INSERT OR IGNORE INTO emoji_tag (path, tag) VALUES (?, ?)",
-                                (path, tag),
-                            )
-
-                    for scene in meta.get("scenes") or []:
-                        if scene:
-                            conn.execute(
-                                "INSERT OR IGNORE INTO emoji_scene (path, scene) VALUES (?, ?)",
-                                (path, scene),
-                            )
-
-                scalar_fields = tuple(self._EMOJI_SCALAR_COLUMNS)
+                    self._insert_related_values_sync(
+                        conn,
+                        table="emoji_tag",
+                        value_column="tag",
+                        path=path,
+                        values=meta.get("tags") or [],
+                    )
+                    self._insert_related_values_sync(
+                        conn,
+                        table="emoji_scene",
+                        value_column="scene",
+                        path=path,
+                        values=meta.get("scenes") or [],
+                    )
 
                 for path in desired_paths & existing_paths:
                     meta = desired_index[path]
                     current = current_index[path]
-                    if any(field in meta and (meta[field] or "") != (current.get(field) or "") for field in SEARCH_METADATA_FIELDS):
+                    if self._sync_existing_emoji_sync(
+                        conn,
+                        path=path,
+                        current=current,
+                        desired=meta,
+                    ):
                         changed_paths.add(path)
-
-                    changed_fields: dict[str, Any] = {}
-                    for field in scalar_fields:
-                        if field not in meta:
-                            continue
-                        if meta.get(field) != current.get(field):
-                            changed_fields[field] = meta.get(field)
-
-                    if changed_fields:
-                        clauses = ", ".join(f"{field} = ?" for field in changed_fields)
-                        values = list(changed_fields.values()) + [path]
-                        conn.execute(
-                            f"UPDATE emoji SET {clauses} WHERE path = ?",
-                            values,
-                        )
-
-                    if "tags" in meta:
-                        desired_tags = [tag for tag in (meta.get("tags") or []) if tag]
-                        if desired_tags != (current.get("tags") or []):
-                            conn.execute("DELETE FROM emoji_tag WHERE path = ?", (path,))
-                            for tag in desired_tags:
-                                conn.execute(
-                                    "INSERT OR IGNORE INTO emoji_tag (path, tag) VALUES (?, ?)",
-                                    (path, tag),
-                                )
-
-                    if "scenes" in meta:
-                        desired_scenes = [scene for scene in (meta.get("scenes") or []) if scene]
-                        if desired_scenes != (current.get("scenes") or []):
-                            conn.execute("DELETE FROM emoji_scene WHERE path = ?", (path,))
-                            for scene in desired_scenes:
-                                conn.execute(
-                                    "INSERT OR IGNORE INTO emoji_scene (path, scene) VALUES (?, ?)",
-                                    (path, scene),
-                                )
 
                 conn.execute("COMMIT")
                 return sorted(changed_paths)
@@ -1862,7 +1923,7 @@ class DatabaseService:
             data_sql = f"""
                 SELECT e.path, e.hash, e.category, e.desc, e.scope_mode,
                        e.origin_target, e.created_at, e.use_count, e.last_used_at,
-                       e.is_favorite, e.reviewed_at,
+                       e.is_favorite, e.reviewed_at, e.source,
                        e.source_url, e.original_name, e.width, e.height,
                        e.format, e.bytes, e.add_method,
                        e.overlay_text, e.emotions_json, e.character, e.retention_class

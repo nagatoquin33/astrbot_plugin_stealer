@@ -9,6 +9,8 @@ from typing import Any
 
 from astrbot.api import logger
 
+from ..util.meme_presentation import image_display_title, image_source_label
+
 try:
     from PIL import Image as PILImage
     from PIL import ImageDraw as PILImageDraw
@@ -250,12 +252,24 @@ class ImageRenderService:
             return ""
 
     @staticmethod
+    def _index_label(value: Any) -> str:
+        try:
+            index = int(value or 0)
+        except (TypeError, ValueError):
+            index = 0
+        return f"{index:04d}" if index > 0 else "----"
+
+    @staticmethod
     def render_items_for_list(items: list[dict], thumb_size: int = 84) -> list[dict]:
         return [
             {
                 "index": int(item.get("index", 0) or 0),
-                "desc": str(item.get("desc", "") or "").strip(),
+                "index_label": ImageRenderService._index_label(item.get("index")),
+                "desc": image_display_title(item),
                 "category": str(item.get("category", "") or "").strip(),
+                "source_label": image_source_label(
+                    item.get("source"), item.get("add_method")
+                ),
                 "tags": ", ".join(t.strip() for t in (item.get("tags") or []) if t and t.strip()),
                 "scenes": ", ".join(
                     s.strip() for s in (item.get("scenes") or []) if s and s.strip()
@@ -271,6 +285,23 @@ class ImageRenderService:
         ]
 
     # ── 列表页渲染（html-to-pic）─────────────────────────────
+
+    def _prepare_emoji_list_render_items(self, items: list[dict]) -> list[dict]:
+        rendered_items = []
+        for item in items:
+            rendered_items.append(
+                {
+                    "index": int(item.get("index", 0) or 0),
+                    "index_label": self._index_label(item.get("index")),
+                    "desc": image_display_title(item),
+                    "category": str(item.get("category", "") or ""),
+                    "source_label": image_source_label(
+                        item.get("source"), item.get("add_method")
+                    ),
+                    "thumb": self.generate_thumb_uri(str(item.get("path", "") or "")),
+                }
+            )
+        return rendered_items
 
     async def render_emoji_list_page_file(
         self,
@@ -288,24 +319,9 @@ class ImageRenderService:
         if not plugin or not hasattr(plugin, "html_render"):
             return ""
 
-        rendered_items = []
-        for item in items:
-            pth = str(item.get("path", "") or "")
-            thumb_uri = self.generate_thumb_uri(pth)
-            rendered_items.append(
-                {
-                    "index": int(item.get("index", 0) or 0),
-                    "desc": str(item.get("desc", "") or "").strip()
-                    or str(item.get("name", "") or ""),
-                    "category": str(item.get("category", "") or ""),
-                    "source": str(item.get("source", "") or ""),
-                    "thumb": thumb_uri,
-                }
-            )
-
         tmpl = _LIST_PAGE_FILE_TEMPLATE
         data = {
-            "items": rendered_items,
+            "items": self._prepare_emoji_list_render_items(items),
             "page": int(page),
             "total_pages": int(total_pages),
             "total_filtered": int(total_filtered),
@@ -350,24 +366,9 @@ class ImageRenderService:
         if not plugin or not hasattr(plugin, "html_render"):
             return ""
 
-        rendered_items = []
-        for item in items:
-            pth = str(item.get("path", "") or "")
-            thumb_uri = self.generate_thumb_uri(pth)
-            rendered_items.append(
-                {
-                    "index": int(item.get("index", 0) or 0),
-                    "desc": str(item.get("desc", "") or "").strip()
-                    or str(item.get("name", "") or ""),
-                    "category": str(item.get("category", "") or ""),
-                    "source": str(item.get("source", "") or ""),
-                    "thumb": thumb_uri,
-                }
-            )
-
         tmpl = _LIST_PAGE_URL_TEMPLATE
         data = {
-            "items": rendered_items,
+            "items": self._prepare_emoji_list_render_items(items),
             "page": int(page),
             "total_pages": int(total_pages),
             "total_filtered": int(total_filtered),
@@ -516,10 +517,11 @@ class ImageRenderService:
                     draw.rectangle((0, y, width, y + row_h), fill=(246, 246, 250))
 
                 n = int(item.get("index", 0) or 0)
-                desc = str(item.get("desc", "") or "").strip()
-                if not desc:
-                    desc = str(item.get("name", "") or "")
+                desc = image_display_title(item)
                 cat = str(item.get("category", "") or "")
+                source_label = image_source_label(
+                    item.get("source"), item.get("add_method")
+                )
                 pth = str(item.get("path", "") or "")
 
                 thumb_im = _load_thumb(pth, thumb)
@@ -538,20 +540,24 @@ class ImageRenderService:
                         font=small_font,
                     )
 
-                prefix = f"{n:04d}."
+                prefix = f"{n:04d}." if n > 0 else "----."
                 draw.text((text_x, y + 22), prefix, fill=(60, 70, 90), font=body_font)
                 lines = _wrap_text(draw, desc, body_font, max_width=text_w - 96)
                 draw.text((text_x + 78, y + 22), lines[0], fill=(25, 28, 35), font=body_font)
                 if len(lines) > 1:
                     draw.text((text_x + 78, y + 52), lines[1], fill=(25, 28, 35), font=body_font)
+                detail_parts = []
                 if cat:
-                    draw.text(
-                        (text_x, y + 84), f"分类: {cat}", fill=(110, 115, 130), font=small_font
+                    detail_parts.append(f"分类: {cat}")
+                if source_label:
+                    detail_parts.append(f"来源: {source_label}")
+                if detail_parts:
+                    detail_lines = _wrap_text(
+                        draw, "  ·  ".join(detail_parts), small_font, text_w
                     )
-                if str(item.get("source", "") or "") == "qq_store":
                     draw.text(
-                        (text_x + 200, y + 84),
-                        "QQ商城",
+                        (text_x, y + 84),
+                        detail_lines[0],
                         fill=(110, 115, 130),
                         font=small_font,
                     )
@@ -704,14 +710,14 @@ _LIST_PAGE_FILE_TEMPLATE = """<!doctype html>
         </div>
         <div class="meta">
           <div class="line1">
-            <div class="idx">{{ "%04d"|format(it.index) }}.</div>
+            <div class="idx">{{ it.index_label }}.</div>
             <div class="desc">{{ it.desc }}</div>
           </div>
           {% if it.category %}
             <span class="chip">分类: {{ it.category }}</span>
           {% endif %}
-          {% if it.source == "qq_store" %}
-            <span class="chip">QQ商城</span>
+          {% if it.source_label %}
+            <span class="chip">来源: {{ it.source_label }}</span>
           {% endif %}
         </div>
       </div>
@@ -866,14 +872,14 @@ _LIST_PAGE_URL_TEMPLATE = """<!doctype html>
           </div>
           <div class="meta">
             <div class="line1">
-              <div class="idx">{{ "%04d"|format(it.index) }}</div>
+              <div class="idx">{{ it.index_label }}</div>
               <div class="desc">{{ it.desc }}</div>
             </div>
             {% if it.category %}
               <span class="chip">分类: {{ it.category }}</span>
             {% endif %}
-            {% if it.source == "qq_store" %}
-              <span class="chip">QQ商城</span>
+            {% if it.source_label %}
+              <span class="chip">来源: {{ it.source_label }}</span>
             {% endif %}
           </div>
         </div>

@@ -378,7 +378,7 @@ class NaturalEmotionAnalyzer:
         if not text:
             return ""
 
-        # 仅压缩空白；插件已不再注入或解析 &&emotion&& 标签。
+        # 仅压缩空白，保留回复原文的语义结构。
         cleaned = re.sub(r"\s+", " ", text.strip())
 
         # 限制长度（小模型处理能力有限）

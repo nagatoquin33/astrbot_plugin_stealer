@@ -766,7 +766,7 @@ export const TEMPLATE = `
                     </div>
                     <div class="stat-row">
                         <span class="stat-name">{{ t('pages.dashboard.fields.origin', 'Origin') }}</span>
-                        <span class="stat-value">{{ formatOriginTarget(previewItem?.origin_target) }}</span>
+                        <span class="stat-value">{{ formatItemOrigin(previewItem) }}</span>
                     </div>
                     <div v-if="previewItem?.width || previewItem?.format || previewItem?.bytes" class="stat-row">
                         <span class="stat-name">{{ t('pages.dashboard.fields.image_meta', 'Image') }}</span>
@@ -881,7 +881,7 @@ export const TEMPLATE = `
                             <option value="public">{{ t('pages.dashboard.scope.public', 'Public') }}</option>
                             <option value="local">{{ t('pages.dashboard.scope.local', 'Local only') }}</option>
                         </select>
-                        <div class="form-hint">{{ t('pages.dashboard.fields.origin', 'Origin') }}: {{ formatOriginTarget(previewItem?.origin_target) }}</div>
+                        <div class="form-hint">{{ t('pages.dashboard.fields.origin', 'Origin') }}: {{ formatItemOrigin(previewItem) }}</div>
                     </div>
 
                     <div style="margin-bottom:20px">

@@ -11,6 +11,7 @@ import os
 import re
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -45,6 +46,16 @@ _FORMAT_SUFFIX = {
     "BMP": ".bmp",
 }
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
+
+
+@dataclass(slots=True)
+class _SourceImportPlan:
+    source: dict[str, Any]
+    category_map: dict[str, Any]
+    review: bool
+    scope_mode: str
+    origin_target: str
+    character: str
 
 
 class SourceService:
@@ -154,33 +165,7 @@ class SourceService:
             raise ExternalSourceError("external sources are disabled in plugin settings")
         if not isinstance(spec, dict):
             raise ExternalSourceError("source descriptor must be an object")
-        source_type = str(
-            spec.get("source_type") or spec.get("type") or spec.get("kind") or ""
-        ).strip().lower()
-        if not source_type:
-            github_candidate = str(
-                spec.get("repository")
-                or spec.get("repo")
-                or spec.get("url")
-                or spec.get("endpoint")
-                or ""
-            ).strip()
-            github_host = ""
-            if github_candidate:
-                try:
-                    github_host = str(urlsplit(github_candidate).hostname or "").lower()
-                except ValueError:
-                    github_host = ""
-            if (
-                spec.get("repository")
-                or spec.get("repo")
-                or github_host in {"github.com", "www.github.com"}
-            ):
-                source_type = "github"
-            elif spec.get("path"):
-                source_type = "meme_pack"
-            elif spec.get("endpoint") or spec.get("url"):
-                source_type = "http_json"
+        source_type = self._infer_source_type(spec)
         if source_type in {"pack", "meme_pack", "meme-manager", "meme_manager"}:
             path = spec.get("path") or spec.get("endpoint")
             if not path:
@@ -210,6 +195,39 @@ class SourceService:
                 await reader.close()
                 raise
         raise ExternalSourceError(f"unsupported source type: {source_type or 'empty'}")
+
+    @staticmethod
+    def _infer_source_type(spec: dict[str, Any]) -> str:
+        source_type = str(
+            spec.get("source_type") or spec.get("type") or spec.get("kind") or ""
+        ).strip().lower()
+        if source_type:
+            return source_type
+
+        github_candidate = str(
+            spec.get("repository")
+            or spec.get("repo")
+            or spec.get("url")
+            or spec.get("endpoint")
+            or ""
+        ).strip()
+        github_host = ""
+        if github_candidate:
+            try:
+                github_host = str(urlsplit(github_candidate).hostname or "").lower()
+            except ValueError:
+                github_host = ""
+        if (
+            spec.get("repository")
+            or spec.get("repo")
+            or github_host in {"github.com", "www.github.com"}
+        ):
+            return "github"
+        if spec.get("path"):
+            return "meme_pack"
+        if spec.get("endpoint") or spec.get("url"):
+            return "http_json"
+        return ""
 
     @staticmethod
     def _check_inspection_ids(inspection: SourceInspection) -> None:
@@ -533,80 +551,15 @@ class SourceService:
             if not inspection.ok:
                 raise ExternalSourceError("; ".join(inspection.errors))
             job["total"] = len(inspection.items)
-            category_map = spec.get("category_map") if isinstance(spec.get("category_map"), dict) else {}
-            review = bool(
-                spec.get("review", self._cfg("external_source_default_review", False))
-            ) or bool(self._cfg("content_filtration", False))
-            scope_mode = normalize_scope_mode(spec.get("scope_mode")) or "public"
-            origin_target = str(spec.get("origin_target") or "").strip()
-            if scope_mode == "local" and not (
-                origin_target.startswith("group:") or origin_target.startswith("user:")
-            ):
-                raise ExternalSourceError(
-                    "local-scope import requires origin_target group:<id> or user:<id>"
-                )
-            if review and self.db and hasattr(self.db, "count_pending"):
-                pending_capacity = int(self._cfg("steal_pool_capacity", 200))
-                if self.db.count_pending() + len(inspection.items) > pending_capacity:
-                    raise ExternalSourceError(
-                        "external import would exceed the pending pool capacity"
-                    )
-            # Resolve/create the optional role only after all import-wide
-            # validation has passed, so a rejected job leaves configuration
-            # untouched.
-            character = self._prepare_character(spec)
-            if character:
-                spec["character"] = character
-            source = self._source_record(inspection, spec)
-            source_id = source["source_id"]
+            plan = self._build_import_plan(inspection, spec)
+            source_id = plan.source["source_id"]
             job["source_id"] = source_id
-            job["source_name"] = source["name"]
+            job["source_name"] = plan.source["name"]
             if self.db and hasattr(self.db, "upsert_source"):
-                await self.db.upsert_source(source)
+                await self.db.upsert_source(plan.source)
                 await self.db.update_source_status(source_id, status="syncing")
-            for item in inspection.items:
-                raw: bytes | None = None
-                try:
-                    raw = await self._read_source_item(reader, item)
-                    outcome = await self._import_item(
-                        source=source,
-                        item=item,
-                        raw=raw,
-                        category_map=category_map,
-                        review=review,
-                        scope_mode=scope_mode,
-                        origin_target=origin_target,
-                        character=character,
-                    )
-                    job[outcome] = int(job.get(outcome, 0)) + 1
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:
-                    job["failed"] += 1
-                    errors = job["errors"]
-                    if len(errors) < 20:
-                        errors.append(f"{item.external_id}: {exc}")
-                    logger.warning(f"[Source] 导入条目失败 {item.external_id}: {exc}")
-                finally:
-                    raw = None
-                    job["processed"] += 1
-                    job["updated_at"] = time.time()
-            if self.db and hasattr(self.db, "reconcile_source_items"):
-                await self.db.reconcile_source_items(
-                    source_id,
-                    [item.external_id for item in inspection.items],
-                )
-            job.update(status="completed", completed_at=time.time(), updated_at=time.time())
-            if self.db and hasattr(self.db, "count_stale_source_items"):
-                job["stale"] = self.db.count_stale_source_items(source_id)
-            if self.db and hasattr(self.db, "update_source_status"):
-                await self.db.update_source_status(
-                    source_id,
-                    status="ready",
-                    item_count=len(inspection.items),
-                    last_sync_at=int(time.time()),
-                )
-            invalidate_search(self.plugin)
+            await self._import_inspected_items(job, reader, inspection.items, plan)
+            await self._complete_source_import(job, inspection, source_id)
         except asyncio.CancelledError:
             job.update(status="cancelled", completed_at=time.time(), updated_at=time.time())
             if source_id and self.db and hasattr(self.db, "update_source_status"):
@@ -624,6 +577,101 @@ class SourceService:
             logger.error(f"[Source] 外部源导入失败: {exc}", exc_info=True)
         finally:
             await self._close_reader(reader)
+
+    def _build_import_plan(
+        self, inspection: SourceInspection, spec: dict[str, Any]
+    ) -> _SourceImportPlan:
+        category_map = (
+            spec.get("category_map") if isinstance(spec.get("category_map"), dict) else {}
+        )
+        review = bool(
+            spec.get("review", self._cfg("external_source_default_review", False))
+        ) or bool(self._cfg("content_filtration", False))
+        scope_mode = normalize_scope_mode(spec.get("scope_mode")) or "public"
+        origin_target = str(spec.get("origin_target") or "").strip()
+        if scope_mode == "local" and not (
+            origin_target.startswith("group:") or origin_target.startswith("user:")
+        ):
+            raise ExternalSourceError(
+                "local-scope import requires origin_target group:<id> or user:<id>"
+            )
+        if review and self.db and hasattr(self.db, "count_pending"):
+            pending_capacity = int(self._cfg("steal_pool_capacity", 200))
+            if self.db.count_pending() + len(inspection.items) > pending_capacity:
+                raise ExternalSourceError(
+                    "external import would exceed the pending pool capacity"
+                )
+
+        # Resolve/create the optional role only after import-wide validation.
+        character = self._prepare_character(spec)
+        if character:
+            spec["character"] = character
+        return _SourceImportPlan(
+            source=self._source_record(inspection, spec),
+            category_map=category_map,
+            review=review,
+            scope_mode=scope_mode,
+            origin_target=origin_target,
+            character=character,
+        )
+
+    async def _import_inspected_items(
+        self,
+        job: dict[str, Any],
+        reader: Any,
+        items: list[SourceItem],
+        plan: _SourceImportPlan,
+    ) -> None:
+        for item in items:
+            raw: bytes | None = None
+            try:
+                raw = await self._read_source_item(reader, item)
+                outcome = await self._import_item(
+                    source=plan.source,
+                    item=item,
+                    raw=raw,
+                    category_map=plan.category_map,
+                    review=plan.review,
+                    scope_mode=plan.scope_mode,
+                    origin_target=plan.origin_target,
+                    character=plan.character,
+                )
+                job[outcome] = int(job.get(outcome, 0)) + 1
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                job["failed"] += 1
+                errors = job["errors"]
+                if len(errors) < 20:
+                    errors.append(f"{item.external_id}: {exc}")
+                logger.warning(f"[Source] 导入条目失败 {item.external_id}: {exc}")
+            finally:
+                raw = None
+                job["processed"] += 1
+                job["updated_at"] = time.time()
+
+    async def _complete_source_import(
+        self,
+        job: dict[str, Any],
+        inspection: SourceInspection,
+        source_id: str,
+    ) -> None:
+        if self.db and hasattr(self.db, "reconcile_source_items"):
+            await self.db.reconcile_source_items(
+                source_id,
+                [item.external_id for item in inspection.items],
+            )
+        job.update(status="completed", completed_at=time.time(), updated_at=time.time())
+        if self.db and hasattr(self.db, "count_stale_source_items"):
+            job["stale"] = self.db.count_stale_source_items(source_id)
+        if self.db and hasattr(self.db, "update_source_status"):
+            await self.db.update_source_status(
+                source_id,
+                status="ready",
+                item_count=len(inspection.items),
+                last_sync_at=int(time.time()),
+            )
+        invalidate_search(self.plugin)
 
     @staticmethod
     async def _close_reader(reader: Any) -> None:

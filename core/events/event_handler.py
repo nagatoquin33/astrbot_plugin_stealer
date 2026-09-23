@@ -415,6 +415,255 @@ class EventHandler:
                 return ref
         return ""
 
+    def _extract_raw_image_data(
+        self, event: AstrMessageEvent
+    ) -> tuple[list[dict], dict[str, dict]]:
+        image_segments: list[dict] = []
+        file_map: dict[str, dict] = {}
+        try:
+            raw_event = getattr(getattr(event, "message_obj", None), "raw_message", None)
+            logger.debug(
+                f"raw_event type: {type(raw_event).__name__}, is_dict: {isinstance(raw_event, dict)}"
+            )
+            raw_message = None
+            if isinstance(raw_event, dict):
+                raw_message = raw_event.get("message")
+            elif raw_event is not None:
+                raw_message = getattr(raw_event, "message", None)
+            logger.debug(
+                f"raw_message type: {type(raw_message).__name__ if raw_message else 'None'}"
+            )
+            if isinstance(raw_message, list):
+                image_segments = [
+                    segment
+                    for segment in raw_message
+                    if isinstance(segment, dict) and segment.get("type") == "image"
+                ]
+                for segment in image_segments:
+                    data = segment.get("data", {}) or {}
+                    if not isinstance(data, dict):
+                        continue
+                    file_ref = self._platform_detector._normalize_str(data.get("file", ""))
+                    if file_ref and file_ref not in file_map:
+                        file_map[file_ref] = data
+                logger.debug(
+                    f"提取到 {len(image_segments)} 个原始图片段, {len(file_map)} 个文件映射"
+                )
+        except Exception as exc:
+            logger.debug(f"提取原始图片段失败: {exc}")
+            return [], {}
+        return image_segments, file_map
+
+    def _collect_image_candidates(
+        self,
+        event: AstrMessageEvent,
+        images: list[Image],
+        image_segments: list[dict],
+        file_map: dict[str, dict],
+        origin_target: str,
+    ) -> list[tuple[int, Image, dict]]:
+        candidates: list[tuple[int, Image, dict]] = []
+        for index, image in enumerate(images):
+            try:
+                is_platform_emoji = self._platform_detector.check_platform_emoji_metadata(
+                    image,
+                    event,
+                    img_index=index,
+                    image_segments=image_segments,
+                    image_file_map=file_map,
+                )
+                if not is_platform_emoji:
+                    subtype = getattr(image, "subType", "unknown")
+                    logger.debug(f"跳过非表情包图片 (subType={subtype})")
+                    continue
+
+                extra_meta = None
+                try:
+                    segment = image_segments[index] if 0 <= index < len(image_segments) else None
+                    data = segment.get("data", {}) if isinstance(segment, dict) else {}
+                    if isinstance(data, dict) and (
+                        data.get("emoji_id") or data.get("emoji_package_id")
+                    ):
+                        extra_meta = {
+                            "source": "qq_store",
+                            "qq_emoji_id": str(data.get("emoji_id") or ""),
+                            "qq_emoji_package_id": str(data.get("emoji_package_id") or ""),
+                            "origin_url": self._platform_detector._normalize_str(
+                                data.get("url", "")
+                            ),
+                            "qq_key": self._platform_detector._normalize_str(
+                                data.get("key", "")
+                            ),
+                        }
+                except Exception:
+                    extra_meta = None
+
+                if origin_target:
+                    if extra_meta is None:
+                        extra_meta = {}
+                    extra_meta["origin_target"] = origin_target
+                candidates.append((index, image, extra_meta or {}))
+            except Exception as exc:
+                logger.error(f"收集图片信息失败: {exc}")
+        return candidates
+
+    async def _queue_background_capture(
+        self,
+        candidates: list[tuple[int, Image, dict]],
+        store_urls: list[str],
+        *,
+        to_pending: bool,
+        origin_target: str,
+    ) -> bool:
+        if self._background_queue is None:
+            return False
+
+        descriptors: list[dict[str, Any]] = []
+        for _index, image, extra_meta in candidates:
+            media_ref = self._get_media_ref(image)
+            if media_ref:
+                descriptors.append(
+                    {
+                        "media_ref": media_ref,
+                        "source": "automatic",
+                        "to_pending": to_pending,
+                        "extra_meta": extra_meta,
+                    }
+                )
+        for url in store_urls[:3]:
+            extra_meta = {
+                "source": "qq_store",
+                "origin_url": self._platform_detector._normalize_str(url),
+            }
+            if origin_target:
+                extra_meta["origin_target"] = origin_target
+            descriptors.append(
+                {
+                    "media_ref": url,
+                    "source": "automatic",
+                    "to_pending": to_pending,
+                    "extra_meta": extra_meta,
+                }
+            )
+        if descriptors:
+            await self._background_queue.submit_capture_async(descriptors)
+        return True
+
+    async def _process_image_candidates(
+        self,
+        event: AstrMessageEvent,
+        plugin_instance: Any,
+        candidates: list[tuple[int, Image, dict]],
+        *,
+        to_pending: bool,
+    ) -> dict[str, Any]:
+        merged_index: dict[str, Any] = {}
+        if not candidates:
+            return merged_index
+
+        logger.debug(f"开始并行下载 {len(candidates)} 张图片")
+        download_results = await asyncio.gather(
+            *[
+                self._image_download_service.download_original_image(image)
+                for _index, image, _extra_meta in candidates
+            ],
+            return_exceptions=True,
+        )
+        process_tasks = []
+        for (_index, _image, extra_meta), result in zip(candidates, download_results):
+            if isinstance(result, Exception):
+                logger.error(f"下载图片异常: {result}")
+                continue
+            temp_path, _is_gif = result
+            if not temp_path or not Path(temp_path).exists():
+                logger.warning(f"临时文件不存在: {temp_path}")
+                continue
+            process_tasks.append(
+                plugin_instance._process_image(
+                    event,
+                    temp_path,
+                    is_temp=True,
+                    is_platform_emoji=True,
+                    extra_meta=extra_meta,
+                    to_pending=to_pending,
+                )
+            )
+
+        if not process_tasks:
+            return merged_index
+        logger.debug(f"开始并行处理 {len(process_tasks)} 张图片")
+        results = await asyncio.gather(*process_tasks, return_exceptions=True)
+        for result in results:
+            if isinstance(result, Exception):
+                logger.error(f"处理图片异常: {result}")
+                continue
+            success, index = result
+            if success and isinstance(index, dict):
+                merged_index.update(index)
+        return merged_index
+
+    async def _process_store_urls(
+        self,
+        event: AstrMessageEvent,
+        plugin_instance: Any,
+        store_urls: list[str],
+        *,
+        to_pending: bool,
+        origin_target: str,
+    ) -> dict[str, Any]:
+        merged_index: dict[str, Any] = {}
+        if not store_urls:
+            return merged_index
+
+        logger.debug(f"开始并行下载 {min(len(store_urls), 3)} 个商城表情")
+
+        async def download_store_url(url: str) -> tuple[str | None, str]:
+            try:
+                temp_path, _is_gif = await self._download_url_to_temp(url)
+                return temp_path, url
+            except Exception as exc:
+                logger.error(f"下载商城表情失败: {exc}")
+                return None, url
+
+        download_results = await asyncio.gather(
+            *[download_store_url(url) for url in store_urls[:3]],
+            return_exceptions=True,
+        )
+        process_tasks = []
+        for result in download_results:
+            if isinstance(result, Exception):
+                continue
+            temp_path, url = result
+            if not temp_path or not Path(temp_path).exists():
+                continue
+            extra_meta = {
+                "source": "qq_store",
+                "origin_url": self._platform_detector._normalize_str(url),
+            }
+            if origin_target:
+                extra_meta["origin_target"] = origin_target
+            process_tasks.append(
+                plugin_instance._process_image(
+                    event,
+                    temp_path,
+                    is_temp=True,
+                    is_platform_emoji=True,
+                    extra_meta=extra_meta,
+                    to_pending=to_pending,
+                )
+            )
+        if not process_tasks:
+            return merged_index
+
+        results = await asyncio.gather(*process_tasks, return_exceptions=True)
+        for result in results:
+            if isinstance(result, Exception):
+                continue
+            success, index = result
+            if success and isinstance(index, dict):
+                merged_index.update(index)
+        return merged_index
+
     async def on_message(self, event: AstrMessageEvent):
         """消息监听：偷取消息中的图片并分类存储。"""
         if self._cleaned or self.plugin is None:
@@ -462,36 +711,7 @@ class EventHandler:
             )
             return
         logger.debug(f"开始处理 {len(imgs)} 个表情")
-        raw_image_segments: list[dict] = []
-        raw_image_file_map: dict[str, dict] = {}
-        try:
-            raw_event = getattr(getattr(event, "message_obj", None), "raw_message", None)
-            logger.debug(f"raw_event type: {type(raw_event).__name__}, is_dict: {isinstance(raw_event, dict)}")
-            # raw_event 可能是 dict（aiocqhttp）或对象，需要兼容两种类型
-            raw_message = None
-            if isinstance(raw_event, dict):
-                raw_message = raw_event.get("message")
-            elif raw_event is not None:
-                raw_message = getattr(raw_event, "message", None)
-            logger.debug(f"raw_message type: {type(raw_message).__name__ if raw_message else 'None'}")
-            if isinstance(raw_message, list):
-                raw_image_segments = [
-                    seg
-                    for seg in raw_message
-                    if isinstance(seg, dict) and seg.get("type") == "image"
-                ]
-                for seg in raw_image_segments:
-                    data = seg.get("data", {}) or {}
-                    if not isinstance(data, dict):
-                        continue
-                    seg_file = self._platform_detector._normalize_str(data.get("file", ""))
-                    if seg_file and seg_file not in raw_image_file_map:
-                        raw_image_file_map[seg_file] = data
-                logger.debug(f"提取到 {len(raw_image_segments)} 个原始图片段, {len(raw_image_file_map)} 个文件映射")
-        except Exception as e:
-            logger.debug(f"提取原始图片段失败: {e}")
-            raw_image_segments = []
-            raw_image_file_map = {}
+        raw_image_segments, raw_image_file_map = self._extract_raw_image_data(event)
         origin_target_str = ""
         try:
             cfg = getattr(plugin_instance, "plugin_config", None)
@@ -501,170 +721,49 @@ class EventHandler:
                     origin_target_str = f"{scope}:{target_id}"
         except (AttributeError, KeyError) as e:
             logger.debug(f"提取来源群信息失败: {e}")
-        merged_idx: dict[str, Any] = {}
-
-        def merge_result_idx(result_idx: object) -> None:
-            if isinstance(result_idx, dict):
-                merged_idx.update(result_idx)
-
-        imgs_to_process: list[tuple[int, Image, dict]] = []
-        for i, img in enumerate(imgs):
-            try:
-                is_platform_emoji = self._platform_detector.check_platform_emoji_metadata(
-                    img,
-                    event,
-                    img_index=i,
-                    image_segments=raw_image_segments,
-                    image_file_map=raw_image_file_map,
-                )
-                if not is_platform_emoji:
-                    sub_type_value = getattr(img, "subType", "unknown")
-                    logger.debug(f"跳过非表情包图片 (subType={sub_type_value})")
-                    continue
-                extra_meta = None
-                try:
-                    seg = raw_image_segments[i] if 0 <= i < len(raw_image_segments) else None
-                    data = seg.get("data", {}) if isinstance(seg, dict) else {}
-                    if isinstance(data, dict) and (
-                        data.get("emoji_id") or data.get("emoji_package_id")
-                    ):
-                        extra_meta = {
-                            "source": "qq_store",
-                            "qq_emoji_id": str(data.get("emoji_id") or ""),
-                            "qq_emoji_package_id": str(data.get("emoji_package_id") or ""),
-                            "origin_url": self._platform_detector._normalize_str(data.get("url", "")),
-                            "qq_key": self._platform_detector._normalize_str(data.get("key", "")),
-                        }
-                except Exception:
-                    extra_meta = None
-                if origin_target_str:
-                    if extra_meta is None:
-                        extra_meta = {}
-                    extra_meta["origin_target"] = origin_target_str
-                imgs_to_process.append((i, img, extra_meta or {}))
-            except Exception as e:
-                logger.error(f"收集图片信息失败: {e}")
+        image_candidates = self._collect_image_candidates(
+            event,
+            imgs,
+            raw_image_segments,
+            raw_image_file_map,
+            origin_target_str,
+        )
 
         # 冷却只针对确认过的表情包生效。普通图片不能消耗冷却窗口，
         # 否则紧随其后的真实表情包会被直接跳过。
-        if (imgs_to_process or store_urls) and not self._should_process_image():
+        if (image_candidates or store_urls) and not self._should_process_image():
             return
 
         # 只有通过概率/冷却判断后，才记录即将执行的自动偷取，避免让检测日志
         # 造成“每个检测到的表情包都会被偷”的误解。
-        if imgs_to_process or store_urls:
+        if image_candidates or store_urls:
             logger.info("检测到表情包，准备偷走它！")
 
-        if self._background_queue is not None:
-            descriptors: list[dict[str, Any]] = []
-            for _i, img, extra_meta in imgs_to_process:
-                ref = self._get_media_ref(img)
-                if ref:
-                    descriptors.append(
-                        {
-                            "media_ref": ref,
-                            "source": "automatic",
-                            "to_pending": to_pending,
-                            "extra_meta": extra_meta,
-                        }
-                    )
-            for url in store_urls[:3]:
-                extra_meta = {"source": "qq_store", "origin_url": self._platform_detector._normalize_str(url)}
-                if origin_target_str:
-                    extra_meta["origin_target"] = origin_target_str
-                descriptors.append(
-                    {
-                        "media_ref": url,
-                        "source": "automatic",
-                        "to_pending": to_pending,
-                        "extra_meta": extra_meta,
-                    }
-                )
-            if descriptors:
-                await self._background_queue.submit_capture_async(descriptors)
+        if await self._queue_background_capture(
+            image_candidates,
+            store_urls,
+            to_pending=to_pending,
+            origin_target=origin_target_str,
+        ):
             return
 
-        if imgs_to_process:
-            logger.debug(f"开始并行下载 {len(imgs_to_process)} 张图片")
-            download_results = await asyncio.gather(
-                *[self._image_download_service.download_original_image(item[1]) for item in imgs_to_process],
-                return_exceptions=True,
+        merged_index = await self._process_image_candidates(
+            event,
+            plugin_instance,
+            image_candidates,
+            to_pending=to_pending,
+        )
+        merged_index.update(
+            await self._process_store_urls(
+                event,
+                plugin_instance,
+                store_urls,
+                to_pending=to_pending,
+                origin_target=origin_target_str,
             )
-            process_tasks = []
-            for (i, img, extra_meta), result in zip(imgs_to_process, download_results):
-                if isinstance(result, Exception):
-                    logger.error(f"下载图片异常: {result}")
-                    continue
-                # _download_original_image 固定返回二元组 (temp_path, is_gif)
-                temp_path, _is_gif = result
-                if not temp_path or not Path(temp_path).exists():
-                    logger.warning(f"临时文件不存在: {temp_path}")
-                    continue
-                process_tasks.append(
-                    plugin_instance._process_image(
-                        event,
-                        temp_path,
-                        is_temp=True,
-                        is_platform_emoji=True,
-                        extra_meta=extra_meta,
-                        to_pending=to_pending,
-                    )
-                )
-            if process_tasks:
-                logger.debug(f"开始并行处理 {len(process_tasks)} 张图片")
-                process_results = await asyncio.gather(*process_tasks, return_exceptions=True)
-                for result in process_results:
-                    if isinstance(result, Exception):
-                        logger.error(f"处理图片异常: {result}")
-                        continue
-                    # _process_image 固定返回 (bool, dict|None)
-                    success, idx = result
-                    if success and isinstance(idx, dict):
-                        merge_result_idx(idx)
-        if store_urls:
-            logger.debug(f"开始并行下载 {min(len(store_urls), 3)} 个商城表情")
-
-            async def download_store_url(url: str) -> tuple[str | None, str]:
-                try:
-                    temp_path, _ = await self._download_url_to_temp(url)
-                    return temp_path, url
-                except Exception as e:
-                    logger.error(f"下载商城表情失败: {e}")
-                    return None, url
-
-            store_download_results = await asyncio.gather(
-                *[download_store_url(url) for url in store_urls[:3]], return_exceptions=True
-            )
-            store_process_tasks = []
-            for result in store_download_results:
-                if isinstance(result, Exception):
-                    continue
-                temp_path, url = result
-                if not temp_path or not Path(temp_path).exists():
-                    continue
-                extra_meta = {"source": "qq_store", "origin_url": self._platform_detector._normalize_str(url)}
-                if origin_target_str:
-                    extra_meta["origin_target"] = origin_target_str
-                store_process_tasks.append(
-                    plugin_instance._process_image(
-                        event,
-                        temp_path,
-                        is_temp=True,
-                        is_platform_emoji=True,
-                        extra_meta=extra_meta,
-                        to_pending=to_pending,
-                    )
-                )
-            if store_process_tasks:
-                store_results = await asyncio.gather(*store_process_tasks, return_exceptions=True)
-                for result in store_results:
-                    if isinstance(result, Exception):
-                        continue
-                    success, idx = result
-                    if success and isinstance(idx, dict):
-                        merge_result_idx(idx)
-        if merged_idx:
-            await plugin_instance.index_manager.save_index(merged_idx)
+        )
+        if merged_index:
+            await plugin_instance.index_manager.save_index(merged_index)
 
     async def _handle_force_capture(
         self,

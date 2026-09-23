@@ -6,4 +6,5 @@
 /ruff.toml export-ignore
 /requirements-dev.txt export-ignore
 /.gitignore export-ignore
+/.webui-preview export-ignore
 /.gitattributes export-ignore

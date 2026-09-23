@@ -21,28 +21,32 @@ class CommandHandler:
         self.plugin = plugin_instance
         self._cleaned = False  # 清理标志位
 
-    def _apply_config_updates(self, updates: dict) -> None:
-        self.plugin.update_config(updates)
+    def _apply_config_updates(self, updates: dict) -> bool:
+        try:
+            return bool(self.plugin.update_config(updates))
+        except Exception as exc:
+            logger.error(f"指令更新配置失败: {exc}")
+            return False
 
     async def meme_on(self, event: AstrMessageEvent):
         """开启偷表情包功能。"""
-        self._apply_config_updates({"steal_meme": True})
-        yield event.plain_result("已开启偷表情包")
+        saved = self._apply_config_updates({"steal_meme": True})
+        yield event.plain_result("已开启偷表情包" if saved else "❌ 开启偷表情包失败：配置未保存")
 
     async def meme_off(self, event: AstrMessageEvent):
         """关闭偷表情包功能。"""
-        self._apply_config_updates({"steal_meme": False})
-        yield event.plain_result("已关闭偷表情包")
+        saved = self._apply_config_updates({"steal_meme": False})
+        yield event.plain_result("已关闭偷表情包" if saved else "❌ 关闭偷表情包失败：配置未保存")
 
     async def auto_on(self, event: AstrMessageEvent):
         """开启自动发送功能。"""
-        self._apply_config_updates({"auto_send_meme": True})
-        yield event.plain_result("已开启自动发送")
+        saved = self._apply_config_updates({"auto_send_meme": True})
+        yield event.plain_result("已开启自动发送" if saved else "❌ 开启自动发送失败：配置未保存")
 
     async def auto_off(self, event: AstrMessageEvent):
         """关闭自动发送功能。"""
-        self._apply_config_updates({"auto_send_meme": False})
-        yield event.plain_result("已关闭自动发送")
+        saved = self._apply_config_updates({"auto_send_meme": False})
+        yield event.plain_result("已关闭自动发送" if saved else "❌ 关闭自动发送失败：配置未保存")
 
     async def capture(self, event: AstrMessageEvent):
         window_seconds = 30
@@ -58,6 +62,7 @@ class CommandHandler:
 
     async def toggle_natural_analysis(self, event: AstrMessageEvent, action: str = ""):
         """启用/禁用自然语言情绪分析。"""
+        action = str(action or "").strip().lower()
         if action not in ["on", "off"]:
             current_status = "启用" if self.plugin.plugin_config.enable_natural_emotion_analysis else "禁用"
             yield event.plain_result(
@@ -66,14 +71,18 @@ class CommandHandler:
             return
 
         if action == "on":
-            self._apply_config_updates({"enable_natural_emotion_analysis": True})
+            if not self._apply_config_updates({"enable_natural_emotion_analysis": True}):
+                yield event.plain_result("❌ 智能检索开启失败：配置未保存")
+                return
             yield event.plain_result(
                 "✅ 已启用自然语言情绪分析（LLM模式）\n\n轻量模型会从 AI 回复里提取检索词，是否发送仍由概率/冷却等门控决定。"
             )
         else:
-            self._apply_config_updates({"enable_natural_emotion_analysis": False})
+            if not self._apply_config_updates({"enable_natural_emotion_analysis": False}):
+                yield event.plain_result("❌ 被动检索切换失败：配置未保存")
+                return
             yield event.plain_result(
-                "✅ 已切换为被动检索模式\n\n不再向回复注入 &&emotion&& 标签，直接用回复原文检索表情包。"
+                "✅ 已切换为被动检索模式\n\n直接用回复原文检索表情包。"
             )
 
     async def emotion_analysis_stats(self, event: AstrMessageEvent):
@@ -99,12 +108,10 @@ class CommandHandler:
                     status_text += f"缓存大小: {stats['cache_size']}\n"
 
                 status_text += "\n💡 智能检索说明:\n"
-                status_text += "- 不向LLM注入提示词\n"
                 status_text += "- 从 AI 回复中提取检索词\n"
                 status_text += "- 提供情绪先验增强匹配，不决定是否发送\n"
             else:
                 status_text += "📋 原文检索说明:\n"
-                status_text += "- 不向 LLM 注入提示词，不改回复\n"
                 status_text += "- 用回复原文做图上文字 / BM25 / 嵌入检索\n"
                 status_text += "- 仍受概率、冷却和意图门控约束\n"
 
@@ -249,12 +256,17 @@ class CommandHandler:
         except Exception as e:
             logger.error(f"标签统计失败: {e}", exc_info=True)
             yield event.plain_result(f"❌ 标签统计失败: {e}")
+
+    async def clean(self, event: AstrMessageEvent, mode: str = ""):
         """手动触发清理操作，清理raw目录中的原始图片文件，不影响已分类的表情包。
 
         Args:
             event: 消息事件
-            mode: 清理模式，现在只支持清理所有raw文件
+            mode: 留空或 raw，均只清理 raw 原始图片
         """
+        if str(mode or "").strip().lower() not in {"", "raw"}:
+            yield event.plain_result("用法: /meme clean [raw]；仅清理 raw 原始图片")
+            return
         try:
             # 清理所有raw文件（因为成功分类的文件已经被立即删除了）
             deleted_count = await self._force_clean_raw_directory()
@@ -286,12 +298,12 @@ class CommandHandler:
                 return
 
             # 执行容量控制
-            deleted_files = await self.plugin.event_handler._enforce_capacity(image_index)
+            await self.plugin.event_handler._enforce_capacity(image_index)
             await self.plugin.index_manager.save_index(image_index)
 
             # 重新统计
             new_count = library_counts(image_index)["automatic"]
-            removed_count = len(deleted_files)
+            removed_count = max(0, current_count - new_count)
 
             yield event.plain_result(
                 f"容量控制完成\n"

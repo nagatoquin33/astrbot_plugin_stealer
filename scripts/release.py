@@ -38,6 +38,7 @@ EXCLUDED_PARTS = frozenset(
         "CLAUDE.md",
         ".pytest_cache",
         ".ruff_cache",
+        ".webui-preview",
         "__pycache__",
         "scripts",
         "tests",

@@ -252,7 +252,11 @@
                 "add_method_manual": "Вручную",
                 "add_method_llm": "Через LLM",
                 "add_method_api": "Через API",
+                "add_method_external": "Внешний импорт",
                 "add_method_unknown": "Неизвестно",
+                "source_channel_pack": "Набор мемов",
+                "source_channel_github": "GitHub",
+                "source_channel_http_json": "JSON API",
                 "character": "Персонаж",
                 "overlay_text": "Текст на картинке",
                 "id": "ID"

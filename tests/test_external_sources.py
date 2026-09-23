@@ -6,6 +6,7 @@ import io
 import hashlib
 import json
 import os
+import socket
 import sqlite3
 import time
 import zipfile
@@ -15,12 +16,15 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 
+from core.commands.image_mgmt_command import ImageManagementCommand
 from core.db.database_service import DatabaseService
+from core.processing.image_render_service import ImageRenderService
 from core.sources.http_source import HTTPSource, validate_source_url
 from core.sources.github_source import GitHubSource, _parse_repository
 from core.sources.models import ExternalSourceError, ExternalSourceSecurityError
 from core.sources.pack_source import PackSource, safe_member_path
 from core.sources.source_service import SourceService
+from core.util.meme_presentation import image_display_title
 
 
 def _png_bytes(color=(255, 0, 0)) -> bytes:
@@ -129,13 +133,26 @@ def test_pack_member_rejects_path_traversal():
     assert safe_member_path("memes/happy/a.png") == "memes/happy/a.png"
 
 
-def test_http_source_blocks_local_and_non_http_urls():
+@pytest.fixture
+def public_catalog_dns(monkeypatch):
+    def getaddrinfo(host, port, **_kwargs):
+        address = "127.0.0.1" if host == "private.example" else "8.8.8.8"
+        return [
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (address, port))
+        ]
+
+    monkeypatch.setattr("core.sources.http_source.socket.getaddrinfo", getaddrinfo)
+
+
+def test_http_source_blocks_local_and_non_http_urls(public_catalog_dns):
     with pytest.raises(ExternalSourceSecurityError):
         validate_source_url("http://127.0.0.1/catalog", allow_http=True)
     with pytest.raises(ExternalSourceSecurityError):
         validate_source_url("file:///tmp/catalog.json")
     with pytest.raises(ExternalSourceSecurityError):
         validate_source_url("https://example.com:99999/catalog.json", resolve_dns=False)
+    with pytest.raises(ExternalSourceSecurityError):
+        validate_source_url("https://private.example/catalog.json")
     assert validate_source_url("https://example.com/catalog.json").startswith("https://")
 
 
@@ -211,7 +228,7 @@ class _FakeSession:
 
 
 @pytest.mark.asyncio
-async def test_http_source_drops_credentials_after_cross_origin_redirect():
+async def test_http_source_drops_credentials_after_cross_origin_redirect(public_catalog_dns):
     source = HTTPSource(
         "https://api.example/catalog.json",
         headers={"Authorization": "Bearer secret", "X-API-Key": "key", "User-Agent": "test"},
@@ -419,6 +436,62 @@ async def test_pack_import_copies_tracks_and_deduplicates(tmp_path):
     assert second["duplicates"] == 1
     assert db.count_total() == 1
     assert (pack / "memes" / "happy" / "smile.png").is_file()
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_imported_meme_list_renders_original_name_and_source_channel(tmp_path):
+    service, db = _service(tmp_path)
+    pack = _pack(tmp_path)
+    metadata_path = pack / "memes_data.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["items"][0]["caption"] = ""
+    metadata["items"][0]["visible_text"] = ""
+    metadata_path.write_text(json.dumps(metadata, ensure_ascii=False), encoding="utf-8")
+
+    await service.initialize()
+    imported = await service.import_now({"source_type": "meme_pack", "path": str(pack)})
+    assert imported["imported"] == 1
+    rows, total, _counts = db.get_emojis_paginated(page=1, page_size=10)
+    assert total == 1
+    assert rows[0]["source"] == "external:meme_pack"
+
+    rendered_data = {}
+
+    async def html_render(_template, data, **_kwargs):
+        rendered_data.update(data)
+        return str(tmp_path / "list.png")
+
+    class Result:
+        def stop_event(self):
+            return self
+
+    class Event:
+        def get_platform_name(self):
+            return "test"
+
+        def make_result(self):
+            return self
+
+        def file_image(self, _path):
+            return Result()
+
+    renderer = ImageRenderService()
+    plugin = SimpleNamespace(db_service=db, image_render_service=renderer, html_render=html_render)
+    renderer.plugin = plugin
+    messages = [
+        message async for message in ImageManagementCommand(plugin).list_images(Event())
+    ]
+    assert len(messages) == 1
+    assert rendered_data["items"][0]["desc"] == "smile"
+    assert rendered_data["items"][0]["source_label"] == "外部导入 · 资源包"
+    assert image_display_title(
+        {
+            "source": "external:meme_pack",
+            "original_name": f"{'b' * 64}.png",
+            "name": f"ext_{'a' * 12}_{'b' * 64}.png",
+        }
+    ) == "未命名表情"
     await service.close()
 
 

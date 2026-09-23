@@ -8,6 +8,7 @@ from astrbot.api.event import AstrMessageEvent
 
 from ..util.blacklist import add_blacklist_hash
 from ..db.index_manager import delete_index_paths
+from ..util.meme_presentation import image_display_title, image_source_label
 from ..util.normalization import normalize_scope_mode
 from ..util.safe_io import safe_remove_file
 
@@ -17,6 +18,15 @@ class ImageManagementCommand:
 
     def __init__(self, plugin_instance: Any) -> None:
         self.plugin = plugin_instance
+
+    @staticmethod
+    def _existing_path_indexes(db_service: Any) -> dict[str, int]:
+        """Number present files in the same order used by numeric commands."""
+        indexes: dict[str, int] = {}
+        for path in db_service.get_paths_sorted_newest():
+            if Path(path).exists():
+                indexes[path] = len(indexes) + 1
+        return indexes
 
     async def _add_blacklist_hash(self, image_hash: str) -> bool:
         return await add_blacklist_hash(self.plugin, image_hash)
@@ -76,7 +86,7 @@ class ImageManagementCommand:
         db_service = getattr(self.plugin, "db_service", None)
         if db_service and hasattr(db_service, "get_emojis_paginated"):
             cat_filter = category if category else None
-            rows, total_filtered, category_counts = db_service.get_emojis_paginated(
+            rows, total_filtered, _category_counts = db_service.get_emojis_paginated(
                 page=page_num, page_size=per_page, category=cat_filter, sort_order="newest"
             )
             total_all = db_service.count_total()
@@ -84,6 +94,17 @@ class ImageManagementCommand:
             if total_all == 0:
                 yield event.plain_result("暂无表情包数据")
                 return
+
+            total_pages = max(1, (total_filtered + per_page - 1) // per_page)
+            if page_num > total_pages:
+                page_num = total_pages
+                rows, total_filtered, _category_counts = db_service.get_emojis_paginated(
+                    page=page_num,
+                    page_size=per_page,
+                    category=cat_filter,
+                    sort_order="newest",
+                )
+            indexes = self._existing_path_indexes(db_service)
 
             # 构建展示列表，标记文件是否存在
             display_images = []
@@ -94,11 +115,15 @@ class ImageManagementCommand:
                 if not file_exists:
                     missing_count += 1
                 display_images.append({
+                    "index": indexes.get(img_path, 0),
                     "path": img_path,
                     "name": Path(img_path).name,
                     "category": row.get("category", "未分类"),
                     "desc": str(row.get("desc", "") or ""),
+                    "overlay_text": str(row.get("overlay_text", "") or ""),
+                    "original_name": str(row.get("original_name", "") or ""),
                     "source": str(row.get("source", "") or ""),
+                    "add_method": str(row.get("add_method", "") or ""),
                     "qq_emoji_package_id": str(row.get("qq_emoji_package_id", "") or ""),
                     "created_at": row.get("created_at", 0),
                     "file_exists": file_exists,
@@ -110,10 +135,6 @@ class ImageManagementCommand:
             if not display_images and category:
                 yield event.plain_result(f"分类 '{category}' 中暂无表情包")
                 return
-
-            total_pages = max(1, (total_filtered + per_page - 1) // per_page)
-            if page_num > total_pages:
-                page_num = total_pages
 
         else:
             # 兜底：旧的全量加载方式
@@ -139,7 +160,10 @@ class ImageManagementCommand:
                         "name": Path(img_path).name,
                         "category": img_category,
                         "desc": str(img_desc or ""),
+                        "overlay_text": str(img_info.get("overlay_text", "") or ""),
+                        "original_name": str(img_info.get("original_name", "") or ""),
                         "source": str(img_source or ""),
+                        "add_method": str(img_info.get("add_method", "") or ""),
                         "qq_emoji_package_id": str(img_pkg or ""),
                         "created_at": img_info.get("created_at", 0),
                         "file_exists": file_exists,
@@ -152,9 +176,15 @@ class ImageManagementCommand:
                     yield event.plain_result("暂无有效的表情包文件")
                 return
 
-            all_images.sort(key=lambda x: x["created_at"], reverse=True)
-            for i, img in enumerate(all_images, 1):
-                img["index"] = i
+            all_images.sort(
+                key=lambda item: (int(item.get("created_at", 0) or 0), item["path"]),
+                reverse=True,
+            )
+            next_index = 1
+            for img in all_images:
+                img["index"] = next_index if img["file_exists"] else 0
+                if img["file_exists"]:
+                    next_index += 1
 
             filtered_images = [
                 img for img in all_images if (not category or img.get("category") == category)
@@ -227,32 +257,47 @@ class ImageManagementCommand:
         result_text = title + "\n\n"
         for img in display_images:
             idx = int(img.get("index", 0) or 0)
-            desc = str(img.get("desc", "") or "").strip()
-            if not desc:
-                desc = str(img.get("name", "") or "")
+            desc = image_display_title(img)
             if len(desc) > 28:
                 desc = desc[:25] + "..."
             marker = "" if img.get("file_exists", True) else "⚠"
-            result_text += f"{idx:4d}. {marker}{desc}\n"
+            source_label = image_source_label(
+                img.get("source"), img.get("add_method")
+            )
+            source_text = f" [{source_label}]" if source_label else ""
+            index_label = f"{idx:4d}" if idx > 0 else "----"
+            result_text += f"{index_label}. {marker}{desc}{source_text}\n"
 
-        if total_pages > 1:
-            next_page_hint = f"\n下一页: /meme list {page_num + 1}"
+        if page_num < total_pages:
+            next_args = ["/meme list"]
             if category:
-                next_page_hint = f"\n下一页: /meme list {category} {page_num + 1}"
+                next_args.append(category)
+            if per_page != 10:
+                next_args.append(str(per_page))
+            next_args.append(str(page_num + 1))
+            next_page_hint = "\n下一页: " + " ".join(next_args)
             result_text += next_page_hint
-        result_text += "\n用法: /meme list [分类] [每页数量] [页码]"
+        result_text += (
+            "\n用法: /meme list [分类] [每页数量] [页码]"
+            "；单独一个数字或分类后一个数字表示页码"
+        )
         yield event.plain_result(result_text).stop_event()
 
     async def _delete_indexed_image(self, image_index: dict, target: dict) -> bool:
-        if not await self._delete_image_files(target["path"]):
+        if not await self._delete_image_files(
+            target["path"], target.get("category", ""), image_index
+        ):
             return False
-        image_hash = str(target.get("hash") or "").strip()
-        paths = [path for path, meta in image_index.items() if path == target["path"] or (
-            image_hash and isinstance(meta, dict) and meta.get("hash") == image_hash
-        )]
-        await delete_index_paths(self.plugin, paths)
-        for path in paths:
-            image_index.pop(path, None)
+        path = target["path"]
+        try:
+            removed = await delete_index_paths(self.plugin, [path])
+        except Exception as exc:
+            logger.error(f"删除图片索引失败 [{path}]: {exc}")
+            return False
+        if removed != 1:
+            logger.warning(f"删除文件后未能移除索引: {path}")
+            return False
+        image_index.pop(path, None)
         return True
 
     async def delete_image(self, event: AstrMessageEvent, identifier: str = ""):
@@ -278,7 +323,7 @@ class ImageManagementCommand:
 
         if not target_image:
             yield event.plain_result(
-                f"未找到图片: {identifier}\n请使用 /meme list 查看可用的图片列表"
+                f"未找到唯一匹配的图片: {identifier}\n请使用 /meme list 查看序号或完整文件名"
             )
             return
 
@@ -307,7 +352,7 @@ class ImageManagementCommand:
         target_image = self._find_target_image(image_index, identifier)
         if not target_image:
             yield event.plain_result(
-                f"未找到图片: {identifier}\n请使用 /meme list 查看可用的图片列表"
+                f"未找到唯一匹配的图片: {identifier}\n请使用 /meme list 查看序号或完整文件名"
             )
             return
 
@@ -320,8 +365,24 @@ class ImageManagementCommand:
             yield event.plain_result(f"❌ 拉黑失败: {target_image['name']} 无法写入黑名单")
             return
 
-        if not await self._delete_indexed_image(image_index, target_image):
-            yield event.plain_result(f"❌ 拉黑失败: {target_image['name']}")
+        matching = [
+            {
+                "path": path,
+                "name": Path(path).name,
+                "category": meta.get("category", ""),
+            }
+            for path, meta in image_index.items()
+            if isinstance(meta, dict) and str(meta.get("hash") or "").strip() == target_hash
+        ]
+        failed = []
+        for image in matching:
+            if not await self._delete_indexed_image(image_index, image):
+                failed.append(image["name"])
+        if failed:
+            yield event.plain_result(
+                f"⚠ 已加入黑名单，但有 {len(failed)} 个同哈希文件删除失败: "
+                + ", ".join(failed[:5])
+            )
             return
 
         logger.info(f"已加入黑名单: {target_hash}")
@@ -353,7 +414,7 @@ class ImageManagementCommand:
         target_image = self._find_target_image(image_index, identifier)
         if not target_image:
             yield event.plain_result(
-                f"未找到图片: {identifier}\n请使用 /meme list 查看可用的图片列表"
+                f"未找到唯一匹配的图片: {identifier}\n请使用 /meme list 查看序号或完整文件名"
             )
             return
 
@@ -401,12 +462,22 @@ class ImageManagementCommand:
                     }
                 )
 
-        valid_images.sort(key=lambda x: x["created_at"], reverse=True)
+        valid_images.sort(
+            key=lambda item: (int(item.get("created_at", 0) or 0), item["path"]),
+            reverse=True,
+        )
         return valid_images
 
     def _find_target_image(self, image_index: dict, identifier: str) -> dict[str, Any] | None:
         """按 /meme list 的全局序号或文件名定位图片。"""
         valid_images = self._collect_valid_images(image_index)
+        identifier = str(identifier or "").strip()
+        if not identifier:
+            return None
+
+        exact_path = next((img for img in valid_images if img["path"] == identifier), None)
+        if exact_path is not None:
+            return exact_path
 
         try:
             index = int(identifier) - 1
@@ -415,14 +486,16 @@ class ImageManagementCommand:
         except ValueError:
             pass
 
-        for img in valid_images:
-            if img["name"] == identifier or img["name"].startswith(identifier):
-                return img
+        exact = [img for img in valid_images if img["name"] == identifier]
+        if exact:
+            return exact[0] if len(exact) == 1 else None
+        prefix = [img for img in valid_images if img["name"].startswith(identifier)]
+        return prefix[0] if len(prefix) == 1 else None
 
-        return None
-
-    async def _delete_image_files(self, img_path: str) -> bool:
-        """删除图片文件（raw目录和categories目录）。
+    async def _delete_image_files(
+        self, img_path: str, category: str = "", image_index: dict | None = None
+    ) -> bool:
+        """删除索引文件及同一分类中的旧版副本。
 
         Args:
             img_path: 图片路径
@@ -431,29 +504,40 @@ class ImageManagementCommand:
             bool: 是否删除成功
         """
         try:
-            deleted_files = []
+            config = getattr(self.plugin, "plugin_config", None)
+            categories_root = getattr(self.plugin, "categories_dir", None) or getattr(
+                config, "categories_dir", None
+            )
+            raw_root = getattr(self.plugin, "raw_dir", None) or getattr(
+                config, "raw_dir", None
+            )
+            category_name = str(category or "").strip()
+            if (
+                categories_root
+                and raw_root
+                and Path(img_path).resolve().parent == Path(raw_root).resolve()
+                and category_name
+                and not any(
+                    separator in category_name for separator in ("/", "\\")
+                )
+                and category_name not in {".", ".."}
+            ):
+                root = Path(categories_root).resolve()
+                category_dir = Path(categories_root) / category_name
+                if category_dir.resolve().parent == root:
+                    category_file = category_dir / Path(img_path).name
+                    if (
+                        category_file != Path(img_path)
+                        and str(category_file) not in (image_index or {})
+                        and category_file.exists()
+                    ):
+                        if not await safe_remove_file(str(category_file)):
+                            return False
 
-            # 删除主文件（通常在raw目录）
-            if Path(img_path).exists():
-                if await safe_remove_file(img_path):
-                    deleted_files.append(img_path)
-                logger.info(f"已删除主文件: {img_path}")
-
-            # 查找并删除categories目录中的对应文件
-            if hasattr(self.plugin, "categories_dir") and self.plugin.plugin_config.categories_dir:
-                img_name = Path(img_path).name
-
-                # 遍历所有分类目录
-                for category_dir in self.plugin.plugin_config.categories_dir.iterdir():
-                    if category_dir.is_dir():
-                        category_file = category_dir / img_name
-                        if category_file.exists():
-                            if await safe_remove_file(str(category_file)):
-                                deleted_files.append(str(category_file))
-                            logger.info(f"已删除分类文件: {category_file}")
-
-            logger.info(f"删除操作完成，共删除 {len(deleted_files)} 个文件")
-            return len(deleted_files) > 0
+            if not await safe_remove_file(img_path):
+                return False
+            logger.info(f"已删除图片文件: {img_path}")
+            return True
 
         except Exception as e:
             logger.error(f"删除图片文件失败: {e}")

@@ -634,122 +634,189 @@ class PluginAPI:
 
     # ── List / Stats / Health ─────────────────────────────────
 
+    def _build_image_list_payload(
+        self,
+        *,
+        total: int,
+        page: int,
+        page_size: int,
+        images: list[dict],
+        category_counts: dict[str, int],
+        character_counts: dict[str, int],
+        libraries: dict[str, int],
+    ) -> dict:
+        return {
+            "success": True,
+            "total": total,
+            "page": page,
+            "size": page_size,
+            "images": images,
+            "categories": self._build_categories_list(category_counts),
+            "characters": self._build_characters_list(character_counts),
+            "unassigned_character_count": int(character_counts.get("", 0) or 0),
+            "favorite_count": self._count_favorites(),
+            "libraries": libraries,
+            "automatic_limit": self.plugin.plugin_config.max_reg_num,
+        }
+
+    def _list_images_from_database(
+        self,
+        *,
+        db: Any,
+        page: int,
+        page_size: int,
+        category: str | None,
+        search: str,
+        sort_order: str,
+        favorite_only: bool,
+        character: str,
+        library: str,
+    ) -> dict | None:
+        """Query the paginated SQLite view when it contains live rows."""
+        get_paginated = getattr(db, "get_emojis_paginated", None) if db else None
+        if not db or not callable(get_paginated) or db.count_total() <= 0:
+            return None
+
+        raw, total, category_counts = get_paginated(
+            page=page,
+            page_size=page_size,
+            category=category,
+            sort_order=sort_order,
+            search_query=search or None,
+            favorite_only=favorite_only,
+            character=character or None,
+            **({"library": library} if library else {}),
+        )
+        images = [
+            item for item in (self._build_image_item(row["path"], row) for row in raw) if item
+        ]
+        character_counts = (
+            db.get_character_counts(exclude_favorites=True)
+            if library == "characters"
+            else db.get_character_counts()
+        )
+        return self._build_image_list_payload(
+            total=total,
+            page=page,
+            page_size=page_size,
+            images=images,
+            category_counts=category_counts,
+            character_counts=character_counts,
+            libraries=db.get_library_counts(),
+        )
+
+    def _list_images_from_index(
+        self,
+        *,
+        page: int,
+        page_size: int,
+        category: str | None,
+        search: str,
+        sort_order: str,
+        favorite_only: bool,
+        character: str,
+        library: str,
+    ) -> dict:
+        """Build the same response shape from legacy index-only data."""
+        index = self._get_index()
+        images: list[dict] = []
+        category_counts: dict[str, int] = {}
+
+        for path_str, metadata in index.items():
+            if not Path(path_str).exists():
+                continue
+            item = self._build_image_item(path_str, metadata)
+            if not item:
+                continue
+            if search and not (
+                any(search in str(tag).lower() for tag in item["tags"])
+                or search in item["desc"].lower()
+                or any(search in str(scene).lower() for scene in item.get("scenes", []))
+            ):
+                continue
+            if library in {"general", "favorites", "characters"} and library_group(item) != library:
+                continue
+
+            category_key = item["category"]
+            category_counts[category_key] = category_counts.get(category_key, 0) + 1
+            if category and item["category"] != category:
+                continue
+            if favorite_only and not item.get("is_favorite"):
+                continue
+            item_character = str(item.get("character", "") or "")
+            if character == "__none__" and item_character:
+                continue
+            if character and character != "__none__" and item_character != character:
+                continue
+            images.append(item)
+
+        sort_fields = {
+            "least_used": ("use_count", "created_at"),
+            "most_used": ("use_count", "last_used_at"),
+            "last_used": ("last_used_at", "use_count"),
+        }.get(sort_order, ("created_at",))
+        images.sort(
+            key=lambda item: tuple(int(item.get(field, 0) or 0) for field in sort_fields)
+            + (str(item.get("hash", "")),),
+            reverse=sort_order not in {"oldest", "least_used"},
+        )
+
+        total = len(images)
+        start = (page - 1) * page_size
+        character_counts: dict[str, int] = {}
+        for metadata in index.values():
+            if not isinstance(metadata, dict):
+                continue
+            if library == "characters" and metadata.get("is_favorite"):
+                continue
+            key = str(metadata.get("character", "") or "")
+            character_counts[key] = character_counts.get(key, 0) + 1
+
+        return self._build_image_list_payload(
+            total=total,
+            page=page,
+            page_size=page_size,
+            images=images[start : start + page_size],
+            category_counts=category_counts,
+            character_counts=character_counts,
+            libraries=library_counts(index),
+        )
+
     async def handle_list_images(self):
-        """返回分页图片列表和分类统计。"""
+        """Return a paginated image list and category counts."""
         try:
             page = request.args.get("page", 1, type=int)
             page_size = request.args.get("size", 50, type=int)
-            cat_filter = request.args.get("category", None)
+            category = request.args.get("category", None)
             search = str(request.args.get("q", "")).lower()
             sort_order = request.args.get("sort", "newest")
             favorite_only = request.args.get("favorite_only", "false").lower() == "true"
-            character_filter = str(request.args.get("character", "") or "")
+            character = str(request.args.get("character", "") or "")
             library = str(request.args.get("library", "") or "")
 
-            db = self._db
-            get_paginated = getattr(db, "get_emojis_paginated", None) if db else None
-
-            if db and callable(get_paginated) and db.count_total() > 0:
-                raw, total, cat_counts = get_paginated(
+            payload = self._list_images_from_database(
+                db=self._db,
+                page=page,
+                page_size=page_size,
+                category=category,
+                search=search,
+                sort_order=sort_order,
+                favorite_only=favorite_only,
+                character=character,
+                library=library,
+            )
+            if payload is None:
+                payload = self._list_images_from_index(
                     page=page,
                     page_size=page_size,
-                    category=cat_filter,
+                    category=category,
+                    search=search,
                     sort_order=sort_order,
-                    search_query=search if search else None,
                     favorite_only=favorite_only,
-                    character=character_filter or None,
-                    **({"library": library} if library else {}),
+                    character=character,
+                    library=library,
                 )
-                images = [
-                    item for item in (self._build_image_item(i["path"], i) for i in raw) if item
-                ]
-                cats = self._build_categories_list(cat_counts)
-                char_counts = db.get_character_counts(exclude_favorites=True) if library == "characters" else db.get_character_counts()
-                return jsonify(
-                    {
-                        "success": True,
-                        "total": total,
-                        "page": page,
-                        "size": page_size,
-                        "images": images,
-                        "categories": cats,
-                        "characters": self._build_characters_list(char_counts),
-                        "unassigned_character_count": int(char_counts.get("", 0) or 0),
-                        "favorite_count": self._count_favorites(),
-                        "libraries": db.get_library_counts(),
-                        "automatic_limit": self.plugin.plugin_config.max_reg_num,
-                    }
-                )
-
-            index = self._get_index()
-            images: list[dict] = []
-            cat_counts: dict[str, int] = {}
-
-            for path_str, meta in index.items():
-                if not Path(path_str).exists():
-                    continue
-                item = self._build_image_item(path_str, meta)
-                if not item:
-                    continue
-                if search and not (
-                    any(search in str(t).lower() for t in item["tags"])
-                    or search in item["desc"].lower()
-                    or any(search in str(s).lower() for s in item.get("scenes", []))
-                ):
-                    continue
-                if library in {"general", "favorites", "characters"} and library_group(item) != library:
-                    continue
-                cat = item["category"]
-                cat_counts[cat] = cat_counts.get(cat, 0) + 1
-                if cat_filter and item["category"] != cat_filter:
-                    continue
-                if favorite_only and not item.get("is_favorite"):
-                    continue
-                item_character = str(item.get("character", "") or "")
-                if character_filter == "__none__" and item_character:
-                    continue
-                if character_filter and character_filter != "__none__" and item_character != character_filter:
-                    continue
-                images.append(item)
-
-            sort_fields = {
-                "least_used": ("use_count", "created_at"),
-                "most_used": ("use_count", "last_used_at"),
-                "last_used": ("last_used_at", "use_count"),
-            }.get(sort_order, ("created_at",))
-            images.sort(
-                key=lambda x: tuple(int(x.get(field, 0) or 0) for field in sort_fields)
-                + (str(x.get("hash", "")),),
-                reverse=sort_order not in {"oldest", "least_used"},
-            )
-
-            total = len(images)
-            start = (page - 1) * page_size
-            paged = images[start : start + page_size]
-            cats = self._build_categories_list(cat_counts)
-            char_counts: dict[str, int] = {}
-            for path_str, meta in index.items():
-                if isinstance(meta, dict):
-                    if library == "characters" and meta.get("is_favorite"):
-                        continue
-                    key = str(meta.get("character", "") or "")
-                    char_counts[key] = char_counts.get(key, 0) + 1
-
-            return jsonify(
-                {
-                    "success": True,
-                    "total": total,
-                    "page": page,
-                    "size": page_size,
-                    "images": paged,
-                    "categories": cats,
-                    "characters": self._build_characters_list(char_counts),
-                    "unassigned_character_count": int(char_counts.get("", 0) or 0),
-                    "favorite_count": self._count_favorites(),
-                    "libraries": library_counts(index),
-                    "automatic_limit": self.plugin.plugin_config.max_reg_num,
-                }
-            )
+            return jsonify(payload)
         except Exception as e:
             logger.error(f"Error listing images: {e}", exc_info=True)
             return jsonify({"success": False, "error": str(e)})

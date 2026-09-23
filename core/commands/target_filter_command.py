@@ -33,12 +33,12 @@ class TargetFilterCommand:
             return ", ".join(shown) + suffix
 
         def resolve_target(raw_target: str, raw_target_id: str) -> str:
-            if raw_target and raw_target_id:
-                lowered = raw_target.lower()
-                if lowered in {"group", "g"}:
-                    return cfg.normalize_target_entry(raw_target_id, "group")
-                if lowered in {"user", "u", "qq"}:
-                    return cfg.normalize_target_entry(raw_target_id, "user")
+            lowered = str(raw_target or "").strip().lower()
+            if lowered in {"group", "g", "user", "u", "qq"}:
+                if not str(raw_target_id or "").strip():
+                    return ""
+                scope = "group" if lowered in {"group", "g"} else "user"
+                return f"{scope}:{str(raw_target_id).strip()}"
 
             combined = str(raw_target or raw_target_id or "").strip()
             if combined:
@@ -56,14 +56,22 @@ class TargetFilterCommand:
         if raw_scope in {"show", "list", "ls", "status"} and not raw_list_name:
             raw_action = raw_scope
             raw_scope = ""
-        elif (
-            raw_scope in {"wl", "white", "whitelist", "bl", "black", "blacklist"} and not raw_action
-        ):
+        elif raw_scope in {"wl", "white", "whitelist", "bl", "black", "blacklist"}:
+            # /meme group wl add [target] 是 send 名单的简写。
+            target_id = target
+            target = action
             raw_action = raw_list_name
             raw_list_name = raw_scope
             raw_scope = "send"
+        elif raw_scope in {"send", "steal"} and raw_list_name in {
+            "show", "list", "ls", "status"
+        } and not raw_action:
+            raw_action = raw_list_name
+            raw_list_name = ""
 
-        if raw_action in {"", "help", "h"}:
+        if raw_action in {"help", "h"} or (
+            not raw_action and raw_list_name not in {"priority", "prio", "order"}
+        ):
             help_text = (
                 "用法：\n"
                 "/meme group show\n"
