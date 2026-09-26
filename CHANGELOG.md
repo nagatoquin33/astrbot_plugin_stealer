@@ -7,8 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.4] - 2026-09-26
+
+### added
+- 顶栏图标改为侧栏折叠按钮
+
 ### changed
 - 将 Web API 路由、数据库表结构与分领域查询、LLM 表情包工具流程拆入独立模块，保留原有注册入口和调用接口
+- 调整表情库侧栏选中态，与 AstrBot 侧栏统一为整行高亮
 
 ### fixed
 - 修复 Linux 大小写路径及 Windows 分隔符导致的表情包使用计数未命中，并阻止旧索引快照覆盖新计数

@@ -25,17 +25,23 @@ export const TEMPLATE = `
     <div class="header-left">
     <div class="header-title">
         <button class="mobile-menu-button" type="button" @click="sidebarOpen = true"
-            :aria-label="t('pages.dashboard.actions.open_navigation', 'Open navigation')">
+            :aria-label="t('pages.dashboard.actions.open_navigation', 'Open navigation')"
+            aria-controls="dashboard-sidebar" :aria-expanded="sidebarOpen">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
             </svg>
         </button>
-        <div class="header-icon">
-            <svg style="width:28px;height:28px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-                    d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+        <button class="header-sidebar-toggle" type="button" @click="toggleSidebarCollapsed"
+            aria-controls="dashboard-sidebar" :aria-expanded="!sidebarCollapsed"
+            :aria-label="sidebarCollapsed ? t('pages.dashboard.actions.expand_sidebar', '展开侧栏') : t('pages.dashboard.actions.collapse_sidebar', '折叠侧栏')"
+            :title="sidebarCollapsed ? t('pages.dashboard.actions.expand_sidebar', '展开侧栏') : t('pages.dashboard.actions.collapse_sidebar', '折叠侧栏')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                <rect x="2.5" y="3.5" width="19" height="17" rx="2.5" stroke-width="1.7" />
+                <path d="M9 3.5v17" stroke-width="1.7" />
+                <path v-if="sidebarCollapsed" d="m14 9 3 3-3 3" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" />
+                <path v-else d="m17 9-3 3 3 3" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" />
             </svg>
-        </div>
+        </button>
         <div class="fo-vaultboy fo-vaultboy-header" role="img" aria-label="Vault Boy"></div>
         <div class="header-text">
             <h1>{{ t('pages.dashboard.header.brand', 'Henry\\'s Spoils') }}</h1>
@@ -129,15 +135,7 @@ export const TEMPLATE = `
 
 <div class="main-container" :class="{ 'sidebar-collapsed': sidebarCollapsed }">
     <div v-if="sidebarOpen" class="mobile-sidebar-backdrop" @click="sidebarOpen = false"></div>
-    <aside class="sidebar" :class="{ 'is-open': sidebarOpen, 'is-collapsed': sidebarCollapsed }">
-        <button type="button" class="sidebar-collapse-btn" @click="toggleSidebarCollapsed"
-            :aria-label="sidebarCollapsed ? t('pages.dashboard.actions.expand_sidebar', '展开侧栏') : t('pages.dashboard.actions.collapse_sidebar', '折叠侧栏')"
-            :title="sidebarCollapsed ? t('pages.dashboard.actions.expand_sidebar', '展开侧栏') : t('pages.dashboard.actions.collapse_sidebar', '折叠侧栏')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-                <path v-if="sidebarCollapsed" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-                <path v-else stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 5l-7 7 7 7" />
-            </svg>
-        </button>
+    <aside id="dashboard-sidebar" class="sidebar" :class="{ 'is-open': sidebarOpen, 'is-collapsed': sidebarCollapsed }">
         <div class="section-switcher">
             <button type="button" class="section-tab" :class="{ active: activeSection === 'pending' }" @click="switchSection('pending')">
                 <svg class="section-tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">

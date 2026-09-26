@@ -22,6 +22,8 @@
     --text-primary: #f8fafc;
     --text-secondary: #a1a7b6;
     --text-tertiary: #828da3;
+    --sidebar-selection-bg: #24343e;
+    --sidebar-selection-text: #67b4dc;
     --text-main: var(--text-primary);
     --text-muted: var(--text-secondary);
     --glass-bg: rgba(17, 21, 32, 0.75);
@@ -77,6 +79,8 @@
     --text-primary: #1a1a1a;
     --text-secondary: #4a4a4a;
     --text-tertiary: #6b6560;
+    --sidebar-selection-bg: #dceaf1;
+    --sidebar-selection-text: #176b91;
     --glass-bg: rgba(250, 248, 243, 0.85);
     --glass-border: rgba(139, 105, 20, 0.2);
 }
@@ -222,22 +226,36 @@ h2 {
     justify-self: center;
 }
 
-.header-icon {
+.header-sidebar-toggle {
     width: 48px;
     height: 48px;
-    background: var(--glass-bg);
-    border: 2px solid var(--gold-dim);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow: inset 0 0 10px rgba(0,0,0,0.5);
+    background: var(--bg-card);
+    border: 1px solid var(--glass-border);
+    border-radius: 8px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    font: inherit;
     flex-shrink: 0;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: background-color 160ms ease, color 160ms ease, border-color 160ms ease;
 }
 
-.header-icon svg {
-    width: 28px;
-    height: 28px;
-    color: var(--gold-primary);
+.header-sidebar-toggle:hover {
+    color: var(--sidebar-selection-text);
+    border-color: var(--sidebar-selection-text);
+    background: var(--sidebar-selection-bg);
+}
+
+.header-sidebar-toggle:focus-visible {
+    outline: 2px solid var(--sidebar-selection-text);
+    outline-offset: 2px;
+}
+
+.header-sidebar-toggle svg {
+    width: 26px;
+    height: 26px;
 }
 
 .header-text h1 {
@@ -347,7 +365,6 @@ h2 {
     transition: all 0.2s ease;
     background: none;
     border: none;
-    border-left: 3px solid transparent;
     font: inherit;
     text-align: left;
     position: relative;
@@ -366,8 +383,7 @@ h2 {
     background: rgba(var(--accent-rgb), 0.1);
 }
 .category-item.active {
-    background: var(--cat-accent-soft, rgba(var(--accent-rgb), 0.15));
-    border-left-color: var(--cat-accent, var(--gold-primary));
+    background: var(--sidebar-selection-bg);
 }
 
 .category-name {
@@ -380,7 +396,7 @@ h2 {
 }
 
 .category-item.active .category-name {
-    color: var(--cat-accent, var(--gold-bright));
+    color: var(--sidebar-selection-text);
 }
 
 .category-count {
@@ -397,8 +413,8 @@ h2 {
 }
 
 .category-item.active .category-count {
-    color: var(--cat-accent, var(--gold-primary));
-    border-color: var(--cat-accent, var(--gold-dim));
+    color: var(--sidebar-selection-text);
+    border-color: transparent;
 }
 
 
@@ -1597,12 +1613,12 @@ select.codex-input {
         font-size: var(--fs-xl);
     }
     
-    .header-icon {
+    .header-sidebar-toggle {
         width: 40px;
         height: 40px;
     }
     
-    .header-icon svg {
+    .header-sidebar-toggle svg {
         width: 24px;
         height: 24px;
     }
@@ -1787,8 +1803,8 @@ select.codex-input {
     }
 
     .category-item.active:hover {
-        background: rgba(var(--accent-rgb), 0.15);
-        border-color: var(--gold-primary);
+        background: var(--sidebar-selection-bg);
+        border-color: transparent;
     }
 }
 
@@ -1977,8 +1993,12 @@ select.codex-input {
 }
 
 [data-theme="light"] .category-item.active {
-    background: rgba(184, 148, 46, 0.15);
-    border-color: var(--gold-primary);
+    background: var(--sidebar-selection-bg);
+    border-color: transparent;
+}
+
+[data-theme="light"] .category-item.active .category-name {
+    color: var(--sidebar-selection-text);
 }
 
 [data-theme="light"] .category-name {
@@ -2355,6 +2375,7 @@ input, select, textarea {
     outline: 2px solid var(--gold-primary);
     outline-offset: 2px;
 }
+.category-item:focus { outline-color: var(--sidebar-selection-text); }
 
 
 ::-webkit-scrollbar {
@@ -2845,11 +2866,7 @@ input, select, textarea {
         display: none;
     }
 
-    .header-icon {
-        width: 34px;
-        height: 34px;
-        flex: 0 0 34px;
-    }
+    .header-sidebar-toggle { display: none; }
 
     .header-right {
         grid-column: 2;
@@ -3989,13 +4006,13 @@ html[data-theme="minecraft"],
     border-bottom: 0;
     box-shadow: var(--mc-raised);
 }
-[data-theme="minecraft"] .header-icon {
+[data-theme="minecraft"] .header-sidebar-toggle {
     background: #8b8b8b;
     border: 0;
     box-shadow: var(--mc-inset);
     border-radius: 0;
 }
-[data-theme="minecraft"] .header-icon svg { color: #404040; }
+[data-theme="minecraft"] .header-sidebar-toggle svg { color: #404040; }
 [data-theme="minecraft"] .header-text h1 {
     color: #404040;
     font-size: var(--fs-xl);
@@ -4694,7 +4711,12 @@ html[data-theme="minecraft"],
 [data-theme="fallout"] .header-title { grid-column: 1; grid-row: 2; min-width: 0; }
 [data-theme="fallout"] .stats-bar { display: none; }
 [data-theme="fallout"] .header-right { grid-column: 2; grid-row: 2; }
-[data-theme="fallout"] .header-icon { display: none; }
+[data-theme="fallout"] .header-sidebar-toggle {
+    color: #39ff88;
+    background: transparent;
+    border: 1px solid #39ff88;
+    border-radius: 0;
+}
 [data-theme="fallout"] .header-text { display: none; }
 [data-theme="fallout"] .fo-vaultboy {
     display: block;
@@ -5588,10 +5610,12 @@ html[data-theme="minecraft"],
 }
 /* Library navigation and collection cards share geometry across themes. */
 .library-navigation { display: grid; gap: 5px; padding: 0 12px 8px; }
-.library-nav-item { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 44px; padding: 8px; white-space: nowrap; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text-secondary); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.library-nav-item { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 44px; padding: 8px; white-space: nowrap; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--text-secondary); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
 .library-nav-item:hover { background: var(--bg-card-hover); color: var(--text-primary); }
-.library-nav-item.active { border-color: var(--gold-dim); background: rgba(var(--accent-rgb), .1); color: var(--gold-primary); box-shadow: inset 3px 0 var(--gold-primary); }
-.library-nav-item:focus-visible { outline: 2px solid var(--gold-primary); outline-offset: 2px; }
+.library-nav-item.active { border-color: transparent; background: var(--sidebar-selection-bg); color: var(--sidebar-selection-text); box-shadow: none; }
+.library-nav-item:focus-visible { outline: 2px solid var(--sidebar-selection-text); outline-offset: 2px; }
+[data-theme="minecraft"] .library-nav-item.active { background: #c6c6c6; color: #3f3f3f; box-shadow: var(--mc-raised); }
+[data-theme="fallout"] .library-nav-item.active { background: #39ff88; color: #02140c; }
 .library-nav-mark { width: 16px; flex-shrink: 0; text-align: center; font-size: 20px; }
 .library-nav-count { margin-left: auto; font-variant-numeric: tabular-nums; font-size: var(--fs-xs); }
 .library-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; padding: 22px 24px 16px; border-bottom: 1px solid var(--glass-border); }
@@ -5645,28 +5669,6 @@ html[data-theme="minecraft"],
     transition: width 180ms ease, padding-left 180ms ease;
 }
 
-.sidebar-collapse-btn {
-    position: sticky;
-    top: 0;
-    z-index: 3;
-    align-self: flex-end;
-    display: grid;
-    place-items: center;
-    width: 34px;
-    height: 34px;
-    margin: 0 0 6px;
-    border: 1px solid var(--glass-border);
-    border-radius: 6px;
-    color: var(--text-secondary);
-    background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
-    cursor: pointer;
-}
-.sidebar-collapse-btn:hover,
-.sidebar-collapse-btn:focus-visible {
-    color: var(--gold-primary);
-    border-color: var(--gold-dim);
-}
-.sidebar-collapse-btn svg { width: 18px; height: 18px; }
 .library-nav-item { position: relative; }
 
 @media (min-width: 769px) {
@@ -5676,7 +5678,6 @@ html[data-theme="minecraft"],
         padding: 12px 7px;
         overflow: hidden;
     }
-    .sidebar.is-collapsed .sidebar-collapse-btn { align-self: center; }
     .sidebar.is-collapsed .sidebar-title,
     .sidebar.is-collapsed .sidebar-divider,
     .sidebar.is-collapsed .category-list,
@@ -5797,7 +5798,6 @@ html[data-theme="minecraft"],
     .item-more-btn { opacity: 1; }
 }
 @media (max-width: 768px) {
-    .sidebar-collapse-btn { display: none; }
     .main-container.sidebar-collapsed { padding-left: 12px; }
     .sidebar.is-collapsed {
         width: min(280px, 84vw);
