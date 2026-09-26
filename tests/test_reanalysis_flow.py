@@ -10,7 +10,9 @@ import pytest
 from PIL import Image
 
 import astrbot_plugin_stealer.core.config.config as config_module
-import astrbot_plugin_stealer.plugin_api as api_module
+import astrbot_plugin_stealer.api.maintenance as maintenance_module
+import astrbot_plugin_stealer.api.image_mutations as image_mutations_module
+import astrbot_plugin_stealer.plugin_api as plugin_api_module
 from astrbot_plugin_stealer.core.db.database_service import DatabaseService
 from astrbot_plugin_stealer.core.processing.image_processor_service import (
     ImageProcessorService,
@@ -55,14 +57,12 @@ def flow(tmp_path, monkeypatch):
     plugin.image_processor_service = processor
     api = PluginAPI(plugin)
     refresh = AsyncMock()
-    monkeypatch.setattr(api_module, "refresh_search_entry", refresh)
+    monkeypatch.setattr(plugin_api_module, "refresh_search_entry", refresh)
     payload = {"hash": image_hash}
-    monkeypatch.setattr(
-        api_module,
-        "request",
-        SimpleNamespace(get_json=AsyncMock(side_effect=lambda: payload)),
-    )
-    monkeypatch.setattr(api_module, "jsonify", lambda value: value)
+    fake_request = SimpleNamespace(get_json=AsyncMock(side_effect=lambda: payload))
+    for module in (maintenance_module, image_mutations_module):
+        monkeypatch.setattr(module, "request", fake_request)
+        monkeypatch.setattr(module, "jsonify", lambda value: value)
     return SimpleNamespace(
         api=api, refresh=refresh,
         plugin=plugin,

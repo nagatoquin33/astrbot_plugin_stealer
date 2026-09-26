@@ -96,8 +96,8 @@ jobs:
 
       - name: Lint and compile
         run: |
-          python -m ruff check --isolated --select E4,E7,E9,F --ignore E402 main.py plugin_api.py task_scheduler.py core tests scripts
-          python -m compileall -q main.py plugin_api.py task_scheduler.py core tests scripts
+          python -m ruff check --isolated --select E4,E7,E9,F --ignore E402 main.py plugin_api.py task_scheduler.py api core tests scripts
+          python -m compileall -q main.py plugin_api.py task_scheduler.py api core tests scripts
           node --check pages/dashboard/app.js
           node --check pages/dashboard/template.js
 

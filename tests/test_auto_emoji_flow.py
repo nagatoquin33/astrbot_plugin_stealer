@@ -220,6 +220,12 @@ class AutoEmojiFlowTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_generic_image_tool_send_suppresses_passive_meme(self):
         main = _build_main(1.0)
+        recorded = []
+
+        async def record_usage(path, trigger):
+            recorded.append((path, trigger))
+
+        main.meme_selector = types.SimpleNamespace(record_emoji_usage=record_usage)
         event = DummyEvent("final reply")
         event._has_send_oper = True
         tool = types.SimpleNamespace(name="send_message_to_user")
@@ -244,8 +250,30 @@ class AutoEmojiFlowTests(unittest.IsolatedAsyncioTestCase):
         handled = await main._prepare_emoji_response(event)
 
         self.assertTrue(main._emoji_sender_engine.emoji_turn_state(event).is_active_sent())
+        self.assertEqual(recorded, [("meme.png", "generic_tool")])
         self.assertFalse(handled)
         self.assertEqual(scheduled, [])
+
+    async def test_generic_image_tool_only_counts_successful_delivery(self):
+        main = _build_main(1.0)
+        recorded = []
+
+        async def record_usage(path, trigger):
+            recorded.append((path, trigger))
+
+        main.meme_selector = types.SimpleNamespace(record_emoji_usage=record_usage)
+        event = DummyEvent()
+        tool = types.SimpleNamespace(name="send_message_to_user")
+        args = {"messages": [{"type": "image", "path": "meme.png"}]}
+        failed = types.SimpleNamespace(content=[types.SimpleNamespace(text="send failed")])
+        success = types.SimpleNamespace(
+            content=[types.SimpleNamespace(text="Message sent to session other-session")]
+        )
+
+        await main._track_external_image_delivery(event, tool, args, failed)
+        assert recorded == []
+        await main._track_external_image_delivery(event, tool, args, success)
+        assert recorded == [("meme.png", "generic_tool")]
 
     def test_tool_documentation_uses_exposed_names(self):
         search_doc = Main.search_meme.__doc__ or ""

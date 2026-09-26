@@ -1,6 +1,5 @@
 import asyncio
 import json
-import os
 import shutil
 from pathlib import Path
 from typing import Any
@@ -27,16 +26,15 @@ from .core.search.meme_selector import MemeSelector
 from .core.events.event_handler import EventHandler
 from .core.events.meme_sender_engine import MemeSenderEngine
 from .core.db.index_manager import IndexManager
-from .core.events.event_context import unwrap_event
 from .core.processing.natural_emotion_analyzer import NaturalEmotionAnalyzer
 from .core.processing.image_processor_service import ImageProcessorService
 from .core.processing.image_render_service import ImageRenderService
 from .core.maintenance.service import MaintenanceService
 from .core.sources.source_service import SourceService
-from .core.util.normalization import canonicalize_path, normalize_label_list
-from .core.util.safe_io import safe_remove_file
 from .task_scheduler import TaskScheduler
 from .plugin_api import PluginAPI
+from .core.tools.meme_search_tool import MemeSearchToolWorkflow
+from .core.tools.meme_steal_tool import MemeStealToolWorkflow
 
 try:
     import aiofiles  # type: ignore
@@ -44,7 +42,7 @@ except ImportError:
     aiofiles = None
 
 
-class Main(Star):
+class Main(MemeSearchToolWorkflow, MemeStealToolWorkflow, Star):
     """表情包偷取与发送插件。
 
     功能：
@@ -665,28 +663,6 @@ class Main(Star):
         async for result in self.index_commands.rebuild_index(event):
             yield result
 
-    async def _search_meme_candidates(
-        self,
-        event: AstrMessageEvent,
-        query: str,
-        *,
-        limit: int = 5,
-        idx: dict | None = None,
-    ):
-        """委托给 MemeSelector.smart_search。"""
-        if idx is None:
-            idx = (
-                self.db_service.get_index_cache_readonly()
-                if self.db_service.count_total() > 0
-                else {}
-            )
-
-        return await self.meme_selector.smart_search(query, limit=limit, idx=idx, event=event)
-
-    def _find_similar_categories(self, query: str, top_n: int = 3) -> list[str]:
-        """找到与查询词最相似的多个分类，委托给 MemeSelector。"""
-        return self.meme_selector.find_similar_categories(query, top_n)
-
     @filter.llm_tool(name=SEARCH_MEME_TOOL_NAME)
     async def search_meme(self, event: AstrMessageEvent, query: str):
         """从插件索引中搜索表情包候选；不要直接浏览表情库目录或发送本地文件。
@@ -706,121 +682,8 @@ class Main(Star):
 
         根据候选的图上文字、角色和描述选择最贴合的一张，然后调用 send_meme；不要猜测或传递文件路径。
         """
-        event = unwrap_event(event)
-        query = str(query or "").strip()
-        logger.info(f"[Tool] LLM 搜索表情包: {query}")
-
-        turn_state = self._emoji_sender_engine.emoji_turn_state(event)
-
-        try:
-            if not query:
-                yield "搜索失败：缺少 query 参数。请传入你当前心情词，例如：开心、无语、尴尬、感谢。"
-                return
-
-            if not self.is_send_enabled_for_event(event):
-                yield "搜索失败：当前群聊已禁用表情包功能"
-                return
-
-            if self.db_service.count_total() > 0:
-                idx = self.db_service.get_index_cache_readonly()
-            else:
-                logger.debug("索引未加载，正在加载...")
-                await self.index_manager.load_index()
-                idx = self.db_service.get_index_cache_readonly()
-
-            # smart_search 已内置关键词映射和模糊匹配（阈值0.4）
-            results = await self._search_meme_candidates(
-                event, query, limit=self.MAX_SEARCH_RESULTS, idx=idx
-            )
-
-            if not results:
-                similar = self._find_similar_categories(query, top_n=3)
-                suggestion = f"未找到与'{query}'匹配的表情包。"
-                if similar:
-                    suggestion += "\n\n您是否想找以下分类？\n- " + "\n- ".join(similar)
-                cats = self.plugin_config.get_categories()
-                suggestion += "\n\n可用分类：" + ", ".join(cats[:10])
-                if len(cats) > 10:
-                    suggestion += f" 等共{len(cats)}个分类"
-                logger.warning(f"[Tool] 未找到匹配: {query}, 推荐: {similar}")
-                yield suggestion
-                return
-
-            candidates = []
-            result_lines = [f"找到 {len(results)} 个匹配的表情包：\n"]
-
-            for i, (path, desc, emotion, tags) in enumerate(results):
-                if os.path.exists(path):
-                    meta = idx.get(path, {}) if isinstance(idx, dict) else {}
-                    raw_scenes = meta.get("scenes", None) if isinstance(meta, dict) else None
-                    if not raw_scenes:
-                        raw_scenes = meta.get("scene", None) if isinstance(meta, dict) else None
-
-                    scenes_items = normalize_label_list(raw_scenes)
-                    scenes_str = ", ".join(scenes_items)
-                    overlay_text = str(meta.get("overlay_text", "") or "") if isinstance(meta, dict) else ""
-                    character_key = str(meta.get("character", "") or "") if isinstance(meta, dict) else ""
-                    character_name = character_key
-                    if character_key:
-                        info_map = getattr(self.plugin_config, "character_info", None) or {}
-                        info = info_map.get(character_key) if isinstance(info_map, dict) else None
-                        if isinstance(info, dict) and info.get("name"):
-                            character_name = str(info.get("name"))
-                    source = str(meta.get("source", "") or "") if isinstance(meta, dict) else ""
-                    scope_mode = str(meta.get("scope_mode", "public") or "public") if isinstance(meta, dict) else "public"
-                    origin_target = str(meta.get("origin_target", "") or "") if isinstance(meta, dict) else ""
-                    use_count = int(meta.get("use_count", 0) or 0) if isinstance(meta, dict) else 0
-
-                    candidate_id = f"emoji_{i + 1}"
-                    candidates.append(
-                        {
-                            "id": candidate_id,
-                            "path": path,
-                            "desc": desc,
-                            "emotion": emotion,
-                            "tags": tags,
-                            "scenes": scenes_str,
-                            "overlay_text": overlay_text,
-                            "character": character_key,
-                            "source": source,
-                            "scope_mode": scope_mode,
-                            "origin_target": origin_target,
-                            "use_count": use_count,
-                        }
-                    )
-                    result_lines.append(f"\n[{i + 1}] 分类：{emotion}")
-                    if character_name:
-                        result_lines.append(f"    角色：{character_name}")
-                    if overlay_text:
-                        result_lines.append(f"    图上文字：{overlay_text}")
-                    if tags:
-                        result_lines.append(f"    标签：{tags}")
-                    if scenes_str:
-                        result_lines.append(f"    画面短语：{scenes_str}")
-                    result_lines.append(f"    作用域：{scope_mode}")
-                    if use_count:
-                        result_lines.append(f"    使用次数：{use_count}")
-                    if source == "qq_store":
-                        result_lines.append("    来源：QQ商城")
-                    result_lines.append(f"    描述：{desc}")
-
-            if not candidates:
-                yield "搜索失败：找到的表情包文件均已丢失"
-                return
-
-            turn_state.set_candidates(candidates)
-            result_lines.append(
-                f"\n\n下一步请从候选中选择一项，并调用 {self.SEND_MEME_TOOL_NAME}(emoji_id=编号) 发送。"
-                "候选不合适时请换关键词再次搜索；不要用文件、终端或通用消息工具直接发送表情库文件。"
-            )
-
-            result_text = "\n".join(result_lines)
-            logger.info(f"[Tool] 搜索完成，返回 {len(candidates)} 个候选")
-            yield result_text
-
-        except Exception as e:
-            logger.error(f"[Tool] 搜索表情包失败: {e}", exc_info=True)
-            yield f"搜索出错：{e}"
+        async for result in self._search_meme_impl(event, query):
+            yield result
 
     @filter.llm_tool(name=SEND_MEME_TOOL_NAME)
     async def send_meme(self, event: AstrMessageEvent, emoji_id: int):
@@ -832,75 +695,11 @@ class Main(Star):
             emoji_id(number): 表情包编号（从 search_meme 返回的候选列表中选择）
 
         """
-        event = unwrap_event(event)
-        logger.info(f"[Tool] LLM 选择发送表情包编号: {emoji_id}")
-        turn_state = self._emoji_sender_engine.emoji_turn_state(event)
-
-        try:
-            if not self.is_send_enabled_for_event(event):
-                yield "发送失败：reason=send_disabled。当前会话已禁用表情包发送功能，请不要继续调用发送工具。"
-                return
-
-            if emoji_id is None:
-                yield f"发送失败：reason=missing_id。缺少 emoji_id 参数。请先调用 {self.SEARCH_MEME_TOOL_NAME}，再传入候选编号。"
-                return
-
-            try:
-                emoji_id = int(emoji_id)
-            except Exception:
-                yield f"发送失败：reason=invalid_id。编号 {emoji_id} 无法解析为整数，请输入有效的数字编号。"
-                return
-
-            candidates = turn_state.get_candidates()
-            if not candidates:
-                yield f"发送失败：reason=candidate_expired。没有可用候选列表。请先调用 {self.SEARCH_MEME_TOOL_NAME} 重新搜索。"
-                return
-
-            if emoji_id < 1 or emoji_id > len(candidates):
-                yield f"发送失败：reason=invalid_id。编号 {emoji_id} 无效。可选编号范围：1-{len(candidates)}，请重新选择。"
-                return
-
-            selected = candidates[emoji_id - 1]
-            path = selected["path"]
-            desc = selected["desc"]
-            emotion = selected["emotion"]
-
-            if not os.path.exists(path):
-                yield f"发送失败：reason=file_missing。表情包文件已丢失。\n你选择的是：编号 {emoji_id}，分类 {emotion}，描述 {desc}\n请重新搜索并选择其他表情包。"
-                return
-
-            if not self.meme_selector.is_path_allowed_for_event(path, event):
-                yield "发送失败：reason=scope_denied。该表情包被限制为仅来源会话可发送，请选择 public 表情或重新搜索。"
-                return
-
-            logger.info(f"[Tool] 发送选中的表情包: {path} (emotion={emotion})")
-            send_mode = await self.meme_selector.send_emoji_message(event, path)
-            if not send_mode:
-                yield "发送失败：reason=send_failed。表情包编码或平台发送失败，请重新搜索或选择其他候选。"
-                return
-            sent_as_sticker = send_mode == "telegram_sticker"
-
-            await self.meme_selector.record_emoji_usage(path, trigger="llm_tool")
-            await self._emoji_sender_engine.mark_auto_emoji_sent(event)
-            turn_state.mark_active_sent()
-
-            mode_desc = "Telegram贴纸" if sent_as_sticker else "图片"
-            success_msg = f"发送成功（{mode_desc}）。\n\n你发送的表情包：\n- 编号：{emoji_id}\n- 分类：{emotion}\n- 描述：{desc}"
-            logger.info(f"[Tool] {success_msg}")
-            yield success_msg
-            return
-
-        except Exception as e:
-            logger.error(f"[Tool] 发送表情包失败: {e}", exc_info=True)
-            yield f"发送出错：{e}"
-            return
+        async for result in self._send_meme_impl(event, emoji_id):
+            yield result
 
     @filter.llm_tool(name="steal_meme")
-    async def steal_sticker(
-        self,
-        event: AstrMessageEvent,
-        image_ref: str,
-    ):
+    async def steal_sticker(self, event: AstrMessageEvent, image_ref: str):
         """偷取图片入库。VLM 视觉模型会自动分析图片，打上分类、标签、描述和场景。
 
         使用时机：
@@ -916,304 +715,8 @@ class Main(Star):
         Args:
             image_ref(string): 图片 URL 或文件路径，从当前消息已有的 Image URL 中选择。
         """
-        event = unwrap_event(event)
-        try:
-            if not self.plugin_config.steal_meme:
-                yield "偷取失败：表情包偷取功能未开启，请先在插件配置中启用"
-                return
-
-            if not self.is_steal_enabled_for_event(event):
-                yield "偷取失败：当前群聊已禁用偷取功能"
-                return
-
-            event_handler = self._get_event_handler(log_message="event_handler 未初始化，无法下载图片")
-            if event_handler is None:
-                yield "偷取失败：内部服务未初始化"
-                return
-
-            image_ref, source = await self._resolve_steal_image_ref(
-                event, image_ref, event_handler
-            )
-            if not image_ref:
-                yield "偷取失败：缺少 image_ref 参数，请提供当前消息中的图片 URL"
-                return
-
-            logger.info(f"[Tool] LLM 请求偷取: ref={image_ref[:80]}")
-
-            # 下载图片
-            if image_ref.startswith("http://") or image_ref.startswith("https://"):
-                temp_path, _is_gif = await event_handler._download_to_temp(image_ref, log_download=True)
-                if not temp_path or not os.path.exists(temp_path):
-                    yield f"偷取失败：无法下载图片 {image_ref[:100]}"
-                    return
-                is_temp = True
-            elif image_ref.startswith("file:///"):
-                local_path = image_ref[8:]
-                if len(local_path) > 2 and local_path[0] == "/" and local_path[2] == ":":
-                    local_path = local_path[1:]
-                temp_path = os.path.abspath(local_path)
-                is_temp = False
-            else:
-                temp_path = os.path.abspath(image_ref)
-                is_temp = False
-
-            if not os.path.exists(temp_path):
-                hint = ""
-                # 当 LLM 传来的是非 URL 形式（相对路径/裸文件名）且仍无法定位时，
-                # 提示它从消息中已有的 Image URL 选择（issue #88）。
-                ref_value = str(image_ref or "").strip()
-                if ref_value and not (
-                    ref_value.startswith("http://")
-                    or ref_value.startswith("https://")
-                    or ref_value.startswith("file:")
-                ):
-                    hint = "（请确认 image_ref 是当前消息中的图片 URL 或本地绝对路径）"
-                yield f"偷取失败：图片文件不存在: {temp_path}{hint}"
-                return
-
-            precheck_ok, precheck_reason = self._precheck_image_file(temp_path)
-            if not precheck_ok:
-                if is_temp:
-                    await safe_remove_file(temp_path)
-                yield f"偷取失败：{precheck_reason}"
-                return
-
-            # 记下入库存前已有的路径，之后 diff 找出 VLM 分析结果
-            idx_before = await self.index_manager.load_index()
-            before_paths = set(idx_before.keys()) if idx_before else set()
-
-            # 统一走 VLM 流水线
-            logger.info(f"[Tool] VLM 分析入库: {temp_path}")
-            extra_meta = self._build_steal_tool_extra_meta(
-                event, image_ref, source=source
-            )
-            success, merged_idx = await self._process_image(
-                event, temp_path, is_temp=is_temp, extra_meta=extra_meta
-            )
-
-            if not success:
-                fail_open_hint = (
-                    "。已启用审核失败开放策略，但明确审核不通过或重复图片不会入库"
-                    if getattr(self, "content_filtration_fail_open", False)
-                    else ""
-                )
-                yield f"偷取失败：VLM 分析未通过（可能已存在、内容不合适或无法识别为表情包）{fail_open_hint}"
-                return
-
-            if merged_idx:
-                await self.index_manager.save_index(merged_idx)
-                new_paths = set(merged_idx.keys()) - before_paths
-                if new_paths:
-                    new_entry = next((merged_idx[p] for p in new_paths if isinstance(merged_idx.get(p), dict)), None)
-                    if new_entry and isinstance(new_entry, dict):
-                        cat = new_entry.get("category", "?")
-                        tag_list = new_entry.get("tags", [])
-                        tags_str = ", ".join(tag_list) if isinstance(tag_list, list) else str(tag_list)
-                        desc_text = new_entry.get("desc", "")
-                        scene_list = new_entry.get("scenes", [])
-                        scenes_str = ", ".join(scene_list) if isinstance(scene_list, list) else str(scene_list)
-                        yield (
-                            f"偷取成功！VLM 分析结果：\n"
-                            f"- 分类：{cat}\n"
-                            f"- 标签：{tags_str or '无'}\n"
-                            f"- 描述：{desc_text or '无'}\n"
-                            f"- 场景：{scenes_str or '无'}"
-                        )
-                        return
-                yield "偷取成功！已通过 VLM 自动分析并入库"
-            else:
-                yield "偷取成功但索引更新失败"
-
-        except Exception as e:
-            logger.error(f"[Tool] 偷取表情包失败: {e}", exc_info=True)
-            yield f"偷取出错：{e}"
-            return
-
-    async def _resolve_steal_image_ref(
-        self,
-        event: AstrMessageEvent,
-        image_ref: str,
-        event_handler: Any,
-    ) -> tuple[str, str]:
-        """Resolve an explicit or current-message image reference for steal_sticker.
-
-        修复 issue #88：LLM 偶尔会传相对路径（如 ``./image.png``）或仅文件名。
-        之前的实现直接把 ``explicit_ref`` 原样返回，下游 ``os.path.abspath``
-        会拼到 CWD（如 ``/AstrBot/image.png``），触发"图片文件不存在"。
-
-        现在对非 URL 形式的 ``image_ref``，优先在当前消息的 ``Image`` 组件中
-        按 basename 匹配，再回退到组件自带的 url/file/path/convert_to_file_path。
-        """
-        explicit_ref = str(image_ref or "").strip()
-
-        # 1. URL 形式（http/https/file 协议）直接信任 LLM 传入
-        if explicit_ref and (
-            explicit_ref.startswith("http://")
-            or explicit_ref.startswith("https://")
-            or explicit_ref.startswith("file:")
-        ):
-            return explicit_ref, "llm_tool"
-
-        # 2. 尝试把显式 ref 解析为消息内某张图片的真实位置
-        resolved_explicit = ""
-        if explicit_ref:
-            resolved_explicit = await self._resolve_image_ref_against_event(
-                event, explicit_ref
-            )
-            if resolved_explicit:
-                return resolved_explicit, "llm_tool"
-
-        # 3. 未提供 ref 或 ref 解析失败：取当前消息中第一张可用图片
-        try:
-            for comp in event.get_messages():
-                if not isinstance(comp, MessageImage):
-                    continue
-                for attr in ("url", "file", "path"):
-                    value = str(getattr(comp, attr, "") or "").strip()
-                    if value:
-                        return value, "llm_tool"
-                if hasattr(comp, "convert_to_file_path"):
-                    path = await comp.convert_to_file_path()
-                    path = str(path or "").strip()
-                    if path:
-                        return path, "llm_tool"
-        except Exception:
-            pass
-
-        # 4. 兜底：QQ 商城表情 URL
-        try:
-            store_urls = event_handler._extract_store_emoji_urls(event)
-        except Exception:
-            store_urls = []
-        if store_urls:
-            return str(store_urls[0] or "").strip(), "qq_store"
-
-        # 5. 都没有的话才把显式 ref 原样回传（让下游报错时提示更准确）
-        return explicit_ref, "llm_tool"
-
-    async def _resolve_image_ref_against_event(
-        self,
-        event: AstrMessageEvent,
-        image_ref: str,
-    ) -> str:
-        """在当前消息的 Image 组件中按 basename / 绝对路径 / 已有本地路径匹配。
-
-        返回：
-            - 命中组件时：组件真实的 url/file/path，或 ``convert_to_file_path()`` 结果；
-            - 未命中或异常时：空串。
-        """
-        ref_norm = image_ref.replace("\\", "/").strip()
-        ref_basename = Path(ref_norm).name if ref_norm else ""
-
-        try:
-            comps = list(event.get_messages())
-        except Exception:
-            return ""
-
-        for comp in comps:
-            if not isinstance(comp, MessageImage):
-                continue
-
-            # a. basename 命中组件的 url/file/path
-            if ref_basename:
-                for attr in ("url", "file", "path"):
-                    value = str(getattr(comp, attr, "") or "").strip()
-                    if not value:
-                        continue
-                    value_norm = value.replace("\\", "/").split("?", 1)[0].split("#", 1)[0]
-                    value_basename = value_norm.rsplit("/", 1)[-1]
-                    if value_basename and value_basename == ref_basename:
-                        return value
-
-            # b. ref 是已存在的绝对路径且等于组件本地路径
-            if os.path.isabs(image_ref):
-                for attr in ("file", "path"):
-                    value = str(getattr(comp, attr, "") or "").strip()
-                    if value and canonicalize_path(value) == canonicalize_path(image_ref):
-                        return value
-
-            # c. 调用组件自身方法把图片落到本地，返回真实可读路径
-            if hasattr(comp, "convert_to_file_path"):
-                try:
-                    path = await comp.convert_to_file_path()
-                    path = str(path or "").strip()
-                except Exception:
-                    path = ""
-                if not path:
-                    continue
-                path_norm = path.replace("\\", "/")
-                path_basename = path_norm.rsplit("/", 1)[-1].split("?")[0]
-                if ref_basename and path_basename == ref_basename:
-                    return path
-                if os.path.isabs(image_ref) and canonicalize_path(path) == canonicalize_path(
-                    image_ref
-                ):
-                    return path
-
-        return ""
-
-    def _build_steal_tool_extra_meta(
-        self,
-        event: AstrMessageEvent,
-        image_ref: str,
-        *,
-        source: str = "llm_tool",
-    ) -> dict[str, Any] | None:
-        extra_meta: dict[str, Any] = {}
-        try:
-            scope, target_id = self.get_event_target(event)
-        except Exception:
-            scope, target_id = "", ""
-        if scope and target_id:
-            extra_meta["origin_target"] = f"{scope}:{target_id}"
-
-        if image_ref.startswith("http://") or image_ref.startswith("https://"):
-            extra_meta["origin_url"] = image_ref
-        if source:
-            extra_meta["source"] = source
-        return extra_meta or None
-
-    async def _process_image(
-        self,
-        event: AstrMessageEvent | None,
-        file_path: str,
-        is_temp: bool = False,
-        idx: dict[str, Any] | None = None,
-        is_platform_emoji: bool = False,
-        extra_meta: dict[str, Any] | None = None,
-        to_pending: bool = False,
-    ) -> tuple[bool, dict[str, Any] | None]:
-        """统一处理图片的方法，包括过滤、分类、存储和索引更新。"""
-        try:
-            success, updated_idx = await asyncio.wait_for(
-                self.image_processor_service.process_image(
-                    event=event,
-                    file_path=file_path,
-                    is_temp=is_temp,
-                    idx=idx,
-                    categories=self.plugin_config.get_categories(),
-                    content_filtration=self.plugin_config.content_filtration,
-                    is_platform_emoji=is_platform_emoji,
-                    extra_meta=extra_meta,
-                    to_pending=to_pending,
-                ),
-                timeout=self.IMAGE_PROCESSING_TIMEOUT_SECONDS,
-            )
-            if idx is None and updated_idx is not None and not to_pending:
-                full_idx = await self.index_manager.load_index()
-                full_idx.update(updated_idx)
-                return success, full_idx
-            return success, updated_idx
-        except asyncio.TimeoutError:
-            logger.warning(f"图片处理超时: {file_path}")
-            if is_temp:
-                await safe_remove_file(file_path)
-            return False, idx if idx is not None else {}
-        except Exception as e:
-            logger.error(f"处理图片失败: {e}")
-            if is_temp:
-                await safe_remove_file(file_path)
-            return False, idx if idx is not None else {}
+        async for result in self._steal_sticker_impl(event, image_ref):
+            yield result
 
     @filter.event_message_type(EventMessageType.ALL)
     @filter.platform_adapter_type(PlatformAdapterType.ALL)
@@ -1245,8 +748,6 @@ class Main(Star):
         """记录 LLM 通过 AstrBot 通用消息工具发送的图片，避免同轮再被动发表情。"""
         if str(getattr(tool, "name", "") or "") != "send_message_to_user":
             return
-        if not getattr(event, "_has_send_oper", False):
-            return
         result_contents = getattr(tool_result, "content", None)
         if not isinstance(result_contents, list) or not any(
             "Message sent to session" in str(getattr(item, "text", "") or "")
@@ -1263,7 +764,23 @@ class Main(Star):
         )
         if not sent_image:
             return
-        self._emoji_sender_engine.emoji_turn_state(event).mark_active_sent()
+        if getattr(event, "_has_send_oper", False):
+            self._emoji_sender_engine.emoji_turn_state(event).mark_active_sent()
+        selector = getattr(self, "meme_selector", None)
+        if selector is None:
+            return
+        for item in messages:
+            if not isinstance(item, dict) or str(item.get("type", "")).lower() != "image":
+                continue
+            image_path = str(item.get("path", "") or "").strip()
+            if not image_path:
+                continue
+            try:
+                await selector.record_emoji_usage(
+                    image_path, trigger="generic_tool"
+                )
+            except Exception as exc:
+                logger.warning(f"[Stealer] 通用消息工具的图片计数失败: {exc}")
         logger.debug("[Stealer] LLM 已通过通用消息工具发送图片，跳过本轮被动表情")
 
     async def _schedule_passive_emoji_response(

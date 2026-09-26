@@ -130,6 +130,7 @@ async def test_database_library_filters_counts_and_least_used(tmp_path):
 @pytest.mark.parametrize("library,expected", [("general", {"a", "b"}), ("favorites", {"d"}), ("characters", {"c"})])
 async def test_list_api_library_contract(tmp_path, monkeypatch, use_db, library, expected):
     from astrbot_plugin_stealer import plugin_api
+    from astrbot_plugin_stealer.api import library as library_routes
     from werkzeug.datastructures import MultiDict
     db = DatabaseService(tmp_path / "api.db")
     index = {}
@@ -145,8 +146,8 @@ async def test_list_api_library_contract(tmp_path, monkeypatch, use_db, library,
     cfg = SimpleNamespace(max_reg_num=100, get_category_info=lambda: [], get_character_info_list=lambda: [])
     api = plugin_api.PluginAPI(SimpleNamespace(db_service=db if use_db else None, plugin_config=cfg))
     monkeypatch.setattr(api, "_get_index", lambda: index)
-    monkeypatch.setattr(plugin_api, "request", SimpleNamespace(args=MultiDict({"library": library, "sort": "least_used"})))
-    monkeypatch.setattr(plugin_api, "jsonify", lambda data: data)
+    monkeypatch.setattr(library_routes, "request", SimpleNamespace(args=MultiDict({"library": library, "sort": "least_used"})))
+    monkeypatch.setattr(library_routes, "jsonify", lambda data: data)
     result = await api.handle_list_images()
     assert result["success"], result
     assert {item["hash"] for item in result["images"]} == expected

@@ -111,6 +111,19 @@ class TestBasicCRUD:
 
         assert db.count_favorites() == 2
 
+    def test_increment_usage_matches_original_and_normalized_windows_path(self, db: DatabaseService):
+        stored_path = r"D:\MemeLib\happy\cat.PNG"
+        asyncio.run(db.insert_batch([
+            {"path": stored_path, "hash": "cat", "category": "happy"},
+        ]))
+
+        assert db.increment_usage_sync(stored_path)
+        assert db.increment_usage_sync("d:/memelib/happy/cat.png")
+        assert not db.increment_usage_sync("d:/memelib/happy/other.png")
+        entry = db.get_emoji(stored_path)
+        assert entry["use_count"] == 2
+        assert entry["last_used_at"] > 0
+
 
 class TestBatchOperations:
     """测试批量操作。"""
@@ -358,6 +371,22 @@ class TestLegacyCompatibility:
             assert emoji["source"] == "manual"
             assert emoji["origin_target"] == "group:2"
             assert emoji["scope_mode"] == "local"
+
+        asyncio.run(run())
+
+    def test_sync_index_does_not_reset_usage_from_stale_snapshot(self, db: DatabaseService):
+        async def run():
+            path = "/test/a.gif"
+            await db.insert_batch([{"path": path, "hash": "h1", "category": "happy"}])
+            snapshot = db.get_index_cache_readonly()
+            assert db.increment_usage_sync(path)
+            snapshot[path]["desc"] = "new description"
+            await db.sync_index(snapshot)
+
+            entry = db.get_emoji(path)
+            assert entry["desc"] == "new description"
+            assert entry["use_count"] == 1
+            assert entry["last_used_at"] > 0
 
         asyncio.run(run())
 

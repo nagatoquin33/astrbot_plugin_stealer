@@ -68,6 +68,23 @@ def test_corrupt_bm25_cache_is_rebuilt_from_current_index(tmp_path):
     assert not list(tmp_path.glob("*.tmp"))
 
 
+def test_record_usage_preserves_case_sensitive_linux_path(tmp_path):
+    import asyncio
+    from core.db.database_service import DatabaseService
+
+    stored_path = "/srv/AstrBot/Memes/Cat.PNG"
+    db = DatabaseService(tmp_path / "usage.db")
+    asyncio.run(db.insert_batch([
+        {"path": stored_path, "hash": "cat", "category": "happy"},
+    ]))
+    plugin = MockPlugin()
+    plugin.db_service = db
+
+    asyncio.run(MemeSelector(plugin).record_emoji_usage(stored_path))
+
+    assert db.get_emoji(stored_path)["use_count"] == 1
+
+
 class TestRecentUsage:
     """测试最近使用记录功能"""
 
@@ -441,6 +458,23 @@ class TestSendPathOptimization:
         assert len(event.sent) == 1
         assert event.sent[0].file_images == [str(image_path)]
         self.plugin.image_render_service.file_to_gif_base64.assert_not_awaited()
+
+    def test_successful_send_increments_database_usage(self, tmp_path):
+        import asyncio
+        from core.db.database_service import DatabaseService
+
+        image_path = tmp_path / "emoji.png"
+        image_path.write_bytes(b"fake")
+        db = DatabaseService(tmp_path / "usage.db")
+        asyncio.run(db.insert_batch([
+            {"path": str(image_path), "hash": "emoji", "category": "happy"},
+        ]))
+        self.plugin.db_service = db
+        self.selector.record_emoji_usage = MemeSelector.record_emoji_usage.__get__(self.selector)
+        event = _DummyEvent(platform_name="discord")
+
+        assert asyncio.run(self.selector.send_emoji_with_text(event, str(image_path), "hello"))
+        assert db.get_emoji(str(image_path))["use_count"] == 1
 
     def test_send_emoji_with_text_falls_back_to_base64_for_aiocqhttp(self, tmp_path):
         image_path = tmp_path / "emoji.png"

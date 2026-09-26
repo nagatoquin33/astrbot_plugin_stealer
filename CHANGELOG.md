@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### changed
+- 将 Web API 路由、数据库表结构与分领域查询、LLM 表情包工具流程拆入独立模块，保留原有注册入口和调用接口
+
+### fixed
+- 修复 Linux 大小写路径及 Windows 分隔符导致的表情包使用计数未命中，并阻止旧索引快照覆盖新计数
+- LLM 通过通用消息工具成功发送已入库的本地表情包时记录使用次数
+
 ## [3.1.3] - 2026-09-23
 
 ### added

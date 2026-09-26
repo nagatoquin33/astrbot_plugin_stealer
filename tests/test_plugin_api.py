@@ -8,7 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest
-import astrbot_plugin_stealer.plugin_api as plugin_api_module
+import astrbot_plugin_stealer.api.taxonomy as taxonomy_module
 
 from astrbot_plugin_stealer.plugin_api import PluginAPI
 from astrbot_plugin_stealer.core.sources.models import ExternalSourceSecurityError
@@ -18,6 +18,28 @@ def _build_api(category_info):
     cfg = types.SimpleNamespace(get_category_info=lambda: category_info)
     plugin = types.SimpleNamespace(plugin_config=cfg)
     return PluginAPI(plugin)
+
+
+def test_split_route_groups_keep_all_registered_endpoints():
+    routes = []
+    api = PluginAPI(types.SimpleNamespace())
+    context = types.SimpleNamespace(
+        register_web_api=lambda path, handler, methods, description: routes.append(
+            (path, handler, methods, description)
+        )
+    )
+
+    api.register(context)
+
+    assert len(routes) == 39
+    assert len({path for path, *_ in routes}) == len(routes)
+    assert all(handler.__self__ is api for _, handler, _, _ in routes)
+    assert {path for path, *_ in routes} >= {
+        "/astrbot_plugin_stealer/images",
+        "/astrbot_plugin_stealer/pending",
+        "/astrbot_plugin_stealer/sources",
+        "/astrbot_plugin_stealer/categories",
+    }
 
 
 class TestCategoryUpdateSafety:
@@ -37,8 +59,8 @@ class TestCategoryUpdateSafety:
             plugin_config=config,
             update_config=lambda value: updates.append(value),
         )
-        monkeypatch.setattr(plugin_api_module, "request", FakeRequest())
-        monkeypatch.setattr(plugin_api_module, "jsonify", lambda value: value)
+        monkeypatch.setattr(taxonomy_module, "request", FakeRequest())
+        monkeypatch.setattr(taxonomy_module, "jsonify", lambda value: value)
         return PluginAPI(plugin), updates
 
     @pytest.mark.asyncio

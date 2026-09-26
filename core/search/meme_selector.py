@@ -134,9 +134,9 @@ class MemeSelector:
         if db_service is None:
             return
 
-        # 使用数据库增量更新
-        target_path = canonicalize_path(emoji_path)
-        db_service.increment_usage_sync(target_path)
+        # 保留数据库中原始路径；规范化键只用于比较。
+        if not db_service.increment_usage_sync(emoji_path) and trigger != "generic_tool":
+            logger.warning(f"[Stealer] 表情包使用计数未命中: {emoji_path}")
 
     def normalize_category(self, category: str) -> str:
         """归一化当前配置中的分类名。"""
