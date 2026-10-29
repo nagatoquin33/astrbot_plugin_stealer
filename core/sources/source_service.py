@@ -27,7 +27,7 @@ from ..util.normalization import (
     normalize_character_key,
     normalize_scope_mode,
 )
-from ..util.safe_io import safe_remove_file
+from ..util.safe_io import write_image_file
 from .github_source import GitHubSource
 from .http_source import HTTPSource
 from .models import (
@@ -710,9 +710,8 @@ class SourceService:
         character: str,
     ) -> str:
         image_hash = hashlib.sha256(raw).hexdigest()
-        if self.db and hasattr(self.db, "blacklisted_hashes"):
-            if image_hash in self.db.blacklisted_hashes():
-                raise ExternalSourceError("image hash is blacklisted")
+        if self.db and await asyncio.to_thread(self.db.is_blacklisted, image_hash):
+            raise ExternalSourceError("image hash is blacklisted")
         width, height, image_format, suffix = self._validate_image(raw)
         existing = self.db.get_emoji_by_hash(image_hash) if self.db else None
         if existing:
@@ -771,30 +770,27 @@ class SourceService:
             "created_at": now,
             "retention_class": "external",
         }
-        if review:
-            config = getattr(self.plugin, "plugin_config", None)
-            target_dir = Path(getattr(config, "pending_dir", self.data_dir / "pending"))
+        async with self.db.file_lock:
+            if not review and category not in self.plugin.plugin_config.get_categories():
+                raise ExternalSourceError("category was removed during import")
+            target_dir = self.data_dir / "pending" if review else self._category_dir(category)
             target_dir.mkdir(parents=True, exist_ok=True)
             target = self._unique_target(target_dir, item, image_hash, suffix)
-            await self._write_atomic(target, raw)
             metadata["path"] = str(target)
-            pending_id = await self.db.insert_pending(metadata) if self.db else None
-            if not pending_id:
-                await safe_remove_file(str(target))
-                raise ExternalSourceError("failed to insert pending metadata")
-            await self._link_item(source, item, image_hash, None, pending_path=str(target))
-            return "pending"
-        target_dir = self._category_dir(category)
-        target = self._unique_target(target_dir, item, image_hash, suffix)
-        await self._write_atomic(target, raw)
-        metadata["path"] = str(target)
-        inserted = await self.db.insert_batch([metadata]) if self.db else 0
-        if inserted <= 0:
-            await safe_remove_file(str(target))
-            raise ExternalSourceError("failed to insert image metadata")
-        await self._link_item(source, item, image_hash, str(target))
-        await refresh_search_entry(self.plugin, str(target), metadata)
-        return "imported"
+
+            async def commit_import(_target):
+                if not review and category not in self.plugin.plugin_config.get_categories():
+                    raise ExternalSourceError("category was removed during import")
+                result = await self.db.insert_pending(metadata) if review else await self.db.insert_batch([metadata])
+                if not result:
+                    raise ExternalSourceError("failed to insert image metadata")
+
+            await write_image_file(raw, target, commit_import)
+        await self._link_item(source, item, image_hash, None if review else str(target),
+                              pending_path=str(target) if review else "")
+        if not review:
+            await refresh_search_entry(self.plugin, str(target), metadata)
+        return "pending" if review else "imported"
 
     def _prepare_character(self, spec: dict[str, Any]) -> str:
         """Resolve the optional role assignment and create a new role once."""
@@ -826,16 +822,10 @@ class SourceService:
             )
         if config is None or not hasattr(config, "characters"):
             return character
-        config.characters = [*known, character]
         info = dict(getattr(config, "character_info", {}) or {})
         info.setdefault(character, {"name": raw[:80], "desc": ""})
-        config.character_info = info
-        save_characters = getattr(config, "save_characters", None)
-        save_info = getattr(config, "save_character_info", None)
-        if callable(save_characters):
-            save_characters()
-        if callable(save_info):
-            save_info()
+        if not config.update_config({"characters": [*known, character], "character_info": info}):
+            raise ExternalSourceError("failed to save character configuration")
         return character
 
     async def _link_item(
@@ -1008,17 +998,6 @@ class SourceService:
             candidate = target_dir / f"{base}_{index}{suffix}"
             index += 1
         return candidate
-
-    async def _write_atomic(self, target: Path, raw: bytes) -> None:
-        staging = self.import_dir / "staging"
-        await asyncio.to_thread(staging.mkdir, parents=True, exist_ok=True)
-        temporary = staging / f"{uuid.uuid4().hex}.part"
-        try:
-            await asyncio.to_thread(temporary.write_bytes, raw)
-            await asyncio.to_thread(os.replace, temporary, target)
-        finally:
-            if temporary.exists():
-                await safe_remove_file(str(temporary))
 
     def _source_record(
         self, inspection: SourceInspection, spec: dict[str, Any]

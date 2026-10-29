@@ -31,9 +31,19 @@ def test_split_route_groups_keep_all_registered_endpoints():
 
     api.register(context)
 
-    assert len(routes) == 39
+    assert len(routes) == 45
     assert len({path for path, *_ in routes}) == len(routes)
     assert all(handler.__self__ is api for _, handler, _, _ in routes)
+    registered = {path: (handler.__name__, tuple(methods)) for path, handler, methods, _ in routes}
+    for suffix, handler, method in (
+        ("", "handle_batch_reanalyze", "POST"),
+        ("/status", "handle_batch_reanalyze_status", "GET"),
+        ("/cancel", "handle_batch_reanalyze_cancel", "POST"),
+        ("/result", "handle_batch_reanalyze_result", "GET"),
+        ("/review", "handle_batch_reanalyze_review", "POST"),
+        ("/retry", "handle_batch_reanalyze_retry", "POST"),
+    ):
+        assert registered["/astrbot_plugin_stealer/images/reanalyze" + suffix] == (handler, (method,))
     assert {path for path, *_ in routes} >= {
         "/astrbot_plugin_stealer/images",
         "/astrbot_plugin_stealer/pending",
@@ -55,10 +65,13 @@ class TestCategoryUpdateSafety:
             save_category_info=lambda: None,
         )
         updates = []
-        plugin = types.SimpleNamespace(
-            plugin_config=config,
-            update_config=lambda value: updates.append(value),
-        )
+        def update(value):
+            updates.append(value)
+            for key, item in value.items():
+                setattr(config, key, item)
+            return True
+
+        plugin = types.SimpleNamespace(plugin_config=config, update_config=update)
         monkeypatch.setattr(taxonomy_module, "request", FakeRequest())
         monkeypatch.setattr(taxonomy_module, "jsonify", lambda value: value)
         return PluginAPI(plugin), updates
@@ -92,7 +105,9 @@ class TestCategoryUpdateSafety:
         body = await api._categories_update()
         assert body["success"] is True
         assert body["categories"] == ["custom_tag"]
-        assert updates == [{"categories": ["custom_tag"]}]
+        assert len(updates) == 1
+        assert updates[0]["categories"] == ["custom_tag"]
+        assert updates[0]["category_info"] == api._cfg.category_info
         assert len(api._cfg.category_info["custom_tag"]["name"]) == 40
         assert len(api._cfg.category_info["custom_tag"]["desc"]) == 200
 

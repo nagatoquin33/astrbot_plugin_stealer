@@ -10,6 +10,7 @@ class TaskScheduler:
 
     def __init__(self):
         self._tasks: dict[str, asyncio.Task[Any]] = {}
+        self._closed = False
 
     @staticmethod
     def _task_done_callback(task: asyncio.Task[Any]) -> None:
@@ -34,8 +35,11 @@ class TaskScheduler:
         return task
 
     def create_task(
-        self, name: str, coro: Coroutine[Any, Any, Any], replace_existing: bool = True
+        self, name: str, coro: Coroutine[Any, Any, Any], replace_existing: bool = True, *, retain: bool = True
     ) -> asyncio.Task[Any] | None:
+        if self._closed:
+            coro.close()
+            return None
         if name in self._tasks:
             if replace_existing:
                 old_task = self._tasks.pop(name)
@@ -47,6 +51,11 @@ class TaskScheduler:
         try:
             task = self.create_detached_task(coro, name=name)
             self._tasks[name] = task
+            if not retain:
+                def forget(completed):
+                    if self._tasks.get(name) is completed:
+                        self._tasks.pop(name)
+                task.add_done_callback(forget)
             logger.info(f"创建任务: {name}")
             return task
         except Exception as e:
@@ -67,7 +76,8 @@ class TaskScheduler:
                     pass
                 except Exception as e:
                     logger.error(f"任务 {name} 取消时出错: {e}")
-            del self._tasks[name]
+            if self._tasks.get(name) is task:
+                self._tasks.pop(name)
             logger.info(f"取消任务: {name}")
             return True
         except Exception as e:
@@ -79,5 +89,6 @@ class TaskScheduler:
             await self.cancel_task(name)
 
     async def cleanup(self):
+        self._closed = True
         await self.cancel_all_tasks()
         logger.info("任务调度器已关闭")

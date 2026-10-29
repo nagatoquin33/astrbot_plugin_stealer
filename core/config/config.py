@@ -1,4 +1,7 @@
 import json
+import os
+import tempfile
+from copy import deepcopy
 import hashlib
 import re
 from pathlib import Path
@@ -330,18 +333,23 @@ class PluginConfig(BaseModel):
             bool: 是否写入成功
         """
         try:
-            with path.open("w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            self._replace_file(path, json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8"))
             return True
-        except PermissionError as e:
-            logger.error(f"[Config] 权限不足，无法写入文件 {path}: {e}")
+        except (OSError, TypeError, ValueError) as exc:
+            logger.error(f"[Config] 写入失败 {path}: {exc}")
             return False
-        except OSError as e:
-            logger.error(f"[Config] 写入文件失败 {path}: {e}")
-            return False
-        except Exception as e:
-            logger.error(f"[Config] 写入 JSON 文件时发生未知错误 {path}: {e}")
-            return False
+
+    @staticmethod
+    def _replace_file(path: Path, content: bytes) -> None:
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as stream:
+                temporary = Path(stream.name)
+                stream.write(content)
+            os.replace(temporary, path)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
 
     def _load_category_state(self) -> None:
         stored_categories = self._read_json_file(self.categories_path)
@@ -538,53 +546,62 @@ class PluginConfig(BaseModel):
         if removed and hasattr(self._data, "save_config"):
             self._data.save_config()
 
-    def __setattr__(self, key: str, value: Any):
-        super().__setattr__(key, value)
+    _FILE_CONFIG: ClassVar[dict[str, str]] = {
+        "categories": "categories_path", "category_info": "category_info_path",
+        "characters": "characters_path", "character_info": "character_info_path",
+    }
 
+    def __setattr__(self, key: str, value: Any):
+        if key in self._FILE_CONFIG and hasattr(self, self._FILE_CONFIG[key]):
+            if not self.update_config({key: value}):
+                raise OSError(f"配置 {key} 保存失败")
+            return
+        super().__setattr__(key, value)
         if key in self._TARGET_POLICY_CONFIG_KEYS:
             self._refresh_target_policy_cache()
 
-        if key in ("categories", "category_info"):
-            if key == "categories":
-                self.save_categories()
-            else:
-                self.save_category_info()
-        if key in ("characters", "character_info"):
-            if key == "characters":
-                self.save_characters()
-            else:
-                self.save_character_info()
-
     def update_config(self, updates: dict) -> bool:
-        """批量更新配置项。
-
-        Args:
-            updates: 配置更新字典
-
-        Returns:
-            bool: 是否更新成功
-        """
+        """先持久化整个配置变更，再发布运行态；失败时恢复已写文件和配置对象。"""
+        valid = {key: deepcopy(value) for key, value in updates.items() if key in type(self).model_fields}
+        previous = {key: deepcopy(getattr(self, key)) for key in valid}
+        files = {getattr(self, path): valid[key] for key, path in self._FILE_CONFIG.items() if key in valid}
+        scalar = {key: value for key, value in valid.items() if key not in self._FILE_CONFIG}
+        backing = deepcopy(dict(self._data)) if self._data is not None else None
+        config_path = getattr(self._data, "config_path", None)
+        paths = list(files)
+        if scalar and config_path:
+            paths.append(Path(config_path))
+        originals = {}
         try:
-            fields = getattr(type(self), "model_fields", None)
-            if fields is None:
-                fields = getattr(type(self), "__fields__", {})
-            valid_updates: dict[str, Any] = {}
-            for key, value in updates.items():
-                if fields is not None and key not in fields:
-                    logger.debug(f"[Config] 忽略已移除的配置键: {key}")
-                    continue
-                valid_updates[key] = value
-                setattr(self, key, value)
-
-            # 回写到 AstrBotConfig
-            if hasattr(self, "_data") and self._data is not None:
+            originals = {path: path.read_bytes() if path.exists() else None for path in paths}
+            for path, value in files.items():
+                if not self._write_json_file(path, value):
+                    raise OSError(f"配置文件保存失败: {path.name}")
+            if scalar and self._data is not None:
                 if hasattr(self._data, "save_config"):
-                    self._data.save_config(valid_updates)
-                elif isinstance(self._data, dict):
-                    self._data.update(valid_updates)
+                    self._data.save_config(scalar)
+                else:
+                    self._data.update(scalar)
+            for key, value in valid.items():
+                BaseModel.__setattr__(self, key, value)
+            self._refresh_target_policy_cache()
             return True
-        except Exception as e:
-            logger.error(f"更新配置失败: {e}")
+        except Exception as exc:
+            for key, value in previous.items():
+                BaseModel.__setattr__(self, key, value)
+            self._refresh_target_policy_cache()
+            if backing is not None:
+                self._data.clear()
+                self._data.update(backing)
+            for path, content in originals.items():
+                try:
+                    if content is None:
+                        path.unlink(missing_ok=True)
+                    elif not path.exists() or path.read_bytes() != content:
+                        self._replace_file(path, content)
+                except OSError as restore_error:
+                    logger.error(f"恢复配置失败 {path}: {restore_error}")
+            logger.error(f"更新配置失败: {exc}")
             return False
 
     _TARGET_POLICY_CONFIG_KEYS: ClassVar[set[str]] = {
@@ -623,10 +640,12 @@ class PluginConfig(BaseModel):
         )
 
     def save_categories(self) -> None:
-        self._write_json_file(self.categories_path, self.categories)
+        if not self._write_json_file(self.categories_path, self.categories):
+            raise OSError("categories 保存失败")
 
     def save_category_info(self) -> None:
-        self._write_json_file(self.category_info_path, self.category_info)
+        if not self._write_json_file(self.category_info_path, self.category_info):
+            raise OSError("category_info 保存失败")
 
     def _load_character_state(self) -> None:
         stored_characters = self._read_json_file(self.characters_path)
@@ -647,10 +666,12 @@ class PluginConfig(BaseModel):
         self.save_character_info()
 
     def save_characters(self) -> None:
-        self._write_json_file(self.characters_path, self.characters)
+        if not self._write_json_file(self.characters_path, self.characters):
+            raise OSError("characters 保存失败")
 
     def save_character_info(self) -> None:
-        self._write_json_file(self.character_info_path, self.character_info)
+        if not self._write_json_file(self.character_info_path, self.character_info):
+            raise OSError("character_info 保存失败")
 
     @staticmethod
     def normalize_character_key(value: str) -> str:

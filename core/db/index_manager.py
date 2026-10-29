@@ -25,14 +25,24 @@ def invalidate_search(plugin) -> None:
         logger.warning(f"检索缓存失效失败: {exc}")
 
 
-async def refresh_search_entry(plugin, path: str, entry=None, *, previous_path: str | None = None) -> None:
-    """同步新增、更新、移动或删除后的向量；模型故障不回滚图库写入。"""
-    invalidate_search(plugin)
+def _wake_search_worker(plugin) -> bool:
     manager = getattr(plugin, "index_manager", None)
     running = getattr(manager, "search_worker_running", None)
     if callable(running) and running():
         manager._search_wakeup.set()
-        return
+        return True
+    return False
+
+
+async def refresh_search_entry(plugin, path: str, entry=None, *, previous_path: str | None = None) -> None:
+    """提交后刷新检索；后台 worker 可用时只发送通知。"""
+    invalidate_search(plugin)
+    if not _wake_search_worker(plugin):
+        await _refresh_embedding_entry(plugin, path, entry, previous_path=previous_path)
+
+
+async def _refresh_embedding_entry(plugin, path: str, entry=None, *, previous_path: str | None = None) -> None:
+    """后台 worker 未运行时同步条目，模型故障不回滚图库写入。"""
     try:
         smart = getattr(getattr(plugin, "meme_selector", None), "_smart_select_service", None)
         embedding = getattr(smart, "_embedding_service", None)
@@ -56,8 +66,12 @@ async def delete_index_paths(plugin, paths: list[str]) -> int:
     if db is None or not hasattr(db, "delete_paths"):
         return 0
     removed = await db.delete_paths(paths)
-    for path in paths:
-        await refresh_search_entry(plugin, path)
+    if removed:
+        # 同一事务批量删除后只失效一次缓存、唤醒一次持久化刷新队列。
+        invalidate_search(plugin)
+        if not _wake_search_worker(plugin):
+            for path in dict.fromkeys(paths):
+                await _refresh_embedding_entry(plugin, path)
     return removed
 
 
@@ -191,7 +205,8 @@ class IndexManager:
         """增量提交后刷新有语义变化的条目，未出现的路径保持不变。"""
         if self.db_service is None:
             return
-        changed = await self.db_service.sync_index(idx)
+        async with self.db_service.file_lock:
+            changed = await self.db_service.sync_index(idx)
         if changed:
             invalidate_search(self.plugin)
         for path in changed or []:
@@ -200,7 +215,9 @@ class IndexManager:
     def _iter_legacy_index_paths(self, base_dir) -> list[Path]:
         """收集所有可能的旧版索引 JSON 路径。"""
         base_dir_path = Path(base_dir) if base_dir else None
-        roots: list[Path] = [self.cache_dir / "index_cache.json"]
+        roots: list[Path] = []
+        if self.cache_dir:
+            roots.append(self.cache_dir / "index_cache.json")
 
         if base_dir_path:
             roots.extend(

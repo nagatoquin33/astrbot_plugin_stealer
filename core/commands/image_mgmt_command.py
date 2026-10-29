@@ -83,124 +83,57 @@ class ImageManagementCommand:
         page_num = max(1, page_num)
 
         # 使用数据库分页查询，避免全量加载
-        db_service = getattr(self.plugin, "db_service", None)
-        if db_service and hasattr(db_service, "get_emojis_paginated"):
-            cat_filter = category if category else None
+        db_service = self.plugin.db_service
+        cat_filter = category if category else None
+        rows, total_filtered, _category_counts = db_service.get_emojis_paginated(
+            page=page_num, page_size=per_page, category=cat_filter, sort_order="newest"
+        )
+        total_all = db_service.count_total()
+
+        if total_all == 0:
+            yield event.plain_result("暂无表情包数据")
+            return
+
+        total_pages = max(1, (total_filtered + per_page - 1) // per_page)
+        if page_num > total_pages:
+            page_num = total_pages
             rows, total_filtered, _category_counts = db_service.get_emojis_paginated(
-                page=page_num, page_size=per_page, category=cat_filter, sort_order="newest"
+                page=page_num,
+                page_size=per_page,
+                category=cat_filter,
+                sort_order="newest",
             )
-            total_all = db_service.count_total()
+        indexes = self._existing_path_indexes(db_service)
 
-            if total_all == 0:
-                yield event.plain_result("暂无表情包数据")
-                return
+        # 构建展示列表，标记文件是否存在
+        display_images = []
+        missing_count = 0
+        for row in rows:
+            img_path = row.get("path", "")
+            file_exists = Path(img_path).exists()
+            if not file_exists:
+                missing_count += 1
+            display_images.append({
+                "index": indexes.get(img_path, 0),
+                "path": img_path,
+                "name": Path(img_path).name,
+                "category": row.get("category", "未分类"),
+                "desc": str(row.get("desc", "") or ""),
+                "overlay_text": str(row.get("overlay_text", "") or ""),
+                "original_name": str(row.get("original_name", "") or ""),
+                "source": str(row.get("source", "") or ""),
+                "add_method": str(row.get("add_method", "") or ""),
+                "qq_emoji_package_id": str(row.get("qq_emoji_package_id", "") or ""),
+                "created_at": row.get("created_at", 0),
+                "file_exists": file_exists,
+            })
 
-            total_pages = max(1, (total_filtered + per_page - 1) // per_page)
-            if page_num > total_pages:
-                page_num = total_pages
-                rows, total_filtered, _category_counts = db_service.get_emojis_paginated(
-                    page=page_num,
-                    page_size=per_page,
-                    category=cat_filter,
-                    sort_order="newest",
-                )
-            indexes = self._existing_path_indexes(db_service)
-
-            # 构建展示列表，标记文件是否存在
-            display_images = []
-            missing_count = 0
-            for row in rows:
-                img_path = row.get("path", "")
-                file_exists = Path(img_path).exists()
-                if not file_exists:
-                    missing_count += 1
-                display_images.append({
-                    "index": indexes.get(img_path, 0),
-                    "path": img_path,
-                    "name": Path(img_path).name,
-                    "category": row.get("category", "未分类"),
-                    "desc": str(row.get("desc", "") or ""),
-                    "overlay_text": str(row.get("overlay_text", "") or ""),
-                    "original_name": str(row.get("original_name", "") or ""),
-                    "source": str(row.get("source", "") or ""),
-                    "add_method": str(row.get("add_method", "") or ""),
-                    "qq_emoji_package_id": str(row.get("qq_emoji_package_id", "") or ""),
-                    "created_at": row.get("created_at", 0),
-                    "file_exists": file_exists,
-                })
-
-            if not display_images and not category:
-                yield event.plain_result("暂无有效的表情包文件")
-                return
-            if not display_images and category:
-                yield event.plain_result(f"分类 '{category}' 中暂无表情包")
-                return
-
-        else:
-            # 兜底：旧的全量加载方式
-            image_index = await self.plugin.index_manager.load_index()
-
-            if not image_index:
-                yield event.plain_result("暂无表情包数据")
-                return
-
-            all_images = []
-            missing_count = 0
-            for img_path, img_info in image_index.items():
-                if isinstance(img_info, dict):
-                    file_exists = Path(img_path).exists()
-                    if not file_exists:
-                        missing_count += 1
-                    img_category = img_info.get("category", "未分类")
-                    img_desc = img_info.get("desc", "")
-                    img_source = img_info.get("source", "")
-                    img_pkg = img_info.get("qq_emoji_package_id", "")
-                    all_images.append({
-                        "path": img_path,
-                        "name": Path(img_path).name,
-                        "category": img_category,
-                        "desc": str(img_desc or ""),
-                        "overlay_text": str(img_info.get("overlay_text", "") or ""),
-                        "original_name": str(img_info.get("original_name", "") or ""),
-                        "source": str(img_source or ""),
-                        "add_method": str(img_info.get("add_method", "") or ""),
-                        "qq_emoji_package_id": str(img_pkg or ""),
-                        "created_at": img_info.get("created_at", 0),
-                        "file_exists": file_exists,
-                    })
-
-            if not all_images:
-                if category:
-                    yield event.plain_result(f"分类 '{category}' 中暂无表情包")
-                else:
-                    yield event.plain_result("暂无有效的表情包文件")
-                return
-
-            all_images.sort(
-                key=lambda item: (int(item.get("created_at", 0) or 0), item["path"]),
-                reverse=True,
-            )
-            next_index = 1
-            for img in all_images:
-                img["index"] = next_index if img["file_exists"] else 0
-                if img["file_exists"]:
-                    next_index += 1
-
-            filtered_images = [
-                img for img in all_images if (not category or img.get("category") == category)
-            ]
-            if not filtered_images:
-                yield event.plain_result(f"分类 '{category}' 中暂无表情包")
-                return
-
-            total_filtered = len(filtered_images)
-            total_all = len(all_images)
-            total_pages = max(1, (total_filtered + per_page - 1) // per_page)
-            if page_num > total_pages:
-                page_num = total_pages
-
-            start = (page_num - 1) * per_page
-            display_images = filtered_images[start : start + per_page]
+        if not display_images and not category:
+            yield event.plain_result("暂无有效的表情包文件")
+            return
+        if not display_images and category:
+            yield event.plain_result(f"分类 '{category}' 中暂无表情包")
+            return
 
         # 渲染输出
         if getattr(self.plugin, "image_render_service", None):

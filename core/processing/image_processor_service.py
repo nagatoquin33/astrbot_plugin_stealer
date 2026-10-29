@@ -10,7 +10,7 @@ from typing import Any
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
-from ..util.safe_io import commit_image_file, safe_remove_file, unique_image_path
+from ..util.safe_io import protect_file, commit_image_file, safe_remove_file, unique_image_path
 from ..util.normalization import normalize_label_list
 from .semantic_schema import MAX_DESC_CHARS, clip_chars
 from ..db.index_manager import refresh_search_entry
@@ -245,17 +245,22 @@ class ImageProcessorService:
         db = getattr(self.plugin, "db_service", None)
         if db is None:
             raise RuntimeError("database unavailable")
-        cat_dir = self.plugin_config.ensure_category_dir(category)
-        filename = os.path.basename(file_path)
-        cat_path = str(unique_image_path(cat_dir, filename))
-        async def commit_entry(_target):
-            entry = await self._build_image_entry(
-                cat_path, hash_val, category, extra_meta, tags, desc, scenes,
-                phash_val, source_url, original_name, add_method,
-            )
-            await db.sync_index({cat_path: entry})
-            return entry
-        entry = await commit_image_file(file_path, cat_path, commit_entry, consume=is_temp or already_in_raw)
+        async with db.file_lock:
+            if category not in self.plugin_config.categories:
+                raise ValueError("分类已被移除")
+            cat_dir = self.plugin_config.ensure_category_dir(category)
+            filename = os.path.basename(file_path)
+            cat_path = str(unique_image_path(cat_dir, filename))
+            async def commit_entry(_target):
+                if category not in self.plugin_config.categories:
+                    raise ValueError("分类已被移除")
+                entry = await self._build_image_entry(
+                    cat_path, hash_val, category, extra_meta, tags, desc, scenes,
+                    phash_val, source_url, original_name, add_method,
+                )
+                await db.sync_index({cat_path: entry})
+                return entry
+            entry = await commit_image_file(file_path, cat_path, commit_entry, consume=is_temp or already_in_raw)
         idx[cat_path] = entry
         await refresh_search_entry(self.plugin, cat_path, entry)
         return True, {cat_path: entry}
@@ -327,7 +332,7 @@ class ImageProcessorService:
                     await safe_remove_file(file_path)
                 return False, None
             # 查黑名单
-            if hasattr(db, "blacklisted_hashes") and hash_val in db.blacklisted_hashes():
+            if db.is_blacklisted(hash_val):
                 logger.debug(f"pending: 哈希已在黑名单中，跳过: {hash_val}")
                 if is_temp and os.path.exists(file_path):
                     await safe_remove_file(file_path)
@@ -357,7 +362,7 @@ class ImageProcessorService:
                     raise RuntimeError("pending metadata insertion failed")
                 return pending_id
             pending_id = await commit_image_file(file_path, pending_path, commit_pending,
-                                                 consume=is_temp or already_in_raw)
+                                                 consume=is_temp or already_in_raw, lock=db.file_lock)
         except Exception as exc:
             logger.error(f"pending publication failed: {exc}")
             return False, None
@@ -552,7 +557,7 @@ class ImageProcessorService:
 
         db = getattr(self.plugin, "db_service", None)
         if db is not None:
-            if db.hash_exists(hash_val) or hash_val in db.blacklisted_hashes():
+            if db.hash_exists(hash_val) or db.is_blacklisted(hash_val):
                 await _cleanup_temp()
                 return True
             image_phash = phash_val or await self._phash_service.compute_phash(file_path)
@@ -794,7 +799,6 @@ class ImageProcessorService:
             )
 
             if success and merged_idx is not None:
-                await self.plugin.index_manager.save_index(merged_idx)
                 tag_hint = f"，标签: {', '.join(normalized_tags)}" if normalized_tags else ""
                 scene_hint = f"，场景: {', '.join(normalized_scenes)}" if normalized_scenes else ""
                 return True, f"偷取成功！已入库到分类 '{category}'{tag_hint}{scene_hint}"
@@ -846,10 +850,11 @@ class ImageProcessorService:
             )
 
             # 调用视觉模型
-            response = await self._vlm_call_service._call_vision_model(
-                event, file_path, prompt,
-                validate_response=self._classification_parser.validate_response,
-            )
+            with protect_file(file_path):
+                response = await self._vlm_call_service._call_vision_model(
+                    event, file_path, prompt,
+                    validate_response=self._classification_parser.validate_response,
+                )
 
             # 解析JSON响应
             return self._classification_parser._parse_classification_response(response, file_path)

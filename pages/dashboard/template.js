@@ -320,6 +320,9 @@ export const TEMPLATE = `
                             {{ isBatchMode ? t('pages.dashboard.actions.done', 'Done') : t('pages.dashboard.actions.batch', 'Batch') }}
                         </button>
 
+                        <button v-if="reanalysisJob" @click="reanalysisOpen = true" class="codex-btn">
+                            {{ t('pages.dashboard.reanalysis.progress', 'Analysis progress') }} · {{ reanalysisJob.processed }}/{{ reanalysisJob.total }}
+                        </button>
                         <button @click="openEmotionsModal" class="codex-btn">
                             <svg style="width:16px;height:16px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -401,7 +404,7 @@ export const TEMPLATE = `
             <div v-else class="inventory-grid library-grid" :class="{ 'list-mode': viewMode === 'list' }">
                 <div v-for="(img, idx) in images" :key="img.hash" class="item-slot"
                     :class="{ selected: selectedImages.has(img.hash) }"
-                    :style="{ animationDelay: Math.min(idx * 24, 420) + 'ms' }"
+                    :style="{ animationDelay: Math.min(idx * 16, 200) + 'ms' }"
                     role="button" tabindex="0"
                     :aria-label="img.desc || getCategoryName(img.category)"
                     @mouseenter="onItemSlotEnter($event)"
@@ -494,18 +497,29 @@ export const TEMPLATE = `
         </template>
 
         <template v-if="activeSection === 'pending'">
-            <div class="pending-progress">
-                <div class="progress-track">
-                    <div class="progress-fill"
-                        :style="{ width: Math.min(100, pendingStats.pending / pendingStats.capacity * 100) + '%' }"
-                        :class="{ full: pendingStats.paused }"></div>
+            <header class="library-heading pending-heading">
+                <div class="library-heading-main">
+                    <span class="library-eyebrow">{{ t('pages.dashboard.pending.pool', '待审核池') }}</span>
+                    <h2>{{ t('pages.dashboard.sections.pending', '审核区') }} <span class="library-result-count">{{ pendingTotal }}</span></h2>
+                    <div class="library-location">
+                        <span>{{ t('pages.dashboard.pending.progress', 'Pending') }} {{ pendingStats.pending }} / {{ pendingStats.capacity }}</span>
+                        <span aria-hidden="true">/</span>
+                        <span>{{ t('pages.dashboard.pending.queued_count', 'Queued') }}: {{ pendingStats.queued }}</span>
+                        <span aria-hidden="true">/</span>
+                        <span>{{ t('pages.dashboard.pending.processing_count', 'Analyzing') }}: {{ pendingStats.processing }}</span>
+                        <span aria-hidden="true">/</span>
+                        <span>{{ t('pages.dashboard.pending.failed_count', 'Failed') }}: {{ pendingStats.failed }}</span>
+                    </div>
                 </div>
-                <div class="progress-info">
-                    <span>{{ t('pages.dashboard.pending.progress', 'Pending') }} {{ pendingStats.pending }} / {{ pendingStats.capacity }}</span>
-                    <span>{{ t('pages.dashboard.pending.queued_count', 'Queued') }}: {{ pendingStats.queued }} · {{ t('pages.dashboard.pending.processing_count', 'Analyzing') }}: {{ pendingStats.processing }} · {{ t('pages.dashboard.pending.failed_count', 'Failed') }}: {{ pendingStats.failed }}</span>
+                <div class="pending-heading-side">
+                    <div class="progress-track">
+                        <div class="progress-fill"
+                            :style="{ width: Math.min(100, pendingStats.pending / pendingStats.capacity * 100) + '%' }"
+                            :class="{ full: pendingStats.paused }"></div>
+                    </div>
                     <span v-if="pendingStats.paused" class="progress-paused-label">{{ t('pages.dashboard.pending.paused_hint', 'Stealing is paused and will resume after review.') }}</span>
                 </div>
-            </div>
+            </header>
 
             <div class="inventory-toolbar">
                 <div class="toolbar-search">
@@ -572,7 +586,7 @@ export const TEMPLATE = `
                 <div v-for="(item, idx) in pendingImages" :key="item.id" class="pending-card"
                     :class="{ selected: pendingSelectedImages.has(item.id), 'kbd-focused': focusedPendingId === item.id }"
                     :data-pending-id="item.id"
-                    :style="{ animationDelay: Math.min(idx * 24, 420) + 'ms' }"
+                    :style="{ animationDelay: Math.min(idx * 16, 200) + 'ms' }"
                     @click="pendingBatchMode ? togglePendingSelection(item) : openPendingPreview(item)">
                     <div v-if="pendingBatchMode" class="batch-indicator">
                         <svg v-if="pendingSelectedImages.has(item.id)" style="width:12px;height:12px" fill="none"
@@ -1034,7 +1048,8 @@ export const TEMPLATE = `
             </button>
         </div>
 
-        <form @submit.prevent="submitUpload" class="modal-pad">
+        <form @submit.prevent="submitUpload" class="modal-form">
+            <div class="modal-form-body">
             <div class="upload-area" @click="$refs.fileInput.click()">
                 <input ref="fileInput" type="file" accept="image/*" @change="handleFileSelect" style="display:none">
 
@@ -1052,7 +1067,7 @@ export const TEMPLATE = `
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
                             d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                     </svg>
-                    <p style="margin:0;color:var(--text-muted);font-family:'Cinzel','Noto Sans SC',sans-serif;text-align:center">{{ t('pages.dashboard.upload.click_to_upload', 'Click to upload an image') }}</p>
+                    <p style="margin:0;color:var(--text-muted);font-family:var(--font-display);text-align:center">{{ t('pages.dashboard.upload.click_to_upload', 'Click to upload an image') }}</p>
                 </div>
             </div>
 
@@ -1137,6 +1152,7 @@ export const TEMPLATE = `
             <div v-if="uploadError" class="error-banner">
                 {{ uploadError }}
             </div>
+            </div>
 
             <div class="modal-footer-actions">
                 <button type="button" @click="closeUploadModal" class="codex-btn" style="flex:1">{{ t('pages.dashboard.actions.cancel', 'Cancel') }}</button>
@@ -1193,7 +1209,7 @@ export const TEMPLATE = `
                                     d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                             </svg>
                             <div>
-                                <p style="margin:0 0 4px 0;color:var(--gold-primary);font-family:'Cinzel','Noto Sans SC',sans-serif">{{ t('pages.dashboard.batch.selected_count', 'Selected {count} image(s)').replace('{count}', batchFiles.length) }}</p>
+                                <p style="margin:0 0 4px 0;color:var(--gold-primary);font-family:var(--font-display)">{{ t('pages.dashboard.batch.selected_count', 'Selected {count} image(s)').replace('{count}', batchFiles.length) }}</p>
                                 <p style="margin:0;color:var(--text-muted);font-size:0.85rem">{{ formatBatchSize() }}</p>
                             </div>
                         </div>
@@ -1218,7 +1234,7 @@ export const TEMPLATE = `
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
                                 d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                         </svg>
-                        <p style="margin:0;color:var(--text-muted);font-family:'Cinzel','Noto Sans SC',sans-serif;text-align:center">{{ t('pages.dashboard.batch.drag_upload', 'Click or drag to upload multiple images') }}</p>
+                        <p style="margin:0;color:var(--text-muted);font-family:var(--font-display);text-align:center">{{ t('pages.dashboard.batch.drag_upload', 'Click or drag to upload multiple images') }}</p>
                         <p style="margin:8px 0 0;color:var(--text-muted);font-size:0.85rem;text-align:center">{{ t('pages.dashboard.batch.supported_formats', 'Supports PNG, JPG, GIF, WEBP, BMP') }}</p>
                     </div>
                 </div>
@@ -1253,7 +1269,7 @@ export const TEMPLATE = `
                         style="margin:4px 0 0 24px;font-size:0.75rem;color:var(--gold-dim)">{{ t('pages.dashboard.batch.auto_analyze_disabled_hint', 'Clear the selected category before enabling auto analyze.') }}</p>
                     <p v-if="batchUploadForm.autoAnalyze"
                         style="margin:8px 0 0 24px;font-size:0.75rem;color:#f59e0b;padding:8px;background:rgba(245,158,11,0.1);border-radius:4px">
-                        {{ t('pages.dashboard.batch.auto_analyze_warning', 'Auto analyze will call the VLM service concurrently. Make sure your API supports concurrency or upload in smaller batches.') }}
+                        {{ t('pages.dashboard.batch.auto_analyze_warning', 'Images are analyzed one at a time using the configured model request interval.') }}
                     </p>
                 </div>
 
@@ -1539,10 +1555,10 @@ export const TEMPLATE = `
             </button>
         </div>
 
-        <div class="modal-pad">
-            <div style="background:var(--bg-main);padding:16px;margin-bottom:20px;border:1px solid var(--gold-dark)">
-                <h3 style="margin:0 0 16px 0;font-size:0.9rem;color:var(--gold-primary);font-family:'Cinzel','Noto Sans SC',sans-serif">{{ t('pages.dashboard.categories.add_new', 'Add Category') }}</h3>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:12px">
+        <div class="modal-pad category-manager">
+            <section class="category-add-panel">
+                <h3 class="category-add-title">{{ t('pages.dashboard.categories.add_new', 'Add Category') }}</h3>
+                <div class="category-add-grid">
                     <input v-model="newEmotion.key" maxlength="48" autocapitalize="none" spellcheck="false"
                         pattern="[a-z][a-z0-9_-]{0,47}" :placeholder="t('pages.dashboard.placeholders.category_key', 'Key (e.g. happy)')" class="codex-input">
                     <input v-model="newEmotion.name" maxlength="40" :placeholder="t('pages.dashboard.placeholders.category_name', 'Name (e.g. Happy)')" class="codex-input">
@@ -1551,19 +1567,17 @@ export const TEMPLATE = `
                         {{ addingEmotion ? '...' : t('pages.dashboard.actions.add', 'Add') }}
                     </button>
                 </div>
-                <p class="hint-text" style="margin:10px 0 0">{{ t('pages.dashboard.categories.key_hint', 'Key 以英文字母开头，仅使用小写字母、数字、_、-，最长48字符。显示名称可以使用中文。') }}</p>
-            </div>
+                <p class="hint-text category-add-hint">{{ t('pages.dashboard.categories.key_hint', 'Key 以英文字母开头，仅使用小写字母、数字、_、-，最长48字符。显示名称可以使用中文。') }}</p>
+            </section>
 
-            <div style="display:flex;flex-direction:column;gap:8px;max-height:400px;overflow-y:auto">
-                <div v-for="cat in availableEmotions" :key="cat.key"
-                    style="display:flex;align-items:center;justify-content:space-between;padding:16px;background:var(--bg-slot);border:1px solid var(--gold-dark)">
-                    <div>
-                        <div style="display:flex;align-items:center;gap:12px;margin-bottom:4px">
-                            <span style="font-family:'Cinzel','Noto Sans SC',sans-serif;color:var(--gold-primary);font-size:1.1rem">{{ cat.name || cat.key }}</span>
-                            <span
-                                style="font-size:0.75rem;color:var(--text-muted);background:var(--bg-main);padding:2px 8px;border:1px solid var(--gold-dark)">{{ cat.key }}</span>
+            <div class="category-manager-list">
+                <div v-for="cat in availableEmotions" :key="cat.key" class="category-manager-row">
+                    <div class="category-manager-main">
+                        <div class="category-manager-name">
+                            <span class="category-manager-label">{{ cat.name || cat.key }}</span>
+                            <span class="category-manager-key">{{ cat.key }}</span>
                         </div>
-                        <p style="margin:0;color:var(--text-muted);font-size:0.85rem;font-style:italic">{{ cat.desc || t('pages.dashboard.messages.no_description', 'No description') }}</p>
+                        <p class="category-manager-desc">{{ cat.desc || t('pages.dashboard.messages.no_description', 'No description') }}</p>
                     </div>
                     <button @click="deleteEmotion(cat)" :disabled="deletingEmotionKey === cat.key"
                         class="codex-btn danger">
@@ -1595,7 +1609,7 @@ export const TEMPLATE = `
         <div class="modal-pad">
             <p class="hint-text" style="margin:0 0 16px">{{ t('pages.dashboard.characters.hint', '角色由你在管理面板手工归档，VLM 不会识别角色。先创建角色，再点卡片编辑或用批量分配。') }}</p>
             <div style="background:var(--bg-main);padding:16px;margin-bottom:20px;border:1px solid var(--gold-dark)">
-                <h3 style="margin:0 0 16px 0;font-size:0.9rem;color:var(--gold-primary);font-family:'Cinzel','Noto Sans SC',sans-serif">{{ t('pages.dashboard.actions.characters', '角色管理') }}</h3>
+                <h3 style="margin:0 0 16px 0;font-size:0.9rem;color:var(--gold-primary);font-family:var(--font-display)">{{ t('pages.dashboard.actions.characters', '角色管理') }}</h3>
                 <div class="character-create-row">
                     <input v-model="newCharacter.key" class="codex-input"
                         :placeholder="t('pages.dashboard.placeholders.character_key', '标识（如 neurosama）')">
@@ -1610,7 +1624,7 @@ export const TEMPLATE = `
                 <div v-for="item in characters" :key="item.key" class="character-list-row">
                     <div>
                         <div style="display:flex;align-items:center;gap:12px;margin-bottom:4px">
-                            <span style="font-family:'Cinzel','Noto Sans SC',sans-serif;color:var(--gold-primary);font-size:1.1rem">{{ item.name || item.key }}</span>
+                            <span style="font-family:var(--font-display);color:var(--gold-primary);font-size:1.1rem">{{ item.name || item.key }}</span>
                             <span style="font-size:0.75rem;color:var(--text-muted);background:var(--bg-main);padding:2px 8px;border:1px solid var(--gold-dark)">{{ item.key }}</span>
                         </div>
                         <p style="margin:0;color:var(--text-muted);font-size:0.85rem">{{ item.count || 0 }}</p>
@@ -1703,9 +1717,12 @@ export const TEMPLATE = `
 </div>
 
 <div v-if="isBatchMode && selectedImages.size > 0" class="batch-bar">
-    <span style="font-family:'Cinzel','Noto Sans SC',sans-serif;color:var(--gold-bright);font-size:1rem">{{ t('pages.dashboard.batch.selected_short', 'Selected {count}').replace('{count}', selectedImages.size) }}</span>
+    <span style="font-family:var(--font-display);color:var(--gold-bright);font-size:1rem">{{ t('pages.dashboard.batch.selected_short', 'Selected {count}').replace('{count}', selectedImages.size) }}</span>
     <div style="width:1px;height:24px;background:var(--gold-dark)"></div>
     <button @click="selectAll" class="codex-btn" style="font-size:0.8rem;padding:8px 16px">{{ t('pages.dashboard.actions.select_all', 'Select All') }}</button>
+    <button @click="startBatchReanalysis" :disabled="reanalysisBusy || reanalysisSubmitting" class="codex-btn primary" style="font-size:0.8rem;padding:8px 16px">
+        {{ t('pages.dashboard.reanalysis.title', 'Batch re-analysis') }}
+    </button>
     <button @click="openBatchMoveModal" class="codex-btn" style="font-size:0.8rem;padding:8px 16px">{{ t('pages.dashboard.actions.move', 'Move') }}</button>
     <button @click="openBatchCharacterModal" class="codex-btn" style="font-size:0.8rem;padding:8px 16px">{{ t('pages.dashboard.actions.assign_character', '分配角色') }}</button>
     <button @click="handleBatchDelete" class="codex-btn danger" style="font-size:0.8rem;padding:8px 16px">{{ t('pages.dashboard.actions.delete', 'Delete') }}</button>
@@ -1726,6 +1743,69 @@ export const TEMPLATE = `
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
         </svg>
     </button>
+</div>
+
+<div v-if="reanalysisOpen" class="modal-overlay" @click.self="reanalysisOpen = false">
+    <section class="modal-panel modal-narrow reanalysis-panel" :class="{ 'reanalysis-review': reanalysisReady.length }" role="dialog" aria-modal="true" :aria-label="t('pages.dashboard.reanalysis.title', 'Batch re-analysis')">
+        <div class="modal-header">
+            <h2>{{ t('pages.dashboard.reanalysis.title', 'Batch re-analysis') }}</h2>
+            <button type="button" class="modal-close" @click="reanalysisOpen = false" :aria-label="t('pages.dashboard.actions.close', 'Close')">×</button>
+        </div>
+        <div class="modal-pad">
+            <p class="hint-text">{{ t('pages.dashboard.reanalysis.hint', 'Analysis results are saved only after you review and confirm each image. Categories, characters, favorites and scope are kept.') }}</p>
+            <template v-if="reanalysisJob">
+                <div class="reanalysis-status" aria-live="polite">
+                    <strong>{{ t('pages.dashboard.reanalysis.' + reanalysisJob.status, reanalysisJob.status) }}</strong>
+                    <span>{{ reanalysisJob.processed }} / {{ reanalysisJob.total }}</span>
+                </div>
+                <progress class="reanalysis-progress" :value="reanalysisJob.processed" :max="reanalysisJob.total" :aria-label="t('pages.dashboard.reanalysis.progress', 'Analysis progress')"></progress>
+                <div class="reanalysis-counts">
+                    <span>{{ t('pages.dashboard.reanalysis.analyzed', 'Analyzed') }} <b>{{ reanalysisJob.succeeded }}</b></span>
+                    <span>{{ t('pages.dashboard.reanalysis.pending_review', 'Awaiting review') }} <b>{{ reanalysisJob.pending }}</b></span>
+                    <span>{{ t('pages.dashboard.reanalysis.saved', 'Saved') }} <b>{{ reanalysisJob.saved }}</b></span>
+                    <span>{{ t('pages.dashboard.reanalysis.failed_count', 'Failed') }} <b>{{ reanalysisJob.failed }}</b></span>
+                    <span>{{ t('pages.dashboard.reanalysis.skipped', 'Skipped') }} <b>{{ reanalysisJob.skipped }}</b></span>
+                </div>
+                <p v-if="reanalysisJob.current" class="reanalysis-current">{{ reanalysisJob.current }}</p>
+                <p class="hint-text">{{ t('pages.dashboard.reanalysis.background_hint', 'You can close this panel or page. Reload to see progress; restarting the plugin ends this batch.') }}</p>
+                <div v-if="reanalysisReady.length" class="reanalysis-review-section">
+                    <div class="reanalysis-review-picker">
+                        <img v-if="reanalysisImage" :src="reanalysisImage" :alt="reanalysisResult?.name || ''" class="reanalysis-review-image">
+                        <label>
+                            <span>{{ t('pages.dashboard.reanalysis.choose_result', 'Choose an image to review') }}</span>
+                            <select :value="reanalysisHash" @change="selectReanalysisResult($event.target.value)" :disabled="reanalysisSubmitting" class="codex-input">
+                                <option v-for="item in reanalysisReady" :key="item.hash" :value="item.hash">{{ item.name }} · {{ item.hash.slice(0, 8) }}</option>
+                            </select>
+                        </label>
+                    </div>
+                    <p v-if="reanalysisLoading" class="hint-text" role="status">{{ t('pages.dashboard.reanalysis.loading_result', 'Loading comparison…') }}</p>
+                    <div v-if="reanalysisResult" class="reanalysis-comparison">
+                        <div class="reanalysis-comparison-head"><span></span><strong>{{ t('pages.dashboard.reanalysis.before', 'Before analysis') }}</strong><strong>{{ t('pages.dashboard.reanalysis.after', 'New result') }}</strong></div>
+                        <div v-for="field in ['desc', 'tags', 'scenes', 'overlay_text', 'emotions']" :key="field" class="reanalysis-comparison-row">
+                            <strong>{{ t('pages.dashboard.reanalysis.field_' + field, field) }}</strong>
+                            <span>{{ formatAnalysisValue(reanalysisResult.before[field]) }}</span>
+                            <span>{{ formatAnalysisValue(reanalysisResult.after[field]) }}</span>
+                        </div>
+                    </div>
+                    <div class="reanalysis-actions">
+                        <button @click="discardReanalysisResult" :disabled="reanalysisSubmitting || reanalysisLoading || !reanalysisResult" class="codex-btn">{{ t('pages.dashboard.reanalysis.discard_one', 'Keep original and continue') }}</button>
+                        <button @click="saveReanalysisResult" :disabled="reanalysisSubmitting || reanalysisLoading || !reanalysisResult" class="codex-btn primary">{{ t('pages.dashboard.reanalysis.save_one', 'Save this image and continue') }}</button>
+                    </div>
+                </div>
+                <p v-else class="hint-text">{{ t('pages.dashboard.reanalysis.no_pending', 'No results awaiting review.') }}</p>
+                <details v-if="reanalysisJob.errors.length" class="reanalysis-errors">
+                    <summary>{{ t('pages.dashboard.reanalysis.details', 'Failure and skip details') }} ({{ reanalysisJob.errors.length }})</summary>
+                    <ul><li v-for="item in reanalysisJob.errors" :key="item.hash"><code>{{ item.hash.slice(0, 12) }}</code> · {{ item.error }}</li></ul>
+                </details>
+            </template>
+            <p v-if="reanalysisError" class="error-banner" role="alert">{{ reanalysisError }}</p>
+            <div class="reanalysis-actions">
+                <button v-if="reanalysisBusy" @click="cancelBatchReanalysis" :disabled="reanalysisSubmitting || reanalysisJob.status === 'stopping'" class="codex-btn danger">{{ t('pages.dashboard.reanalysis.stop', 'Stop after current image') }}</button>
+                <button v-else-if="reanalysisJob?.failed" @click="retryBatchReanalysis" :disabled="reanalysisSubmitting" class="codex-btn primary">{{ t('pages.dashboard.reanalysis.retry', 'Retry failed images') }}</button>
+                <button @click="reanalysisOpen = false" class="codex-btn">{{ t('pages.dashboard.actions.close', 'Close') }}</button>
+            </div>
+        </div>
+    </section>
 </div>
 
 <div v-if="toastOpen" class="toast-notification" :class="toastType" @click="toastOpen = false" style="white-space:pre-line">

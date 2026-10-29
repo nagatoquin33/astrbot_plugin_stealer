@@ -328,6 +328,9 @@ class PreviewServer:
         self.host = host
         self.port = port
         self._png_cache: dict[tuple[str, int], bytes] = {}
+        self.reanalysis_job = None
+        self.reanalysis_hashes = []
+        self.reanalysis_results = {}
         self.app = web.Application()
         self._setup_routes()
 
@@ -341,7 +344,7 @@ class PreviewServer:
         r.add_get("/logo.png", self.handle_logo)
         r.add_get("/vaultboy.png", self.handle_vaultboy)
         for filename in ("app.js", "app.css", "template.js", "image_preview_client.js",
-                         "source_actions.js", "source_labels.js"):
+                         "source_actions.js", "source_labels.js", "batch_reanalysis.js"):
             r.add_get("/" + filename, self._make_static_handler(filename))
         r.add_get("/vendor/{filename}", self._make_vendor_handler)
         r.add_route("*", PLUGIN_BASE + "/{endpoint:.+}", self.handle_api)
@@ -908,6 +911,76 @@ class PreviewServer:
             "updated_at": int(time.time()),
         }
         return {"success": True, "task_id": task_id}
+
+    def api_images_reanalyze(self, request, payload):
+        if self.reanalysis_job and (self.reanalysis_job["status"] == "running" or self.reanalysis_job["pending"]):
+            return {"success": False, "error": "已有任务运行中", "task": self.reanalysis_job}
+        self.reanalysis_hashes = list(dict.fromkeys(payload.get("hashes", [])))
+        self.reanalysis_results = {}
+        self.reanalysis_job = {
+            "id": uuid.uuid4().hex, "status": "running", "total": len(self.reanalysis_hashes),
+            "processed": 0, "succeeded": 0, "failed": 0, "skipped": 0,
+            "pending": 0, "saved": 0, "discarded": 0, "results": [],
+            "current": "", "errors": [], "created_at": time.time(),
+        }
+        return {"success": True, "task": self.reanalysis_job}
+
+    def api_images_reanalyze_status(self, request, payload):
+        job = self.reanalysis_job
+        if job and job["status"] == "running":
+            count = min(job["total"], int((time.time() - job["created_at"]) / 2))
+            for image_hash in self.reanalysis_hashes[job["processed"]:count]:
+                item = next((item for item in self.state.library if item["hash"] == image_hash), None)
+                if item:
+                    draft = {
+                        "hash": image_hash, "name": item.get("original_name") or image_hash,
+                        "status": "ready",
+                        "before": {key: item.get(key) for key in ("desc", "tags", "scenes", "emotions", "overlay_text")},
+                        "after": dict(desc="[mock VLM] 重新分析完成", tags=["重新分析"], scenes=["聊天"], emotions=["happy"], overlay_text="AI"),
+                    }
+                    self.reanalysis_results[image_hash] = draft
+                    job["results"].append({key: draft[key] for key in ("hash", "name", "status")})
+                    job["pending"] += 1
+                    job["succeeded"] += 1
+                else:
+                    job["skipped"] += 1
+                    job["errors"].append({"hash": image_hash, "status": "skipped", "error": "图片已删除"})
+            job["processed"] = count
+            if count == job["total"]:
+                job["status"] = "completed"
+        return {"success": True, "task": job}
+
+    def api_images_reanalyze_result(self, request, payload):
+        if not self.reanalysis_job or request.query.get("task_id") != self.reanalysis_job["id"]:
+            return {"success": False, "error": "任务不存在"}
+        return {"success": True, "result": self.reanalysis_results[request.query["hash"]]}
+
+    def api_images_reanalyze_review(self, request, payload):
+        job = self.reanalysis_job
+        if not job or payload.get("task_id") != job["id"]:
+            return {"success": False, "error": "任务不存在"}
+        draft = self.reanalysis_results[payload["hash"]]
+        if draft["status"] != "ready":
+            return {"success": False, "error": "结果已处理"}
+        if payload["decision"] == "save":
+            item = next(item for item in self.state.library if item["hash"] == draft["hash"])
+            item.update(draft["after"])
+            draft["status"] = "saved"
+            job["saved"] += 1
+        else:
+            draft["status"] = "discarded"
+            job["discarded"] += 1
+        job["pending"] -= 1
+        for summary in job["results"]:
+            if summary["hash"] == draft["hash"]:
+                summary["status"] = draft["status"]
+        return {"success": True, "task": job}
+
+    def api_images_reanalyze_cancel(self, request, payload):
+        if not self.reanalysis_job or payload.get("task_id") != self.reanalysis_job["id"]:
+            return {"success": False, "error": "任务不存在"}
+        self.reanalysis_job["status"] = "cancelled"
+        return {"success": True, "task": self.reanalysis_job}
 
     def api_analyze(self, request, payload):
         emotion = EMOTIONS[int(time.time()) % len(EMOTIONS)]

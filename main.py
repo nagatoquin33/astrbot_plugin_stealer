@@ -26,7 +26,8 @@ from .core.db.database_service import DatabaseService
 from .core.search.meme_selector import MemeSelector
 from .core.events.event_handler import EventHandler
 from .core.events.meme_sender_engine import MemeSenderEngine
-from .core.db.index_manager import IndexManager
+from .core.processing.library_reanalysis import BatchReanalysisService
+from .core.db.index_manager import IndexManager, refresh_search_entry
 from .core.processing.natural_emotion_analyzer import NaturalEmotionAnalyzer
 from .core.processing.image_processor_service import ImageProcessorService
 from .core.processing.image_render_service import ImageRenderService
@@ -89,8 +90,6 @@ class Main(MemeSearchToolWorkflow, MemeStealToolWorkflow, Star):
         self.index_commands = IndexRebuildCommand(self)
         self.target_commands = TargetFilterCommand(self)
         self.web_server = None
-        self.plugin_api = PluginAPI(self)
-        self.plugin_api.register(context)
 
         self.event_handler = EventHandler(self)
         self.image_processor_service = ImageProcessorService(self)
@@ -104,6 +103,12 @@ class Main(MemeSearchToolWorkflow, MemeStealToolWorkflow, Star):
         self.index_manager = IndexManager(self)
         self._emoji_sender_engine = MemeSenderEngine(self)
         self.maintenance = MaintenanceService(self)
+        self.batch_reanalysis = BatchReanalysisService(
+            self.db_service, self.image_processor_service, self.plugin_config,
+            self.task_scheduler, lambda path: refresh_search_entry(self, path),
+        )
+        self.plugin_api = PluginAPI(self)
+        self.plugin_api.register(context)
 
         # 运行时属性
         self._terminated: bool = False  # 终止标志位，防止重复清理
@@ -961,6 +966,7 @@ class Main(MemeSearchToolWorkflow, MemeStealToolWorkflow, Star):
             return
         self._terminated = True
         await self.menu_commands.aclose()
+        await self.batch_reanalysis.close()
         await self.index_manager.stop_search_worker()
         try:
             await self.task_scheduler.cancel_task("raw_cleanup_loop")

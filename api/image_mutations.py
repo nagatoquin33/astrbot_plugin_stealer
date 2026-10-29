@@ -11,7 +11,7 @@ from quart import jsonify, request
 from astrbot.api import logger
 
 from ..core.db.index_manager import delete_index_paths
-from ..core.util.safe_io import safe_remove_file
+from ..core.util.safe_io import protect_file, safe_remove_file
 
 class ImageMutationRoutes:
     # ── Upload / Update / Delete ──────────────────────────────
@@ -167,10 +167,8 @@ class ImageMutationRoutes:
             hashes = set(data.get("hashes", []))
             if not hashes:
                 return jsonify({"success": True, "count": 0})
-            index = self._get_index()
-            removed_paths = [
-                p for p, m in index.items() if isinstance(m, dict) and m.get("hash") in hashes
-            ]
+            index = await asyncio.to_thread(self._db.get_entries_by_hashes, list(hashes))
+            removed_paths = list(index)
             deleted_paths: list[str] = []
             for p in removed_paths:
                 try:
@@ -195,10 +193,8 @@ class ImageMutationRoutes:
             moved_count = 0
 
             target_dir = self._cfg.ensure_category_dir(target_cat)
-            index = self._get_index()
+            index = await asyncio.to_thread(self._db.get_entries_by_hashes, list(hashes))
             for p, m in list(index.items()):
-                if not isinstance(m, dict) or m.get("hash") not in hashes:
-                    continue
                 if m.get("category") == target_cat:
                     continue
                 old = Path(p)
@@ -222,10 +218,8 @@ class ImageMutationRoutes:
             if character and character not in set(self._cfg.get_characters()):
                 return jsonify({"success": False, "error": f"角色无效: {character}"})
             updated = 0
-            index = self._get_index()
+            index = await asyncio.to_thread(self._db.get_entries_by_hashes, list(hashes))
             for path, meta in index.items():
-                if not isinstance(meta, dict) or meta.get("hash") not in hashes:
-                    continue
                 if str(meta.get("character", "") or "") == character:
                     continue
                 if await self._update_index_path(path, {"character": character}):
@@ -245,10 +239,8 @@ class ImageMutationRoutes:
             updated = 0
             skipped = 0
 
-            index = self._get_index()
+            index = await asyncio.to_thread(self._db.get_entries_by_hashes, list(hashes))
             for p, m in index.items():
-                if not isinstance(m, dict) or m.get("hash") not in hashes:
-                    continue
                 if scope == "local" and not str(m.get("origin_target", "")).strip():
                     skipped += 1
                     continue
@@ -268,10 +260,8 @@ class ImageMutationRoutes:
                 return jsonify({"success": True, "count": 0})
             updated = 0
 
-            index = self._get_index()
+            index = await asyncio.to_thread(self._db.get_entries_by_hashes, list(hashes))
             for p, m in index.items():
-                if not isinstance(m, dict) or m.get("hash") not in hashes:
-                    continue
                 if await self._update_index_path(p, {"is_favorite": 1 if favorite else 0}):
                     updated += 1
             return jsonify({"success": True, "count": updated})
@@ -349,9 +339,14 @@ class ImageMutationRoutes:
                 "created_at": now,
                 "updated_at": now,
             }
-            asyncio.create_task(
-                self._process_batch(task_id, files_data, category, auto_analyze, fallback, character)
+            scheduled = self.plugin.task_scheduler.create_task(
+                "batch_upload_" + task_id,
+                self._process_batch(task_id, files_data, category, auto_analyze, fallback, character),
+                retain=False,
             )
+            if scheduled is None:
+                self.batch_upload_tasks.pop(task_id, None)
+                raise RuntimeError("插件已停止，无法创建批量上传任务")
             return jsonify({"success": True, "task_id": task_id, "total": len(files_data)})
         except Exception as e:
             logger.error(f"批量上传失败: {e}", exc_info=True)
@@ -374,29 +369,30 @@ class ImageMutationRoutes:
                         try:
                             img_hash = fd["hash"]
                             tmp = self._data_dir / "temp" / f"{img_hash}{fd['ext']}"
-                            tmp.parent.mkdir(parents=True, exist_ok=True)
-                            await asyncio.to_thread(lambda: tmp.write_bytes(fd["content"]))
-                            proc = self.plugin.image_processor_service
-                            if proc:
-                                classified = await proc.classify_image(
-                                    event=None,
-                                    file_path=str(tmp),
-                                    categories=list(self._cfg.categories or []),
-                                    content_filtration=False,
-                                )
-                                rc, rt, rd, _, rs, overlay_text, emotions = classified
-                                if rc and rc != getattr(proc, "CATEGORY_FILTERED", None):
-                                    final_cat = rc
-                                    tags = rt or []
-                                    desc = rd or ""
-                                    scenes = rs or []
-                                    overlay_text = overlay_text or ""
-                                    emotions = emotions or []
+                            with protect_file(tmp):
+                                tmp.parent.mkdir(parents=True, exist_ok=True)
+                                await asyncio.to_thread(lambda: tmp.write_bytes(fd["content"]))
+                                proc = self.plugin.image_processor_service
+                                if proc:
+                                    classified = await proc.classify_image(
+                                        event=None,
+                                        file_path=str(tmp),
+                                        categories=list(self._cfg.categories or []),
+                                        content_filtration=False,
+                                    )
+                                    rc, rt, rd, _, rs, overlay_text, emotions = classified
+                                    if rc and rc != getattr(proc, "CATEGORY_FILTERED", None):
+                                        final_cat = rc
+                                        tags = rt or []
+                                        desc = rd or ""
+                                        scenes = rs or []
+                                        overlay_text = overlay_text or ""
+                                        emotions = emotions or []
                         except Exception as e:
                             logger.warning(f"自动分析失败: {e}")
                         finally:
                             if tmp is not None:
-                                await asyncio.to_thread(lambda: tmp.unlink() if tmp.exists() else None)
+                                await safe_remove_file(str(tmp))
 
                     img = await self._persist_image(
                         file_content=fd["content"],
@@ -429,6 +425,11 @@ class ImageMutationRoutes:
             task["status"] = "completed"
             task["completed_at"] = self._task_now()
             task["updated_at"] = task["completed_at"]
+        except asyncio.CancelledError:
+            task = self.batch_upload_tasks.get(task_id)
+            if task:
+                task.update(status="failed", error="插件卸载，批量上传已停止", completed_at=self._task_now())
+            raise
         except Exception as e:
             logger.error(f"批量上传任务 {task_id} 失败: {e}")
             if task_id in self.batch_upload_tasks:

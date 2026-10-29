@@ -73,6 +73,7 @@ Pause collection at any time:
 
 ### 4. WebUI management
 
+
 Open the plugin detail panel in the AstrBot Dashboard and click **Emoji Manager**. No extra port or password is needed.
 
 - **Browse**: Filter by category, search, and sort collected memes.
@@ -80,7 +81,8 @@ Open the plugin detail panel in the AstrBot Dashboard and click **Emoji Manager*
 - **Review Queue**: Approve or delete pending images in batches and inspect failure reasons.
 - **Single upload**: Upload an image and let AI detect category, description, tags, and scenes.
 - **VLM A/B review**: Click re-analyze in the detail view. Apply the new category, visible text, tags, scenes, or emotions only after confirmation; character, scope, favorites, and usage history are preserved.
-- **Batch import**: Category selection and auto-analysis are mutually exclusive. Category selection skips VLM; auto-analysis makes concurrent VLM calls, so batch according to your API limits.
+- **Batch re-analysis**: Click **Batch**, select images, then **Batch re-analysis**. Background analysis only prepares results; it never saves automatically. Review each image and its before/after description, tags, scenes, emotions and image text, then choose **Save this image** or **Keep original**. Categories, characters, favorites, provenance and scope are preserved. Saving checks for edits or deletions since analysis began. Progress, stopping and failure retries are supported; retries retain other results awaiting review. Closing the page keeps analysis active and reloading restores review. Restarting the plugin ends the task and clears unsaved results. Each batch supports up to 500 images, with one active batch at a time. Resolve pending results before starting a new batch.
+- **Batch import**: Category selection and auto-analysis are mutually exclusive. Selecting a category skips VLM; auto-analysis processes images sequentially using the configured model request interval.
 - **Maintenance**: Scan and clean stale index rows, orphan files, thumbnail cache, and temporary files.
 - **Categories**: Add, edit, and delete categories.
 - **Themes**: Choose host default, dark, light, Minecraft, or Fallout. The page choice persists, while `webui_theme` supplies the default.

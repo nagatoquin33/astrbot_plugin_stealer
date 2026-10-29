@@ -48,7 +48,6 @@ class BackgroundStealQueue:
         self._queue: asyncio.Queue[StealJob] = asyncio.Queue(maxsize=self.capacity)
         self._workers: list[asyncio.Task[Any]] = []
         self._capture_tasks: set[asyncio.Task[Any]] = set()
-        self._save_lock = asyncio.Lock()
         # Serializes "copy into staging + enqueue". stop() takes this lock
         # before draining/cleaning staging so a local snapshot cannot enqueue
         # after the cleanup pass.
@@ -338,9 +337,6 @@ class BackgroundStealQueue:
                     f"[Stealer] 后台偷图处理完成 source={job.source}, "
                     f"success={success}, pending={job.to_pending}"
                 )
-                if success and isinstance(index, dict) and not job.to_pending:
-                    async with self._save_lock:
-                        await self.plugin.index_manager.save_index(index)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:

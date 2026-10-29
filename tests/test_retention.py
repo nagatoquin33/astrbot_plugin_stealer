@@ -126,9 +126,8 @@ async def test_database_library_filters_counts_and_least_used(tmp_path):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("use_db", [False, True])
 @pytest.mark.parametrize("library,expected", [("general", {"a", "b"}), ("favorites", {"d"}), ("characters", {"c"})])
-async def test_list_api_library_contract(tmp_path, monkeypatch, use_db, library, expected):
+async def test_list_api_library_contract(tmp_path, monkeypatch, library, expected):
     from astrbot_plugin_stealer import plugin_api
     from astrbot_plugin_stealer.api import library as library_routes
     from werkzeug.datastructures import MultiDict
@@ -144,8 +143,7 @@ async def test_list_api_library_contract(tmp_path, monkeypatch, use_db, library,
         index[str(path)] = dict(path=str(path), hash=key, category="happy", **metadata)
     await db.insert_batch(list(index.values()))
     cfg = SimpleNamespace(max_reg_num=100, get_category_info=lambda: [], get_character_info_list=lambda: [])
-    api = plugin_api.PluginAPI(SimpleNamespace(db_service=db if use_db else None, plugin_config=cfg))
-    monkeypatch.setattr(api, "_get_index", lambda: index)
+    api = plugin_api.PluginAPI(SimpleNamespace(db_service=db, plugin_config=cfg))
     monkeypatch.setattr(library_routes, "request", SimpleNamespace(args=MultiDict({"library": library, "sort": "least_used"})))
     monkeypatch.setattr(library_routes, "jsonify", lambda data: data)
     result = await api.handle_list_images()
@@ -169,7 +167,11 @@ async def test_rebuild_preserves_protection_and_usage_before_capacity(tmp_path):
         "general.png": {"hash": "g", "use_count": 7, "created_at": 30},
     }
     rebuilt = {path: {"hash": meta["hash"]} for path, meta in old.items()}
-    manager = SimpleNamespace(rebuild_index_from_files=AsyncMock(return_value=rebuilt), save_index=AsyncMock())
+    manager = SimpleNamespace(
+        rebuild_index_from_files=AsyncMock(return_value=rebuilt),
+        save_index=AsyncMock(),
+        load_legacy_index_data=AsyncMock(return_value=({}, [])),
+    )
     handler = SimpleNamespace(_enforce_capacity=AsyncMock())
     plugin = SimpleNamespace(
         index_manager=manager, event_handler=handler, cache_dir=None, base_dir=None,

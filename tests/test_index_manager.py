@@ -17,6 +17,23 @@ def build_manager(tmp_path):
     ))
 
 
+@pytest.mark.asyncio
+async def test_bulk_delete_invalidates_and_wakes_only_once(tmp_path):
+    db = DatabaseService(tmp_path / "batch.db")
+    await db.insert_batch([
+        {"path": "a.png", "hash": "a"}, {"path": "b.png", "hash": "b"},
+    ])
+    selector = SimpleNamespace(_invalidate_bm25_index=Mock())
+    manager = SimpleNamespace(search_worker_running=lambda: True, _search_wakeup=Mock())
+    plugin = SimpleNamespace(db_service=db, meme_selector=selector, index_manager=manager)
+
+    assert await delete_index_paths(plugin, ["a.png", "b.png", "a.png"]) == 2
+
+    selector._invalidate_bm25_index.assert_called_once()
+    manager._search_wakeup.set.assert_called_once()
+    assert {job["path"] for job in db.get_search_refresh_jobs()} == {"a.png", "b.png"}
+
+
 def test_migrate_legacy_data_returns_loaded_records(tmp_path: Path):
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir(parents=True, exist_ok=True)

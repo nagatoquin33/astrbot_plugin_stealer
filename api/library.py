@@ -4,7 +4,6 @@ import asyncio
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 from PIL import Image
 from quart import jsonify, request
@@ -16,7 +15,6 @@ except ImportError:
 
 from astrbot.api import logger
 
-from ..core.maintenance.retention import library_counts, library_group
 
 class LibraryRoutes:
     # ── Image serving ─────────────────────────────────────────
@@ -39,18 +37,7 @@ class LibraryRoutes:
         image_hash = request.args.get("hash", "").strip()
         if not image_hash:
             return jsonify({"success": False, "error": "缺少 hash"})
-        found = await asyncio.to_thread(self._find_index_entry_by_hash, image_hash)
-        file_path = found[0] if found else None
-
-        if not file_path:
-            db = self._db
-            if db and hasattr(db, "get_pending_by_hash"):
-                try:
-                    pending_row = db.get_pending_by_hash(image_hash)
-                except Exception:
-                    pending_row = None
-                if pending_row:
-                    file_path = pending_row.get("path")
+        file_path = await asyncio.to_thread(self._find_image_path_by_hash, image_hash)
 
         if file_path and os.path.isfile(file_path):
             try:
@@ -59,6 +46,17 @@ class LibraryRoutes:
             except Exception as e:
                 logger.warning(f"读取图片失败: {e}")
         return jsonify({"success": False, "error": "图片未找到"})
+
+    def _find_image_path_by_hash(self, image_hash: str) -> str | None:
+        """预览优先使用正式图库中的记录，未命中时查询待审核池。"""
+        found = self._find_index_entry_by_hash(image_hash)
+        if found:
+            return found[0]
+        try:
+            pending = self._db.get_pending_by_hash(image_hash)
+        except Exception:
+            pending = None
+        return pending.get("path") if pending else None
 
     async def _get_or_create_thumbnail(
         self, img_hash: str, file_path: str, max_size: int = 300
@@ -105,22 +103,7 @@ class LibraryRoutes:
         if not img_hash:
             return jsonify({"success": False, "error": "缺少 hash"}), 400
 
-        file_path = None
-        for p, m in self._get_index().items():
-            if isinstance(m, dict) and m.get("hash") == img_hash:
-                file_path = p
-                break
-
-        # 回退：正式库未命中时查待审核池（审核区缩略图走此路径）
-        if not file_path:
-            db = self._db
-            if db and hasattr(db, "get_pending_by_hash"):
-                try:
-                    pending_row = db.get_pending_by_hash(img_hash)
-                except Exception:
-                    pending_row = None
-                if pending_row:
-                    file_path = pending_row.get("path")
+        file_path = await asyncio.to_thread(self._find_image_path_by_hash, img_hash)
 
         if not file_path or not os.path.isfile(file_path):
             return jsonify({"success": False, "error": "图片未找到"}), 404
@@ -165,7 +148,6 @@ class LibraryRoutes:
     def _list_images_from_database(
         self,
         *,
-        db: Any,
         page: int,
         page_size: int,
         category: str | None,
@@ -174,13 +156,10 @@ class LibraryRoutes:
         favorite_only: bool,
         character: str,
         library: str,
-    ) -> dict | None:
-        """Query the paginated SQLite view when it contains live rows."""
-        get_paginated = getattr(db, "get_emojis_paginated", None) if db else None
-        if not db or not callable(get_paginated) or db.count_total() <= 0:
-            return None
-
-        raw, total, category_counts = get_paginated(
+    ) -> dict:
+        """从 SQLite 分页读取图库，包括空图库的分类和角色统计。"""
+        db = self._db
+        raw, total, category_counts = db.get_emojis_paginated(
             page=page,
             page_size=page_size,
             category=category,
@@ -188,7 +167,7 @@ class LibraryRoutes:
             search_query=search or None,
             favorite_only=favorite_only,
             character=character or None,
-            **({"library": library} if library else {}),
+            library=library,
         )
         images = [
             item for item in (self._build_image_item(row["path"], row) for row in raw) if item
@@ -208,83 +187,6 @@ class LibraryRoutes:
             libraries=db.get_library_counts(),
         )
 
-    def _list_images_from_index(
-        self,
-        *,
-        page: int,
-        page_size: int,
-        category: str | None,
-        search: str,
-        sort_order: str,
-        favorite_only: bool,
-        character: str,
-        library: str,
-    ) -> dict:
-        """Build the same response shape from legacy index-only data."""
-        index = self._get_index()
-        images: list[dict] = []
-        category_counts: dict[str, int] = {}
-
-        for path_str, metadata in index.items():
-            if not Path(path_str).exists():
-                continue
-            item = self._build_image_item(path_str, metadata)
-            if not item:
-                continue
-            if search and not (
-                any(search in str(tag).lower() for tag in item["tags"])
-                or search in item["desc"].lower()
-                or any(search in str(scene).lower() for scene in item.get("scenes", []))
-            ):
-                continue
-            if library in {"general", "favorites", "characters"} and library_group(item) != library:
-                continue
-
-            category_key = item["category"]
-            category_counts[category_key] = category_counts.get(category_key, 0) + 1
-            if category and item["category"] != category:
-                continue
-            if favorite_only and not item.get("is_favorite"):
-                continue
-            item_character = str(item.get("character", "") or "")
-            if character == "__none__" and item_character:
-                continue
-            if character and character != "__none__" and item_character != character:
-                continue
-            images.append(item)
-
-        sort_fields = {
-            "least_used": ("use_count", "created_at"),
-            "most_used": ("use_count", "last_used_at"),
-            "last_used": ("last_used_at", "use_count"),
-        }.get(sort_order, ("created_at",))
-        images.sort(
-            key=lambda item: tuple(int(item.get(field, 0) or 0) for field in sort_fields)
-            + (str(item.get("hash", "")),),
-            reverse=sort_order not in {"oldest", "least_used"},
-        )
-
-        total = len(images)
-        start = (page - 1) * page_size
-        character_counts: dict[str, int] = {}
-        for metadata in index.values():
-            if not isinstance(metadata, dict):
-                continue
-            if library == "characters" and metadata.get("is_favorite"):
-                continue
-            key = str(metadata.get("character", "") or "")
-            character_counts[key] = character_counts.get(key, 0) + 1
-
-        return self._build_image_list_payload(
-            total=total,
-            page=page,
-            page_size=page_size,
-            images=images[start : start + page_size],
-            category_counts=category_counts,
-            character_counts=character_counts,
-            libraries=library_counts(index),
-        )
-
     async def handle_list_images(self):
         """Return a paginated image list and category counts."""
         try:
@@ -299,7 +201,6 @@ class LibraryRoutes:
 
             payload = await asyncio.to_thread(
                 self._list_images_from_database,
-                db=self._db,
                 page=page,
                 page_size=page_size,
                 category=category,
@@ -309,18 +210,6 @@ class LibraryRoutes:
                 character=character,
                 library=library,
             )
-            if payload is None:
-                payload = await asyncio.to_thread(
-                    self._list_images_from_index,
-                    page=page,
-                    page_size=page_size,
-                    category=category,
-                    search=search,
-                    sort_order=sort_order,
-                    favorite_only=favorite_only,
-                    character=character,
-                    library=library,
-                )
             return jsonify(payload)
         except Exception as e:
             logger.error(f"Error listing images: {e}", exc_info=True)

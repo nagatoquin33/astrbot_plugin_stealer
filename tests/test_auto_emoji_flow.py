@@ -477,6 +477,11 @@ class AutoEmojiFlowTests(unittest.IsolatedAsyncioTestCase):
             async def _download_to_temp(self, _url, *, log_download=False):
                 return temp_path, False
 
+        from astrbot_plugin_stealer.core.db.database_service import DatabaseService
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        db = DatabaseService(Path(directory.name) / "tool.db")
+        main.db_service = db
         captured = {}
         saved = []
         main._get_event_handler = lambda **kwargs: FakeEventHandler()
@@ -490,14 +495,15 @@ class AutoEmojiFlowTests(unittest.IsolatedAsyncioTestCase):
 
         async def _process_image(event, file_path, is_temp=False, extra_meta=None, **kwargs):
             captured["extra_meta"] = dict(extra_meta or {})
-            return True, {
-                file_path: {
+            entry = {
                     "category": "happy",
                     "tags": ["tag"],
                     "desc": "desc",
                     "scenes": ["scene"],
-                }
+                    **dict(extra_meta or {}),
             }
+            await db.insert_batch([{"path": file_path, **entry}])
+            return True, {file_path: entry}
 
         main._load_index = _load_index
         main._save_index = _save_index
@@ -516,7 +522,11 @@ class AutoEmojiFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured["extra_meta"]["origin_target"], "group:123")
         self.assertEqual(captured["extra_meta"]["origin_url"], "https://example.test/a.png")
         self.assertEqual(captured["extra_meta"]["source"], "llm_tool")
-        self.assertTrue(saved)
+        stored = db.get_emoji(temp_path)
+        self.assertEqual(stored["origin_target"], "group:123")
+        self.assertEqual(stored["source"], "llm_tool")
+        self.assertEqual(stored["tags"], ["tag"])
+        self.assertEqual(saved, [])
 
     async def test_state_keys_are_centralized(self):
         """验证所有状态键都通过 _MemeTurnState 集中管理"""

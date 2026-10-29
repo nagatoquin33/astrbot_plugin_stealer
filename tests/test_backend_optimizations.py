@@ -47,8 +47,11 @@ async def test_distinct_animations_and_legacy_first_frame_hashes(tmp_path):
     service = PHashDedupService()
     assert await service.compute_phash(str(files[1])) == ""
     legacy = await service.compute_phash(str(png))
-    db = SimpleNamespace(hash_exists=lambda _: False, blacklisted_hashes=lambda: set(),
-                         get_phash_map=lambda: {str(files[0]): legacy})
+    db = DatabaseService(tmp_path / "animation.db")
+    await db.insert_batch([{
+        "path": str(files[0]), "hash": hashlib.sha256(files[0].read_bytes()).hexdigest(),
+        "phash": legacy,
+    }])
     processor = ImageProcessorService.__new__(ImageProcessorService)
     processor.plugin, processor._phash_service = SimpleNamespace(db_service=db), service
     image_hash = hashlib.sha256(files[1].read_bytes()).hexdigest()
@@ -224,3 +227,30 @@ async def test_v6_migration_keeps_existing_library_and_vectors(tmp_path):
     assert migrated.get_search_refresh_jobs() == []
     await migrated.update_path("a", {"desc": "changed"})
     assert migrated.get_search_refresh_jobs()[0]["path"] == "a"
+
+
+@pytest.mark.asyncio
+async def test_status_and_selected_hash_queries_never_load_full_snapshot(tmp_path, monkeypatch):
+    from core.commands.command_handler import CommandHandler
+
+    db = DatabaseService(tmp_path / "performance.db")
+    await db.insert_batch([
+        {"path": "a", "hash": "same", "category": "happy", "tags": ["one"]},
+        {"path": "b", "hash": "same", "category": "sad", "is_favorite": True},
+        {"path": "other", "hash": "other", "category": "happy"},
+    ])
+    monkeypatch.setattr(db, "get_index_cache_readonly", lambda: pytest.fail("不应读取全库快照"))
+    selected = db.get_entries_by_hashes(["same"])
+    assert set(selected) == {"a", "b"} and selected["a"]["tags"] == ["one"]
+    assert db.get_entries_by_hashes([]) == {}
+    await db.add_blacklist("blocked")
+    monkeypatch.setattr(db, "blacklisted_hashes", lambda: pytest.fail("不应加载整个黑名单"))
+    assert db.is_blacklisted("blocked") and not db.is_blacklisted("other")
+    plugin = SimpleNamespace(db_service=db, plugin_config=SimpleNamespace(
+        steal_meme=True, auto_send_meme=False, max_reg_num=100,
+    ))
+    messages = [message async for message in CommandHandler(plugin).status(
+        SimpleNamespace(plain_result=lambda text: text)
+    )]
+    assert "表情：3" in messages[0] and "收藏：1" in messages[0]
+    assert "happy 2" in messages[0] and len(messages[0].splitlines()) <= 4

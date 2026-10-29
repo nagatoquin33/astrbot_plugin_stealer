@@ -118,7 +118,6 @@ class MemeStealToolWorkflow:
                 return
 
             if merged_idx:
-                await self.index_manager.save_index(merged_idx)
                 new_paths = set(merged_idx.keys()) - before_paths
                 if new_paths:
                     new_entry = next((merged_idx[p] for p in new_paths if isinstance(merged_idx.get(p), dict)), None)

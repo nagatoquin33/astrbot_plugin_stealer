@@ -1,7 +1,6 @@
 """TaxonomyRoutes methods for PluginAPI."""
 
 import asyncio
-import shutil
 from pathlib import Path
 
 from quart import jsonify, request
@@ -12,7 +11,7 @@ from ..core.db.index_manager import delete_index_paths, invalidate_search
 from ..core.util.normalization import (
     normalize_category_key,
 )
-from ..core.util.safe_io import safe_remove_file
+from ..core.util.safe_io import safe_remove_file, storage_write
 
 class TaxonomyRoutes:
     # ── Categories ────────────────────────────────────────────
@@ -82,18 +81,18 @@ class TaxonomyRoutes:
             if not keys:
                 return jsonify({"success": False, "error": "分类列表无效"})
 
-            self.plugin.update_config({"categories": keys})
-
-            cur_info = dict(getattr(self._cfg, "category_info", {}) or {})
-            self._cfg.category_info = {k: cur_info.get(k, {}) for k in keys}
-            self._cfg.category_info.update(info)
+            cur_info = dict(self._cfg.category_info or {})
+            updated_info = {key: cur_info.get(key, {}) for key in keys}
+            updated_info.update(info)
+            if not self.plugin.update_config({"categories": keys, "category_info": updated_info}):
+                raise OSError("分类配置保存失败")
             self._cfg.ensure_category_dirs(keys)
-            self._cfg.save_category_info()
             return jsonify({"success": True, "categories": keys})
         except Exception as e:
             logger.error(f"更新分类失败: {e}", exc_info=True)
             return jsonify({"success": False, "error": str(e)})
 
+    @storage_write
     async def handle_delete_category(self):
         try:
             data = await request.get_json() or {}
@@ -133,15 +132,16 @@ class TaxonomyRoutes:
             cat_dir = self._data_dir / "categories" / key
             try:
                 if cat_dir.exists():
-                    await asyncio.to_thread(shutil.rmtree, cat_dir, True)
+                    await asyncio.to_thread(cat_dir.rmdir)
             except Exception as e:
                 logger.warning(f"删除分类目录失败: {cat_dir}, {e}")
 
-            if key in getattr(self._cfg, "category_info", {}):
-                del self._cfg.category_info[key]
-                self._cfg.save_category_info()
-
-            self.plugin.update_config({"categories": updated})
+            if self._db.get_category_counts().get(key, 0):
+                raise RuntimeError("分类中仍有未能删除的图片，已保留分类")
+            info = dict(self._cfg.category_info or {})
+            info.pop(key, None)
+            if not self.plugin.update_config({"categories": updated, "category_info": info}):
+                raise OSError("分类配置保存失败")
 
             return jsonify(
                 {"success": True, "deleted": key, "categories": updated, "deleted_files": deleted}
@@ -194,10 +194,8 @@ class TaxonomyRoutes:
                         continue
                     seen.add(key)
                     keys.append(key)
-            self._cfg.characters = keys
-            self._cfg.character_info = info
-            self._cfg.save_characters()
-            self._cfg.save_character_info()
+            if not self._cfg.update_config({"characters": keys, "character_info": info}):
+                raise OSError("角色配置保存失败")
             counts = self._db.get_character_counts() if self._db and hasattr(self._db, "get_character_counts") else {}
             return jsonify(
                 {
@@ -218,12 +216,9 @@ class TaxonomyRoutes:
             updated = [item for item in self._cfg.get_characters() if item != key]
             info = dict(self._cfg.character_info or {})
             info.pop(key, None)
-            if self._db and hasattr(self._db, "clear_character"):
-                self._db.clear_character(key)
-            self._cfg.characters = updated
-            self._cfg.character_info = info
-            self._cfg.save_characters()
-            self._cfg.save_character_info()
+            if not self._cfg.update_config({"characters": updated, "character_info": info}):
+                raise OSError("角色配置保存失败")
+            self._db.clear_character(key)
             invalidate_search(self.plugin)
             return jsonify({"success": True, "deleted": key, "characters": updated})
         except Exception as e:

@@ -6,6 +6,8 @@ from pathlib import Path
 
 from astrbot.api import logger
 
+from .pending_promotion import promote_pending
+
 
 class PendingAnalysisWorker:
     def __init__(self, plugin):
@@ -48,9 +50,8 @@ class PendingAnalysisWorker:
                     fields = {'category': row['category'] or category}
                 if not await db.update_pending(pending_id, fields, from_analysis=True):
                     raise RuntimeError('识图结果保存失败')
-            # Use the existing compensating file commit and metadata/source promotion.
-            from ...plugin_api import PluginAPI
-            ok, error = await PluginAPI(self.plugin)._promote_one(db, pending_id)
+            # 文件发布与元数据提升由独立业务服务处理。
+            ok, error = await promote_pending(self.plugin, pending_id)
             if not ok:
                 raise RuntimeError(error)
         except asyncio.CancelledError:

@@ -34,6 +34,10 @@ REQUIRED_FILES = (
     "api/pending.py",
     "api/preferences.py",
     "api/taxonomy.py",
+    "api/reanalysis.py",
+    "core/processing/library_analysis.py",
+    "core/processing/library_reanalysis.py",
+    "core/processing/pending_promotion.py",
     "core/db/schema.py",
     "core/db/source_repository.py",
     "core/db/library_queries.py",
@@ -47,6 +51,7 @@ REQUIRED_FILES = (
     "requirements.txt",
     "pages/dashboard/app.js",
     "pages/dashboard/template.js",
+    "pages/dashboard/batch_reanalysis.js",
 )
 EXCLUDED_PARTS = frozenset(
     {

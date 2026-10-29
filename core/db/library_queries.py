@@ -31,6 +31,12 @@ class LibraryQueries:
             row = conn.execute(f"SELECT {aggregates} FROM emoji e").fetchone()
             return {key: int(row[key] or 0) for key in clauses}
 
+    def get_category_counts(self) -> dict[str, int]:
+        with self._get_connection() as conn:
+            return {row["category"]: row["cnt"] for row in conn.execute(
+                "SELECT category, COUNT(*) AS cnt FROM emoji GROUP BY category"
+            )}
+
     def get_emojis_paginated(
         self,
         page: int = 1,

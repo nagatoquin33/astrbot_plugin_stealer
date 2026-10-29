@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.12] - 2026-10-30
+
+### added
+- WebUI 新增批量重新分析：后台逐张生成结果，查看图片及分析前后对比后，选择保存当前图片或保留原内容；不会自动覆盖图库。支持进度查看、停止、失败重试和刷新页面后继续确认，保留分类、角色、收藏、来源与作用域。重启插件会清空未保存结果。
+
+### changed
+- 更新 WebUI 主题和布局：统一顶栏、侧栏、工具栏与卡片层级，重绘详情弹窗，补充审核区标题；亮色采用暖纸与珊瑚橙配色，暗色更新为「X之暗面 / Dark Side of X」的近黑与银蓝配色。
+- 强化辐射 4 主题的 Pip-Boy 终端外观、静态 CRT 扫描线与 HP/AP/LVL 状态条；保留 Minecraft 像素风格，并改善两种游戏主题的表单和占位符可读性。
+- 缩短状态和情绪统计指令回复；状态、容量检查使用数据库聚合，批量编辑只读取选中图片，黑名单检查使用单条查询，减少大图库操作时的开销。
+- 原图和缩略图共用图片查找规则，正式图库未命中时查询待审核池；旧索引重建优先保留元数据更完整的记录。
+
+### fixed
+- 修复配置写入失败后运行状态仍被修改，以及分类、角色配置保存失败却报告成功的问题；多文件配置提交失败时恢复原文件与配置对象。
+- 修复孤儿清理、分类删除与图片入库并发时可能误删新文件的问题；文件发布与数据库提交完成前，清理操作会等待，模型正在读取的文件会保留。
+- 修复旧索引快照覆盖后续编辑、恢复已删除记录的问题；保留并发修改，并移除入库后的重复索引写回。
+- 修复插件卸载后批量上传仍继续写入的问题；卸载时取消后台上传并等待在途提交结束。
+- 修复辐射 4 主题的闪烁，以及小窗口下表单弹窗顶部被裁切、操作按钮超出视口的问题。
+
+### English summary
+- Added background batch re-analysis with per-image before/after review and explicit save or discard. Progress, stopping, failure retries and page-reload recovery are supported. Unsaved results are cleared when the plugin restarts.
+- Refreshed the light, Dark Side of X, Fallout 4 and Minecraft themes, improved dashboard and modal layouts, and fixed flickering and clipped form controls.
+- Shortened status replies and reduced library-operation overhead with SQL aggregates, selected-hash queries and indexed blacklist lookups. Original-image and thumbnail lookups now follow the same rules.
+- Fixed configuration save failures leaving changed runtime state or reporting success, concurrent cleanup deleting newly published images, stale snapshots overwriting edits or restoring deleted records, and uploads continuing after plugin unload.
+
 ## [3.1.11] - 2026-10-26
 
 ### added

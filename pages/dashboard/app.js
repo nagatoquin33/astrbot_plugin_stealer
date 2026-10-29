@@ -1,6 +1,7 @@
 import { TEMPLATE, EMOTION_LABELS_TEMPLATE } from './template.js';
 import { ImagePreviewClient } from './image_preview_client.js';
 import { createSourceActions } from './source_actions.js';
+import { createBatchReanalysis } from './batch_reanalysis.js';
 import { formatItemOriginLabel } from './source_labels.js';
 const { createApp, ref, reactive, computed, onMounted, onUnmounted, nextTick } = Vue;
 
@@ -401,7 +402,7 @@ createApp({
 
         const THEME_OPTIONS = [
             { value: 'auto', key: 'auto', fallback: 'Follow host', group: 'original' },
-            { value: 'dark', key: 'dark', fallback: 'Dark Gold', swatch: '#161b2a,#d4a853', group: 'original' },
+            { value: 'dark', key: 'dark', fallback: 'Dark Side of X', swatch: '#0a0b0f,#9fb6ff', group: 'original' },
             { value: 'light', key: 'light', fallback: 'Light', swatch: '#faf8f3,#8b6914', group: 'original' },
             { value: 'minecraft', key: 'minecraft', fallback: 'Minecraft', swatch: '#2a1c10,#5d9c3d', group: 'game' },
             { value: 'fallout', key: 'fallout', fallback: 'Fallout 4', swatch: '#021408,#1bff80', group: 'game' },
@@ -1192,6 +1193,21 @@ createApp({
             await fetchStats();
         };
 
+        const reanalysis = createBatchReanalysis({
+            ref, computed, apiFetch, selectedImages, showConfirm, refreshView, t,
+            loadThumbnail: (hash) => imagePreviewClient.loadThumbnail(hash),
+        });
+        const {
+            job: reanalysisJob, open: reanalysisOpen, error: reanalysisError,
+            submitting: reanalysisSubmitting, busy: reanalysisBusy,
+            startSelected: startBatchReanalysis, retryFailed: retryBatchReanalysis,
+            cancel: cancelBatchReanalysis,
+            readyResults: reanalysisReady, reviewHash: reanalysisHash,
+            reviewResult: reanalysisResult, reviewImage: reanalysisImage,
+            reviewLoading: reanalysisLoading, selectResult: selectReanalysisResult,
+            saveResult: saveReanalysisResult, discardResult: discardReanalysisResult,
+        } = reanalysis;
+
         const sourceActions = createSourceActions({
             apiFetch,
             applySourceInspection,
@@ -1440,7 +1456,7 @@ createApp({
         const anyModalOpen = () => (
             confirmOpen.value || promptOpen.value || uploadOpen.value || batchUploadOpen.value
             || emotionsOpen.value || batchMoveOpen.value || batchScopeOpen.value || pendingEditOpen.value
-            || batchCharacterOpen.value || charactersOpen.value
+            || batchCharacterOpen.value || charactersOpen.value || reanalysisOpen.value
         );
 
         const handleKeydown = (e) => {
@@ -2533,9 +2549,11 @@ createApp({
             checkHealth();
             loadDashboardPrefs();
             loadAll();
+            reanalysis.restore();
         });
 
         onUnmounted(() => {
+            reanalysis.dispose();
             pendingPollStopped = true;
             clearTimeout(pendingPollTimer);
             window.removeEventListener('keydown', handleKeydown);
@@ -2642,6 +2660,10 @@ createApp({
 
             isBatchMode,
             selectedImages,
+            reanalysisJob, reanalysisOpen, reanalysisError, reanalysisSubmitting,
+            reanalysisBusy, startBatchReanalysis, retryBatchReanalysis, cancelBatchReanalysis,
+            reanalysisReady, reanalysisHash, reanalysisResult, reanalysisImage, reanalysisLoading,
+            selectReanalysisResult, saveReanalysisResult, discardReanalysisResult,
             contextMenu,
             openContextMenu,
             closeContextMenu,

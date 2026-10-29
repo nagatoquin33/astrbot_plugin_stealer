@@ -11,6 +11,8 @@ from unittest.mock import AsyncMock, patch
 
 from core.commands.image_mgmt_command import ImageManagementCommand
 from core.commands.index_rebuild_command import IndexRebuildCommand
+from core.db.database_service import DatabaseService
+from core.db.index_manager import IndexManager
 from core.search.meme_selector import MemeSelector
 
 
@@ -117,6 +119,7 @@ class DummyPlugin:
             load_index=lambda: self._load_index(),
             save_index=lambda idx: self._save_index(idx),
             rebuild_index_from_files=lambda: self._rebuild_index_from_files(),
+            load_legacy_index_data=lambda base_dir: IndexManager(self).load_legacy_index_data(base_dir),
         )
 
     async def _load_index(self):
@@ -323,7 +326,12 @@ class ScopeFeatureTests(unittest.IsolatedAsyncioTestCase):
                 sent_texts.append(getattr(comp, "text", ""))
         self.assertTrue(any("已收录" in text for text in sent_texts))
 
-    async def test_event_handler_merges_multi_image_results_before_save(self):
+    async def test_event_handler_keeps_each_committed_image_without_snapshot_resave(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        db = DatabaseService(Path(directory.name) / "multi.db")
+        await db.insert_batch([{"path": "existing.png", "category": "happy", "created_at": 1}])
+
         class MultiImagePlugin(DummyPlugin):
             def __init__(self):
                 super().__init__({"existing.png": {"category": "happy", "created_at": 1}})
@@ -339,16 +347,14 @@ class ScopeFeatureTests(unittest.IsolatedAsyncioTestCase):
                 to_pending=False,
             ):
                 self._process_counter += 1
-                return True, {
-                    "existing.png": {"category": "happy", "created_at": 1},
-                    f"new_{self._process_counter}.png": {
-                        "category": "happy",
-                        "created_at": self._process_counter + 1,
-                        "origin_target": dict(extra_meta or {}).get("origin_target", ""),
-                    },
-                }
+                path = f"new_{self._process_counter}.png"
+                entry = {"category": "happy", "created_at": self._process_counter + 1,
+                         "origin_target": dict(extra_meta or {}).get("origin_target", "")}
+                await db.insert_batch([{"path": path, **entry}])
+                return True, {path: entry}
 
         plugin = MultiImagePlugin()
+        plugin.db_service = db
         handler = self._create_handler(plugin)
         image_cls = self._get_shared_image_class()
         event = DummyEvent(target="group:123", messages=[image_cls(), image_cls()])
@@ -374,10 +380,11 @@ class ScopeFeatureTests(unittest.IsolatedAsyncioTestCase):
                 if os.path.exists(path_str):
                     os.remove(path_str)
 
-        self.assertIsNotNone(plugin.saved_index)
-        self.assertIn("existing.png", plugin.saved_index)
-        self.assertIn("new_1.png", plugin.saved_index)
-        self.assertIn("new_2.png", plugin.saved_index)
+        stored = db.get_index_cache_readonly()
+        self.assertEqual(set(stored), {"existing.png", "new_1.png", "new_2.png"})
+        self.assertEqual(stored["new_1.png"]["origin_target"], "group:123")
+        self.assertEqual(stored["new_2.png"]["origin_target"], "group:123")
+        self.assertIsNone(plugin.saved_index)
 
     async def test_scope_command_marks_entry_as_local(self):
         with tempfile.NamedTemporaryFile(delete=False) as fp:

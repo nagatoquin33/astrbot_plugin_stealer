@@ -7,7 +7,9 @@ from quart import jsonify, request
 
 from astrbot.api import logger
 
+from ..core.util.safe_io import storage_write
 from ..core.db.index_manager import delete_index_paths
+from ..core.processing.library_analysis import analyze_library_image
 
 class MaintenanceRoutes:
     # ── Repair / Storage maintenance ─────────────────────────
@@ -54,6 +56,7 @@ class MaintenanceRoutes:
             logger.error(f"存储扫描失败: {e}", exc_info=True)
             return jsonify({"success": False, "error": str(e)})
 
+    @storage_write
     async def handle_storage_cleanup(self):
         try:
             data = await request.get_json() or {}
@@ -172,28 +175,9 @@ class MaintenanceRoutes:
             if not file_path:
                 return jsonify({"success": False, "error": "缺少 hash 或 base64 图片数据"})
 
-            cat, tags, desc, _, scenes, overlay_text, emotions = await proc.classify_image(
-                event=None,
-                file_path=file_path,
-                categories=list(self._cfg.categories or []),
-                content_filtration=False,
-            )
-            if cat == getattr(proc, "CATEGORY_FILTERED", None):
-                return jsonify({"success": False, "error": "图片内容审核不通过"})
-            if not cat:
-                return jsonify({"success": False, "error": "无法识别图片分类"})
-
-            return jsonify(
-                {
-                    "success": True,
-                    "category": cat,
-                    "tags": tags,
-                    "description": desc,
-                    "scenes": scenes or [],
-                    "overlay_text": overlay_text or "",
-                    "emotions": emotions or [],
-                }
-            )
+            result = await analyze_library_image(proc, file_path, list(self._cfg.categories or []))
+            result["description"] = result.pop("desc")
+            return jsonify({"success": True, **result})
         except Exception as e:
             logger.error(f"VLM分析失败: {e}", exc_info=True)
             return jsonify({"success": False, "error": f"分析失败: {e}"})

@@ -1,6 +1,6 @@
 """PendingRoutes methods for PluginAPI."""
 
-import os
+import asyncio
 from typing import Any
 
 from quart import jsonify, request
@@ -8,8 +8,8 @@ from quart import jsonify, request
 from astrbot.api import logger
 
 from ..core.util.blacklist import add_blacklist_hash
-from ..core.db.index_manager import refresh_search_entry
-from ..core.util.safe_io import commit_image_file, safe_remove_file
+from ..core.processing.pending_promotion import promote_pending
+from ..core.util.safe_io import safe_remove_file
 
 class PendingRoutes:
     # ── Pending (待审核池) ────────────────────────────────────
@@ -97,7 +97,7 @@ class PendingRoutes:
         return list({int(i) for i in raw if i is not None})
 
     async def _approve_one(self, db, pending_id: int) -> tuple[bool, str]:
-        row = db.get_pending(pending_id)
+        row = await asyncio.to_thread(db.get_pending, pending_id)
         if row is None:
             return False, 'pending not found'
         if row.get('review_status') in ('queued', 'processing'):
@@ -109,42 +109,7 @@ class PendingRoutes:
             if worker is not None:
                 worker.wakeup.set()
             return True, 'queued'
-        return await self._promote_one(db, pending_id)
-
-    async def _promote_one(self, db, pending_id: int) -> tuple[bool, str]:
-        """发布待审核图片并提交分类、标签、场景等元数据，成功后刷新检索索引。
-
-        文件发布与元数据提交通过补偿流程处理失败。
-        """
-        row = db.get_pending(pending_id)
-        if not row:
-            return False, "pending not found"
-
-        src_path = str(row.get("path", "") or "")
-        if not src_path or not os.path.isfile(src_path):
-            # 文件已丢失：清理孤儿 pending 行
-            db.delete_pending(pending_id)
-            return False, "pending file missing"
-
-        category = str(row.get("category", "") or "").strip()
-        known = set(self._cfg.get_vlm_categories() if hasattr(self._cfg, "get_vlm_categories") else (self._cfg.categories or []))
-        if not category or category == "other" or category not in known:
-            category = self._cfg.closest_category(category) if hasattr(self._cfg, "closest_category") else "confused"
-
-        cat_dir = self._cfg.ensure_category_dir(category)
-        cat_path = str(cat_dir / os.path.basename(src_path))
-
-        cat_path = str(self._unique_path(cat_dir, os.path.basename(src_path)))
-        try:
-            async def commit_approval(_target):
-                if not await db.approve_pending(pending_id, cat_path, category):
-                    raise RuntimeError("pending metadata promotion failed")
-            await commit_image_file(src_path, cat_path, commit_approval)
-            await refresh_search_entry(self.plugin, cat_path)
-            return True, ""
-        except Exception as exc:
-            logger.error(f"pending approval failed id={pending_id}: {exc}", exc_info=True)
-            return False, str(exc)
+        return await promote_pending(self.plugin, pending_id)
 
     async def handle_pending_approve(self):
         """POST /pending/approve —— 批量通过 {id} 或 {ids:[]}。"""

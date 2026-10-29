@@ -65,6 +65,11 @@ class _Config:
         target.mkdir(parents=True, exist_ok=True)
         return target
 
+    def update_config(self, updates):
+        for key, value in updates.items():
+            setattr(self, key, value)
+        return True
+
     def save_characters(self):
         return None
 

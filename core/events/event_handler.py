@@ -11,7 +11,7 @@ from ..db.index_manager import delete_index_paths
 from astrbot.api.event import AstrMessageEvent, MessageChain
 from astrbot.api.message_components import Image, Plain
 
-from ..util.safe_io import safe_remove_file
+from ..util.safe_io import file_in_use, safe_remove_file
 from ..maintenance.retention import eviction_candidates
 from .background_steal_queue import BackgroundStealQueue
 from .event_context import get_event_session_key
@@ -743,23 +743,9 @@ class EventHandler:
         ):
             return
 
-        merged_index = await self._process_image_candidates(
-            event,
-            plugin_instance,
-            image_candidates,
-            to_pending=to_pending,
-        )
-        merged_index.update(
-            await self._process_store_urls(
-                event,
-                plugin_instance,
-                store_urls,
-                to_pending=to_pending,
-                origin_target=origin_target_str,
-            )
-        )
-        if merged_index:
-            await plugin_instance.index_manager.save_index(merged_index)
+        await self._process_image_candidates(event, plugin_instance, image_candidates, to_pending=to_pending)
+        await self._process_store_urls(event, plugin_instance, store_urls,
+                                       to_pending=to_pending, origin_target=origin_target_str)
 
     async def _handle_force_capture(
         self,
@@ -792,7 +778,6 @@ class EventHandler:
                     event, temp_path, is_temp=True, is_platform_emoji=True
                 )
                 if success and isinstance(idx, dict):
-                    await plugin_instance.index_manager.save_index(idx)
                     await event.send(MessageChain([Plain(text="✅ 已收录并自动分类入库")]))
                 else:
                     await event.send(
@@ -820,7 +805,7 @@ class EventHandler:
             if raw_dir and raw_dir.exists():
                 for f in raw_dir.iterdir():
                     try:
-                        if f.is_file():
+                        if f.is_file() and not file_in_use(f):
                             f.unlink()
                             deleted += 1
                     except Exception:

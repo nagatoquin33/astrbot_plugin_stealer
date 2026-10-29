@@ -1,6 +1,5 @@
 """索引重建命令：负责从文件重建索引并合并旧元数据。"""
 
-import json
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -10,6 +9,7 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
 from ..db.index_metadata_merge import has_meaningful_metadata, restore_rebuilt_metadata
+from ..db.database_service import IndexSnapshot
 from ..db.index_manager import delete_index_paths
 from ..maintenance.retention import library_counts
 
@@ -47,51 +47,11 @@ class IndexRebuildCommand:
                 old_index = self.plugin.db_service.get_index_cache_readonly()
                 logger.info(f"[rebuild_index] 从数据库加载 {len(old_index)} 条旧记录")
 
-            # 2. 加载各候选路径中的 JSON 索引。
-            legacy_metadata_count = 0
-            legacy_data_map = {}
-            possible_legacy_paths = []
-
-            # 添加所有可能的 JSON 文件路径（包括迁移后的备份文件）
-            if self.plugin.cache_dir:
-                possible_legacy_paths.extend(
-                    [
-                        self.plugin.cache_dir / "index_cache.json",
-                        self.plugin.cache_dir / "index_cache.json.backup",
-                        self.plugin.cache_dir / "index_cache.json.migrated",  # 迁移后的备份
-                    ]
-                )
-            if self.plugin.base_dir:
-                possible_legacy_paths.extend(
-                    [
-                        self.plugin.base_dir / "index.json",
-                        self.plugin.base_dir / "index.json.backup",
-                        self.plugin.base_dir / "index.json.migrated",  # 迁移后的备份
-                        self.plugin.base_dir / "image_index.json",
-                        self.plugin.base_dir / "image_index.json.backup",
-                        self.plugin.base_dir / "image_index.json.migrated",
-                        self.plugin.base_dir / "cache" / "index.json",
-                        self.plugin.base_dir / "cache" / "index.json.backup",
-                        self.plugin.base_dir / "cache" / "index.json.migrated",
-                        self.plugin.base_dir / "cache" / "index_cache.json",
-                        self.plugin.base_dir / "cache" / "index_cache.json.backup",
-                        self.plugin.base_dir / "cache" / "index_cache.json.migrated",
-                    ]
-                )
-
-            for legacy_path in possible_legacy_paths:
-                if legacy_path.exists():
-                    try:
-                        with open(legacy_path, encoding="utf-8") as f:
-                            legacy_data = json.load(f)
-                            if isinstance(legacy_data, dict) and legacy_data:
-                                legacy_data_map.update(legacy_data)
-                                legacy_metadata_count += len(legacy_data)
-                                logger.info(
-                                    f"[rebuild_index] 从 JSON 加载 {len(legacy_data)} 条: {legacy_path}"
-                                )
-                    except Exception as e:
-                        logger.warning(f"[rebuild_index] 加载 JSON 失败 {legacy_path}: {e}")
+            # 旧 JSON 共用迁移加载器，重复路径优先保留元数据完整的记录。
+            legacy_data_map, _ = await self.plugin.index_manager.load_legacy_index_data(
+                self.plugin.base_dir
+            )
+            legacy_metadata_count = len(legacy_data_map)
 
             old_count = len(old_index) + len(legacy_data_map)
             restore_rebuilt_metadata(rebuilt_index, old_index, legacy_data_map)
@@ -109,7 +69,7 @@ class IndexRebuildCommand:
                 await self.plugin.event_handler._enforce_capacity(final_index)
 
             # 保存合并后的索引
-            await self.plugin.index_manager.save_index(final_index)
+            await self.plugin.index_manager.save_index(IndexSnapshot(final_index, old_index))
 
             # save_index 是增量同步，明确移除旧数据库中已丢失的文件记录。
             stale_paths = [

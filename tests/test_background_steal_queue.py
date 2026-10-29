@@ -1,4 +1,9 @@
 import asyncio
+import json
+from PIL import Image
+from astrbot_plugin_stealer.core.config.config import PluginConfig
+from astrbot_plugin_stealer.core.db.database_service import DatabaseService
+from astrbot_plugin_stealer.core.processing.image_processor_service import ImageProcessorService
 import shutil
 import tempfile
 import threading
@@ -228,26 +233,27 @@ class BackgroundQueueTests(unittest.IsolatedAsyncioTestCase):
         await self.queue.stop()
         self.assertFalse(Path(self.temp_dir.name, "queued.jpg").exists())
 
-    async def test_non_pending_result_is_saved(self):
-        source = self._write_file("direct.jpg")
-        self.plugin.event_handler = types.SimpleNamespace(
-            _download_url_to_temp=self._download_url_to_temp
-        )
-        self.queue.submit_capture(
-            [
-                {
-                    "media_ref": str(source),
-                    "source": "force",
-                    "to_pending": False,
-                    "extra_meta": {},
-                }
-            ]
-        )
-        for _ in range(20):
-            if self.saved:
-                break
-            await asyncio.sleep(0.01)
-        self.assertEqual(self.saved, [{"processed.png": {"category": "happy"}}])
+    async def test_non_pending_processing_commits_once_without_snapshot_resave(self):
+        source = self._write_file("direct.png")
+        Image.new("RGB", (32, 32), "red").save(source)
+        self.plugin.plugin_config = PluginConfig({"vision_provider_id": "vision", "model_request_interval": 0})
+        self.plugin.db_service = DatabaseService(Path(self.temp_dir.name) / "direct.db")
+        self.plugin.context = types.SimpleNamespace(llm_generate=mock.AsyncMock(return_value=types.SimpleNamespace(
+            completion_text=json.dumps({"category": "happy", "description": "test", "tags": ["test"]}),
+        )))
+        processor = ImageProcessorService(self.plugin)
+        self.plugin._process_image = processor.process_image
+        await self.queue.submit_capture_async([{
+            "media_ref": str(source), "source": "force", "to_pending": False, "extra_meta": {},
+        }])
+        await self.queue._queue.join()
+        stored = self.plugin.db_service.get_index_cache_readonly()
+        self.assertEqual(len(stored), 1)
+        path, meta = next(iter(stored.items()))
+        self.assertTrue(Path(path).is_file())
+        self.assertEqual(meta["category"], "happy")
+        self.assertEqual(self.saved, [])
+
 
     async def test_full_queue_drops_newest_staged_file(self):
         for worker in self.queue._workers:

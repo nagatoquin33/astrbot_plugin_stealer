@@ -19,7 +19,7 @@ from .core.util.normalization import (
     normalize_label_list,
     normalize_scope_mode,
 )
-from .core.util.safe_io import commit_image_file, safe_remove_file, unique_image_path, write_image_file
+from .core.util.safe_io import storage_write, file_in_use, commit_image_file, safe_remove_file, unique_image_path, write_image_file
 
 from .api.library import LibraryRoutes
 from .api.preferences import PreferenceRoutes
@@ -28,6 +28,7 @@ from .api.pending import PendingRoutes
 from .api.image_mutations import ImageMutationRoutes
 from .api.maintenance import MaintenanceRoutes
 from .api.taxonomy import TaxonomyRoutes
+from .api.reanalysis import ReanalysisRoutes
 
 PLUGIN_NAME = "astrbot_plugin_stealer"
 
@@ -40,6 +41,7 @@ class PluginAPI(
     ImageMutationRoutes,
     MaintenanceRoutes,
     TaxonomyRoutes,
+    ReanalysisRoutes,
 ):
     """Backend API provider for plugin Pages."""
 
@@ -71,6 +73,12 @@ class PluginAPI(
             ("/images/batch-upload-status", "handle_batch_upload_status", ["GET"]),
             ("/images/scope-repair", "handle_scope_repair", ["POST"]),
             ("/analyze", "handle_analyze_image", ["POST"]),
+            ("/images/reanalyze", "handle_batch_reanalyze", ["POST"]),
+            ("/images/reanalyze/status", "handle_batch_reanalyze_status", ["GET"]),
+            ("/images/reanalyze/cancel", "handle_batch_reanalyze_cancel", ["POST"]),
+            ("/images/reanalyze/result", "handle_batch_reanalyze_result", ["GET"]),
+            ("/images/reanalyze/review", "handle_batch_reanalyze_review", ["POST"]),
+            ("/images/reanalyze/retry", "handle_batch_reanalyze_retry", ["POST"]),
             ("/storage/scan", "handle_storage_scan", ["GET"]),
             ("/storage/cleanup", "handle_storage_cleanup", ["POST"]),
             ("/stats", "handle_get_stats", ["GET"]),
@@ -113,7 +121,7 @@ class PluginAPI(
 
     @property
     def _db(self):
-        return getattr(self.plugin, "db_service", None)
+        return self.plugin.db_service
 
     @property
     def _cfg(self):
@@ -124,36 +132,28 @@ class PluginAPI(
         return getattr(self.plugin, "source_service", None)
 
     def _get_index(self) -> dict[str, Any]:
-        """从数据库读取完整索引；DB 不存在时返回空 dict。"""
-        db = self._db
-        if db:
-            return db.get_index_cache_readonly()
-        return {}
+        """从数据库读取完整索引快照。"""
+        return self._db.get_index_cache_readonly()
 
+    @storage_write
     async def _move_image_file(self, old: str, new: str, category: str, updates=None) -> None:
         async def commit_move(_target):
+            if category not in self._cfg.categories:
+                raise ValueError("分类已被移除，请重新选择分类")
             if not await self._move_index_path(old, new, category, updates):
                 raise RuntimeError("update image metadata failed")
+        if category not in self._cfg.categories:
+            raise ValueError("分类已被移除，请重新选择分类")
         await commit_image_file(old, new, commit_move)
 
     def _find_index_entry_by_hash(self, img_hash: str) -> tuple[str, dict[str, Any]] | None:
-        db = self._db
-        if db and hasattr(db, "get_emoji_by_hash"):
-            return db.get_emoji_by_hash(img_hash)
-        for path, meta in self._get_index().items():
-            if isinstance(meta, dict) and meta.get("hash") == img_hash:
-                return path, dict(meta)
-        return None
-
+        return self._db.get_emoji_by_hash(img_hash)
 
     async def _add_blacklist_hash(self, image_hash: str) -> bool:
         return await add_blacklist_hash(self.plugin, image_hash)
 
     async def _update_index_path(self, path: str, updates: dict[str, Any]) -> bool:
-        db = self._db
-        if db is None or not hasattr(db, "update_path"):
-            return False
-        ok = await db.update_path(path, updates)
+        ok = await self._db.update_path(path, updates)
         if ok:
             if SEARCH_METADATA_FIELDS.intersection(updates):
                 await refresh_search_entry(self.plugin, path)
@@ -166,10 +166,7 @@ class PluginAPI(
         category: str,
         updates: dict[str, Any] | None = None,
     ) -> bool:
-        db = self._db
-        if db is None or not hasattr(db, "move_path"):
-            return False
-        ok = await db.move_path(old_path, new_path, category, updates or {})
+        ok = await self._db.move_path(old_path, new_path, category, updates or {})
         if ok:
             await refresh_search_entry(self.plugin, new_path, previous_path=old_path)
         return ok
@@ -369,7 +366,7 @@ class PluginAPI(
             if not path or not self._is_under_data_dir(path):
                 continue
             try:
-                if path.is_file():
+                if path.is_file() and not file_in_use(path):
                     ok = await safe_remove_file(str(path))
                     if ok:
                         removed += 1
@@ -411,14 +408,7 @@ class PluginAPI(
         return result
 
     def _count_favorites(self) -> int:
-        db = self._db
-        if db and hasattr(db, "count_favorites"):
-            return int(db.count_favorites())
-        return sum(
-            1
-            for meta in self._get_index().values()
-            if isinstance(meta, dict) and bool(meta.get("is_favorite", 0))
-        )
+        return int(self._db.count_favorites())
 
     def _build_image_item(self, path_str: str, meta: dict) -> dict | None:
         try:
@@ -453,6 +443,7 @@ class PluginAPI(
         except ValueError:
             return None
 
+    @storage_write
     async def _persist_image(
         self,
         *,
@@ -470,6 +461,8 @@ class PluginAPI(
         character: str = "",
     ) -> dict:
         final_cat = str(category or "").strip() or "unknown"
+        if final_cat not in self._cfg.categories:
+            raise ValueError("分类已被移除，请重新选择分类")
         ts = int(datetime.now().timestamp())
         filename = f"{ts}_{uuid.uuid4().hex[:8]}{file_ext}"
         cat_dir = self._cfg.ensure_category_dir(final_cat)
@@ -494,6 +487,8 @@ class PluginAPI(
         if db is None:
             raise RuntimeError("database unavailable")
         async def commit_upload(_target):
+            if final_cat not in self._cfg.categories:
+                raise ValueError("分类已被移除，请重新选择分类")
             if await db.insert_batch([data]) <= 0:
                 raise RuntimeError("insert image metadata failed")
         await write_image_file(file_content, file_path, commit_upload)

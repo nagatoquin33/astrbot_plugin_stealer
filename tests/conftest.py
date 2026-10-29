@@ -143,19 +143,6 @@ def _install_compatible_stubs() -> None:
     run_context_module.ContextWrapper = _SharedContextWrapper
     sys.modules["astrbot.core.agent.run_context"] = run_context_module
 
-    # 创建 quart stub（plugin_api 需要）
-    if "quart" not in sys.modules:
-        quart_module = types.ModuleType("quart")
-        quart_module.request = object()
-        quart_module.jsonify = lambda *args, **kwargs: {"jsonified": True}
-        quart_module.send_file = lambda *args, **kwargs: {"send_file": True}
-        sys.modules["quart"] = quart_module
-
-    # 创建 aiofiles stub（main.py 可选导入）
-    if "aiofiles" not in sys.modules:
-        aiofiles_module = types.ModuleType("aiofiles")
-        sys.modules["aiofiles"] = aiofiles_module
-
     # 注册模块（强制覆盖）
     sys.modules["astrbot"] = astrbot_module
     sys.modules["astrbot.api"] = api_module

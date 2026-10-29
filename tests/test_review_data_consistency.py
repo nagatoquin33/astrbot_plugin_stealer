@@ -117,20 +117,32 @@ async def test_startup_cleanup_removes_orphans_after_grace_period(tmp_path, monk
 
 
 @pytest.mark.asyncio
-async def test_background_save_submits_only_processed_delta(tmp_path):
+async def test_background_processing_preserves_edits_after_the_ingestion_commit(tmp_path):
     source = tmp_path / "staged.png"
     source.write_bytes(b"fixture")
-    delta = {"new.png": {"hash": "new", "category": "happy"}}
-    manager = SimpleNamespace(load_index=AsyncMock(side_effect=AssertionError("full snapshot")), save_index=AsyncMock())
-    plugin = SimpleNamespace(base_dir=tmp_path, index_manager=manager,
-                             _process_image=AsyncMock(return_value=(True, delta)))
+    db = DatabaseService(tmp_path / "worker.db")
+    await db.insert_batch([{"path": "existing.png", "hash": "old", "desc": "existing"}])
+    delta = {"new.png": {"hash": "new", "category": "happy", "desc": "model result"}}
+
+    async def process(*args, **kwargs):
+        await db.insert_batch([{"path": path, **entry} for path, entry in delta.items()])
+        await db.update_path("new.png", {"desc": "later user edit"})
+        return True, delta
+
+    plugin = SimpleNamespace(base_dir=tmp_path, db_service=db, _process_image=process)
+    manager = IndexManager(plugin)
+    plugin.index_manager = manager
+    manager.load_index = AsyncMock(side_effect=AssertionError("full snapshot"))
+    manager.save_index = AsyncMock(wraps=manager.save_index)
     queue = BackgroundStealQueue(plugin, worker_count=1)
     await queue.start()
     try:
         await queue._queue.put(StealJob(str(source), to_pending=False))
         await asyncio.wait_for(queue._queue.join(), timeout=3)
         manager.load_index.assert_not_awaited()
-        manager.save_index.assert_awaited_once_with(delta)
+        manager.save_index.assert_not_awaited()
+        assert db.get_emoji("new.png")["desc"] == "later user edit"
+        assert db.get_emoji("existing.png")["desc"] == "existing"
     finally:
         await queue.stop()
 
@@ -147,6 +159,7 @@ def fallback_fixture(tmp_path):
     service._get_provider = lambda: provider
     service._init_faiss = lambda: False
     return service, db, provider, model
+
 
 
 @pytest.mark.asyncio

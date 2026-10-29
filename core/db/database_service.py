@@ -23,6 +23,16 @@ from .pending_repository import PendingRepository
 from .embedding_repository import EmbeddingRepository
 
 
+class IndexSnapshot(dict):
+    """带只读基线的可编辑快照，用于计算本次变更而非回写整份旧数据。"""
+    def __init__(self, entries, baseline):
+        super().__init__(entries)
+        self.baseline = baseline
+
+    def copy(self):
+        return IndexSnapshot(self, self.baseline)
+
+
 class DatabaseService(
     DatabaseSchema,
     SourceRepository,
@@ -57,6 +67,7 @@ class DatabaseService(
 
         # 异步锁，保护并发写入
         self._write_lock = asyncio.Lock()
+        self.file_lock = asyncio.Lock()
         self._snapshot_lock = threading.RLock()
         self._snapshot_revision: str | None = None
         self._snapshot: dict[str, Any] = {}
@@ -453,6 +464,10 @@ class DatabaseService(
             result = conn.execute("SELECT COUNT(*) as cnt FROM emoji").fetchone()
             return result["cnt"] if result else 0
 
+    def is_blacklisted(self, hash_val: str) -> bool:
+        with self._get_connection() as conn:
+            return conn.execute("SELECT 1 FROM blacklist WHERE hash = ?", (hash_val,)).fetchone() is not None
+
     def blacklisted_hashes(self) -> set[str]:
         with self._get_connection() as conn:
             rows = conn.execute("SELECT hash FROM blacklist").fetchall()
@@ -560,13 +575,17 @@ class DatabaseService(
                 raise
         return deleted
 
-    async def update_path(self, path: str, updates: dict[str, Any]) -> bool:
+    async def update_path(
+        self, path: str, updates: dict[str, Any], *, expected: dict[str, Any] | None = None,
+    ) -> bool:
         if not path or not updates:
             return False
         async with self._write_lock:
-            return await asyncio.to_thread(self._update_path_sync, path, updates)
+            return await asyncio.to_thread(self._update_path_sync, path, updates, expected)
 
-    def _update_path_sync(self, path: str, updates: dict[str, Any]) -> bool:
+    def _update_path_sync(
+        self, path: str, updates: dict[str, Any], expected: dict[str, Any] | None = None,
+    ) -> bool:
         scalar_fields = self._EMOJI_SCALAR_COLUMNS
         scalar_updates = {
             key: self._coerce_int_flag(value) if key == "is_favorite" else value
@@ -585,6 +604,13 @@ class DatabaseService(
                 if not row:
                     conn.execute("ROLLBACK")
                     return False
+
+                if expected is not None:
+                    # 后台分析只在原始字段仍未变化时写回，检查和更新处于同一事务。
+                    current = self._read_index(conn, [path])[path]
+                    if any(current.get(key) != value for key, value in expected.items()):
+                        conn.execute("ROLLBACK")
+                        return False
 
                 scalar_updates = {key: value for key, value in scalar_updates.items() if row[key] != value}
                 if scalar_updates:
@@ -791,7 +817,7 @@ class DatabaseService(
                 path: {key: value.copy() if isinstance(value, list) else value for key, value in entry.items()}
                 for path, entry in self._snapshot.items()
             }
-            return snapshot, f"{versions['corpus_id']}:{versions['corpus_revision']}"
+            return IndexSnapshot(snapshot, self._snapshot), f"{versions['corpus_id']}:{versions['corpus_revision']}"
 
     def _read_index(self, conn: sqlite3.Connection, paths: list[str] | None = None) -> dict[str, Any]:
         """Hydrate a coherent snapshot or a bounded set of submitted paths."""
@@ -813,6 +839,19 @@ class DatabaseService(
             entry["scenes"] = scenes.get(row["path"], [])
             result[row["path"]] = self._hydrate_entry(entry)
         return result
+
+    def get_entries_by_hashes(self, hashes: list[str]) -> dict[str, Any]:
+        """只读取选中 hash 的记录，保留同一 hash 的所有路径。"""
+        with self._get_connection() as conn:
+            conn.execute("BEGIN")
+            paths = []
+            for start in range(0, len(hashes), self._RELATED_FETCH_CHUNK_SIZE):
+                batch = hashes[start:start + self._RELATED_FETCH_CHUNK_SIZE]
+                placeholders = ",".join("?" for _ in batch)
+                paths.extend(row["path"] for row in conn.execute(
+                    f"SELECT path FROM emoji WHERE hash IN ({placeholders})", batch,
+                ))
+            return self._read_index(conn, paths)
 
     def get_entries(self, paths: list[str]) -> dict[str, Any]:
         with self._get_connection() as conn:
@@ -840,15 +879,20 @@ class DatabaseService(
             return await asyncio.to_thread(self._sync_index_sync, idx)
 
     def _sync_index_sync(self, idx: dict[str, Any]) -> list[str]:
+        baseline = getattr(idx, "baseline", None)
         desired_index = {
             path: dict(meta)
             for path, meta in idx.items()
             if isinstance(path, str) and isinstance(meta, dict)
         }
 
-        for meta in desired_index.values():
+        for path, meta in desired_index.items():
             if "emotions" in meta:
-                meta["emotions_json"] = self._dump_emotions_json(meta.pop("emotions"))
+                emotions = meta.pop("emotions")
+                if baseline is not None and path in baseline and emotions == baseline[path].get("emotions"):
+                    meta.pop("emotions_json", None)
+                else:
+                    meta["emotions_json"] = self._dump_emotions_json(emotions)
             for field in ("tags", "scenes"):
                 if field in meta:
                     meta[field] = self._normalize_multi_value(meta[field])
@@ -866,6 +910,12 @@ class DatabaseService(
                 changed_paths = set(desired_paths - existing_paths)
 
                 for path in desired_paths - existing_paths:
+                    if baseline is not None and path in baseline:
+                        changed_paths.discard(path)
+                        continue  # 读取快照后已经删除，不能从旧快照恢复。
+                    if baseline is not None and Path(path).is_absolute() and not Path(path).is_file():
+                        changed_paths.discard(path)
+                        continue
                     meta = desired_index[path]
                     now = int(time.time())
                     conn.execute(
@@ -890,6 +940,13 @@ class DatabaseService(
                 for path in desired_paths & existing_paths:
                     meta = desired_index[path]
                     current = current_index[path]
+                    if baseline is not None:
+                        if path not in baseline:
+                            continue  # 新路径已由另一写入提交，保留那次提交的完整元数据。
+                        before = baseline[path]
+                        meta = {key: value for key, value in meta.items()
+                                if key != "path" and value != before.get(key)
+                                and current.get(key) == before.get(key)}
                     if self._sync_existing_emoji_sync(
                         conn,
                         path=path,

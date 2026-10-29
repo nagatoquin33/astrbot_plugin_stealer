@@ -5,10 +5,41 @@ import asyncio
 import os
 import shutil
 import tempfile
-from contextlib import AsyncExitStack
+from functools import wraps
+from contextlib import AsyncExitStack, contextmanager
+from collections import Counter
 from pathlib import Path
 
 from astrbot.api import logger
+
+
+_active_files = Counter()
+
+
+def file_in_use(path) -> bool:
+    return bool(_active_files[str(Path(path).resolve()).casefold()])
+
+
+@contextmanager
+def protect_file(path):
+    """在模型读取期间保留原文件，允许维护操作跳过正在使用的文件。"""
+    key = str(Path(path).resolve()).casefold()
+    _active_files[key] += 1
+    try:
+        yield
+    finally:
+        _active_files[key] -= 1
+        if not _active_files[key]:
+            del _active_files[key]
+
+
+def storage_write(handler):
+    """串行化 WebUI 清理和分类删除，与图片发布使用同一把锁。"""
+    @wraps(handler)
+    async def wrapped(self, *args, **kwargs):
+        async with self._db.file_lock:
+            return await handler(self, *args, **kwargs)
+    return wrapped
 
 
 def unique_image_path(directory: Path, filename: str) -> Path:
@@ -87,7 +118,14 @@ def _publish_image(source: Path, target: Path, consume: bool) -> None:
             raise
 
 
-async def commit_image_file(source, target, commit, *, consume: bool = True):
+async def commit_image_file(source, target, commit, *, consume: bool = True, lock=None):
+    if lock is not None:
+        async with lock:
+            return await commit_image_file(source, target, commit, consume=consume)
+    return await _commit_image_file(source, target, commit, consume=consume)
+
+
+async def _commit_image_file(source, target, commit, *, consume: bool = True):
     """Plugin ingestion: publish without overwrite, commit metadata, compensate on failure."""
     source, target = Path(source), Path(target)
     if source.resolve() == target.resolve():
@@ -108,7 +146,7 @@ async def commit_image_file(source, target, commit, *, consume: bool = True):
     return result
 
 
-async def write_image_file(content: bytes, target, commit):
+async def write_image_file(content: bytes, target, commit, *, lock=None):
     """Stage upload bytes using tempfile, then share the ingestion compensation path."""
     target = Path(target)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -117,4 +155,4 @@ async def write_image_file(content: bytes, target, commit):
         _, cancelled = await _finish_operation(asyncio.to_thread(source.write_bytes, content))
         if cancelled:
             raise asyncio.CancelledError
-        return await commit_image_file(source, target, commit)
+        return await commit_image_file(source, target, commit, lock=lock)
