@@ -47,6 +47,8 @@ The plugin is open source and free to use. Issues and pull requests are welcome 
 | **Two-Part WebUI** | Review Queue handles pending images; Library supports browsing, sorting, and batch operations |
 | **Group Filtering** | Configure separate send/steal whitelists, blacklists, and conflict priorities |
 
+Persona isolation can be enabled in the WebUI character manager. It uses the active session persona ID as the character key, or a persona selected for the character in the WebUI character manager. Same-name personas are linked automatically and can be unlinked there. Selection prefers relevant character images and falls back to shared images when none are suitable. Other characters are excluded; an unavailable persona uses shared images. JEV may make a second request for shared candidates when it rejects the character candidates. This does not reassign existing or newly collected images. Character keys are lowercase.
+
 ## 🚀 Quick Start
 
 ### 1. Install or update

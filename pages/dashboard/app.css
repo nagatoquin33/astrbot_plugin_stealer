@@ -8657,3 +8657,12 @@ html[data-theme="minecraft"],
     .reanalysis-comparison-head, .reanalysis-comparison-row { grid-template-columns: 55px minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
     .reanalysis-review-section .reanalysis-actions > button { width: 100%; }
 }
+
+.persona-bindings { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
+.persona-binding-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 7px; color: var(--text-main); background: var(--bg-main); border: 1px solid var(--gold-dark); font-size: var(--fs-sm); }
+.persona-binding-chip button { border: 0; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 1rem; line-height: 1; }
+.persona-binding-chip button:hover { color: var(--danger, #e36a72); }
+.persona-bind-controls { display: flex; gap: 8px; margin-top: 8px; max-width: 380px; }
+.persona-bind-controls select { min-width: 0; flex: 1; }
+
+.persona-isolation-control { display: flex; align-items: center; gap: 8px; color: var(--text-main); margin-bottom: 8px; cursor: pointer; }

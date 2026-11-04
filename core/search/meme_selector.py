@@ -6,11 +6,12 @@ from typing import Any
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
-from ..util.normalization import canonicalize_path
+from ..util.normalization import canonicalize_path, normalize_character_key
 from .meme_search_engine import MemeSearchEngine
 from .meme_selection_strategy import MemeSelectionStrategy
 
 from ..events.event_context import unwrap_event
+from ..events.persona_library import prepare_persona_scope
 from .meme_scope_service import MemeScopeService
 from .meme_smart_select_service import MemeSmartSelectService
 from .jev_selector import JevSelector
@@ -46,6 +47,7 @@ class MemeSelector:
         """相关度粗筛 Top 10 后由 JEV 选图；不提前更新使用记录。"""
         if not self._check_group_allowed(event):
             return None
+        await prepare_persona_scope(self.plugin, event)
         history = await self._jev_selector.get_history(event)
         async with self._selection_lock:
             ranked = await self._smart_select_service._rank_emoji_candidates(
@@ -66,14 +68,26 @@ class MemeSelector:
                     continue
                 seen.add(canon)
                 candidates.append((path, data))
-                if len(candidates) == JevSelector.TOP_K:
-                    break
+        character = self._scope_service.active_character(event)
+        if not character:
+            return await self._jev_selector.select(
+                candidates[:JevSelector.TOP_K], history=history, user_message=user_message, reply=text,
+            )
+        preferred = [item for item in candidates if normalize_character_key(item[1].get("character")) == character]
+        fallback = [item for item in candidates if not normalize_character_key(item[1].get("character"))]
+        if preferred:
+            selected = await self._jev_selector.select(
+                preferred[:JevSelector.TOP_K], history=history, user_message=user_message, reply=text,
+            )
+            if selected is not None:
+                return selected
         return await self._jev_selector.select(
-            candidates, history=history, user_message=user_message, reply=text,
+            fallback[:JevSelector.TOP_K], history=history, user_message=user_message, reply=text,
         )
 
     async def send_jev_selection(self, event: AstrMessageEvent, path: str, text: str) -> bool:
         """网络请求及延迟后重新核验候选，再走既有发送/计数链路。"""
+        await prepare_persona_scope(self.plugin, event)
         idx = await self._candidate_index([path])
         data = idx.get(path) or idx.get(canonicalize_path(path))
         if not isinstance(data, dict) or not Path(path).is_file():
@@ -159,6 +173,7 @@ class MemeSelector:
         *, emotion_weights: dict[str, float] | None = None,
     ) -> str | None:
         """选择表情包（智能或随机）。"""
+        await prepare_persona_scope(self.plugin, event)
         async with self._selection_lock:
             use_smart = self.plugin.plugin_config.smart_meme_selection
             extra = [item for item in (extra_categories or []) if item]
@@ -180,12 +195,18 @@ class MemeSelector:
                     event=event,
                     emotion_weights=emotion_weights,
                 )
-            for candidate_category in candidate_categories:
-                random_path = await asyncio.to_thread(
-                    self._select_emoji_random_impl, candidate_category, event=event,
-                )
-                if random_path:
-                    return random_path
+            active_character = self._scope_service.active_character(event)
+            groups = (active_character, "") if active_character else (None,)
+            for character in groups:
+                for candidate_category in candidate_categories:
+                    options = {"event": event}
+                    if character is not None:
+                        options["character"] = character
+                    random_path = await asyncio.to_thread(
+                        self._select_emoji_random_impl, candidate_category, **options,
+                    )
+                    if random_path:
+                        return random_path
 
             return None
 
@@ -193,6 +214,7 @@ class MemeSelector:
         self,
         category: str,
         event: AstrMessageEvent | None = None,
+        *, character: str | None = None,
     ) -> str | None:
         try:
             entries: list[tuple[Path, dict]] = []
@@ -201,6 +223,8 @@ class MemeSelector:
                 if not isinstance(data, dict):
                     continue
                 if entry_category(data) != category:
+                    continue
+                if character is not None and normalize_character_key(data.get("character")) != character:
                     continue
                 if not self._is_entry_allowed_for_event(data, event):
                     continue
@@ -302,6 +326,7 @@ class MemeSelector:
         self, query: str, *, limit: int = 10, idx: dict | None = None, event=None
     ):
         """委托智能选择服务搜索表情包。"""
+        await prepare_persona_scope(self.plugin, event)
         return await self._smart_select_service.search_images(
             query, limit=limit, idx=idx, event=event
         )
@@ -310,6 +335,7 @@ class MemeSelector:
         self, query: str, *, limit: int = 10, idx: dict | None = None, event=None
     ):
         """委托智能选择服务检索并排序表情包候选。"""
+        await prepare_persona_scope(self.plugin, event)
         return await self._smart_select_service.smart_search(
             query, limit=limit, idx=idx, event=event
         )
@@ -340,6 +366,10 @@ class MemeSelector:
             if not self._check_group_allowed(event):
                 return False
 
+            if getattr(self.plugin.plugin_config, "persona_character_isolation", False):
+                await prepare_persona_scope(self.plugin, event)
+                if not self.is_path_allowed_for_event(emoji_path, event):
+                    return False
             send_mode = await self.send_emoji_message(event, emoji_path)
             if not send_mode:
                 return False

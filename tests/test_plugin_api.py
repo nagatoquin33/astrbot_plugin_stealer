@@ -31,7 +31,7 @@ def test_split_route_groups_keep_all_registered_endpoints():
 
     api.register(context)
 
-    assert len(routes) == 45
+    assert len(routes) == 46
     assert len({path for path, *_ in routes}) == len(routes)
     assert all(handler.__self__ is api for _, handler, _, _ in routes)
     registered = {path: (handler.__name__, tuple(methods)) for path, handler, methods, _ in routes}

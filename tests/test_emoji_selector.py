@@ -20,6 +20,10 @@ class MockPluginConfig:
     categories = ["happy", "sad", "angry", "tired", "dumb", "confused"]
     category_info = {}
     keyword_map = {}
+    enable_embedding_search = False
+    embedding_provider_id = ""
+    send_meme_as_gif = False
+    send_meme_as_qq_sticker = True
 
     def get_keyword_map(self):
         return self.keyword_map
@@ -439,7 +443,7 @@ class TestSendPathOptimization:
     def setup_method(self):
 
         self.plugin = MockPlugin()
-        self.plugin.send_meme_as_gif = False
+        self.plugin.plugin_config.send_meme_as_gif = False
         self.plugin.image_render_service = types.SimpleNamespace(
             file_to_gif_base64=AsyncMock(return_value="encoded-image")
         )

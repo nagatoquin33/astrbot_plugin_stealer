@@ -197,6 +197,26 @@ async def test_semantic_edits_refresh_embedding_without_changing_scope(
 
 
 @pytest.mark.asyncio
+async def test_edit_emotions_and_change_primary_preserves_other_metadata(flow):
+    await seed(flow)
+    flow.payload.update({"category": "happy", "emotions": ["happy", "sad"]})
+    assert await flow.api.handle_update_image() == {"success": True}
+    rows, total, counts = flow.db.get_emojis_paginated(category="sad", include_secondary=True)
+    assert total == 1 and counts["happy"] == counts["sad"] == 1
+    assert rows[0]["emotions"] == ["happy", "sad"]
+    assert rows[0]["character"] == "panda" and rows[0]["scope_mode"] == "local"
+    payload = flow.api._list_images_from_database(
+        page=1, page_size=20, category="sad", search="", sort_order="newest",
+        favorite_only=False, character="", library="",
+    )
+    assert payload["total"] == payload["category_total"] == 1
+    assert next(cat for cat in payload["categories"] if cat["key"] == "sad")["count"] == 1
+    flow.payload.update({"category": "happy", "emotions": ["happy"]})
+    assert await flow.api.handle_update_image() == {"success": True}
+    assert flow.db.get_emojis_paginated(category="sad", include_secondary=True)[1] == 0
+
+
+@pytest.mark.asyncio
 async def test_missing_processor_returns_the_intended_error(flow):
     flow.plugin.image_processor_service = None
     result = await flow.api.handle_analyze_image()

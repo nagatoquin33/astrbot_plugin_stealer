@@ -168,7 +168,15 @@ class LibraryRoutes:
             favorite_only=favorite_only,
             character=character or None,
             library=library,
+            include_secondary=True,
         )
+        if category or character:
+            _, category_total, _ = db.get_emojis_paginated(
+                page=1, page_size=1, search_query=search or None,
+                favorite_only=favorite_only, library=library,
+            )
+        else:
+            category_total = total
         images = [
             item for item in (self._build_image_item(row["path"], row) for row in raw) if item
         ]
@@ -177,7 +185,7 @@ class LibraryRoutes:
             if library == "characters"
             else db.get_character_counts()
         )
-        return self._build_image_list_payload(
+        payload = self._build_image_list_payload(
             total=total,
             page=page,
             page_size=page_size,
@@ -186,6 +194,8 @@ class LibraryRoutes:
             character_counts=character_counts,
             libraries=db.get_library_counts(),
         )
+        payload["category_total"] = category_total
+        return payload
 
     async def handle_list_images(self):
         """Return a paginated image list and category counts."""

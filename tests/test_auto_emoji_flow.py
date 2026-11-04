@@ -75,13 +75,14 @@ class DummyLLMResponse:
 
 def _build_main(chance: float) -> Main:
     main = Main.__new__(Main)
-    main.auto_send_meme = True
-    main.meme_chance = chance
     # 用 SimpleNamespace 模拟插件配置。
     main.plugin_config = types.SimpleNamespace(
         enable_natural_emotion_analysis=False,
         steal_meme=True,
-        auto_send_meme=True,
+        auto_send_meme=True, meme_chance=chance, auto_meme_intent_gate=True,
+        auto_meme_cancel_on_new_message=True, meme_send_char_delay=0.0,
+        meme_send_delay=5.0, meme_send_delay_random=False, meme_send_delay_max=8.0,
+        categories=["happy"], content_filtration_fail_open=False,
     )
     # 为索引管理器提供可由各测试替换的异步空实现。
 
@@ -193,7 +194,7 @@ class AutoEmojiFlowTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_search_tool_bypasses_probability_gate(self):
         main = _build_main(0.0)
-        main.categories = ["happy"]
+        main.plugin_config.categories = ["happy"]
         main.db_service = types.SimpleNamespace(
             count_total=lambda: 1,
             get_index_cache_readonly=lambda: {__file__: {"source": "local"}}
@@ -330,7 +331,7 @@ class AutoEmojiFlowTests(unittest.IsolatedAsyncioTestCase):
     async def test_candidates_passed_correctly_to_send_tool(self):
         """验证候选列表通过 turn_state 正确传递"""
         main = _build_main(1.0)
-        main.categories = ["happy"]
+        main.plugin_config.categories = ["happy"]
         event = DummyEvent()
 
         # 设置候选列表

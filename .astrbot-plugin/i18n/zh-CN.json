@@ -29,6 +29,14 @@
             "description": "开启表情包偷取功能",
             "hint": "开启后监听并保存聊天中的图片。启用人工审核时先保存原图，通过后再使用视觉模型分类入库。"
         },
+        "persona_character_isolation": {
+            "description": "按人格隔离角色表情库",
+            "hint": "按当前会话生效的人格关联角色库，优先使用角色表情，无合适候选时回退通用库。"
+        },
+        "persona_character_map": {
+            "description": "人格与角色对应关系",
+            "hint": "可选：人格 ID 到角色 key 的映射；未映射时使用人格 ID。"
+        },
         "steal_mode": {
             "description": "偷图模式",
             "hint": "概率模式：每次收到图片时按设定概率决定是否偷取。冷却模式：两次偷取之间必须间隔指定秒数。",
@@ -402,6 +410,7 @@
                 "character": "角色",
                 "overlay_text": "图上文字",
                 "emotions": "情绪",
+                "secondary_emotions": "副情绪",
                 "id": "编号"
             },
             "units": {
@@ -602,6 +611,13 @@
                 "clear_focus": "取消聚焦"
             },
             "characters": {
+                "persona_isolation": "启用人格表情库隔离",
+                "no_personas_available": "未找到人格，请先在 AstrBot 中创建。",
+                "persona_hint": "关联后，启用隔离时优先使用该角色表情，无合适候选时使用通用表情。一个角色可以关联多个人格。",
+                "unlink_persona": "解除关联",
+                "no_persona": "未关联人格",
+                "select_persona": "选择人格",
+                "bind_persona": "关联",
                 "title": "角色",
                 "all": "全部角色",
                 "unassigned": "通用表情库",

@@ -24,7 +24,7 @@ def sender(text="这是一条完整回复"):
         return_value=EmotionQuery(True, "检索词", ["happy"]),
     ))
     plugin = SimpleNamespace(
-        plugin_config=SimpleNamespace(enable_jev=False),
+        plugin_config=SimpleNamespace(enable_jev=False, enable_natural_emotion_analysis=True),
         enable_natural_emotion_analysis=True, emotion_analyzer=analyzer,
     )
     engine = MemeSenderEngine(plugin)
@@ -161,6 +161,6 @@ async def test_reset_turn_discards_captured_llm_reply():
 
 
 def test_repeated_questions_reach_matching_and_technical_errors_keep_gate():
-    engine = MemeSenderEngine(SimpleNamespace(auto_meme_intent_gate=True))
+    engine = MemeSenderEngine(SimpleNamespace(plugin_config=SimpleNamespace(auto_meme_intent_gate=True)))
     assert not engine.should_skip_auto_emoji_by_gate("你在说什么？？")
     assert engine.should_skip_auto_emoji_by_gate("连接失败？？")

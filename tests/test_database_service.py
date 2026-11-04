@@ -594,6 +594,19 @@ class TestStats:
         assert category_counts["happy"] == 2
         assert category_counts["sad"] == 1
 
+    def test_library_secondary_emotion_filter_and_counts(self, db: DatabaseService):
+        asyncio.run(db.update_path("/test/a.gif", {"emotions": ["happy", "sad", "sad"]}))
+        rows, total, counts = db.get_emojis_paginated(
+            category="sad", search_query="开心", include_secondary=True
+        )
+        assert total == 1
+        assert [row["hash"] for row in rows] == ["h1"]
+        assert counts == {"happy": 1, "sad": 1}
+        rows, total, counts = db.get_emojis_paginated(category="sad", include_secondary=True)
+        assert total == 2
+        assert counts["happy"] == 2 and counts["sad"] == 2
+        assert db.get_emojis_paginated(category="sad")[1] == 1
+
     def test_get_emojis_paginated_includes_favorite_and_usage_fields(
         self, db: DatabaseService
     ):

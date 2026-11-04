@@ -9,12 +9,13 @@ from typing import Any
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
+from ..processing.semantic_schema import build_meme_search_text
 from ..events.emoji_delivery import send_qq_image_as_sticker
 from ..events.event_context import get_event_platform_name, unwrap_event
 
 from .text_similarity import calculate_hybrid_similarity, tokenize_for_bm25, _extract_words, _has_negation_prefix
 from .embedding_service import EmbeddingService
-from ..util.normalization import canonicalize_path
+from ..util.normalization import canonicalize_path, normalize_character_key
 from .search_features import entry_category, parse_tags, prepare_entry_text_features
 
 class MemeSmartSelectService:
@@ -191,8 +192,32 @@ class MemeSmartSelectService:
                 if len(recalled) >= self.SMART_RECALL_K:
                     break
 
+        active_character = self._scope_service.active_character(event)
+        if active_character:
+            matching = [path for path, data in idx.items()
+                        if isinstance(data, dict)
+                        and normalize_character_key(data.get("character")) == active_character
+                        and self._scope_service._is_entry_allowed_for_event(data, event)
+                        and (not require_files or os.path.isfile(path))]
+            query_tokens = set(tokenize_for_bm25(context_text))
+            if query_tokens:
+                def matching_tokens(path):
+                    data = idx[path]
+                    text = build_meme_search_text(data, bm25=True)
+                    return len(query_tokens.intersection(tokenize_for_bm25(text)))
+                matching.sort(key=matching_tokens, reverse=True)
+            _add(matching[:self.SMART_RECALL_K])
+
         ordered = sorted(recalled, key=lambda path: -fusion_scores[path])
-        return [recalled[path] for path in ordered[:self.SMART_RECALL_K]], embedding_paths
+        if active_character:
+            # 保留独立的角色候选额度，避免通用库挤掉角色候选。
+            character_paths = [path for path in ordered if normalize_character_key((idx.get(recalled[path]) or {}).get("character")) == active_character]
+            character_set = set(character_paths)
+            general_paths = [path for path in ordered if path not in character_set]
+            ordered = character_paths[:self.SMART_RECALL_K] + general_paths[:self.SMART_RECALL_K]
+        else:
+            ordered = ordered[:self.SMART_RECALL_K]
+        return [recalled[path] for path in ordered], embedding_paths
 
     async def _select_emoji_smart_impl(
         self, category: str, context_text: str,
@@ -201,10 +226,13 @@ class MemeSmartSelectService:
         *, emotion_weights: dict[str, float] | None = None,
     ) -> str | None:
         """按相关度选图，只有接近同分的候选参与随机选择。"""
+        idx = await asyncio.to_thread(self._search_engine.get_index)
         candidates = await self._rank_emoji_candidates(
             category, context_text, candidate_categories, event,
-            emotion_weights=emotion_weights,
+            idx=idx, emotion_weights=emotion_weights,
+            require_files=True if self._scope_service.active_character(event) else None,
         )
+        candidates = self._prefer_character_candidates(candidates, idx, event)
         if not candidates:
             return None
         try:
@@ -369,9 +397,11 @@ class MemeSmartSelectService:
                 canon_path = canonicalize_path(file_path)
                 history_penalty = self._selection_strategy._calculate_recent_penalty(item_category, canon_path) if penalize_recent else 0.0
 
+                active_character = self._scope_service.active_character(event)
+                persona_bonus = 0.08 if active_character and normalize_character_key(data.get("character")) == active_character else 0.0
                 final_score = max(
                     0.0, base_score + category_bonus + use_count_bonus
-                    + favorite_bonus + punctuation_bonus - history_penalty,
+                    + favorite_bonus + punctuation_bonus + persona_bonus - history_penalty,
                 )
                 if final_score > 0.1:
                     candidates.append(
@@ -409,6 +439,16 @@ class MemeSmartSelectService:
         if self._embedding_service:
             self._embedding_service.invalidate_cache()
 
+    def _prefer_character_candidates(self, candidates, idx, event):
+        """专属候选通过相关性筛选时优先使用，否则保留通用候选。"""
+        character = self._scope_service.active_character(event)
+        if not character:
+            return candidates
+        preferred = [item for item in candidates if normalize_character_key(
+            (idx.get(item[0]) or idx.get(canonicalize_path(item[0])) or {}).get("character")
+        ) == character]
+        return preferred or candidates
+
     async def search_images(self, query, limit=1, idx=None, event=None):
         """Manual search uses the same multi-channel relevance ranking as auto selection."""
         query = str(query or "").strip()
@@ -420,6 +460,7 @@ class MemeSmartSelectService:
             "", query, event=event, deterministic=True, idx=idx,
             require_files=False, penalize_recent=False,
         )
+        ranked = self._prefer_character_candidates(ranked, idx, event)
         results = []
         for path, *_score in ranked[:limit]:
             data = idx.get(path) or idx.get(canonicalize_path(path))
@@ -536,7 +577,7 @@ class MemeSmartSelectService:
 
     def _should_send_file_directly(self, event: AstrMessageEvent) -> bool:
         """Prefer local file sends when GIF coercion is disabled and the adapter is friendly."""
-        if getattr(self.plugin, "send_meme_as_gif", True):
+        if self.plugin.plugin_config.send_meme_as_gif:
             return False
 
         return get_event_platform_name(event) != "aiocqhttp"

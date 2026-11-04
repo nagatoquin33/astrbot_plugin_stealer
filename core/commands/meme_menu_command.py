@@ -9,7 +9,9 @@ from typing import Any
 from astrbot.api import logger
 
 from ..events.event_context import get_event_platform_name, get_event_session_key
+from ..events.persona_library import prepare_persona_scope
 from ..search.meme_scope_service import MemeScopeService
+from ..util.normalization import normalize_character_key
 from .qq_menu import build_keyboard, panel_content, panel_rows, send_keyboard
 from .panel_actions import PANEL_ACTIONS
 from .qq_panel_interactions import QQPanelInteractions
@@ -139,6 +141,7 @@ class MemeMenuCommand:
         await event.send(event.plain_result(content + "\n\n功能指令：\n" + "\n".join(commands)))
 
     async def _visible_index(self, event: Any) -> dict:
+        await prepare_persona_scope(self.plugin, event)
         index = await asyncio.to_thread(self.plugin.db_service.get_index_cache_readonly)
 
         def visible():
@@ -172,6 +175,10 @@ class MemeMenuCommand:
         if not paths:
             await event.send(event.plain_result("当前会话暂无未试发的可用表情，稍后重开面板可再次随机。"))
             return
+        character = self._scope_service.active_character(event)
+        if character:
+            preferred = [path for path in paths if normalize_character_key(index[path].get("character")) == character]
+            paths = preferred or paths
         await self._send_path(event, session, secrets.choice(paths))
 
     async def execute_action(self, event: Any, token: str, action: str, session: PanelSession) -> None:
@@ -195,6 +202,7 @@ class MemeMenuCommand:
         if not self.plugin.is_send_enabled_for_event(event):
             await event.send(event.plain_result("当前会话已禁用表情包发送。"))
             return
+        await prepare_persona_scope(self.plugin, event)
         if not Path(path).is_file() or not self.plugin.meme_selector.is_path_allowed_for_event(path, event):
             await event.send(event.plain_result("这张表情已移除或不允许在当前会话发送，请重新随机。"))
             return

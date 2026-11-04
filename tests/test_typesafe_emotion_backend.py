@@ -322,7 +322,8 @@ def build_ranking(tmp_path):
         _calculate_recent_penalty=lambda *a: 0, _update_recent_usage=Mock()
     )
     scope = SimpleNamespace(
-        _is_entry_allowed_for_event=lambda data, event: not data.get("blocked")
+        _is_entry_allowed_for_event=lambda data, event: not data.get("blocked"),
+        active_character=lambda event: "",
     )
     svc = MemeSmartSelectService(None, search, strategy, scope)
     return svc, idx, strategy, scope

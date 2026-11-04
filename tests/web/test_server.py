@@ -148,6 +148,10 @@ class PreviewState:
         self.blacklist: set[str] = set()
         self.batch_tasks: dict[str, dict] = {}
         self.prefs: dict[str, str] = {"theme": "auto", "view": "grid", "sidebar": "expanded"}
+        self.characters = [{"key": "atri", "name": "ATRI", "desc": "", "count": 0}]
+        self.personas = ["atri", "revenant_fun"]
+        self.persona_mapping = {}
+        self.persona_isolation = False
         self._next_pending_id = 1
         self._now = int(time.time())
         if seed:
@@ -523,6 +527,7 @@ class PreviewServer:
             "size": page_size,
             "images": [self._library_view(m) for m in paged],
             "categories": st._categories_list(st.library),
+            "characters": st.characters,
             "favorite_count": sum(1 for m in st.library if m.get("is_favorite")),
             "libraries": counts,
             "automatic_limit": 100,
@@ -551,6 +556,15 @@ class PreviewServer:
         if item is None:
             return {"success": False, "error": "图片未找到"}
         return {"success": True, "hash": img_hash, "url": to_data_url(self._png_for(item, 480))}
+
+    def api_characters_personas(self, request, payload):
+        if request.method == "POST":
+            if "isolation" in payload:
+                self.state.persona_isolation = payload["isolation"]
+            else:
+                self.state.persona_mapping[payload["persona_id"]] = payload.get("character", "")
+        return {"success": True, "personas": self.state.personas, "mapping": self.state.persona_mapping,
+                "isolation": self.state.persona_isolation}
 
     def api_emotions(self, request, payload):
         return {"success": True, "emotions": [dict(e) for e in self.state.emotions]}

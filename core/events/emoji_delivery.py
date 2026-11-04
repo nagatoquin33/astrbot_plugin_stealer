@@ -15,7 +15,7 @@ async def send_qq_image_as_sticker(
     plugin: Any = None,
 ) -> bool:
     """在 QQ (aiocqhttp) 平台以自定义表情类型发送图片。"""
-    if not getattr(plugin, "send_meme_as_qq_sticker", True):
+    if plugin is not None and not plugin.plugin_config.send_meme_as_qq_sticker:
         return False
     try:
         from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import (
@@ -32,7 +32,7 @@ async def send_qq_image_as_sticker(
     # event.send 路径回退，避免平台版本变化中断回复。
     try:
         file_source: str = file_path
-        if plugin and getattr(plugin, "send_meme_as_gif", False):
+        if plugin and plugin.plugin_config.send_meme_as_gif:
             renderer = getattr(plugin, "image_render_service", None)
             if renderer:
                 encoded = await renderer.file_to_gif_base64(file_path)

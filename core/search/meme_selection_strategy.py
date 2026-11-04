@@ -63,7 +63,7 @@ class MemeSelectionStrategy:
         info_map = getattr(cfg, "category_info", {}) if cfg else {}
         scored: list[tuple[float, str]] = []
 
-        for current in getattr(self.plugin, "categories", []):
+        for current in self.plugin.plugin_config.categories:
             if current == normalized:
                 scored.append((10.0, current))
                 continue

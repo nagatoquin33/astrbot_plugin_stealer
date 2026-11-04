@@ -674,6 +674,8 @@ class DatabaseService(
                     for key, value in updates.items()
                     if key in self._EMOJI_SCALAR_COLUMNS
                 }
+                if "emotions" in updates and "emotions_json" not in scalar:
+                    scalar["emotions_json"] = self._dump_emotions_json(updates["emotions"]) or "[]"
 
                 conn.execute(
                     self._INSERT_EMOJI_SQL,

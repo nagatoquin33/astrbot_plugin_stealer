@@ -22,6 +22,14 @@ class DummyConfig:
         self.categories_dir = None
         self.smart_meme_selection = False
         self.audit_required = True
+        self.steal_meme = True
+        self.steal_pool_capacity = 200
+        self.categories = ["happy"]
+        self.max_reg_num = 0
+        self.enable_embedding_search = False
+        self.embedding_provider_id = ""
+        self.send_meme_as_gif = False
+        self.send_meme_as_qq_sticker = True
 
     def get_event_target(self, event):
         raw_target = getattr(event, "target", self.target)

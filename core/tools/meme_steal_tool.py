@@ -111,7 +111,7 @@ class MemeStealToolWorkflow:
             if not success:
                 fail_open_hint = (
                     "。已启用审核失败开放策略，但明确审核不通过或重复图片不会入库"
-                    if getattr(self, "content_filtration_fail_open", False)
+                    if self.plugin_config.content_filtration_fail_open
                     else ""
                 )
                 yield f"偷取失败：VLM 分析未通过（可能已存在、内容不合适或无法识别为表情包）{fail_open_hint}"

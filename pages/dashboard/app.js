@@ -32,6 +32,8 @@ const emotionKeys = (item) => [...new Set(
         .map((value) => String(value || '').trim()).filter(Boolean)
 )];
 
+const editedEmotionKeys = (form) => [...new Set([form.category, ...form.emotions].filter(Boolean))];
+
 createApp({
     components: {
         EmotionLabels: {
@@ -61,6 +63,7 @@ createApp({
         const currentPage = ref(1);
         const pageSize = ref(24);
         const total = ref(0);
+        const libraryCategoryTotal = ref(0);
 
         const pendingImages = ref([]);
         const pendingTotal = ref(0);
@@ -168,7 +171,7 @@ createApp({
         const previewItem = ref(null);
         const previewSource = ref('library');
         const isEditing = ref(false);
-        const editForm = reactive({ category: '', tags: '', scene: '', desc: '', overlay_text: '', character: '', scope_mode: 'public' });
+        const editForm = reactive({ category: '', emotions: [], tags: '', scene: '', desc: '', overlay_text: '', character: '', scope_mode: 'public' });
         const vlmReanalysisLoading = ref(false);
         const vlmReanalysisApplying = ref(false);
         const vlmReanalysisError = ref('');
@@ -198,6 +201,12 @@ createApp({
         const batchCharacterOpen = ref(false);
         const batchTargetCharacter = ref('');
         const charactersOpen = ref(false);
+        const personaIds = ref([]);
+        const personaIsolation = ref(false);
+        const personaMapping = ref({});
+        const personaSelections = reactive({});
+        const personaBindingBusy = ref(false);
+        const personaBindingError = ref('');
         const newCharacter = reactive({ key: '', name: '' });
         const addingCharacter = ref(false);
         const deletingCharacterKey = ref('');
@@ -848,6 +857,7 @@ createApp({
                 currentPage.value = page;
                 images.value = nextImages;
                 total.value = nextTotal;
+                libraryCategoryTotal.value = Number(data.category_total ?? nextTotal);
                 categories.value = normalizeCategories(data.categories);
                 characters.value = Array.isArray(data.characters) ? data.characters : [];
                 unassignedCharacterCount.value = Number(data.unassigned_character_count || 0);
@@ -1526,6 +1536,7 @@ createApp({
             if (!previewItem.value) return;
             Object.assign(editForm, {
                 category: previewItem.value.category,
+                emotions: emotionKeys(previewItem.value).filter((key) => key !== previewItem.value.category),
                 tags: (previewItem.value.tags || []).join(', '),
                 scene: (previewItem.value.scenes || []).join('、'),
                 desc: previewItem.value.desc,
@@ -1545,7 +1556,7 @@ createApp({
             try {
                 const res = await apiFetch('api/images/update', {
                     method: 'POST',
-                    body: JSON.stringify({ ...editForm, hash: previewItem.value.hash }),
+                    body: JSON.stringify({ ...editForm, emotions: editedEmotionKeys(editForm), hash: previewItem.value.hash }),
                 });
                 const data = await res.json();
                 if (data.success) {
@@ -1556,6 +1567,7 @@ createApp({
                         previewItem.value = refreshedItem;
                     } else {
                         previewItem.value.category = editForm.category;
+                        previewItem.value.emotions = editedEmotionKeys(editForm);
                         previewItem.value.tags = editForm.tags.split(',').map((t) => t.trim()).filter((t) => t);
                         previewItem.value.scenes = parseSceneList(editForm.scene);
                         previewItem.value.desc = editForm.desc;
@@ -2359,8 +2371,68 @@ createApp({
             return found ? found.name : key;
         };
 
+        const loadCharacterPersonas = async () => {
+            personaBindingError.value = '';
+            try {
+                const res = await apiFetch('api/characters/personas');
+                const data = await res.json();
+                if (!res.ok || !data.success) throw new Error(data.error || 'Failed to load personas');
+                personaIds.value = data.personas || [];
+                personaMapping.value = data.mapping || {};
+                personaIsolation.value = !!data.isolation;
+            } catch (e) {
+                personaBindingError.value = e.message;
+            }
+        };
+        const characterPersonas = (key) => [...new Set([...personaIds.value, ...Object.keys(personaMapping.value)])]
+            .filter((id) => String(Object.prototype.hasOwnProperty.call(personaMapping.value, id)
+                ? personaMapping.value[id] : id).trim().toLowerCase() === key);
+        const personaOwnerLabel = (id) => {
+            const owner = String(Object.prototype.hasOwnProperty.call(personaMapping.value, id)
+                ? personaMapping.value[id] : id).trim().toLowerCase();
+            const character = characters.value.find((item) => item.key === owner);
+            return character ? character.name || character.key : '';
+        };
+        const saveCharacterPersona = async (id, key) => {
+            if (!id || personaBindingBusy.value) return;
+            personaBindingBusy.value = true;
+            personaBindingError.value = '';
+            try {
+                const res = await apiFetch('api/characters/personas', {
+                    method: 'POST', body: JSON.stringify({ persona_id: id, character: key }),
+                });
+                const data = await res.json();
+                if (!res.ok || !data.success) throw new Error(data.error || 'Failed to save persona');
+                personaIds.value = data.personas || [];
+                personaMapping.value = data.mapping || {};
+                if (key) personaSelections[key] = '';
+            } catch (e) {
+                personaBindingError.value = e.message;
+            } finally {
+                personaBindingBusy.value = false;
+            }
+        };
+        const setPersonaIsolation = async (enabled, control) => {
+            if (personaBindingBusy.value) return;
+            personaBindingBusy.value = true;
+            personaBindingError.value = '';
+            try {
+                const res = await apiFetch('api/characters/personas', {
+                    method: 'POST', body: JSON.stringify({ isolation: enabled }),
+                });
+                const data = await res.json();
+                if (!res.ok || !data.success) throw new Error(data.error || 'Failed to update setting');
+                personaIsolation.value = !!data.isolation;
+            } catch (e) {
+                control.checked = personaIsolation.value;
+                personaBindingError.value = e.message;
+            } finally {
+                personaBindingBusy.value = false;
+            }
+        };
         const openCharactersModal = () => {
             charactersOpen.value = true;
+            loadCharacterPersonas();
         };
 
         const closeCharactersModal = () => {
@@ -2638,6 +2710,7 @@ createApp({
             previewSource,
             previewListLength,
             isEditing,
+            libraryCategoryTotal,
             editForm,
             vlmReanalysisLoading,
             vlmReanalysisApplying,
@@ -2686,6 +2759,15 @@ createApp({
             closeBatchCharacterModal,
             confirmBatchCharacter,
             charactersOpen,
+            personaIds,
+            personaIsolation,
+            setPersonaIsolation,
+            personaSelections,
+            personaBindingBusy,
+            personaBindingError,
+            characterPersonas,
+            personaOwnerLabel,
+            saveCharacterPersona,
             newCharacter,
             addingCharacter,
             deletingCharacterKey,

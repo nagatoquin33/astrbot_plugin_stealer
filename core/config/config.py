@@ -26,6 +26,8 @@ class PluginConfig(BaseModel):
     steal_mode: str = "probability"  # "probability" 或 "cooldown"
     steal_chance: float = 0.3  # 概率模式下的偷图概率
     auto_send_meme: bool = True
+    persona_character_isolation: bool = False
+    persona_character_map: dict[str, str] = {}
     meme_chance: float = 0.2
     send_meme_as_qq_sticker: bool = True
     send_meme_as_gif: bool = False
@@ -562,7 +564,11 @@ class PluginConfig(BaseModel):
 
     def update_config(self, updates: dict) -> bool:
         """先持久化整个配置变更，再发布运行态；失败时恢复已写文件和配置对象。"""
-        valid = {key: deepcopy(value) for key, value in updates.items() if key in type(self).model_fields}
+        unknown = updates.keys() - type(self).model_fields.keys()
+        if unknown:
+            logger.error(f"未知配置项: {', '.join(sorted(unknown))}")
+            return False
+        valid = {key: deepcopy(value) for key, value in updates.items()}
         previous = {key: deepcopy(getattr(self, key)) for key in valid}
         files = {getattr(self, path): valid[key] for key, path in self._FILE_CONFIG.items() if key in valid}
         scalar = {key: value for key, value in valid.items() if key not in self._FILE_CONFIG}

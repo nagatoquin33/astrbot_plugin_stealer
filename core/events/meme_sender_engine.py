@@ -1,6 +1,7 @@
 """表情包发送决策引擎：负责 LLM 响应拦截、自动发送决策和表情包发送。"""
 
 import asyncio
+import hashlib
 import random
 import re
 from typing import Any
@@ -106,6 +107,7 @@ class MemeSenderEngine:
         self._auto_emoji_cooldowns_max = 1000  # 最大条目数，防止内存泄漏
         self._auto_emoji_cooldowns_lock = asyncio.Lock()
         self._pending_auto_emoji_tasks: dict[str, asyncio.Task] = {}
+        self._pending_auto_emoji_sources: dict[str, tuple[asyncio.Task, Any]] = {}
 
     # --- 状态管理 ---
 
@@ -139,13 +141,49 @@ class MemeSenderEngine:
             except Exception:
                 pass
 
+    def is_new_message_turn(self, event: AstrMessageEvent) -> bool:
+        """仅将新的用户消息视为会中断待发表情的对话轮次。"""
+        message = getattr(event, "message_obj", None)
+        raw = getattr(message, "raw_message", None)
+        if isinstance(raw, dict) and raw.get("post_type") in {"notice", "request", "meta_event", "message_sent"}:
+            return False
+        sender = str(getattr(getattr(message, "sender", None), "user_id", "") or "").strip()
+        self_id = str(getattr(message, "self_id", "") or "").strip()
+        if sender and self_id and sender == self_id:
+            return False
+        key = self.get_auto_emoji_session_key(event)
+        source = self._pending_auto_emoji_sources.get(key)
+        if source and not source[0].done():
+            original = source[1]
+            if event is original:
+                return False
+            original_message = getattr(original, "message_obj", None)
+            current_id = str(getattr(message, "message_id", "") or "").strip()
+            original_id = str(getattr(original_message, "message_id", "") or "").strip()
+            if current_id and original_id and current_id == original_id:
+                return False
+        return True
+
+    @staticmethod
+    def _message_debug_id(event: Any) -> str:
+        message_id = str(getattr(getattr(event, "message_obj", None), "message_id", "") or "").strip()
+        return hashlib.sha256(message_id.encode("utf-8")).hexdigest()[:12] if message_id else "unknown"
+
     def cancel_pending_auto_emoji(self, event: AstrMessageEvent, reason: str = "new_message") -> bool:
         """取消当前会话尚未发出的自动表情任务。"""
         key = self.get_auto_emoji_session_key(event)
         task = self._pending_auto_emoji_tasks.pop(key, None)
+        source = self._pending_auto_emoji_sources.pop(key, None)
         if task and not task.done():
             task.cancel()
-            logger.debug(f"[MemeSenderEngine] 取消待发送自动表情: session={key}, reason={reason}")
+            raw = getattr(getattr(event, "message_obj", None), "raw_message", None)
+            raw_type = raw.get("post_type") if isinstance(raw, dict) else None
+            event_type = raw_type if raw_type in {"message", "message_sent", "notice", "request", "meta_event"} else "unknown"
+            logger.debug(
+                f"[MemeSenderEngine] 取消待发送自动表情: session={key}, reason={reason}, "
+                f"event_type={event_type}, source_id={self._message_debug_id(source[1]) if source else 'unknown'}, "
+                f"event_id={self._message_debug_id(event)}"
+            )
             return True
         return False
 
@@ -162,10 +200,12 @@ class MemeSenderEngine:
         if old_task and old_task is not task and not old_task.done():
             old_task.cancel()
         self._pending_auto_emoji_tasks[key] = task
+        self._pending_auto_emoji_sources[key] = (task, event)
 
         def _clear(done_task: asyncio.Task) -> None:
             if self._pending_auto_emoji_tasks.get(key) is done_task:
                 self._pending_auto_emoji_tasks.pop(key, None)
+                self._pending_auto_emoji_sources.pop(key, None)
 
         task.add_done_callback(_clear)
         return task
@@ -218,7 +258,7 @@ class MemeSenderEngine:
         """根据文本内容判断是否跳过自动发送。"""
         if not text:
             return True
-        if not getattr(self.plugin, "auto_meme_intent_gate", True):
+        if not self.plugin.plugin_config.auto_meme_intent_gate:
             return False
         normalized = re.sub(r"\s+", " ", text).strip()
         if len(normalized) <= 2:
@@ -256,7 +296,7 @@ class MemeSenderEngine:
     def normalize_auto_meme_chance(self) -> float:
         """归一化自动表情发送概率。"""
         try:
-            chance = float(getattr(self.plugin, "meme_chance", 0.4))
+            chance = float(self.plugin.plugin_config.meme_chance)
         except (TypeError, ValueError):
             chance = 0.4
         return max(0.0, min(1.0, chance))
@@ -275,7 +315,7 @@ class MemeSenderEngine:
             turn_state.set_auto_decision(allowed, reason)
             return allowed
 
-        if not getattr(self.plugin, "auto_send_meme", False):
+        if not self.plugin.plugin_config.auto_send_meme:
             return decide(False, "auto_send_meme_disabled")
         if not self.plugin.is_send_enabled_for_event(event):
             return decide(False, "send_disabled")
@@ -292,9 +332,11 @@ class MemeSenderEngine:
 
     async def _resolve_with_log(self, event: AstrMessageEvent) -> bool:
         """带日志的权限判断包装，方便排查发送概率问题。"""
+        already_decided = self.emoji_turn_state(event).is_auto_decided()
         allowed = await self.resolve_auto_emoji_turn_permission(event)
-        reason = event.get_extra("stealer_auto_emoji_turn_reason") or "unknown"
-        logger.debug(f"[Stealer] 当前轮次自动发表情判定: allowed={allowed}, reason={reason}")
+        if not already_decided:
+            reason = event.get_extra("stealer_auto_emoji_turn_reason") or "unknown"
+            logger.debug(f"[Stealer] 当前轮次自动发表情判定: allowed={allowed}, reason={reason}")
         return allowed
 
     def claim_auto_emoji_turn(self, event: AstrMessageEvent) -> bool:
@@ -343,22 +385,22 @@ class MemeSenderEngine:
 
     def get_meme_send_delay(self, text: str = "", task_start: float = 0.0) -> float:
         """获取表情包发送延迟（秒）。"""
-        char_delay = getattr(self.plugin, "meme_send_char_delay", 0.0)
+        char_delay = self.plugin.plugin_config.meme_send_char_delay
         if char_delay > 0 and text:
             desired = len(text) * char_delay
             if task_start > 0:
                 elapsed = asyncio.get_event_loop().time() - task_start
                 return max(0.0, desired - elapsed)
             return desired
-        delay = getattr(self.plugin, "meme_send_delay", 0.5)
+        delay = self.plugin.plugin_config.meme_send_delay
         try:
             base = float(delay)
         except (TypeError, ValueError):
             base = 0.5
         # meme_send_delay_random (bool) 开启时在 [base, base+max] 之间随机
-        use_random = bool(getattr(self.plugin, "meme_send_delay_random", False))
+        use_random = bool(self.plugin.plugin_config.meme_send_delay_random)
         if use_random:
-            delay_max = getattr(self.plugin, "meme_send_delay_max", 8.0)
+            delay_max = self.plugin.plugin_config.meme_send_delay_max
             try:
                 rand_max = float(delay_max)
             except (TypeError, ValueError):
@@ -402,7 +444,7 @@ class MemeSenderEngine:
                         return
 
             search_text = text
-            if not use_jev and getattr(self.plugin, "enable_natural_emotion_analysis", False) and hasattr(
+            if not use_jev and self.plugin.plugin_config.enable_natural_emotion_analysis and hasattr(
                 self.plugin, "emotion_analyzer"
             ):
                 analyzed = await self.plugin.emotion_analyzer.analyze_for_reply(

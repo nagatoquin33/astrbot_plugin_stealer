@@ -113,28 +113,6 @@ class Main(MemeSearchToolWorkflow, MemeStealToolWorkflow, Star):
         # 运行时属性
         self._terminated: bool = False  # 终止标志位，防止重复清理
 
-    def __getattr__(self, name: str):
-        """将未定义的属性访问自动代理到 plugin_config。
-
-        将 steal_meme 等配置项的读取委托给 plugin_config，
-        配置尚未初始化或属性不存在时抛出 AttributeError。
-        """
-        if name == "plugin_config":
-            raise AttributeError(f"'{type(self).__name__}' object has no attribute 'plugin_config'")
-        cfg = self.__dict__.get("plugin_config")
-        if cfg is not None and hasattr(cfg, name):
-            return getattr(cfg, name)
-        # 区分：plugin_config 未初始化 vs. 属性完全不存在
-        if cfg is None:
-            raise AttributeError(
-                f"'{type(self).__name__}' object has no attribute '{name}' "
-                f"(plugin_config 尚未初始化)"
-            )
-        raise AttributeError(
-            f"'{type(self).__name__}' object has no attribute '{name}' "
-            f"(plugin_config 中也不存在该属性)"
-        )
-
     def _load_vision_provider_id(self) -> str:
         """加载视觉模型提供商ID。"""
         provider_id = getattr(self.plugin_config, "vision_provider_id", "")
@@ -159,7 +137,7 @@ class Main(MemeSearchToolWorkflow, MemeStealToolWorkflow, Star):
         DEFAULT_CATEGORIES 作为合并基线。这样用户主动删除的预定义类别不会
         被重新加回，仅自动发现磁盘上用户未配置的自定义类别。
         """
-        current = list(getattr(self, "categories", None) or [])
+        current = list(self.plugin_config.categories or [])
         # 兼容：若 categories 尚未加载，回退到已存储配置或默认列表
         if not current:
             current = list(getattr(self.plugin_config, "categories", None) or [])
@@ -744,10 +722,11 @@ class Main(MemeSearchToolWorkflow, MemeStealToolWorkflow, Star):
     @filter.platform_adapter_type(PlatformAdapterType.ALL)
     async def on_message(self, event: AstrMessageEvent):
         """消息监听：偷取消息中的图片并分类存储。"""
-        # 每条新消息到达时重置回合状态，防止上一轮的标记影响当前对话
-        if getattr(self, "auto_meme_cancel_on_new_message", True):
-            self._emoji_sender_engine.cancel_pending_auto_emoji(event)
-        self._emoji_sender_engine.reset_turn_state(event)
+        # 通知、机器人自身消息及本轮消息重放不会打断待发表情。
+        if self._emoji_sender_engine.is_new_message_turn(event):
+            if self.plugin_config.auto_meme_cancel_on_new_message:
+                self._emoji_sender_engine.cancel_pending_auto_emoji(event)
+            self._emoji_sender_engine.reset_turn_state(event)
         event_handler = self._get_event_handler(
             log_message="[Stealer] event_handler 未初始化，跳过消息处理",
             log_level="debug",

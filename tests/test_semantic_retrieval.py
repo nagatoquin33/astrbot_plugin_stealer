@@ -232,7 +232,7 @@ def test_embedding_search_defaults_to_disabled():
     )
     assert schema["enable_embedding_search"]["default"] is False
     assert PluginConfig.model_fields["enable_embedding_search"].default is False
-    assert EmbeddingService(types.SimpleNamespace())._embedding_enabled() is False
+    assert EmbeddingService(types.SimpleNamespace(plugin_config=types.SimpleNamespace(enable_embedding_search=False)))._embedding_enabled() is False
 
 
 def test_get_prompts_falls_back_to_bundled_when_custom_blank():

@@ -678,7 +678,7 @@ class EventHandler:
                 return
         except (AttributeError, TypeError, KeyError):
             return
-        if not plugin_instance.steal_meme and not force_active:
+        if not plugin_instance.plugin_config.steal_meme and not force_active:
             return
         # audit_required=True → 自动偷取的图片进入待审核池。
         # audit_required=False → 跳过审核，直接入库
@@ -700,7 +700,7 @@ class EventHandler:
             pending_count = plugin_instance.db_service.count_pending()
         except (AttributeError, TypeError):
             pending_count = 0
-        capacity = getattr(plugin_instance, "steal_pool_capacity", 200)
+        capacity = plugin_instance.plugin_config.steal_pool_capacity
         if pending_count >= capacity:
             logger.debug(
                 f"[steal] 待审核池已满 {pending_count}/{capacity}，暂停偷取，审核后自动恢复"

@@ -31,7 +31,7 @@ async def test_existing_gif_is_sent_byte_for_byte(tmp_path):
         Image.new("RGBA", (12, 12), (40, 40, 220, 255)),
     ]
     original = _save_animation(source, frames, [40, 120], loop=3)
-    service = ImageRenderService(types.SimpleNamespace(send_meme_as_gif=True))
+    service = ImageRenderService(types.SimpleNamespace(plugin_config=types.SimpleNamespace(send_meme_as_gif=True)))
 
     encoded = await service.file_to_gif_base64(str(source))
 
@@ -47,7 +47,7 @@ async def test_non_gif_animation_keeps_total_duration_and_loop(tmp_path):
         Image.new("RGBA", (12, 12), (40, 40, 220, 255)),
     ]
     _save_animation(source, frames, [40, 80, 120], loop=2)
-    service = ImageRenderService(types.SimpleNamespace(send_meme_as_gif=True))
+    service = ImageRenderService(types.SimpleNamespace(plugin_config=types.SimpleNamespace(send_meme_as_gif=True)))
 
     encoded = await service.file_to_gif_base64(str(source))
 
@@ -69,7 +69,7 @@ async def test_sparse_non_gif_animation_keeps_a_changed_frame(tmp_path):
     frames = [red.copy() for _ in range(60)]
     frames[31] = blue
     _save_animation(source, frames, [40] * len(frames))
-    service = ImageRenderService(types.SimpleNamespace(send_meme_as_gif=True))
+    service = ImageRenderService(types.SimpleNamespace(plugin_config=types.SimpleNamespace(send_meme_as_gif=True)))
 
     encoded = await service.file_to_gif_base64(str(source))
 

@@ -10,6 +10,19 @@
     "default": false,
     "hint": "开启后监听并保存聊天中的图片。启用人工审核时先保存原图，通过后再使用视觉模型分类入库。"
   },
+  "persona_character_isolation": {
+    "description": "按人格隔离角色表情库",
+    "type": "bool",
+    "default": false,
+    "hint": "按当前会话生效的人格名关联角色库，发送时优先角色表情，无合适候选时回退通用库。不修改已归档图片；无人格或无法识别时仅使用通用库。"
+  },
+  "persona_character_map": {
+    "description": "人格与角色对应关系",
+    "invisible": true,
+    "type": "dict",
+    "default": {},
+    "hint": "可选：人格 ID 到已有角色 key 的映射，例如 {\"revenant_fun\": \"revenant\"}。未映射时直接使用人格 ID。"
+  },
   "steal_mode": {
     "description": "偷图模式",
     "type": "string",

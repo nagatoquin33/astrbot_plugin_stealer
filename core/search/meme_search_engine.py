@@ -313,12 +313,12 @@ class MemeSearchEngine:
         Returns:
             最佳匹配的分类，无则返回 None
         """
-        if not query or not getattr(self.plugin, "categories", []):
+        if not query or not self.plugin.plugin_config.categories:
             return None
 
         best_match = None
         best_score = 0.0
-        for category in getattr(self.plugin, "categories", []):
+        for category in self.plugin.plugin_config.categories:
             score = calculate_hybrid_similarity(query, category)
             if score > best_score and score > threshold:
                 best_score = score
@@ -336,11 +336,11 @@ class MemeSearchEngine:
         Returns:
             相似分类列表
         """
-        if not query or not getattr(self.plugin, "categories", []):
+        if not query or not self.plugin.plugin_config.categories:
             return []
 
         scores = []
-        for category in getattr(self.plugin, "categories", []):
+        for category in self.plugin.plugin_config.categories:
             score = calculate_hybrid_similarity(query, category)
             scores.append((category, score))
 

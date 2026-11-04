@@ -173,7 +173,7 @@ export const TEMPLATE = `
             <div class="category-list">
                 <button type="button" class="category-item" :class="{ active: selectedCategory === '' }" @click="selectLibraryCategory('')">
                     <span class="category-name">{{ t('pages.dashboard.layout.all_emotions', '全部情绪') }}</span>
-                    <span class="category-count">{{ categories.reduce((sum, cat) => sum + (Number(cat.count) || 0), 0) }}</span>
+                    <span class="category-count">{{ libraryCategoryTotal }}</span>
                 </button>
                 <button v-for="cat in categories" :key="cat.key" type="button" class="category-item"
                     :class="{ active: selectedCategory === cat.key }" :style="catAccent(cat.key)"
@@ -778,7 +778,8 @@ export const TEMPLATE = `
                 <div class="item-stats">
                     <div class="stat-row">
                         <span class="stat-name">{{ t('pages.dashboard.fields.emotions', 'Emotions') }}</span>
-                        <emotion-labels :item="previewItem" :label="getCategoryName" />
+                        <button v-if="previewSource !== 'pending'" type="button" class="codex-btn" @click="startEdit" :title="t('pages.dashboard.actions.edit', 'Edit')"><emotion-labels :item="previewItem" :label="getCategoryName" /></button>
+                        <emotion-labels v-else :item="previewItem" :label="getCategoryName" />
                     </div>
                     <div class="stat-row">
                         <span class="stat-name">{{ t('pages.dashboard.fields.scope', 'Scope') }}</span>
@@ -911,6 +912,15 @@ export const TEMPLATE = `
                         <select v-model="editForm.category" class="codex-input">
                             <option v-for="cat in categories" :key="cat.key" :value="cat.key">{{ cat.name }}</option>
                         </select>
+                    </div>
+
+                    <div style="margin-bottom:20px">
+                        <label class="form-label">{{ t('pages.dashboard.fields.secondary_emotions', 'Secondary emotions') }}</label>
+                        <div class="item-tags">
+                            <label v-for="cat in categories.filter((item) => item.key !== editForm.category)" :key="cat.key" class="tag" style="cursor:pointer">
+                                <input type="checkbox" :value="cat.key" v-model="editForm.emotions"> {{ cat.name }}
+                            </label>
+                        </div>
                     </div>
 
                     <div style="margin-bottom:20px">
@@ -1620,6 +1630,14 @@ export const TEMPLATE = `
                     </button>
                 </div>
             </div>
+            <p v-if="personaBindingError" role="alert" class="hint-text" style="color:var(--danger, #e36a72)">{{ personaBindingError }}</p>
+            <label class="persona-isolation-control">
+                <input type="checkbox" :checked="personaIsolation" :disabled="personaBindingBusy"
+                    @change="setPersonaIsolation($event.target.checked, $event.target)">
+                <span>{{ t('pages.dashboard.characters.persona_isolation', '启用人格表情库隔离') }}</span>
+            </label>
+            <p class="hint-text">{{ t('pages.dashboard.characters.persona_hint', '关联后，启用人格隔离时会使用该角色与通用表情。一个角色可以关联多个人格。') }}</p>
+            <p v-if="!personaIds.length && !personaBindingError" class="hint-text">{{ t('pages.dashboard.characters.no_personas_available', '未找到人格，请先在 AstrBot 中创建。') }}</p>
             <div style="display:flex;flex-direction:column;gap:8px;max-height:400px;overflow-y:auto">
                 <div v-for="item in characters" :key="item.key" class="character-list-row">
                     <div>
@@ -1628,6 +1646,23 @@ export const TEMPLATE = `
                             <span style="font-size:0.75rem;color:var(--text-muted);background:var(--bg-main);padding:2px 8px;border:1px solid var(--gold-dark)">{{ item.key }}</span>
                         </div>
                         <p style="margin:0;color:var(--text-muted);font-size:0.85rem">{{ item.count || 0 }}</p>
+                        <div class="persona-bindings">
+                            <span v-for="id in characterPersonas(item.key)" :key="id" class="persona-binding-chip">
+                                {{ id }}
+                                <button type="button" :disabled="personaBindingBusy" @click="saveCharacterPersona(id, '')"
+                                    :aria-label="t('pages.dashboard.characters.unlink_persona', '解除关联') + ' ' + id">×</button>
+                            </span>
+                            <span v-if="!characterPersonas(item.key).length" class="hint-text">{{ t('pages.dashboard.characters.no_persona', '未关联人格') }}</span>
+                        </div>
+                        <div class="persona-bind-controls">
+                            <select :value="personaSelections[item.key] || ''" @change="personaSelections[item.key] = $event.target.value" class="codex-input" :disabled="personaBindingBusy || !personaIds.length"
+                                :aria-label="t('pages.dashboard.characters.select_persona', '选择人格') + ' ' + (item.name || item.key)">
+                                <option value="">{{ t('pages.dashboard.characters.select_persona', '选择人格') }}</option>
+                                <option v-for="id in personaIds.filter((id) => !characterPersonas(item.key).includes(id))" :key="id" :value="id">{{ id }}{{ personaOwnerLabel(id) ? ' · ' + personaOwnerLabel(id) : '' }}</option>
+                            </select>
+                            <button type="button" class="codex-btn" :disabled="personaBindingBusy || !personaSelections[item.key]"
+                                @click="saveCharacterPersona(personaSelections[item.key], item.key)">{{ t('pages.dashboard.characters.bind_persona', '关联') }}</button>
+                        </div>
                     </div>
                     <button @click="deleteCharacter(item)" :disabled="deletingCharacterKey === item.key" class="codex-btn danger">
                         {{ deletingCharacterKey === item.key ? '...' : t('pages.dashboard.actions.delete', '删除') }}

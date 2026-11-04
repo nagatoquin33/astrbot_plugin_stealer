@@ -41,10 +41,11 @@ async def test_qq_sticker_type_with_enabled_or_legacy_config(
     event, path = qq_delivery
     renderer = types.SimpleNamespace(file_to_gif_base64=AsyncMock(return_value="gif"))
     plugin = types.SimpleNamespace(
-        send_meme_as_gif=as_gif, image_render_service=renderer
+        plugin_config=types.SimpleNamespace(send_meme_as_gif=as_gif, send_meme_as_qq_sticker=True),
+        image_render_service=renderer,
     )
     if setting is not None:
-        plugin.send_meme_as_qq_sticker = setting
+        plugin.plugin_config.send_meme_as_qq_sticker = setting
 
     assert await emoji_delivery.send_qq_image_as_sticker(event, path, plugin=plugin)
 
@@ -68,7 +69,7 @@ async def test_qq_sticker_type_with_enabled_or_legacy_config(
 @pytest.mark.asyncio
 async def test_disabled_sticker_returns_control_to_normal_image_delivery(qq_delivery):
     event, path = qq_delivery
-    plugin = types.SimpleNamespace(send_meme_as_qq_sticker=False)
+    plugin = types.SimpleNamespace(plugin_config=types.SimpleNamespace(send_meme_as_qq_sticker=False))
 
     assert not await emoji_delivery.send_qq_image_as_sticker(event, path, plugin=plugin)
     event._parse_onebot_json.assert_not_awaited()

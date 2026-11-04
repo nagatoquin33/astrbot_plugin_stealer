@@ -24,7 +24,7 @@ from core.search.meme_smart_select_service import MemeSmartSelectService
 def smart_service(index):
     search = SimpleNamespace(get_index=lambda: index, _bm25_dirty=False,
                              _bm25_index=SimpleNamespace(get_top_k=lambda *a, **k: []))
-    scope = SimpleNamespace(_is_entry_allowed_for_event=lambda data, event: not data.get("blocked"))
+    scope = SimpleNamespace(_is_entry_allowed_for_event=lambda data, event: not data.get("blocked"), active_character=lambda event: "")
     strategy = SimpleNamespace(_calculate_recent_penalty=lambda *a: 0)
     return MemeSmartSelectService(None, search, strategy, scope)
 
@@ -106,7 +106,7 @@ async def test_recall_fusion_keeps_embedding_and_bm25_channels():
     ("无法访问该文件", True), ("/meme status", True),
 ])
 def test_contextual_intent_gate(text, skip):
-    engine = MemeSenderEngine(SimpleNamespace())
+    engine = MemeSenderEngine(SimpleNamespace(plugin_config=SimpleNamespace(auto_meme_intent_gate=True)))
     assert engine.should_skip_auto_emoji_by_gate(text) is skip
 
 

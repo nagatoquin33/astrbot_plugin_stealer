@@ -61,6 +61,7 @@ async def test_empty_library_keeps_configured_categories_and_statistics(api, mon
         "favorite_count": 0,
         "libraries": {"general": 0, "favorites": 0, "characters": 0, "automatic": 0},
         "automatic_limit": 100,
+        "category_total": 0,
     }
 
 

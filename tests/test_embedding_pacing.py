@@ -18,7 +18,7 @@ def service_fixture(tmp_path, dimension=99):
     provider = SimpleNamespace(provider_config={'id': 'embedding'}, get_dim=lambda: dimension,
                                get_model=lambda: model[0], get_embedding=AsyncMock(return_value=[1., 0.]))
     service = EmbeddingService(SimpleNamespace(db_service=db, enable_embedding_search=True,
-        plugin_config=SimpleNamespace(model_request_interval=0, category_info={}, character_info={})))
+        plugin_config=SimpleNamespace(enable_embedding_search=True, embedding_provider_id='', model_request_interval=0, category_info={}, character_info={})))
     service._get_provider = lambda: provider
     service._init_faiss = lambda: False
     return service, db, provider, model

@@ -91,6 +91,7 @@ class PluginAPI(
             ("/categories/delete", "handle_delete_category", ["POST"]),
             ("/characters", "handle_characters", ["GET", "POST"]),
             ("/characters/delete", "handle_delete_character", ["POST"]),
+            ("/characters/personas", "handle_character_personas", ["GET", "POST"]),
             ("/images/batch-character", "handle_batch_character", ["POST"]),
             ("/emotions", "handle_get_emotions", ["GET"]),
             ("/health", "handle_health_check", ["GET"]),

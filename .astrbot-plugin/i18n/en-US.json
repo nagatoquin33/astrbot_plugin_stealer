@@ -29,6 +29,14 @@
             "description": "Enable emoji stealing",
             "hint": "Listen for and save images from chat. With manual review enabled, save originals first and classify them after approval."
         },
+        "persona_character_isolation": {
+            "description": "Isolate character memes by persona",
+            "hint": "Prefer suitable memes from the active persona’s character library, falling back to shared memes."
+        },
+        "persona_character_map": {
+            "description": "Persona to character mapping",
+            "hint": "Optional mapping from persona ID to character key. Unmapped personas use their ID."
+        },
         "steal_mode": {
             "description": "Steal mode",
             "hint": "Probability mode: random chance on each received image. Cooldown mode: enforce a minimum interval between collections.",
@@ -402,6 +410,7 @@
                 "character": "Character",
                 "overlay_text": "Overlay text",
                 "emotions": "Emotions",
+                "secondary_emotions": "Secondary emotions",
                 "id": "ID"
             },
             "units": {
@@ -602,6 +611,13 @@
                 "clear_focus": "Clear focus"
             },
             "characters": {
+                "persona_isolation": "Enable persona library isolation",
+                "no_personas_available": "No personas found. Create one in AstrBot first.",
+                "persona_hint": "When isolation is enabled, suitable character memes are preferred; otherwise shared memes are used. A character can have multiple personas.",
+                "unlink_persona": "Unlink",
+                "no_persona": "No linked personas",
+                "select_persona": "Select persona",
+                "bind_persona": "Link",
                 "title": "Characters",
                 "all": "All characters",
                 "unassigned": "General library",

@@ -88,7 +88,7 @@ async def test_sender_uses_original_llm_punctuation_after_query_rewrite(rewrite)
         return_value=EmotionQuery(True, "询问情况", ["confused"]),
     ))
     plugin = SimpleNamespace(
-        plugin_config=SimpleNamespace(enable_jev=False),
+        plugin_config=SimpleNamespace(enable_jev=False, enable_natural_emotion_analysis=rewrite),
         enable_natural_emotion_analysis=rewrite, emotion_analyzer=analyzer,
     )
     engine = MemeSenderEngine(plugin)

@@ -7,6 +7,7 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
 from ..events.event_context import unwrap_event
+from ..events.persona_library import prepare_persona_scope
 from ..util.normalization import normalize_label_list
 
 class MemeSearchToolWorkflow:
@@ -194,6 +195,7 @@ class MemeSearchToolWorkflow:
                 yield f"发送失败：reason=file_missing。表情包文件已丢失。\n你选择的是：编号 {emoji_id}，分类 {emotion}，描述 {desc}\n请重新搜索并选择其他表情包。"
                 return
 
+            await prepare_persona_scope(self, event)
             if not self.meme_selector.is_path_allowed_for_event(path, event):
                 yield "发送失败：reason=scope_denied。该表情包被限制为仅来源会话可发送，请选择 public 表情或重新搜索。"
                 return

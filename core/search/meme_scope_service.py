@@ -4,7 +4,7 @@ from typing import Any
 
 from astrbot.api.event import AstrMessageEvent
 
-from ..util.normalization import canonicalize_path, normalize_scope_mode
+from ..util.normalization import canonicalize_path, normalize_character_key, normalize_scope_mode
 
 
 class MemeScopeService:
@@ -12,6 +12,12 @@ class MemeScopeService:
 
     def __init__(self, plugin_instance: Any = None) -> None:
         self.plugin = plugin_instance
+
+    def active_character(self, event: AstrMessageEvent | None) -> str:
+        cfg = getattr(self.plugin, "plugin_config", None)
+        if event is None or not getattr(cfg, "persona_character_isolation", False):
+            return ""
+        return normalize_character_key(getattr(event, "_stealer_persona_character", ""))
 
     def _get_event_target_entry(self, event: AstrMessageEvent | None) -> str:
         if event is None:
@@ -35,6 +41,13 @@ class MemeScopeService:
     ) -> bool:
         if not isinstance(data, dict) or event is None:
             return True
+
+        cfg = getattr(self.plugin, "plugin_config", None)
+        if getattr(cfg, "persona_character_isolation", False):
+            character = normalize_character_key(data.get("character"))
+            active = self.active_character(event)
+            if character and character != active:
+                return False
 
         if normalize_scope_mode(data.get("scope_mode")) != "local":
             return True

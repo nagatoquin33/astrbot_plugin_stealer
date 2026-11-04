@@ -36,6 +36,42 @@ def payload(monkeypatch, module, data):
     monkeypatch.setattr(module, "jsonify", lambda result: result)
 
 
+def test_unknown_config_key_is_rejected_without_partial_update(flow):
+    cfg = flow.cfg
+    assert not cfg.update_config({"steal_meme": True, "steal_meme_typo": True})
+    assert cfg.steal_meme is False
+    with pytest.raises(AttributeError):
+        _ = cfg.steal_meme_typo
+
+
+def test_main_does_not_implicitly_expose_config_fields(flow):
+    from astrbot_plugin_stealer.main import Main
+
+    main = Main.__new__(Main)
+    main.plugin_config = flow.cfg
+    assert main.plugin_config.steal_meme is False
+    with pytest.raises(AttributeError):
+        _ = main.steal_meme
+    with pytest.raises(AttributeError):
+        _ = main.steal_meme_typo
+
+
+@pytest.mark.asyncio
+async def test_live_config_updates_control_real_sender(flow):
+    from astrbot_plugin_stealer.core.events.meme_sender_engine import MemeSenderEngine
+    from astrbot_plugin_stealer.main import Main
+    from tests.test_auto_emoji_flow import DummyEvent
+
+    main = Main.__new__(Main)
+    main.plugin_config = flow.cfg
+    main.is_send_enabled_for_event = lambda event: True
+    engine = MemeSenderEngine(main)
+    assert flow.cfg.update_config({"auto_send_meme": True, "meme_chance": 1.0})
+    assert await engine.resolve_auto_emoji_turn_permission(DummyEvent())
+    assert flow.cfg.update_config({"auto_send_meme": False})
+    assert not await engine.resolve_auto_emoji_turn_permission(DummyEvent())
+
+
 def test_failed_backing_write_restores_runtime_cache_and_backing(tmp_path):
     class Backing(dict):
         def save_config(self, updates):

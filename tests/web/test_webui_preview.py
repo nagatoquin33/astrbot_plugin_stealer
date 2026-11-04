@@ -142,6 +142,21 @@ console.log(JSON.stringify(items.map(item => options.components.EmotionLabels.co
     ]
 
 
+def test_edit_emotions_deduplicates_selected_primary():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is needed to execute frontend logic")
+    script = r"""
+const fs = require('fs'), vm = require('vm');
+const source = fs.readFileSync(process.argv[1], 'utf8').replace(/^import .*?;\r?\n/gm, '');
+vm.runInNewContext(source + `\nconsole.log(JSON.stringify(editedEmotionKeys({category:'sad', emotions:['happy','sad','tired']})));`, {
+    Vue: { createApp() { return { mount() {} }; } }, TEMPLATE: '', EMOTION_LABELS_TEMPLATE: '', console
+});
+"""
+    result = subprocess.run([node, "-e", script, str(DASHBOARD_DIR / "app.js")], capture_output=True, text=True, check=True)
+    assert json.loads(result.stdout) == ["sad", "happy", "tired"]
+
+
 def test_external_import_origin_shows_channel_in_preview():
     node = shutil.which("node")
     if not node:

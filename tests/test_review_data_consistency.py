@@ -155,7 +155,7 @@ def fallback_fixture(tmp_path):
         return [1.0, 0.0] if model[0] == "model-a" or text == "query" else [0.0, 1.0]
     provider.get_embedding = AsyncMock(side_effect=embed)
     service = EmbeddingService(SimpleNamespace(db_service=db, enable_embedding_search=True,
-        plugin_config=SimpleNamespace(category_info={}, character_info={})))
+        plugin_config=SimpleNamespace(enable_embedding_search=True, embedding_provider_id="", category_info={}, character_info={})))
     service._get_provider = lambda: provider
     service._init_faiss = lambda: False
     return service, db, provider, model
@@ -196,7 +196,7 @@ async def test_unavailable_provider_does_not_consume_vector_refresh_jobs(tmp_pat
     db = DatabaseService(tmp_path / "emoji.db")
     await db.insert_batch([{"path": "a", "hash": "a", "category": "happy"}])
     db.delete_embedding = Mock(side_effect=AssertionError("must preserve vectors"))
-    plugin = SimpleNamespace(db_service=db, enable_embedding_search=True,
+    plugin = SimpleNamespace(db_service=db, plugin_config=SimpleNamespace(enable_embedding_search=True, embedding_provider_id=""),
                              context=SimpleNamespace(get_all_embedding_providers=lambda: []))
     service = EmbeddingService(plugin)
     plugin.meme_selector = SimpleNamespace(_smart_select_service=SimpleNamespace(_embedding_service=service))
@@ -206,7 +206,7 @@ async def test_unavailable_provider_does_not_consume_vector_refresh_jobs(tmp_pat
 
 def test_provider_registration_recovers_after_a_negative_probe():
     providers = []
-    service = EmbeddingService(SimpleNamespace(enable_embedding_search=True,
+    service = EmbeddingService(SimpleNamespace(plugin_config=SimpleNamespace(enable_embedding_search=True, embedding_provider_id=""),
         context=SimpleNamespace(get_all_embedding_providers=lambda: providers)))
     assert service._get_provider() is None
     service._faiss_available = False

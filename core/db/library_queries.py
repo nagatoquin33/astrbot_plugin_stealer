@@ -48,6 +48,7 @@ class LibraryQueries:
         favorite_only: bool = False,
         character: str | None = None,
         library: str = "",
+        include_secondary: bool = False,
     ) -> tuple[list[dict[str, Any]], int, dict[str, int]]:
         """分页获取表情包列表，支持过滤、搜索和排序。
 
@@ -80,8 +81,12 @@ class LibraryQueries:
 
             # 分类过滤
             if category:
-                where_clauses.append("e.category = ?")
-                params.append(category)
+                if include_secondary:
+                    where_clauses.append("(e.category = ? OR EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(e.emotions_json) THEN e.emotions_json ELSE '[]' END) j WHERE j.value = ?))")
+                    params.extend([category, category])
+                else:
+                    where_clauses.append("e.category = ?")
+                    params.append(category)
 
             if character == "__none__":
                 where_clauses.append("(e.character IS NULL OR e.character = '')")
@@ -142,6 +147,17 @@ class LibraryQueries:
                 FROM emoji e {category_count_where_sql}
                 GROUP BY e.category
             """
+            if include_secondary:
+                cat_count_sql = f"""
+                    SELECT category, COUNT(*) AS cnt FROM (
+                        SELECT e.path, e.category AS category FROM emoji e {category_count_where_sql}
+                        UNION
+                        SELECT e.path, j.value AS category FROM emoji e,
+                            json_each(CASE WHEN json_valid(e.emotions_json) THEN e.emotions_json ELSE '[]' END) j
+                        {category_count_where_sql}
+                    ) WHERE category IS NOT NULL AND category != '' GROUP BY category
+                """
+                category_count_params = category_count_params * 2
             cat_rows = conn.execute(cat_count_sql, category_count_params).fetchall()
             category_counts = {r["category"]: r["cnt"] for r in cat_rows}
 

@@ -63,12 +63,12 @@ class EmbeddingService:
 
     def _embedding_enabled(self) -> bool:
         """读取插件配置中的嵌入检索开关。"""
-        return getattr(self.plugin, "enable_embedding_search", False)
+        return self.plugin.plugin_config.enable_embedding_search
 
     def _reset_provider_state_if_changed(self) -> None:
         """配置开关或 provider ID 变化时重置 provider 探测状态。"""
         current_enable = self._embedding_enabled()
-        current_id = str(getattr(self.plugin, "embedding_provider_id", "") or "").strip()
+        current_id = str(self.plugin.plugin_config.embedding_provider_id or "").strip()
         if (
             self._last_enable_embedding_search != current_enable
             or self._last_embedding_provider_id != current_id
@@ -92,7 +92,7 @@ class EmbeddingService:
         if self._provider is not None:
             return self._provider
 
-        provider_id = getattr(self.plugin, "embedding_provider_id", None) or ""
+        provider_id = self.plugin.plugin_config.embedding_provider_id or ""
 
         # 1. 按配置的 ID 查找嵌入提供商。
         if provider_id:
@@ -247,7 +247,7 @@ class EmbeddingService:
 
     def is_available(self) -> bool:
         """嵌入检索是否可用。"""
-        if not getattr(self.plugin, "enable_embedding_search", False):
+        if not self.plugin.plugin_config.enable_embedding_search:
             return False
 
         if self._init_faiss():

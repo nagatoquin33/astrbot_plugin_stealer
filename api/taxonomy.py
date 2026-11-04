@@ -207,6 +207,41 @@ class TaxonomyRoutes:
             logger.error(f"更新角色列表失败: {e}", exc_info=True)
             return jsonify({"success": False, "error": str(e)})
 
+    async def handle_character_personas(self):
+        """读取人格名称并维护人格到角色的关联。"""
+        try:
+            manager = getattr(getattr(self.plugin, "context", None), "persona_manager", None)
+            personas = getattr(manager, "personas_v3", None)
+            if not isinstance(personas, list):
+                return jsonify({"success": False, "error": "无法获取人格列表"}), 503
+            ids = sorted({str(item.get("name") or "").strip() for item in personas
+                          if isinstance(item, dict) and str(item.get("name") or "").strip()})
+            mapping = dict(getattr(self._cfg, "persona_character_map", {}) or {})
+            if request.method == "POST":
+                data = await request.get_json() or {}
+                if "isolation" in data:
+                    if not isinstance(data["isolation"], bool):
+                        return jsonify({"success": False, "error": "开关状态无效"}), 400
+                    if not self._cfg.update_config({"persona_character_isolation": data["isolation"]}):
+                        raise OSError("人格隔离设置保存失败")
+                    return jsonify({"success": True, "personas": ids, "mapping": mapping,
+                                    "isolation": self._cfg.persona_character_isolation})
+                persona_id = str(data.get("persona_id") or "").strip()
+                character = self._normalize_character_key(str(data.get("character") or ""))
+                if persona_id not in ids and persona_id not in mapping:
+                    return jsonify({"success": False, "error": "人格不存在"}), 400
+                known = set(self._cfg.get_characters()) | set(self._db.get_character_counts())
+                if character and character not in known:
+                    return jsonify({"success": False, "error": "角色不存在"}), 400
+                mapping[persona_id] = character
+                if not self._cfg.update_config({"persona_character_map": mapping}):
+                    raise OSError("人格关联保存失败")
+            return jsonify({"success": True, "personas": ids, "mapping": mapping,
+                            "isolation": getattr(self._cfg, "persona_character_isolation", False)})
+        except Exception as e:
+            logger.error(f"人格关联操作失败: {e}", exc_info=True)
+            return jsonify({"success": False, "error": str(e)}), 500
+
     async def handle_delete_character(self):
         try:
             data = await request.get_json() or {}

@@ -26,7 +26,7 @@ def test_bm25_library_adapter_returns_true_top_k():
 def embedding_fixture(tmp_path):
     db = DatabaseService(tmp_path / "emoji.db")
     plugin = SimpleNamespace(db_service=db, enable_embedding_search=True, plugin_config=SimpleNamespace(
-        enable_embedding_search=True, category_info={}, character_info={}))
+        enable_embedding_search=True, embedding_provider_id="", category_info={}, character_info={}))
     service = EmbeddingService(plugin)
     sdk = SimpleNamespace(initialize=AsyncMock(), insert_batch=AsyncMock(return_value=[1]), delete_documents=AsyncMock(),
                           document_storage=SimpleNamespace(get_documents=AsyncMock(return_value=[])))
