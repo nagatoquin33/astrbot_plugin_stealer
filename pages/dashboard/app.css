@@ -8666,3 +8666,15 @@ html[data-theme="minecraft"],
 .persona-bind-controls select { min-width: 0; flex: 1; }
 
 .persona-isolation-control { display: flex; align-items: center; gap: 8px; color: var(--text-main); margin-bottom: 8px; cursor: pointer; }
+
+/* 图片详情中的原位编辑 */
+.editable-detail { cursor: pointer; }
+.editable-detail:hover { outline: 1px solid var(--gold-dark); }
+.detail-edit-link { color: inherit; background: none; border: 0; padding: 0; text-align: right; cursor: pointer; }
+.detail-edit-link:hover { color: var(--gold-primary); }
+.inline-edit-fields { overflow-y: auto; }
+.editable-labels { margin-bottom: 8px; }
+.editable-label { display: inline-flex; align-items: center; gap: 6px; }
+.editable-label button { border: 0; background: none; color: inherit; cursor: pointer; font-size: 1rem; line-height: 1; }
+.label-add-row { display: flex; gap: 8px; }
+.label-add-row .codex-input { min-width: 0; flex: 1; }

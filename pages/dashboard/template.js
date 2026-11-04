@@ -744,10 +744,10 @@ export const TEMPLATE = `
         </div>
 
         <div class="modal-content">
-            <div v-if="!isEditing" class="preview-stack">
+            <div class="preview-stack">
                 <div class="item-detail">
                 <div class="item-preview">
-                    <button v-if="previewListLength > 1" @click.stop="prevImage" class="nav-btn left"
+                    <button v-if="previewListLength > 1 && !isEditing" @click.stop="prevImage" class="nav-btn left"
                         :aria-label="t('pages.dashboard.pagination.prev', 'Previous')">
                         <svg style="width:24px;height:24px" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
@@ -765,7 +765,7 @@ export const TEMPLATE = `
                         @dblclick.prevent="toggleZoom">
                     <div v-if="previewLoading" class="preview-loading">{{ t('pages.dashboard.messages.loading_original', 'Loading full image…') }}</div>
 
-                    <button v-if="previewListLength > 1" @click.stop="nextImage" class="nav-btn right"
+                    <button v-if="previewListLength > 1 && !isEditing" @click.stop="nextImage" class="nav-btn right"
                         :aria-label="t('pages.dashboard.pagination.next', 'Next')">
                         <svg style="width:24px;height:24px" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
@@ -775,17 +775,16 @@ export const TEMPLATE = `
                     <div v-if="previewZoom > 1" class="zoom-indicator">{{ Math.round(previewZoom * 100) }}%</div>
                 </div>
 
-                <div class="item-stats">
+                <div v-if="!isEditing" class="item-stats">
                     <div class="stat-row">
                         <span class="stat-name">{{ t('pages.dashboard.fields.emotions', 'Emotions') }}</span>
-                        <button v-if="previewSource !== 'pending'" type="button" class="codex-btn" @click="startEdit" :title="t('pages.dashboard.actions.edit', 'Edit')"><emotion-labels :item="previewItem" :label="getCategoryName" /></button>
+                        <button v-if="previewSource !== 'pending'" type="button" class="codex-btn" @click="startEdit('category')" :title="t('pages.dashboard.actions.edit', 'Edit')"><emotion-labels :item="previewItem" :label="getCategoryName" /></button>
                         <emotion-labels v-else :item="previewItem" :label="getCategoryName" />
                     </div>
                     <div class="stat-row">
                         <span class="stat-name">{{ t('pages.dashboard.fields.scope', 'Scope') }}</span>
                         <span class="stat-value">
-                            <span class="scope-pill"
-                                :class="previewItem?.scope_mode === 'local' ? 'local' : 'public'">{{
+                            <span class="scope-pill" :class="[previewItem?.scope_mode === 'local' ? 'local' : 'public', { 'editable-detail': previewSource !== 'pending' }]" :role="previewSource !== 'pending' ? 'button' : undefined" :tabindex="previewSource !== 'pending' ? 0 : undefined" @click="previewSource !== 'pending' && startEdit('scope')" @keydown.enter.prevent="previewSource !== 'pending' && startEdit('scope')">{{
                                 getScopeLabel(previewItem?.scope_mode) }}</span>
                         </span>
                     </div>
@@ -823,23 +822,25 @@ export const TEMPLATE = `
                     <div class="stat-row">
                         <span class="stat-name">{{ t('pages.dashboard.fields.description', 'Description') }}</span>
                     </div>
-                    <div class="desc-quote">
+                    <div class="desc-quote" :class="{ 'editable-detail': previewSource !== 'pending' }" :role="previewSource !== 'pending' ? 'button' : undefined" :tabindex="previewSource !== 'pending' ? 0 : undefined" @click="previewSource !== 'pending' && startEdit('desc')" @keydown.enter.prevent="previewSource !== 'pending' && startEdit('desc')">
                         <p style="margin:0;color:var(--text-main);font-style:italic">
                             {{ previewItem?.desc || t('pages.dashboard.messages.no_description', 'No description') }}
                         </p>
                     </div>
                     <div class="stat-row">
                         <span class="stat-name">{{ t('pages.dashboard.fields.character', '角色') }}</span>
-                        <span class="stat-value">{{ characterLabel(previewItem?.character) }}</span>
+                        <button v-if="previewSource !== 'pending'" type="button" class="detail-edit-link" @click="startEdit('character')">{{ characterLabel(previewItem?.character) }}</button>
+                        <span v-else class="stat-value">{{ characterLabel(previewItem?.character) }}</span>
                     </div>
                     <div class="stat-row">
                         <span class="stat-name">{{ t('pages.dashboard.fields.overlay_text', '图上文字') }}</span>
-                        <span class="stat-value">{{ previewItem?.overlay_text || t('pages.dashboard.messages.no_overlay_text', '无') }}</span>
+                        <button v-if="previewSource !== 'pending'" type="button" class="detail-edit-link" @click="startEdit('overlay')">{{ previewItem?.overlay_text || t('pages.dashboard.messages.no_overlay_text', '无') }}</button>
+                        <span v-else class="stat-value">{{ previewItem?.overlay_text || t('pages.dashboard.messages.no_overlay_text', '无') }}</span>
                     </div>
                     <div class="stat-row">
                         <span class="stat-name">{{ t('pages.dashboard.fields.tags', 'Tags') }}</span>
                     </div>
-                    <div class="item-tags" style="margin-bottom:12px">
+                    <div class="item-tags" style="margin-bottom:12px" :class="{ 'editable-detail': previewSource !== 'pending' }" :role="previewSource !== 'pending' ? 'button' : undefined" :tabindex="previewSource !== 'pending' ? 0 : undefined" @click="previewSource !== 'pending' && startEdit('tags')" @keydown.enter.prevent="previewSource !== 'pending' && startEdit('tags')">
                         <span v-for="tag in (previewItem?.tags || [])" :key="tag" class="tag">
                             {{ tag }}
                         </span>
@@ -849,7 +850,7 @@ export const TEMPLATE = `
                     <div class="stat-row">
                         <span class="stat-name">{{ t('pages.dashboard.fields.scenes', 'Scenes') }}</span>
                     </div>
-                    <div class="item-tags" style="margin-bottom:12px">
+                    <div class="item-tags" style="margin-bottom:12px" :class="{ 'editable-detail': previewSource !== 'pending' }" :role="previewSource !== 'pending' ? 'button' : undefined" :tabindex="previewSource !== 'pending' ? 0 : undefined" @click="previewSource !== 'pending' && startEdit('scene')" @keydown.enter.prevent="previewSource !== 'pending' && startEdit('scene')">
                         <span v-for="scene in (previewItem?.scenes || [])" :key="scene" class="tag scene-tag">
                             {{ scene }}
                         </span>
@@ -865,9 +866,93 @@ export const TEMPLATE = `
                         <span class="stat-value" style="font-size:var(--fs-xs);word-break:break-all">{{ previewItem?.hash?.slice(0, 16) }}...</span>
                     </div>
                 </div>
+                <div v-else class="item-stats inline-edit-fields">
+                    <div style="margin-bottom:20px">
+                        <label
+                            class="form-label">{{ t('pages.dashboard.fields.category', 'Category') }}</label>
+                        <select v-model="editForm.category" data-edit-field="category" class="codex-input">
+                            <option v-for="cat in categories" :key="cat.key" :value="cat.key">{{ cat.name }}</option>
+                        </select>
+                    </div>
+
+                    <div style="margin-bottom:20px">
+                        <label class="form-label">{{ t('pages.dashboard.fields.secondary_emotions', 'Secondary emotions') }}</label>
+                        <div class="item-tags editable-labels">
+                            <span v-for="key in editForm.emotions.filter((key) => key !== editForm.category)" :key="key" class="tag editable-label">
+                                {{ getCategoryName(key) }}
+                                <button type="button" @click="removeEditEmotion(key)" :aria-label="t('pages.dashboard.actions.remove', 'Remove') + ' ' + getCategoryName(key)">×</button>
+                            </span>
+                        </div>
+                        <div class="label-add-row">
+                            <select v-model="newEditEmotion" class="codex-input" :aria-label="t('pages.dashboard.fields.secondary_emotions', 'Secondary emotions')">
+                                <option value="">{{ t('pages.dashboard.placeholders.select', 'Select...') }}</option>
+                                <option v-for="cat in categories.filter((item) => item.key !== editForm.category && !editForm.emotions.includes(item.key))" :key="cat.key" :value="cat.key">{{ cat.name }}</option>
+                            </select>
+                            <button type="button" class="codex-btn" :disabled="!newEditEmotion" :aria-label="t('pages.dashboard.actions.add', 'Add') + ' ' + t('pages.dashboard.fields.secondary_emotions', 'Secondary emotions')" @click="addEditEmotion">+</button>
+                        </div>
+                    </div>
+
+                    <div style="margin-bottom:20px">
+                        <label
+                            class="form-label">{{ t('pages.dashboard.fields.scope', 'Scope') }}</label>
+                        <select v-model="editForm.scope_mode" data-edit-field="scope" class="codex-input">
+                            <option value="public">{{ t('pages.dashboard.scope.public', 'Public') }}</option>
+                            <option value="local">{{ t('pages.dashboard.scope.local', 'Local only') }}</option>
+                        </select>
+                        <div class="form-hint">{{ t('pages.dashboard.fields.origin', 'Origin') }}: {{ formatItemOrigin(previewItem) }}</div>
+                    </div>
+
+                    <div style="margin-bottom:20px">
+                        <label
+                            class="form-label">{{ t('pages.dashboard.fields.description', 'Description') }}</label>
+                        <textarea v-model="editForm.desc" data-edit-field="desc" class="codex-input" rows="3"></textarea>
+                    </div>
+
+                    <div style="margin-bottom:20px">
+                        <label class="form-label">{{ t('pages.dashboard.fields.character', '角色') }}</label>
+                        <select v-model="editForm.character" data-edit-field="character" class="codex-input">
+                            <option value="">{{ t('pages.dashboard.characters.unassigned', '通用表情库') }}</option>
+                            <option v-for="item in characters" :key="item.key" :value="item.key">{{ item.name }}</option>
+                        </select>
+                    </div>
+
+                    <div style="margin-bottom:20px">
+                        <label class="form-label">{{ t('pages.dashboard.fields.overlay_text', '图上文字') }}</label>
+                        <input v-model="editForm.overlay_text" data-edit-field="overlay" type="text" class="codex-input"
+                            :placeholder="t('pages.dashboard.placeholders.overlay_text', '图上印的字')">
+                    </div>
+
+                    <div style="margin-bottom:20px">
+                        <label
+                            class="form-label">{{ t('pages.dashboard.fields.scenes', 'Scenes') }} ({{ t('pages.dashboard.messages.scene_separator_hint', 'comma separated') }})</label>
+                        <div class="item-tags editable-labels">
+                            <span v-for="item in parseSceneList(editForm.scene)" :key="item" class="tag editable-label">
+                                {{ item }}<button type="button" @click="removeEditLabel('scene', item)" :aria-label="t('pages.dashboard.actions.remove', 'Remove') + ' ' + item">×</button>
+                            </span>
+                        </div>
+                        <div class="label-add-row">
+                            <input v-model="newEditScene" data-edit-field="scene" type="text" class="codex-input" :aria-label="t('pages.dashboard.fields.scenes', 'scenes')" @keydown.enter.prevent="addEditLabel('scene')">
+                            <button type="button" class="codex-btn" :disabled="!newEditScene.trim()" :aria-label="t('pages.dashboard.actions.add', 'Add') + ' ' + t('pages.dashboard.fields.scenes', 'Scenes')" @click="addEditLabel('scene')">+</button>
+                        </div>
+                    </div>
+
+                    <div style="margin-bottom:20px">
+                        <label
+                            class="form-label">{{ t('pages.dashboard.fields.tags', 'Tags') }} ({{ t('pages.dashboard.messages.tag_separator_hint', 'comma separated') }})</label>
+                        <div class="item-tags editable-labels">
+                            <span v-for="item in parseListField(editForm.tags)" :key="item" class="tag editable-label">
+                                {{ item }}<button type="button" @click="removeEditLabel('tags', item)" :aria-label="t('pages.dashboard.actions.remove', 'Remove') + ' ' + item">×</button>
+                            </span>
+                        </div>
+                        <div class="label-add-row">
+                            <input v-model="newEditTag" data-edit-field="tags" type="text" class="codex-input" :aria-label="t('pages.dashboard.fields.tags', 'tags')" @keydown.enter.prevent="addEditLabel('tags')">
+                            <button type="button" class="codex-btn" :disabled="!newEditTag.trim()" :aria-label="t('pages.dashboard.actions.add', 'Add') + ' ' + t('pages.dashboard.fields.tags', 'Tags')" @click="addEditLabel('tags')">+</button>
+                        </div>
+                    </div>
+                </div>
                 </div>
 
-                <div v-if="previewSource !== 'pending'" class="vlm-reanalysis-panel">
+                <div v-if="previewSource !== 'pending' && !isEditing" class="vlm-reanalysis-panel">
                     <div class="vlm-reanalysis-toolbar">
                         <div>
                             <div class="vlm-reanalysis-title">{{ t('pages.dashboard.analysis.reanalysis_title', 'VLM re-analysis') }}</div>
@@ -904,70 +989,7 @@ export const TEMPLATE = `
                 </div>
             </div>
 
-            <div v-else class="modal-pad" style="width:100%">
-                <div style="max-width:500px;margin:0 auto">
-                    <div style="margin-bottom:20px">
-                        <label
-                            class="form-label">{{ t('pages.dashboard.fields.category', 'Category') }}</label>
-                        <select v-model="editForm.category" class="codex-input">
-                            <option v-for="cat in categories" :key="cat.key" :value="cat.key">{{ cat.name }}</option>
-                        </select>
-                    </div>
 
-                    <div style="margin-bottom:20px">
-                        <label class="form-label">{{ t('pages.dashboard.fields.secondary_emotions', 'Secondary emotions') }}</label>
-                        <div class="item-tags">
-                            <label v-for="cat in categories.filter((item) => item.key !== editForm.category)" :key="cat.key" class="tag" style="cursor:pointer">
-                                <input type="checkbox" :value="cat.key" v-model="editForm.emotions"> {{ cat.name }}
-                            </label>
-                        </div>
-                    </div>
-
-                    <div style="margin-bottom:20px">
-                        <label
-                            class="form-label">{{ t('pages.dashboard.fields.scope', 'Scope') }}</label>
-                        <select v-model="editForm.scope_mode" class="codex-input">
-                            <option value="public">{{ t('pages.dashboard.scope.public', 'Public') }}</option>
-                            <option value="local">{{ t('pages.dashboard.scope.local', 'Local only') }}</option>
-                        </select>
-                        <div class="form-hint">{{ t('pages.dashboard.fields.origin', 'Origin') }}: {{ formatItemOrigin(previewItem) }}</div>
-                    </div>
-
-                    <div style="margin-bottom:20px">
-                        <label
-                            class="form-label">{{ t('pages.dashboard.fields.description', 'Description') }}</label>
-                        <textarea v-model="editForm.desc" class="codex-input" rows="3"></textarea>
-                    </div>
-
-                    <div style="margin-bottom:20px">
-                        <label class="form-label">{{ t('pages.dashboard.fields.character', '角色') }}</label>
-                        <select v-model="editForm.character" class="codex-input">
-                            <option value="">{{ t('pages.dashboard.characters.unassigned', '通用表情库') }}</option>
-                            <option v-for="item in characters" :key="item.key" :value="item.key">{{ item.name }}</option>
-                        </select>
-                    </div>
-
-                    <div style="margin-bottom:20px">
-                        <label class="form-label">{{ t('pages.dashboard.fields.overlay_text', '图上文字') }}</label>
-                        <input v-model="editForm.overlay_text" type="text" class="codex-input"
-                            :placeholder="t('pages.dashboard.placeholders.overlay_text', '图上印的字')">
-                    </div>
-
-                    <div style="margin-bottom:20px">
-                        <label
-                            class="form-label">{{ t('pages.dashboard.fields.scenes', 'Scenes') }} ({{ t('pages.dashboard.messages.scene_separator_hint', 'comma separated') }})</label>
-                        <input v-model="editForm.scene" type="text" class="codex-input"
-                            :placeholder="t('pages.dashboard.placeholders.edit_scene', 'Example: celebration, happy')">
-                    </div>
-
-                    <div style="margin-bottom:20px">
-                        <label
-                            class="form-label">{{ t('pages.dashboard.fields.tags', 'Tags') }} ({{ t('pages.dashboard.messages.tag_separator_hint', 'comma separated') }})</label>
-                        <input v-model="editForm.tags" type="text" class="codex-input"
-                            :placeholder="t('pages.dashboard.placeholders.edit_tags', 'Example: cute, funny, rare')">
-                    </div>
-                </div>
-            </div>
         </div>
 
         <div class="modal-actions">
@@ -1037,8 +1059,8 @@ export const TEMPLATE = `
                 </button>
             </template>
             <template v-else>
-                <button @click="cancelEdit" class="codex-btn" style="flex:1">{{ t('pages.dashboard.actions.cancel', 'Cancel') }}</button>
-                <button @click="saveEdit" class="codex-btn primary" style="flex:1">{{ t('pages.dashboard.actions.save', 'Save') }}</button>
+                <button @click="cancelEdit" :disabled="savingEdit" class="codex-btn" style="flex:1">{{ t('pages.dashboard.actions.cancel', 'Cancel') }}</button>
+                <button @click="saveEdit" :disabled="savingEdit" class="codex-btn primary" style="flex:1">{{ t('pages.dashboard.actions.save', 'Save') }}</button>
             </template>
         </div>
     </div>

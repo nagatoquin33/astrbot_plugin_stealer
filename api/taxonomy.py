@@ -7,7 +7,7 @@ from quart import jsonify, request
 
 from astrbot.api import logger
 
-from ..core.db.index_manager import delete_index_paths, invalidate_search
+from ..core.db.index_manager import delete_index_paths, invalidate_search, refresh_search_entries
 from ..core.util.normalization import (
     normalize_category_key,
 )
@@ -138,10 +138,18 @@ class TaxonomyRoutes:
 
             if self._db.get_category_counts().get(key, 0):
                 raise RuntimeError("分类中仍有未能删除的图片，已保留分类")
-            info = dict(self._cfg.category_info or {})
+            previous_info = dict(self._cfg.category_info or {})
+            info = dict(previous_info)
             info.pop(key, None)
             if not self.plugin.update_config({"categories": updated, "category_info": info}):
                 raise OSError("分类配置保存失败")
+            try:
+                affected = await self._db.remove_emotion_label(key)
+            except Exception:
+                if not self.plugin.update_config({"categories": cur_cats, "category_info": previous_info}):
+                    logger.error("删除分类失败后无法恢复分类配置")
+                raise
+            await refresh_search_entries(self.plugin, affected)
 
             return jsonify(
                 {"success": True, "deleted": key, "categories": updated, "deleted_files": deleted}

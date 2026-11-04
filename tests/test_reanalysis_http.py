@@ -68,7 +68,7 @@ async def http_flow(tmp_path):
     for job in db.get_search_refresh_jobs():
         db.finish_search_refresh(job["path"], job["generation"])
     try:
-        yield SimpleNamespace(client=app.test_client(), db=db, service=service,
+        yield SimpleNamespace(client=app.test_client(), db=db, service=service, cfg=cfg,
                               scheduler=plugin.task_scheduler, llm=llm, paths=paths, hashes=hashes)
     finally:
         await service.close()
@@ -172,3 +172,16 @@ async def test_http_errors_keep_transport_contract(http_flow, monkeypatch):
     failure = await flow.client.post(BASE, json={"hashes": flow.hashes})
     assert failure.status_code == 500
     assert (await failure.get_json())["error"] == "internal failure"
+
+
+@pytest.mark.asyncio
+async def test_reanalysis_rejects_emotion_removed_before_review(http_flow):
+    flow = http_flow
+    started = await flow.client.post(BASE, json={"hashes": [flow.hashes[0]]})
+    task_id = (await started.get_json())["task"]["id"]
+    await finish(flow)
+    before = flow.db.get_emoji(flow.paths[0])
+    assert flow.cfg.update_config({"categories": [key for key in flow.cfg.categories if key != "happy"]})
+    response = await flow.client.post(BASE + "/review", json={"task_id": task_id, "hash": flow.hashes[0], "decision": "save"})
+    assert response.status_code == 409
+    assert flow.db.get_emoji(flow.paths[0]) == before

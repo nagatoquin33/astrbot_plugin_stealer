@@ -178,3 +178,23 @@ async def test_pending_capacity_is_enforced_at_commit(review):
     Image.new('RGB', (32, 32), 'blue').save(path)
     assert (await review.processor.process_image(None, str(path), is_temp=True, to_pending=True))[0] is False
     assert review.db.count_pending() == 1 and path.exists()
+
+
+@pytest.mark.asyncio
+async def test_pending_analysis_discards_emotion_removed_during_model_call(review):
+    pending_id = await collect(review)
+    started, release = asyncio.Event(), asyncio.Event()
+    async def classify(*args, **kwargs):
+        started.set()
+        await release.wait()
+        return 'happy', [], 'description', 'happy', [], '', ['happy', 'sad']
+    review.processor.classify_image = AsyncMock(side_effect=classify)
+    assert (await review.api._approve_one(review.db, pending_id))[0]
+    task = asyncio.create_task(review.worker.process_one())
+    await started.wait()
+    cfg = review.plugin.plugin_config
+    assert cfg.update_config({'categories': [key for key in cfg.categories if key != 'sad']})
+    release.set()
+    await task
+    entry = next(iter(review.db.get_index_cache_readonly().values()))
+    assert entry['emotions'] == ['happy']

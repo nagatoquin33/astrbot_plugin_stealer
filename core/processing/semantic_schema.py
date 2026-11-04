@@ -17,6 +17,13 @@ MAX_OVERLAY_CHARS = 80
 MAX_DESC_CHARS = 80
 
 
+def validate_emotion_labels(values: list[str], categories: list[str]) -> None:
+    """拒绝写入已从分类配置删除的情绪标签。"""
+    invalid = [value for value in values if value not in categories]
+    if invalid:
+        raise ValueError("情绪分类已被移除，请重新选择：" + ", ".join(invalid))
+
+
 def as_label_list(value: Any) -> list[str]:
     if isinstance(value, str):
         text = value.strip()

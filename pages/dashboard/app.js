@@ -171,6 +171,10 @@ createApp({
         const previewItem = ref(null);
         const previewSource = ref('library');
         const isEditing = ref(false);
+        const savingEdit = ref(false);
+        const newEditEmotion = ref('');
+        const newEditTag = ref('');
+        const newEditScene = ref('');
         const editForm = reactive({ category: '', emotions: [], tags: '', scene: '', desc: '', overlay_text: '', character: '', scope_mode: 'public' });
         const vlmReanalysisLoading = ref(false);
         const vlmReanalysisApplying = ref(false);
@@ -1290,6 +1294,7 @@ createApp({
         };
 
         const closePreview = () => {
+            if (savingEdit.value) return;
             previewOpen.value = false;
             previewItem.value = null;
             previewSource.value = 'library';
@@ -1532,8 +1537,31 @@ createApp({
             }
         };
 
-        const startEdit = () => {
-            if (!previewItem.value) return;
+        const addEditEmotion = () => {
+            const key = newEditEmotion.value;
+            if (key && key !== editForm.category && !editForm.emotions.includes(key)) editForm.emotions.push(key);
+            newEditEmotion.value = '';
+        };
+        const removeEditEmotion = (key) => {
+            editForm.emotions = editForm.emotions.filter((item) => item !== key);
+        };
+        const addEditLabel = (field) => {
+            const isScene = field === 'scene';
+            const input = isScene ? newEditScene : newEditTag;
+            const values = isScene ? parseSceneList(editForm.scene) : parseListField(editForm.tags);
+            const additions = isScene ? parseSceneList(input.value) : parseListField(input.value);
+            editForm[field] = [...new Set([...values, ...additions])].join(', ');
+            input.value = '';
+        };
+        const removeEditLabel = (field, value) => {
+            const values = field === 'scene' ? parseSceneList(editForm.scene) : parseListField(editForm.tags);
+            editForm[field] = values.filter((item) => item !== value).join(', ');
+        };
+        const startEdit = (field = '') => {
+            if (!previewItem.value || previewSource.value === 'pending') return;
+            newEditEmotion.value = '';
+            newEditTag.value = '';
+            newEditScene.value = '';
             Object.assign(editForm, {
                 category: previewItem.value.category,
                 emotions: emotionKeys(previewItem.value).filter((key) => key !== previewItem.value.category),
@@ -1545,14 +1573,22 @@ createApp({
                 scope_mode: previewItem.value.scope_mode || 'public',
             });
             isEditing.value = true;
+            if (typeof field === 'string' && field) {
+                nextTick(() => document.querySelector(`[data-edit-field="${field}"]`)?.focus());
+            }
         };
 
         const cancelEdit = () => {
+            if (savingEdit.value) return;
             isEditing.value = false;
         };
 
         const saveEdit = async () => {
-            if (!previewItem.value) return;
+            if (!previewItem.value || savingEdit.value) return;
+            savingEdit.value = true;
+            if (newEditEmotion.value) addEditEmotion();
+            if (newEditTag.value.trim()) addEditLabel('tags');
+            if (newEditScene.value.trim()) addEditLabel('scene');
             try {
                 const res = await apiFetch('api/images/update', {
                     method: 'POST',
@@ -1581,6 +1617,8 @@ createApp({
                 }
             } catch (e) {
                 showAlert(`${t('pages.dashboard.alerts.save_failed', 'Save failed')}: ${e.message}`, 'error');
+            } finally {
+                savingEdit.value = false;
             }
         };
 
@@ -2710,6 +2748,15 @@ createApp({
             previewSource,
             previewListLength,
             isEditing,
+            savingEdit,
+            newEditEmotion,
+            newEditTag,
+            newEditScene,
+            addEditEmotion,
+            removeEditEmotion,
+            addEditLabel,
+            removeEditLabel,
+            parseSceneList,
             libraryCategoryTotal,
             editForm,
             vlmReanalysisLoading,

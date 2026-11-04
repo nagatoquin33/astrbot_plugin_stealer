@@ -764,8 +764,8 @@ class PreviewServer:
                 if isinstance(raw_emotions, list)
                 else [value.strip() for value in str(raw_emotions).split(",") if value.strip()]
             )
-        if payload.get("scenes") is not None:
-            raw = payload["scenes"]
+        if payload.get("scenes", payload.get("scene")) is not None:
+            raw = payload.get("scenes", payload.get("scene"))
             parts = raw if isinstance(raw, list) else str(raw).replace("，", ",").replace("、", ",").split(",")
             item["scenes"] = [p.strip() for p in parts if str(p).strip()]
         scope = str(payload.get("scope_mode") or "").strip().lower()
@@ -773,6 +773,8 @@ class PreviewServer:
             if scope == "local" and not str(item.get("origin_target", "")).strip():
                 return {"success": False, "error": "Origin target missing"}
             item["scope_mode"] = "local" if scope == "local" else "public"
+        if payload.get("character") is not None:
+            item["character"] = str(payload["character"] or "")
         if payload.get("is_favorite") is not None:
             item["is_favorite"] = 1 if payload["is_favorite"] else 0
         return {"success": True}

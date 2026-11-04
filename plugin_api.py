@@ -12,7 +12,7 @@ from astrbot.api import logger
 
 from .core.util.blacklist import add_blacklist_hash
 from .core.db.index_manager import refresh_search_entry
-from .core.processing.semantic_schema import SEARCH_METADATA_FIELDS
+from .core.processing.semantic_schema import SEARCH_METADATA_FIELDS, validate_emotion_labels
 from .core.util.normalization import (
     canonicalize_path,
     normalize_character_key,
@@ -145,6 +145,8 @@ class PluginAPI(
                 raise RuntimeError("update image metadata failed")
         if category not in self._cfg.categories:
             raise ValueError("分类已被移除，请重新选择分类")
+        if updates and "emotions" in updates:
+            validate_emotion_labels(updates["emotions"], self._cfg.categories)
         await commit_image_file(old, new, commit_move)
 
     def _find_index_entry_by_hash(self, img_hash: str) -> tuple[str, dict[str, Any]] | None:

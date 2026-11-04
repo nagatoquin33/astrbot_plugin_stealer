@@ -157,6 +157,46 @@ vm.runInNewContext(source + `\nconsole.log(JSON.stringify(editedEmotionKeys({cat
     assert json.loads(result.stdout) == ["sad", "happy", "tired"]
 
 
+def test_inline_editor_saves_label_changes_and_pending_drafts():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is needed to execute frontend logic")
+    script = r"""
+const fs = require('fs'), vm = require('vm');
+let options, payload;
+const source = fs.readFileSync(process.argv[1], 'utf8').replace(/^import .*?;\r?\n/gm, '');
+const ref = value => ({value});
+const bridge = {
+  apiPost: async (endpoint, body) => { if (endpoint === 'images/update') payload = body; return {success:true}; },
+  apiGet: async () => ({success:true, images:[], categories:[], stats:{}}),
+};
+const context = {
+  Vue: {createApp(value) { options = value; return {mount(){}}; }, ref, reactive: x => x,
+        computed: fn => ({get value(){return fn();}}), onMounted(){}, onUnmounted(){}, nextTick(){}},
+  window: {AstrBotPluginPage:bridge}, document:{querySelectorAll:()=>[]},
+  TEMPLATE:'', EMOTION_LABELS_TEMPLATE:'', ImagePreviewClient:class {},
+  createSourceActions:()=>({}), createBatchReanalysis:()=>({}),
+  URLSearchParams, FormData, console, setTimeout, clearTimeout,
+};
+vm.runInNewContext(source, context);
+(async () => {
+  const ui=options.setup();
+  ui.previewItem.value={hash:'h',category:'happy',emotions:['happy','sad'],tags:['old'],scenes:['old scene'],desc:'desc'};
+  ui.startEdit();
+  ui.removeEditEmotion('sad'); ui.newEditEmotion.value='tired';
+  ui.removeEditLabel('tags','old'); ui.newEditTag.value='new tag';
+  ui.removeEditLabel('scene','old scene'); ui.newEditScene.value='new scene';
+  await ui.saveEdit();
+  console.log(JSON.stringify(payload));
+})().catch(error => { console.error(error); process.exitCode=1; });
+"""
+    result = subprocess.run([node, "-e", script, str(DASHBOARD_DIR / "app.js")], capture_output=True, text=True, check=True)
+    payload = json.loads(result.stdout)
+    assert payload["hash"] == "h"
+    assert payload["emotions"] == ["happy", "tired"]
+    assert payload["tags"] == "new tag" and payload["scene"] == "new scene"
+
+
 def test_external_import_origin_shows_channel_in_preview():
     node = shutil.which("node")
     if not node:

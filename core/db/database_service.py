@@ -148,6 +148,40 @@ class DatabaseService(
         entry["character"] = str(entry.get("character") or "").strip()
         return entry
 
+    async def remove_emotion_label(self, label: str) -> list[str]:
+        """从正式库和待审核池的情绪列表移除指定标签。"""
+        async with self._write_lock:
+            return await asyncio.to_thread(self._remove_emotion_label_sync, label)
+
+    def _remove_emotion_label_sync(self, label: str) -> list[str]:
+        changed_paths = []
+        with self._get_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                for table in ("emoji", "emoji_pending"):
+                    rows = conn.execute(f"SELECT path, emotions_json FROM {table} WHERE emotions_json IS NOT NULL").fetchall()
+                    for row in rows:
+                        emotions = self._load_emotions_json(row["emotions_json"])
+                        if label not in emotions:
+                            continue
+                        remaining = [item for item in emotions if item != label]
+                        conn.execute(f"UPDATE {table} SET emotions_json = ? WHERE path = ?",
+                                     (self._dump_emotions_json(remaining), row["path"]))
+                        if table == "emoji":
+                            changed_paths.append(row["path"])
+                rows = conn.execute("SELECT path, manual_fields FROM emoji_pending WHERE category = ?", (label,)).fetchall()
+                for row in rows:
+                    manual = set(json.loads(row["manual_fields"] or "[]"))
+                    manual.discard("category")
+                    conn.execute("UPDATE emoji_pending SET category = '', manual_fields = ? WHERE path = ?",
+                                 (json.dumps(sorted(manual)), row["path"]))
+                conn.execute("COMMIT")
+                return changed_paths
+            except Exception:
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
+                raise
+
     def get_character_counts(self, *, exclude_favorites: bool = False) -> dict[str, int]:
         with self._get_connection() as conn:
             rows = conn.execute(
@@ -676,6 +710,11 @@ class DatabaseService(
                 }
                 if "emotions" in updates and "emotions_json" not in scalar:
                     scalar["emotions_json"] = self._dump_emotions_json(updates["emotions"]) or "[]"
+                elif "emotions_json" not in scalar and category != row["category"]:
+                    old_primary = str(row["category"] or "")
+                    secondary = [item for item in self._load_emotions_json(row["emotions_json"])
+                                 if item not in {old_primary, category}]
+                    scalar["emotions_json"] = self._dump_emotions_json([category, *secondary])
 
                 conn.execute(
                     self._INSERT_EMOJI_SQL,

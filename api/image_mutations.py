@@ -11,6 +11,7 @@ from quart import jsonify, request
 from astrbot.api import logger
 
 from ..core.db.index_manager import delete_index_paths
+from ..core.processing.semantic_schema import validate_emotion_labels
 from ..core.util.safe_io import protect_file, safe_remove_file
 
 class ImageMutationRoutes:
@@ -117,8 +118,12 @@ class ImageMutationRoutes:
                 new_path = self._unique_path(target_dir, old_path.name)
                 await self._move_image_file(target, str(new_path), new_cat, updates)
             elif updates:
-                if not await self._update_index_path(target, updates):
-                    return jsonify({"success": False, "error": "Update index failed"})
+                async with self._db.file_lock:
+                    if "emotions" in updates:
+                        allowed = [*self._cfg.categories, str(meta.get("category") or "")]
+                        validate_emotion_labels(updates["emotions"], allowed)
+                    if not await self._update_index_path(target, updates):
+                        return jsonify({"success": False, "error": "Update index failed"})
             return jsonify({"success": True})
         except Exception as e:
             logger.error(f"更新图片失败: {e}", exc_info=True)

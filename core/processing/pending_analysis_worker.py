@@ -41,15 +41,20 @@ class PendingAnalysisWorker:
                 if not category:
                     raise ValueError('识图失败，请检查视觉模型后重试')
                 cfg = self.plugin.plugin_config
-                if category not in cfg.categories:
-                    category = cfg.closest_category(category)
-                fields = dict(category=category, tags=tags, desc=desc, scenes=scenes, overlay_text=text, emotions=emotions)
-                manual = set(json.loads(row['manual_fields']))
-                fields = {key: value for key, value in fields.items() if key not in manual}
-                if not fields:
-                    fields = {'category': row['category'] or category}
-                if not await db.update_pending(pending_id, fields, from_analysis=True):
-                    raise RuntimeError('识图结果保存失败')
+                async with db.file_lock:
+                    if category not in cfg.categories:
+                        category = cfg.closest_category(category)
+                    emotions = [item for item in (emotions or []) if item in cfg.categories]
+                    fields = dict(category=category, tags=tags, desc=desc, scenes=scenes, overlay_text=text, emotions=emotions)
+                    current = await asyncio.to_thread(db.get_pending, pending_id)
+                    if current is None:
+                        raise RuntimeError('待审核记录已删除')
+                    manual = set(json.loads(current['manual_fields']))
+                    fields = {key: value for key, value in fields.items() if key not in manual}
+                    if not fields:
+                        fields = {'category': row['category'] or category}
+                    if not await db.update_pending(pending_id, fields, from_analysis=True):
+                        raise RuntimeError('识图结果保存失败')
             # 文件发布与元数据提升由独立业务服务处理。
             ok, error = await promote_pending(self.plugin, pending_id)
             if not ok:

@@ -9,6 +9,7 @@ from pathlib import Path
 from astrbot.api import logger
 
 
+from .semantic_schema import validate_emotion_labels
 from .library_analysis import (
     ANALYSIS_FIELDS, analyze_library_image, ReanalysisInputError,
     ReanalysisNotFoundError, ReanalysisConflictError,
@@ -160,12 +161,20 @@ class BatchReanalysisService:
                 return self.snapshot()
 
             async def commit():
-                if not await self.db.update_path(item["path"], item["after"], expected=item["before"]):
-                    self._resolve_review(item, "conflict")
-                    error = "图片已被修改或删除，未保存此分析结果，请重新分析"
-                    self._job["errors"].append({"hash": image_hash, "status": "conflict", "error": error})
-                    raise ReanalysisConflictError(error)
-                self._resolve_review(item, "saved")
+                async with self.db.file_lock:
+                    try:
+                        validate_emotion_labels(item["after"].get("emotions", []), self.config.categories)
+                    except ValueError as exc:
+                        self._resolve_review(item, "conflict")
+                        error = f"{exc}，请重新分析"
+                        self._job["errors"].append({"hash": image_hash, "status": "conflict", "error": error})
+                        raise ReanalysisConflictError(error) from exc
+                    if not await self.db.update_path(item["path"], item["after"], expected=item["before"]):
+                        self._resolve_review(item, "conflict")
+                        error = "图片已被修改或删除，未保存此分析结果，请重新分析"
+                        self._job["errors"].append({"hash": image_hash, "status": "conflict", "error": error})
+                        raise ReanalysisConflictError(error)
+                    self._resolve_review(item, "saved")
                 await self.on_updated(item["path"])
 
             # 请求断开或插件卸载时，等待已经获准的原子写回完成。

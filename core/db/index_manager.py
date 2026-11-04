@@ -34,6 +34,14 @@ def _wake_search_worker(plugin) -> bool:
     return False
 
 
+async def refresh_search_entries(plugin, paths: list[str]) -> None:
+    """批量元数据更新后统一失效并通知搜索索引。"""
+    if not paths:
+        return
+    invalidate_search(plugin)
+    _wake_search_worker(plugin)
+
+
 async def refresh_search_entry(plugin, path: str, entry=None, *, previous_path: str | None = None) -> None:
     """提交后刷新检索；后台 worker 可用时只发送通知。"""
     invalidate_search(plugin)
