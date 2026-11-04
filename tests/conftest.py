@@ -83,6 +83,7 @@ def _install_compatible_stubs() -> None:
             return _decorator(*args, **kwargs)
 
     filter_stub = types.SimpleNamespace(
+        on_astrbot_loaded=_decorator,
         on_platform_loaded=_decorator,
         on_decorating_result=_decorator,
         on_llm_response=_decorator,
