@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.1] - 2026-11-05
+
+### fixed
+- 修复冷启动时嵌入检索在 Provider 加载前探测，导致误报不可用和缓存错误状态的问题（#124）。
+
 ## [3.2.0] - 2026-11-04
 
 ### added
