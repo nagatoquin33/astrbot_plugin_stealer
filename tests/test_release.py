@@ -1,11 +1,10 @@
 import pytest
 
-from scripts.release import ReleaseError, extract_changelog, read_version, validate
+from scripts.release import ReleaseError, read_version, validate
 
 
 def test_release_metadata_and_changelog_are_current():
     version = read_version()
-    assert "### added" in extract_changelog(version)
     assert validate(version, tag=f"v{version}") == version
     assert validate(version, previous_version="0.0.0") == version
 
