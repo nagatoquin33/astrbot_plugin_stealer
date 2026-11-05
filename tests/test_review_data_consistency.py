@@ -206,12 +206,15 @@ async def test_unavailable_provider_does_not_consume_vector_refresh_jobs(tmp_pat
 
 def test_provider_registration_recovers_after_a_negative_probe():
     providers = []
+    inst_map = {}
     service = EmbeddingService(SimpleNamespace(plugin_config=SimpleNamespace(enable_embedding_search=True, embedding_provider_id=""),
-        context=SimpleNamespace(get_all_embedding_providers=lambda: providers)))
+        context=SimpleNamespace(get_all_embedding_providers=lambda: providers,
+                                provider_manager=SimpleNamespace(inst_map=inst_map))))
     assert service._get_provider() is None
     service._faiss_available = False
     provider = SimpleNamespace(provider_config={"id": "new"}, get_dim=lambda: 2)
     providers.append(provider)
+    inst_map["new"] = provider
     assert service._get_provider() is provider
     assert service._faiss_available is None
 

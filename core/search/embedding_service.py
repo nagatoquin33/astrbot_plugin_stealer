@@ -36,6 +36,7 @@ class EmbeddingService:
 
         # 缓存当前配置下未找到提供商的结果。
         self._provider_not_found: bool = False
+        self._providers_ready: bool = False
         self._last_enable_embedding_search: bool | None = None
         self._last_embedding_provider_id: str | None = None
 
@@ -65,6 +66,25 @@ class EmbeddingService:
         """读取插件配置中的嵌入检索开关。"""
         return self.plugin.plugin_config.enable_embedding_search
 
+    def providers_loaded(self) -> bool:
+        """核心是否已实例化 Provider。
+
+        插件的 initialize() 早于 Provider 加载执行；冷启动由 on_astrbot_loaded
+        标记就绪，热重载时 provider_manager.inst_map 已有内容。
+        """
+        if self._providers_ready:
+            return True
+        try:
+            pm = getattr(self.plugin.context, "provider_manager", None)
+            inst_map = getattr(pm, "inst_map", None)
+            return isinstance(inst_map, dict) and bool(inst_map)
+        except Exception:
+            return False
+
+    def mark_providers_loaded(self) -> None:
+        """标记核心已完成 Provider 加载。"""
+        self._providers_ready = True
+
     def _reset_provider_state_if_changed(self) -> None:
         """配置开关或 provider ID 变化时重置 provider 探测状态。"""
         current_enable = self._embedding_enabled()
@@ -85,6 +105,10 @@ class EmbeddingService:
         """获取 EmbeddingProvider（优先配置 ID，留空取首个）。"""
         # 开关关闭时直接跳过，不触发 provider 探测与日志
         if not self._embedding_enabled():
+            return None
+
+        # Provider 加载完成前不探测，避免把「尚未加载」当成「未配置」
+        if not self.providers_loaded():
             return None
 
         self._reset_provider_state_if_changed()
@@ -268,7 +292,9 @@ class EmbeddingService:
 
         provider = self._get_provider()
         if provider is None:
-            self._faiss_available = False
+            # Provider 加载完成前不缓存探测结果，避免把「尚未加载」固化为不可用
+            if self.providers_loaded():
+                self._faiss_available = False
             return False
         if self._provider_identity(provider) != self._observed_identity or not self._observed_dim:
             return False
@@ -416,6 +442,10 @@ class EmbeddingService:
         """异步初始化嵌入提供商及其向量存储。"""
         # 开关关闭时完全跳过，不探测 provider、不输出日志
         if not self._embedding_enabled():
+            return
+
+        # Provider 尚未加载时跳过；就绪后由 on_astrbot_loaded 重新调度
+        if not self.providers_loaded():
             return
 
         await self._upgrade_corpus_if_needed()

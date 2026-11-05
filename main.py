@@ -920,24 +920,39 @@ class Main(MemeSearchToolWorkflow, MemeStealToolWorkflow, Star):
             self.pending_analysis_worker = PendingAnalysisWorker(self)
             await self.pending_analysis_worker.start()
 
-            # 初始化嵌入向量服务 + 回填旧数据（仅在开启嵌入检索时）
-            if self.plugin_config.enable_embedding_search:
-                try:
-                    smart_service = getattr(self.meme_selector, "_smart_select_service", None)
-                    if smart_service and smart_service._embedding_service:
-                        # Initialization probes the actual output dimension and
-                        # queues existing paths for the durable refresh worker.
-                        self.task_scheduler.create_task(
-                            'embedding_initialize', smart_service._embedding_service.initialize(),
-                        )
-                except Exception as e:
-                    logger.warning(f"[Embedding] 初始化失败: {e}")
+            # 初始化嵌入向量服务 + 回填旧数据（仅在开启嵌入检索时）。
+            # 冷启动阶段 Provider 尚未实例化，由 on_astrbot_loaded 接管调度。
+            self._schedule_embedding_initialization()
 
             logger.info("[Stealer] 插件初始化完成")
             self.index_manager.start_search_worker()
         except Exception as e:
             logger.error(f"初始化插件失败: {e}")
             raise
+
+    def _schedule_embedding_initialization(self, *, core_loaded: bool = False) -> None:
+        """Provider 就绪后调度嵌入服务初始化与旧数据回填。"""
+        if not self.plugin_config.enable_embedding_search:
+            return
+        try:
+            smart_service = getattr(self.meme_selector, "_smart_select_service", None)
+            embedding_service = getattr(smart_service, "_embedding_service", None)
+            if embedding_service is None:
+                return
+            if core_loaded:
+                embedding_service.mark_providers_loaded()
+            # 初始化会探测真实输出维度，并把存量表情包排入持久化刷新队列。
+            if embedding_service.providers_loaded():
+                self.task_scheduler.create_task(
+                    'embedding_initialize', embedding_service.initialize(),
+                )
+        except Exception as e:
+            logger.warning(f"[Embedding] 初始化失败: {e}")
+
+    @filter.on_astrbot_loaded()
+    async def _initialize_embedding_after_core_loaded(self):
+        """核心加载完成（Provider 已实例化）后初始化嵌入检索。"""
+        self._schedule_embedding_initialization(core_loaded=True)
 
     async def terminate(self):
         """插件销毁生命周期钩子。"""
