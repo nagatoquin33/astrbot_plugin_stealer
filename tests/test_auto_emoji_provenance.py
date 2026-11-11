@@ -164,3 +164,15 @@ def test_repeated_questions_reach_matching_and_technical_errors_keep_gate():
     engine = MemeSenderEngine(SimpleNamespace(plugin_config=SimpleNamespace(auto_meme_intent_gate=True)))
     assert not engine.should_skip_auto_emoji_by_gate("你在说什么？？")
     assert engine.should_skip_auto_emoji_by_gate("连接失败？？")
+
+
+@pytest.mark.asyncio
+async def test_tts_record_replaced_llm_reply_keeps_source_current():
+    engine, event, analyzer = sender()
+    result = DummyResult("")
+    result.chain = [SimpleNamespace(type=SimpleNamespace(name="Record"))]
+    result.result_content_type = SimpleNamespace(name="LLM_RESULT")
+    event.set_result(result)
+    await engine.async_analyze_and_send_emoji(event, "这是一条完整回复", [])
+    analyzer.analyze_for_reply.assert_awaited_once()
+    engine.try_send_emoji.assert_awaited_once()

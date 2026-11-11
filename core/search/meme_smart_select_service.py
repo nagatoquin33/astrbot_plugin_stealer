@@ -386,7 +386,7 @@ class MemeSmartSelectService:
                     + embedding_bonus
                 )
 
-                if base_score < 0.15:
+                if base_score < 0.08:
                     continue
 
                 punctuation_bonus = max(
@@ -403,7 +403,7 @@ class MemeSmartSelectService:
                     0.0, base_score + category_bonus + use_count_bonus
                     + favorite_bonus + punctuation_bonus + persona_bonus - history_penalty,
                 )
-                if final_score > 0.1:
+                if final_score > 0.08:
                     candidates.append(
                         (
                             file_path,

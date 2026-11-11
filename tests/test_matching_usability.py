@@ -61,6 +61,27 @@ def test_unrelated_query_does_not_fall_back_to_emotion_bucket(tmp_path):
     assert results == []
 
 
+def test_semantic_embedding_recall_passes_without_character_or_literal_overlap(tmp_path):
+    index = {
+        "sleepy": {
+            "category": "tired",
+            "desc": "猫耳少女抱着枕头打瞌睡",
+            "tags": ["睡觉"],
+            "scenes": ["深夜困了"],
+        }
+    }
+    selector = selector_for(index, tmp_path)
+    service = selector._smart_select_service
+    service._embedding_service = SimpleNamespace(
+        is_available=lambda: True,
+        search=AsyncMock(return_value=[("sleepy", 0.40)]),
+    )
+    ranked = asyncio.run(
+        service._rank_emoji_candidates("tired", "熬夜折腾完代码赶紧去休息", idx=index)
+    )
+    assert [item[0] for item in ranked] == ["sleepy"]
+
+
 def test_automatic_selection_only_randomizes_close_scores(tmp_path):
     selector = selector_for({}, tmp_path)
     service = selector._smart_select_service
