@@ -203,8 +203,8 @@ async def test_empty_response_falls_back_after_retries():
 
 
 @pytest.mark.asyncio
-async def test_model_and_thinking_effort_passed_to_llm_generate():
-    service = _service_with(vision_model="gpt-5-mini", vision_thinking_effort="low")
+async def test_thinking_effort_passed_to_llm_generate():
+    service = _service_with(vision_thinking_effort="low")
     captured = {}
 
     async def fake_llm(chat_provider_id, **kwargs):
@@ -215,7 +215,6 @@ async def test_model_and_thinking_effort_passed_to_llm_generate():
 
     await service._do_vlm_call(["vision"], "prompt", "/tmp/x.png")
 
-    assert captured["model"] == "gpt-5-mini"
     assert captured["reasoning_effort"] == "low"
 
 

@@ -115,10 +115,6 @@
             "description": "视觉模型",
             "hint": "用于图片分类。留空则自动使用 AstrBot 全局配置的图片描述模型（default_image_caption_provider_id）。"
         },
-        "vision_model": {
-            "description": "视觉模型名称",
-            "hint": "留空使用提供商自身配置的模型；填写后按此模型名请求（如 gpt-5-mini、qwen-vl-max）。"
-        },
         "vision_fallback_provider_ids": {
             "description": "视觉模型回落",
             "hint": "视觉模型请求失败时按顺序切换到这些提供商（与 AstrBot 回退对话模型同理）。"

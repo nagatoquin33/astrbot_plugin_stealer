@@ -271,15 +271,6 @@
     "hint": "用于图片分类。留空则自动使用 AstrBot 全局配置的图片描述模型（default_image_caption_provider_id）。",
     "_special": "select_provider"
   },
-  "vision_model": {
-    "description": "视觉模型名称",
-    "type": "string",
-    "default": "",
-    "hint": "留空使用提供商自身配置的模型；填写后按此模型名请求（如 gpt-5-mini、qwen-vl-max）。",
-    "condition": {
-      "show_advanced_settings": true
-    }
-  },
   "vision_fallback_provider_ids": {
     "description": "视觉模型回落",
     "type": "list",

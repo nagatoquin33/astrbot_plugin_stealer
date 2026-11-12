@@ -95,16 +95,13 @@ class VLMCallService:
         return candidates
 
     def _model_request_kwargs(self) -> dict:
-        """生成透传给 llm_generate 的可选参数（模型覆盖与思考强度）。
+        """生成透传给 llm_generate 的可选参数（思考强度）。
 
         reasoning_effort 经 AstrBot 进入 OpenAI 兼容 provider 的 extra_body；
         Anthropic/Gemini provider 忽略未知 kwargs，其思考配置仍在 provider 层。
         """
         cfg = self.plugin_config
         kwargs: dict = {}
-        model = str(getattr(cfg, "vision_model", "") or "").strip() if cfg else ""
-        if model:
-            kwargs["model"] = model
         effort = (
             str(getattr(cfg, "vision_thinking_effort", "") or "").strip() if cfg else ""
         )

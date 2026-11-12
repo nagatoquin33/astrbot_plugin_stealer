@@ -451,8 +451,7 @@ class ImageProcessorService:
             provider_id = str(
                 await self._vlm_call_service._resolve_vision_provider(event) or ""
             )
-            vision_model = str(getattr(self.plugin_config, "vision_model", "") or "")
-            model_sig = f"{provider_id}|{vision_model}"
+            model_sig = provider_id
             cached = self._get_valid_cache(hash_val, model_sig)
             if cached is not None:
                 async with self._process_lock:
