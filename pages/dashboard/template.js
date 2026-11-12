@@ -4,6 +4,695 @@ export const EMOTION_LABELS_TEMPLATE = `
 </span>`;
 
 export const TEMPLATE = `
+<template v-if="isBiliTheme">
+<div class="page-wrap" :class="{ 'is-scrolled': biliHeaderScrolled }">
+    <svg class="icon-sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+        <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M16.2 16.2 21 21"/></symbol>
+        <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4"/><path d="m6.5 9.5 5.5-5.5 5.5 5.5"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></symbol>
+        <symbol id="i-flame" viewBox="0 0 24 24"><path d="M12 3c3.2 3.5 6.5 6.3 6.5 10.2A6.5 6.5 0 0 1 12 21a6.5 6.5 0 0 1-6.5-6.3C5.5 11.4 7 9.2 9 7c.2 1.7 1 3 2.3 3.7C11.7 8.5 11.2 6 12 3Z"/></symbol>
+        <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6.5" height="6.5" rx="1.6"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.6"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.6"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.6"/></symbol>
+        <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+        <symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="m14 6-6 6 6 6"/></symbol>
+        <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="m10 6 6 6-6 6"/></symbol>
+        <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3.6 2.5 5.2 5.7.8-4.1 4 1 5.7-5.1-2.7-5.1 2.7 1-5.7-4.1-4 5.7-.8L12 3.6Z"/></symbol>
+        <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20s-7.5-4.4-7.5-9.4A4.1 4.1 0 0 1 12 7.4a4.1 4.1 0 0 1 7.5 3.2C19.5 15.6 12 20 12 20Z"/></symbol>
+        <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9 7V4.8h6V7"/><path d="M6.5 7 7.4 20h9.2L17.5 7"/><path d="M10 11v5M14 11v5"/></symbol>
+        <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+        <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 6.3"/><path d="M20 4v7h-7"/></symbol>
+        <symbol id="i-message" viewBox="0 0 24 24"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v9a1.5 1.5 0 0 1-1.5 1.5H9l-4.2 3.2A.6.6 0 0 1 4 18.7Z"/></symbol>
+        <symbol id="i-history" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 7.5V12l3 2"/></symbol>
+        <symbol id="i-create" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 13.5 13.5 8l2.5 2.5L10.5 16H8Z"/></symbol>
+        <symbol id="i-play" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M10.4 9.2v5.6l4.6-2.8Z"/></symbol>
+        <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.2 4.2L19 7"/></symbol>
+        <symbol id="i-image" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2"/><circle cx="9" cy="10" r="1.5"/><path d="m5.5 17 4.2-5 3.2 3.4 2.2-2.2 3.4 3.8"/></symbol>
+        <symbol id="i-folder" viewBox="0 0 24 24"><path d="M4 7.5A1.5 1.5 0 0 1 5.5 6H10l2 2.5h6.5A1.5 1.5 0 0 1 20 10v7.5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5Z"/></symbol>
+        <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3.5 19 6v5.2c0 4.6-3 7.4-7 9.3-4-1.9-7-4.7-7-9.3V6Z"/><path d="m9 12 2.2 2.2L15.5 10"/></symbol>
+        <symbol id="i-sort" viewBox="0 0 24 24"><path d="M7 4v16M7 20l-3-3M7 20l3-3"/><path d="M17 20V4M17 4l-3 3M17 4l3 3"/></symbol>
+    </svg>
+
+    <header class="site-header" :class="{ 'is-stuck': biliHeaderScrolled || activeSection !== 'library' }">
+        <div class="header-inner">
+            <div class="header-left">
+                <a class="brand" href="#" @click.prevent="switchSection('library')" aria-label="表情包小偷首页">
+                    <svg class="brand-mark" viewBox="0 0 36 36" aria-hidden="true">
+                        <defs><linearGradient id="brandGrad" x1="0" y1="0" x2="1" y2="1">
+                            <stop offset="0" stop-color="#FF8CB0"/><stop offset="1" stop-color="#FF6699"/>
+                        </linearGradient></defs>
+                        <rect width="36" height="36" rx="10" fill="url(#brandGrad)"/>
+                        <path d="M12 15.5 8.8 11M24 15.5 27.2 11" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/>
+                        <rect x="7.5" y="14" width="21" height="14" rx="4.5" fill="#fff"/>
+                        <circle cx="14" cy="20.4" r="1.8" fill="#FF6699"/>
+                        <circle cx="22" cy="20.4" r="1.8" fill="#FF6699"/>
+                        <path d="M15.2 24.2c1.8 1.5 3.8 1.5 5.6 0" stroke="#FF6699" stroke-width="1.8" stroke-linecap="round" fill="none"/>
+                    </svg>
+                    <span class="brand-text">
+                        <span class="brand-name">表情包小偷</span>
+                        <span class="brand-sub">MEME THIEF</span>
+                    </span>
+                </a>
+                <nav class="main-nav" aria-label="主导航">
+                    <a class="nav-item" :class="{ 'is-active': activeSection === 'library' }" href="#" @click.prevent="switchSection('library')">首页</a>
+                    <a class="nav-item" href="#" @click.prevent="goBiliLibrary('')">表情库</a>
+                    <a class="nav-item" :class="{ 'is-active': activeSection === 'pending' }" href="#" @click.prevent="switchSection('pending')">审核区<i class="nav-badge" v-if="pendingStats.pending">{{ pendingStats.pending }}</i></a>
+                    <a class="nav-item" href="#" @click.prevent="scrollBiliTo('bili-stats')">数据</a>
+                    <a class="nav-item" href="#" @click.prevent="scrollBiliTo('bili-about')">关于</a>
+                    <div class="nav-more-wrap">
+                        <button class="nav-item nav-more" type="button" @click.stop="biliMoreOpen = !biliMoreOpen">更多<svg class="ico ico-chevron"><use href="#i-chevron"/></svg></button>
+                        <div v-if="biliMoreOpen" class="nav-more-menu" @click.stop>
+                            <button type="button" @click="openSourceModal(); biliMoreOpen = false">外部源</button>
+                            <button type="button" @click="openEmotionsModal(); biliMoreOpen = false">分类管理</button>
+                            <button type="button" @click="openCharactersModal(); biliMoreOpen = false">角色管理</button>
+                            <button type="button" @click="runStorageCleanup(); biliMoreOpen = false">存储清理</button>
+                            <button type="button" @click="showAlert('插件设置入口：AstrBot 插件配置'); biliMoreOpen = false">插件设置</button>
+                        </div>
+                    </div>
+                </nav>
+            </div>
+
+            <div class="header-center">
+                <form class="search" role="search" @submit.prevent="submitBiliSearch">
+                    <input class="search-input" v-model="searchQuery" @input="debouncedSearch"
+                        @focus="biliSearchOpen = true" type="search"
+                        placeholder="搜索表情包、标签、场景…" autocomplete="off" aria-label="搜索表情包">
+                    <button class="search-btn" type="submit" aria-label="搜索"><svg class="ico"><use href="#i-search"/></svg></button>
+                    <div v-if="biliSearchOpen" class="search-suggest" @click.stop>
+                        <div class="search-suggest-head">
+                            <span>热门搜索</span>
+                            <button type="button" class="search-suggest-close" aria-label="关闭搜索建议"
+                                @click="biliSearchOpen = false"><svg class="ico"><use href="#i-close"/></svg></button>
+                        </div>
+                        <div class="search-suggest-chips">
+                            <button v-for="cat in biliHotKeywords" :key="'kw-' + cat.key" type="button"
+                                class="suggest-chip" @click="quickBiliSearch(cat)">{{ cat.name }}</button>
+                        </div>
+                        <div class="search-suggest-foot">Enter 搜索 · 共 {{ total }} 个表情包</div>
+                    </div>
+                </form>
+            </div>
+
+            <div class="header-right">
+                <a class="icon-entry" :class="{ 'is-active': selectedLibrary === 'favorites' }" href="#" @click.prevent="goBiliFavorites()"><svg class="ico"><use href="#i-star"/></svg><span>收藏</span></a>
+                <a class="icon-entry" :class="{ 'is-active': biliPanelOpen && biliPanelType === 'history' }" href="#" @click.prevent="openBiliHistory"><svg class="ico"><use href="#i-history"/></svg><span>历史</span></a>
+                <a class="icon-entry" :class="{ 'is-active': biliPanelOpen && biliPanelType === 'studio' }" href="#" @click.prevent="openBiliStudio"><svg class="ico"><use href="#i-create"/></svg><span>创作中心</span></a>
+                <button class="btn-upload" type="button" @click="openUploadModal"><svg class="ico"><use href="#i-upload"/></svg>投稿</button>
+                <div class="theme-picker">
+                    <button type="button" class="icon-entry" @click.stop="themePickerOpen = !themePickerOpen"
+                        aria-label="主题" title="主题">
+                        <svg class="ico" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                                d="M7 21a4.000 4.000 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4.000 4.000 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
+                        </svg>
+                        <span>主题</span>
+                    </button>
+                    <div v-if="themePickerOpen" class="theme-popover" @click.stop>
+                        <p class="theme-save-hint">{{ t('pages.dashboard.themes.save_hint', 'Your pick is saved as the default theme.') }}</p>
+                        <div class="theme-group-label">{{ t('pages.dashboard.themes.group_original', 'Original') }}</div>
+                        <button v-for="opt in originalThemeOptions" :key="opt.value" type="button" class="theme-option"
+                            :class="{ active: themeMode === opt.value }" @click="setThemeMode(opt.value); themePickerOpen = false">
+                            <span v-if="opt.swatch" class="theme-swatch"
+                                :style="{ background: 'linear-gradient(135deg, ' + opt.swatch.split(',')[0] + ' 50%, ' + opt.swatch.split(',')[1] + ' 50%)' }"></span>
+                            <span v-else class="theme-swatch" style="background: conic-gradient(#161b2a 50%, #faf8f3 50%)"></span>
+                            {{ t('pages.dashboard.themes.' + opt.key, opt.fallback) }}
+                            <span v-if="themeMode === opt.value" class="theme-default-tag">{{ t('pages.dashboard.themes.saved_default', 'Default') }}</span>
+                        </button>
+                        <div class="theme-group-label">{{ t('pages.dashboard.themes.group_game', 'Game inventory') }}</div>
+                        <button v-for="opt in gameThemeOptions" :key="opt.value" type="button" class="theme-option"
+                            :class="{ active: themeMode === opt.value }" @click="setThemeMode(opt.value); themePickerOpen = false">
+                            <span class="theme-swatch"
+                                :style="{ background: 'linear-gradient(135deg, ' + opt.swatch.split(',')[0] + ' 50%, ' + opt.swatch.split(',')[1] + ' 50%)' }"></span>
+                            {{ t('pages.dashboard.themes.' + opt.key, opt.fallback) }}
+                            <span v-if="themeMode === opt.value" class="theme-default-tag">{{ t('pages.dashboard.themes.saved_default', 'Default') }}</span>
+                        </button>
+                        <div class="theme-group-label">{{ t('pages.dashboard.themes.group_special', 'Featured') }}</div>
+                        <button v-for="opt in specialThemeOptions" :key="opt.value" type="button" class="theme-option"
+                            :class="{ active: themeMode === opt.value }" @click="setThemeMode(opt.value); themePickerOpen = false">
+                            <span class="theme-swatch"
+                                :style="{ background: 'linear-gradient(135deg, ' + opt.swatch.split(',').join(', ') + ')' }"></span>
+                            {{ t('pages.dashboard.themes.' + opt.key, opt.fallback) }}
+                            <span v-if="themeMode === opt.value" class="theme-default-tag">{{ t('pages.dashboard.themes.saved_default', 'Default') }}</span>
+                        </button>
+                    </div>
+                </div>
+                <button class="avatar" type="button" aria-label="个人中心" @click="showAlert('个人中心')"><span>偷</span></button>
+            </div>
+        </div>
+    </header>
+
+    <section v-if="activeSection === 'library'" class="banner" aria-label="精选专题">
+        <div class="banner-track">
+            <article class="banner-slide" :class="{ 'is-active': biliBannerIndex === 0 }" data-theme="pink">
+                <div class="banner-deco" aria-hidden="true"><span class="blob b1"></span><span class="blob b2"></span><span class="banner-grid"></span></div>
+                <div class="banner-stickers" aria-hidden="true">
+                    <span class="sticker s1">😂</span><span class="sticker s2">🥺</span>
+                    <span class="sticker s3">😼</span><span class="sticker s4">😭</span>
+                    <span class="sticker s5">🫠</span>
+                </div>
+                <div class="banner-copy">
+                    <p class="banner-kicker">B-STYLE REBUILD · 表情包小偷</p>
+                    <h1 class="banner-title">全网表情包，一网打尽</h1>
+                    <p class="banner-desc">从群聊里偷走每一个高光瞬间。AI 自动起名、分类、贴标签，想用哪张点哪张。</p>
+                    <div class="banner-actions">
+                        <a class="btn btn-white" href="#" @click.prevent="goBiliLibrary('')">逛逛表情库</a>
+                        <a class="banner-link" href="#" @click.prevent="scrollBiliTo('bili-stats')">看看图库数据<svg class="ico"><use href="#i-arrow-right"/></svg></a>
+                    </div>
+                </div>
+            </article>
+            <article class="banner-slide" :class="{ 'is-active': biliBannerIndex === 1 }" data-theme="blue">
+                <div class="banner-deco" aria-hidden="true"><span class="blob b1"></span><span class="blob b2"></span><span class="banner-grid"></span></div>
+                <div class="banner-stickers" aria-hidden="true">
+                    <span class="sticker s1">🤯</span><span class="sticker s2">😱</span>
+                    <span class="sticker s3">🤔</span><span class="sticker s4">😳</span>
+                    <span class="sticker s5">✨</span>
+                </div>
+                <div class="banner-copy">
+                    <p class="banner-kicker">VLM 智能分类</p>
+                    <h1 class="banner-title">看一眼，就懂是什么情绪</h1>
+                    <p class="banner-desc">视觉模型自动识别表情、情绪与使用场景，0.8 秒完成入库，还会给每张图写一句描述。</p>
+                    <div class="banner-actions">
+                        <a class="btn btn-white" href="#" @click.prevent="goBiliLibrary('')">看 AI 起的名字</a>
+                        <a class="banner-link" href="#" @click.prevent="scrollBiliTo('bili-stats')">了解更多<svg class="ico"><use href="#i-arrow-right"/></svg></a>
+                    </div>
+                </div>
+            </article>
+            <article class="banner-slide" :class="{ 'is-active': biliBannerIndex === 2 }" data-theme="orange">
+                <div class="banner-deco" aria-hidden="true"><span class="blob b1"></span><span class="blob b2"></span><span class="banner-grid"></span></div>
+                <div class="banner-stickers" aria-hidden="true">
+                    <span class="sticker s1">😍</span><span class="sticker s2">🙏</span>
+                    <span class="sticker s3">😌</span><span class="sticker s4">🫡</span>
+                    <span class="sticker s5">💖</span>
+                </div>
+                <div class="banner-copy">
+                    <p class="banner-kicker">收藏永不淘汰</p>
+                    <h1 class="banner-title">喜欢的表情，永远留在库里</h1>
+                    <p class="banner-desc">收藏内容不参与自动清理，发送时权重 ×3，优先出现在对话里。还有批量导入和外部源。</p>
+                    <div class="banner-actions">
+                        <a class="btn btn-white" href="#" @click.prevent="goBiliFavorites()">收藏夹</a>
+                        <a class="banner-link" href="#" @click.prevent="goBiliLibrary('')">全部表情<svg class="ico"><use href="#i-arrow-right"/></svg></a>
+                    </div>
+                </div>
+            </article>
+        </div>
+        <button class="banner-refresh" type="button" title="换一换" @click="nextBiliBanner">
+            <span>换一换</span><svg class="ico"><use href="#i-refresh"/></svg>
+        </button>
+        <div class="banner-dots" role="tablist" aria-label="专题切换">
+            <button v-for="n in 3" :key="'bd' + n" type="button" class="banner-dot"
+                :class="{ 'is-active': biliBannerIndex === n - 1 }" @click="biliBannerIndex = n - 1"></button>
+        </div>
+    </section>
+
+    <nav v-if="activeSection === 'library'" class="channel-bar" aria-label="表情分类">
+        <div class="channel-icons">
+            <button class="channel-icon" type="button"
+                :class="{ 'is-active': selectedLibrary === '' && selectedCategory === '' && sortBy !== 'most_used' }"
+                @click="goBiliAll()">
+                <span class="icon-bg icon-bg--all"><svg class="ico"><use href="#i-grid"/></svg></span>
+                <span class="channel-icon-text">全部</span>
+            </button>
+            <button class="channel-icon" type="button" :class="{ 'is-active': sortBy === 'most_used' }"
+                @click="goBiliHot()">
+                <span class="icon-bg icon-bg--hot"><svg class="ico"><use href="#i-flame"/></svg></span>
+                <span class="channel-icon-text">热门</span>
+            </button>
+        </div>
+        <div class="channel-links">
+            <button v-for="cat in categories" :key="'ch-' + cat.key" type="button" class="channel-link"
+                :class="{ 'is-active': selectedCategory === cat.key }" @click="selectLibraryCategory(cat.key)">
+                {{ cat.name }}
+            </button>
+        </div>
+        <div class="channel-side">
+            <a class="channel-side-link" href="#" @click.prevent="switchSection('pending')"><svg class="ico"><use href="#i-shield"/></svg>审核区</a>
+            <a class="channel-side-link" href="#" @click.prevent="openSourceModal"><svg class="ico"><use href="#i-folder"/></svg>外部源</a>
+            <a class="channel-side-link" href="#" @click.prevent="runStorageCleanup"><svg class="ico"><use href="#i-trash"/></svg>存储清理</a>
+        </div>
+    </nav>
+
+    <main class="page" :class="{ 'page--offset': activeSection !== 'library' }">
+        <template v-if="activeSection === 'library'">
+        <section class="hero-row" aria-label="今日精选" v-if="biliHeroSlides.length">
+            <div class="hero-carousel">
+                <div class="hero-slides">
+                    <a v-for="(slide, i) in biliHeroSlides" :key="'hero-' + slide.hash" class="hero-slide"
+                        :data-hash="slide.hash"
+                        :class="{ 'is-active': biliHeroIndex === i }" href="#" @click.prevent="openPreview(slide)">
+                        <img v-if="imageDataUrls[slide.hash]" class="hero-img" :src="imageDataUrls[slide.hash]" alt="">
+                        <div class="hero-shade"></div>
+                        <div class="hero-copy">
+                            <span class="hero-badge">{{ getCategoryName(slide.category) }}</span>
+                            <h3 class="hero-title">{{ slide.desc || slide.overlay_text || getCategoryName(slide.category) }}</h3>
+                            <p class="hero-desc">{{ (slide.tags || []).join(' · ') || '收藏、分类、检索你的全部表情包' }}</p>
+                            <span class="hero-stats">{{ slide.use_count || 0 }} 次使用 · {{ formatDate(slide.created_at) }}</span>
+                        </div>
+                    </a>
+                </div>
+                <button class="hero-arrow hero-arrow--prev" type="button" aria-label="上一张" @click="prevBiliHero"><svg class="ico"><use href="#i-arrow-left"/></svg></button>
+                <button class="hero-arrow hero-arrow--next" type="button" aria-label="下一张" @click="nextBiliHero"><svg class="ico"><use href="#i-arrow-right"/></svg></button>
+                <div class="hero-dots">
+                    <button v-for="(slide, i) in biliHeroSlides" :key="'hd-' + slide.hash" type="button" class="hero-dot"
+                        :class="{ 'is-active': biliHeroIndex === i }" @click="biliHeroIndex = i"></button>
+                </div>
+            </div>
+            <div class="hero-grid" aria-label="今日热门表情">
+                <article class="meme-card" v-for="img in biliHot" :key="'hot-' + img.hash">
+                    <div class="meme-cover-wrap" :data-hash="img.hash" role="button" tabindex="0"
+                        @click="openPreview(img)" @keydown.enter.prevent="openPreview(img)">
+                        <img v-if="imageDataUrls[img.hash]" class="meme-cover-bg" :src="imageDataUrls[img.hash]" alt="" aria-hidden="true">
+                        <img v-if="imageDataUrls[img.hash]" class="meme-cover" :src="imageDataUrls[img.hash]" :alt="img.desc">
+                        <span class="meme-badge">{{ getCategoryName(img.category) }}</span>
+                        <div class="meme-stats">
+                            <div class="meme-stats-left">
+                                <span class="meme-stat"><svg class="ico"><use href="#i-play"/></svg><b>{{ img.use_count || 0 }}</b></span>
+                                <span class="meme-stat"><svg class="ico"><use href="#i-heart"/></svg><b>{{ img.is_favorite ? 1 : 0 }}</b></span>
+                            </div>
+                            <span class="meme-format">{{ (img.format || 'img').toUpperCase() }}</span>
+                        </div>
+                        <button class="meme-star" type="button" :class="{ 'is-fav': img.is_favorite }"
+                            aria-label="收藏" @click.stop="toggleFavorite(img)">
+                            <svg class="ico"><use href="#i-star"/></svg>
+                        </button>
+                    </div>
+                    <div class="meme-info">
+                        <h3 class="meme-title"><a href="#" @click.prevent="openPreview(img)">{{ img.desc || img.overlay_text || getCategoryName(img.category) }}</a></h3>
+                        <div class="meme-meta">
+                            <span class="meme-avatar" :style="catAccent(img.category)">{{ (getCategoryName(img.category) || '偷').slice(0, 1) }}</span>
+                            <span class="meme-author">{{ getCategoryName(img.category) }}</span>
+                            <span class="meme-date">{{ formatDate(img.created_at) }}</span>
+                        </div>
+                    </div>
+                </article>
+            </div>
+        </section>
+
+        <div class="content-grid">
+            <section class="feed" id="bili-library">
+                <header class="feed-head">
+                    <div class="feed-head-main">
+                        <h2 class="feed-title">{{ libraryTitle(selectedLibrary) }}<span class="feed-total">{{ total }}</span></h2>
+                        <p class="feed-sub">{{ selectedCategory ? getCategoryName(selectedCategory) : '收集、分类、检索你的全部表情包' }}</p>
+                    </div>
+                    <div class="feed-tabs" role="tablist" aria-label="表情包排序">
+                        <button class="feed-tab" :class="{ 'is-active': biliTab === 'recommend' }" type="button" @click="setBiliTab('recommend')">推荐</button>
+                        <button class="feed-tab" :class="{ 'is-active': biliTab === 'new' }" type="button" @click="setBiliTab('new')">最新</button>
+                        <button class="feed-tab" :class="{ 'is-active': biliTab === 'used' }" type="button" @click="setBiliTab('used')">最常用</button>
+                        <button class="feed-tab" :class="{ 'is-active': biliTab === 'fav' }" type="button" @click="setBiliTab('fav')">收藏</button>
+                    </div>
+                </header>
+
+                <div class="feed-toolbar">
+                    <div class="filter-chips">
+                        <button class="chip" :class="{ 'is-active': selectedLibrary === '' }" type="button" @click="goBiliLibrary('')">全部</button>
+                        <button class="chip" :class="{ 'is-active': selectedLibrary === 'favorites' }" type="button" @click="goBiliFavorites()">收藏</button>
+                        <button class="chip" :class="{ 'is-active': selectedLibrary === 'characters' }" type="button" @click="goBiliLibrary('characters')">角色</button>
+                        <button class="chip" :class="{ 'is-active': selectedLibrary === 'general' }" type="button" @click="goBiliLibrary('general')">通用</button>
+                    </div>
+                    <div class="feed-tools">
+                        <label class="select-wrap" title="排序">
+                            <svg class="ico"><use href="#i-sort"/></svg>
+                            <select class="select" v-model="sortBy" @change="fetchImages(1)" aria-label="排序方式">
+                                <option value="newest">最新入库</option>
+                                <option value="oldest">最旧入库</option>
+                                <option value="most_used">使用最多</option>
+                                <option value="least_used">使用最少</option>
+                                <option value="last_used">最近使用</option>
+                            </select>
+                            <svg class="ico ico-chevron"><use href="#i-chevron"/></svg>
+                        </label>
+                        <button class="btn btn-outline" type="button" @click="toggleBatchMode"><svg class="ico"><use href="#i-check"/></svg>批量</button>
+                        <button class="btn btn-outline" type="button" @click="openUploadModal"><svg class="ico"><use href="#i-upload"/></svg>上传</button>
+                    </div>
+                </div>
+
+                <div v-if="loading" class="meme-grid">
+                    <div class="meme-card skeleton" v-for="n in 8" :key="'sk' + n">
+                        <div class="sk-cover sk-shimmer"></div>
+                        <div class="sk-line sk-line--title sk-shimmer"></div>
+                        <div class="sk-line sk-line--title short sk-shimmer"></div>
+                        <div class="sk-meta"><span class="sk-dot sk-shimmer"></span><span class="sk-line sk-line--meta sk-shimmer"></span></div>
+                    </div>
+                </div>
+
+                <div v-else-if="images.length" class="meme-grid" :class="{ 'is-batch': isBatchMode }">
+                    <article class="meme-card" v-for="img in images" :key="img.hash">
+                        <div class="meme-cover-wrap" :data-hash="img.hash" role="button" tabindex="0"
+                            @click="isBatchMode ? toggleSelection(img) : openPreview(img)"
+                            @keydown.enter.prevent="isBatchMode ? toggleSelection(img) : openPreview(img)">
+                            <img v-if="imageDataUrls[img.hash]" class="meme-cover-bg" :src="imageDataUrls[img.hash]" alt="" aria-hidden="true">
+                            <img v-if="imageDataUrls[img.hash]" class="meme-cover" :src="imageDataUrls[img.hash]" :alt="img.desc">
+                            <span class="meme-badge">{{ getCategoryName(img.category) }}</span>
+                            <div class="meme-mask">
+                                <div class="meme-mask-actions">
+                                    <button class="mask-btn" type="button" aria-label="收藏" @click.stop="toggleFavorite(img)"><svg class="ico"><use href="#i-star"/></svg></button>
+                                    <button class="mask-btn" type="button" aria-label="详情" @click.stop="openPreview(img)"><svg class="ico"><use href="#i-search"/></svg></button>
+                                    <button class="mask-btn" type="button" aria-label="删除" @click.stop="deleteImage(img)"><svg class="ico"><use href="#i-trash"/></svg></button>
+                                </div>
+                            </div>
+                            <div class="meme-stats">
+                                <div class="meme-stats-left">
+                                    <span class="meme-stat"><svg class="ico"><use href="#i-play"/></svg><b>{{ img.use_count || 0 }}</b></span>
+                                    <span class="meme-stat"><svg class="ico"><use href="#i-heart"/></svg><b>{{ img.is_favorite ? 1 : 0 }}</b></span>
+                                </div>
+                                <span class="meme-format">{{ (img.format || 'img').toUpperCase() }}</span>
+                            </div>
+                            <label class="meme-check" v-if="isBatchMode" @click.stop>
+                                <input type="checkbox" :checked="selectedImages.has(img.hash)" @change="toggleSelection(img)"><i></i>
+                            </label>
+                            <button class="meme-star" type="button" :class="{ 'is-fav': img.is_favorite }"
+                                aria-label="收藏" @click.stop="toggleFavorite(img)">
+                                <svg class="ico"><use href="#i-star"/></svg>
+                            </button>
+                        </div>
+                        <div class="meme-info">
+                            <h3 class="meme-title"><a href="#" @click.prevent="openPreview(img)">{{ img.desc || img.overlay_text || getCategoryName(img.category) }}</a></h3>
+                            <div class="meme-meta">
+                                <span class="meme-avatar" :style="catAccent(img.category)">{{ (getCategoryName(img.category) || '偷').slice(0, 1) }}</span>
+                                <span class="meme-author">{{ getCategoryName(img.category) }}</span>
+                                <span class="meme-date">{{ formatDate(img.created_at) }}</span>
+                            </div>
+                        </div>
+                    </article>
+                </div>
+
+                <div v-else class="empty">
+                    <div class="empty-emoji">🫥</div>
+                    <h3>没有找到匹配的表情包</h3>
+                    <p>换个关键词，或者 <button class="link-btn" type="button" @click="goBiliAll">清空筛选</button> 看看全部。</p>
+                </div>
+
+                <nav class="pager" v-if="total > pageSize" aria-label="分页">
+                    <button class="page-btn" type="button" :disabled="currentPage === 1" @click="prevPage" aria-label="上一页"><svg class="ico"><use href="#i-arrow-left"/></svg></button>
+                    <button v-for="n in biliPages" :key="'pg' + n" type="button" class="page-btn"
+                        :class="{ 'is-active': n === currentPage }" @click="goBiliPage(n)">{{ n }}</button>
+                    <button class="page-btn" type="button" :disabled="currentPage * pageSize >= total" @click="nextPage" aria-label="下一页"><svg class="ico"><use href="#i-arrow-right"/></svg></button>
+                </nav>
+            </section>
+
+            <aside class="rail" aria-label="图库信息">
+                <section class="floor-card rank-card">
+                    <div class="floor-head">
+                        <h3 class="floor-title">本周使用榜</h3>
+                        <span class="floor-more">TOP 5</span>
+                    </div>
+                    <ol class="rank-list">
+                        <li class="rank-item" v-for="(img, i) in biliRank" :key="'rank-' + img.hash" :data-hash="img.hash" @click="openPreview(img)">
+                            <span class="rank-num">{{ i + 1 }}</span>
+                            <img v-if="imageDataUrls[img.hash]" class="rank-cover" :src="imageDataUrls[img.hash]" alt="">
+                            <span v-else class="rank-cover" :style="{ backgroundColor: hashToColor(img.hash) }"></span>
+                            <div class="rank-info">
+                                <p class="rank-title">{{ img.desc || img.overlay_text || getCategoryName(img.category) }}</p>
+                                <span class="rank-uses">{{ img.use_count || 0 }} 次使用</span>
+                            </div>
+                        </li>
+                    </ol>
+                </section>
+
+                <section class="floor-card">
+                    <div class="floor-head">
+                        <h3 class="floor-title">最近收录</h3>
+                        <a class="floor-more" href="#" @click.prevent="setBiliTab('new')">更多</a>
+                    </div>
+                    <ul class="recent-list">
+                        <li class="recent-item" v-for="img in biliRecent" :key="'recent-' + img.hash" :data-hash="img.hash" @click="openPreview(img)">
+                            <img v-if="imageDataUrls[img.hash]" class="recent-cover" :src="imageDataUrls[img.hash]" alt="">
+                            <span v-else class="recent-cover" :style="{ backgroundColor: hashToColor(img.hash) }"></span>
+                            <div class="recent-info">
+                                <p class="recent-title">{{ img.desc || getCategoryName(img.category) }}</p>
+                                <span class="recent-time">{{ formatDate(img.created_at) }}</span>
+                            </div>
+                        </li>
+                    </ul>
+                </section>
+
+                <section class="floor-card status-card" id="bili-stats">
+                    <div class="floor-head">
+                        <h3 class="floor-title">图库状态</h3>
+                        <span class="health"><i class="health-dot"></i>{{ getHealthText(healthStatus) }}</span>
+                    </div>
+                    <div class="stat-grid">
+                        <div class="stat"><b>{{ stats.total || 0 }}</b><span>表情包</span></div>
+                        <div class="stat"><b>{{ stats.categories || 0 }}</b><span>分类</span></div>
+                        <div class="stat"><b>{{ libraries.favorites || 0 }}</b><span>收藏</span></div>
+                        <div class="stat"><b>{{ pendingStats.pending || 0 }}</b><span>待审核</span></div>
+                    </div>
+                    <div class="meter">
+                        <div class="meter-head"><span>自动淘汰计数</span><b>{{ libraries.automatic || 0 }} / {{ automaticLimit }}</b></div>
+                        <div class="meter-track"><i class="meter-fill" :style="{ width: Math.min(100, (libraries.automatic || 0) / (automaticLimit || 1) * 100) + '%' }"></i></div>
+                    </div>
+                    <div class="meter">
+                        <div class="meter-head"><span>待审核池</span><b>{{ pendingStats.pending || 0 }} / {{ pendingStats.capacity || 0 }}</b></div>
+                        <div class="meter-track"><i class="meter-fill meter-fill--blue" :style="{ width: Math.min(100, (pendingStats.pending || 0) / (pendingStats.capacity || 1) * 100) + '%' }"></i></div>
+                    </div>
+                    <div class="status-links">
+                        <button class="link-btn" type="button" @click="switchSection('pending')">去审核</button>
+                        <button class="link-btn" type="button" @click="openEmotionsModal">分类管理</button>
+                        <button class="link-btn" type="button" @click="showAlert('插件设置入口：AstrBot 插件配置')">插件设置</button>
+                    </div>
+                </section>
+
+                <section class="floor-card about-card" id="bili-about">
+                    <div class="about-mark">偷</div>
+                    <div>
+                        <h3 class="floor-title">表情包小偷</h3>
+                        <p class="about-text">AstrBot 表情包收集 / 分类 / 检索插件。</p>
+                        <p class="about-note">布局参考 B 站网页端信息流</p>
+                    </div>
+                </section>
+            </aside>
+        </div>
+        </template>
+        <template v-else>
+        <header class="review-head" id="bili-pending">
+            <div class="review-head-main">
+                <p class="banner-kicker">REVIEW QUEUE</p>
+                <h1 class="review-title">审核区 <span class="feed-total">{{ pendingTotal }}</span></h1>
+                <p class="review-sub">
+                    待审核 {{ pendingStats.pending }} / {{ pendingStats.capacity }}
+                    <span aria-hidden="true">·</span> 排队 {{ pendingStats.queued }}
+                    <span aria-hidden="true">·</span> 识图中 {{ pendingStats.processing }}
+                    <span aria-hidden="true">·</span> 失败 {{ pendingStats.failed }}
+                </p>
+            </div>
+            <div class="review-head-side">
+                <div class="progress-track">
+                    <div class="progress-fill" :class="{ full: pendingStats.paused }"
+                        :style="{ width: Math.min(100, pendingStats.pending / (pendingStats.capacity || 1) * 100) + '%' }"></div>
+                </div>
+                <span v-if="pendingStats.paused" class="capacity-paused">偷图已暂停，审核后自动恢复</span>
+            </div>
+        </header>
+
+        <div class="review-chips">
+            <button type="button" class="feed-chip" :class="{ 'is-active': pendingCategory === '' }"
+                @click="selectPendingCategory('')">
+                全部<span class="feed-chip-count">{{ pendingCategoryTotal }}</span>
+            </button>
+            <button v-for="cat in pendingCategories" :key="'pc-' + cat.key" type="button" class="feed-chip"
+                :class="{ 'is-active': pendingCategory === cat.key }" :style="catAccent(cat.key)"
+                @click="selectPendingCategory(cat.key)">
+                <span class="cat-dot"></span>{{ cat.name }}<span class="feed-chip-count">{{ cat.count }}</span>
+            </button>
+        </div>
+
+        <div class="review-toolbar">
+            <div class="review-search">
+                <svg class="ico"><use href="#i-search"/></svg>
+                <input v-model="pendingSearchQuery" @input="pendingDebouncedSearch" type="search"
+                    placeholder="搜索待审核表情…" aria-label="搜索待审核表情">
+            </div>
+            <div class="review-tools">
+                <button type="button" class="btn btn-outline" @click="togglePendingBatchMode">{{ pendingBatchMode ? '完成' : '批量' }}</button>
+                <template v-if="pendingBatchMode">
+                    <button type="button" class="btn btn-outline" @click="toggleSelectAllPending">{{ allPendingSelected ? '取消全选' : '全选本页' }}</button>
+                    <button type="button" class="btn btn-primary" @click="approvePendingBatch">通过所选</button>
+                    <button type="button" class="btn btn-outline danger" @click="rejectPendingBatch(false)">删除所选</button>
+                    <button type="button" class="btn btn-outline danger" @click="rejectPendingBatch(true)">删除并拉黑</button>
+                </template>
+            </div>
+        </div>
+
+        <div v-if="pendingLoading" class="review-grid">
+            <div v-for="n in 6" :key="'prsk' + n" class="review-card skeleton">
+                <div class="sk-cover sk-shimmer"></div>
+                <div class="review-body">
+                    <div class="sk-line sk-line--title sk-shimmer"></div>
+                    <div class="sk-line sk-line--title short sk-shimmer"></div>
+                </div>
+            </div>
+        </div>
+        <div v-else-if="pendingImages.length === 0" class="empty">
+            <div class="empty-emoji">🔍</div>
+            <h3>没有待审核的表情</h3>
+            <p>偷到的新表情会先出现在这里，审核后才会进入表情库。</p>
+        </div>
+        <div v-else class="review-grid">
+            <article v-for="item in pendingImages" :key="item.id" class="review-card"
+                :class="{ selected: pendingSelectedImages.has(item.id) }"
+                @click="pendingBatchMode ? togglePendingSelection(item) : openPendingPreview(item)">
+                <div class="review-cover" :data-hash="item.hash">
+                    <label v-if="pendingBatchMode" class="meme-check" @click.stop>
+                        <input type="checkbox" :checked="pendingSelectedImages.has(item.id)"
+                            @change="togglePendingSelection(item)"><i></i>
+                    </label>
+                    <img v-if="imageDataUrls[item.hash]" :src="imageDataUrls[item.hash]" alt=""
+                        loading="lazy" decoding="async">
+                    <span v-else :style="{ backgroundColor: hashToColor(item.hash) }"></span>
+                </div>
+                <div class="review-body">
+                    <span class="meme-badge">{{ item.category ? getCategoryName(item.category) : '待识图' }}</span>
+                    <h3 class="review-card-title">{{ item.desc || '待识图' }}</h3>
+                    <p class="review-summary">{{ pendingStatusLabel(item) }}<template v-if="item.analysis_error"> · {{ item.analysis_error }}</template></p>
+                    <div v-if="(item.tags || []).length" class="review-tags">
+                        <span v-for="tag in item.tags.slice(0, 4)" :key="tag" class="tag">{{ tag }}</span>
+                    </div>
+                    <div v-if="!pendingBatchMode" class="review-actions">
+                        <button type="button" class="review-btn approve" :disabled="pendingApproving.has(item.id)"
+                            @click.stop="approvePending(item.id)">通过</button>
+                        <button type="button" class="review-btn" @click.stop="openPendingEdit(item)">修改</button>
+                        <button type="button" class="review-btn danger" @click.stop="rejectPending(item.id)">删除</button>
+                        <button type="button" class="review-btn danger" @click.stop="rejectPending(item.id, true)">拉黑</button>
+                    </div>
+                    <div class="review-foot">
+                        <span>{{ item.source === 'auto' ? '自动偷取' : '手动收录' }}</span>
+                        <span>{{ formatDate(item.created_at) }}</span>
+                    </div>
+                </div>
+            </article>
+        </div>
+
+        <nav class="pager" v-if="pendingTotal > pendingPageSize" aria-label="审核区分页">
+            <button class="page-btn" type="button" :disabled="pendingCurrentPage === 1"
+                @click="fetchPendingImages(pendingCurrentPage - 1)" aria-label="上一页"><svg class="ico"><use href="#i-arrow-left"/></svg></button>
+            <button v-for="n in pendingPages" :key="'ppg' + n" type="button" class="page-btn"
+                :class="{ 'is-active': n === pendingCurrentPage }" @click="fetchPendingImages(n)">{{ n }}</button>
+            <button class="page-btn" type="button" :disabled="pendingCurrentPage * pendingPageSize >= pendingTotal"
+                @click="fetchPendingImages(pendingCurrentPage + 1)" aria-label="下一页"><svg class="ico"><use href="#i-arrow-right"/></svg></button>
+        </nav>
+        </template>
+    </main>
+
+    <footer class="site-footer">
+        <div class="footer-inner">
+            <div class="footer-brand">
+                <span class="footer-logo">表情包小偷</span>
+                <p>偷走每一张好笑的脸，在合适的时候还给你。</p>
+            </div>
+            <div class="footer-links">
+                <div class="footer-col">
+                    <h4>产品</h4>
+                    <a href="#" @click.prevent="goBiliLibrary('')">表情库</a>
+                    <a href="#" @click.prevent="switchSection('pending')">审核区</a>
+                    <a href="#" @click.prevent="goBiliFavorites()">收藏夹</a>
+                    <a href="#" @click.prevent="scrollBiliTo('bili-stats')">数据面板</a>
+                </div>
+                <div class="footer-col">
+                    <h4>能力</h4>
+                    <a href="#" @click.prevent="showAlert('VLM 分类：视觉模型识别情绪与场景')">VLM 分类</a>
+                    <a href="#" @click.prevent="showAlert('语义检索：BM25 + 向量召回')">语义检索</a>
+                    <a href="#" @click.prevent="showAlert('自动发送：按对话情绪挑选表情')">自动发送</a>
+                    <a href="#" @click.prevent="runStorageCleanup">容量清理</a>
+                </div>
+                <div class="footer-col">
+                    <h4>视图</h4>
+                    <a href="#" @click.prevent="setThemeMode('dark')">切换暗色主题</a>
+                    <a href="#" @click.prevent="setThemeMode('light')">切换亮色主题</a>
+                    <a href="#" @click.prevent="setThemeMode('auto')">跟随宿主</a>
+                </div>
+            </div>
+        </div>
+        <div class="footer-bottom">
+            <p>表情包小偷 · WebUI</p>
+            <p>B-STYLE × MEME THIEF</p>
+        </div>
+    </footer>
+
+    <div v-if="biliPanelOpen" class="modal-overlay" @click.self="closeBiliPanel">
+        <div class="modal-panel bili-panel" role="dialog" aria-modal="true"
+            :aria-label="biliPanelType === 'history' ? '最近使用' : '创作中心'">
+            <div class="modal-header">
+                <h2>{{ biliPanelType === 'history' ? '最近使用' : '创作中心' }}</h2>
+                <button type="button" class="modal-close" aria-label="关闭" @click="closeBiliPanel">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-content bili-panel-content">
+                <template v-if="biliPanelType === 'history'">
+                    <div v-if="biliHistoryLoading" class="bili-panel-empty">加载中…</div>
+                    <div v-else-if="!biliHistory.length" class="bili-panel-empty">还没有使用记录，先去群里发几张表情吧。</div>
+                    <div v-else class="bili-history-grid">
+                        <button v-for="img in biliHistory" :key="'hist-' + img.hash" type="button"
+                            class="bili-history-item" @click="openBiliHistoryItem(img)">
+                            <span class="bili-history-cover">
+                                <img v-if="imageDataUrls[img.hash]" :src="imageDataUrls[img.hash]" alt="" loading="lazy" decoding="async">
+                            </span>
+                            <span class="bili-history-title">{{ img.desc || img.overlay_text || getCategoryName(img.category) }}</span>
+                            <span class="bili-history-meta">{{ formatDate(img.last_used_at) }} · 用过 {{ img.use_count || 0 }} 次</span>
+                        </button>
+                    </div>
+                </template>
+                <template v-else>
+                    <div class="bili-studio-grid">
+                        <button type="button" class="studio-card studio-card--primary"
+                            @click="openUploadModal(); closeBiliPanel()">
+                            <svg class="ico"><use href="#i-upload"/></svg>
+                            <b>投稿表情</b><span>上传图片，VLM 自动分类入库</span>
+                        </button>
+                        <button type="button" class="studio-card" @click="openBatchUploadModal(); closeBiliPanel()">
+                            <svg class="ico"><use href="#i-folder"/></svg>
+                            <b>批量导入</b><span>一次导入多张，自动排队识图</span>
+                        </button>
+                        <button type="button" class="studio-card" @click="openEmotionsModal(); closeBiliPanel()">
+                            <svg class="ico"><use href="#i-grid"/></svg>
+                            <b>分类管理</b><span>新增、改名、调整情绪分类</span>
+                        </button>
+                        <button type="button" class="studio-card" @click="openCharactersModal(); closeBiliPanel()">
+                            <svg class="ico"><use href="#i-star"/></svg>
+                            <b>角色管理</b><span>按角色归档表情库</span>
+                        </button>
+                        <button type="button" class="studio-card" @click="openSourceModal(); closeBiliPanel()">
+                            <svg class="ico"><use href="#i-folder"/></svg>
+                            <b>外部源</b><span>导入表情包合集与远程图库</span>
+                        </button>
+                        <button type="button" class="studio-card" @click="runStorageCleanup(); closeBiliPanel()">
+                            <svg class="ico"><use href="#i-trash"/></svg>
+                            <b>存储清理</b><span>清理临时文件与孤儿图片</span>
+                        </button>
+                    </div>
+                </template>
+            </div>
+        </div>
+    </div>
+
+    <nav class="mobile-tabbar" aria-label="底部导航">
+        <button type="button" class="tabbar-item" :class="{ active: activeSection === 'library' }"
+            @click="switchSection('library')">
+            <svg class="ico"><use href="#i-grid"/></svg><span>首页</span>
+        </button>
+        <button type="button" class="tabbar-item" :class="{ active: activeSection === 'pending' }"
+            @click="switchSection('pending')">
+            <svg class="ico"><use href="#i-shield"/></svg><span>审核</span>
+            <i v-if="pendingStats.pending" class="tabbar-badge">{{ pendingStats.pending }}</i>
+        </button>
+        <button type="button" class="tabbar-item tabbar-publish" @click="openUploadModal">
+            <span class="tabbar-publish-icon"><svg class="ico"><use href="#i-upload"/></svg></span><span>投稿</span>
+        </button>
+        <button type="button" class="tabbar-item" @click="goBiliFavorites()">
+            <svg class="ico"><use href="#i-star"/></svg><span>收藏</span>
+        </button>
+        <button type="button" class="tabbar-item" @click="showAlert('个人中心')">
+            <span class="tabbar-avatar">偷</span><span>我的</span>
+        </button>
+    </nav>
+
+    <button v-if="biliShowBackTop" class="back-top" type="button" aria-label="回到顶部" @click="scrollBiliTop">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m6 14 6-6 6 6" />
+        </svg>
+    </button>
+</div>
+</template>
+<template v-else>
 <div class="fo-chassis" aria-hidden="true">
     <div class="fo-bezel fo-bezel-l">
         <div class="fo-thumbwheel"></div>
@@ -118,6 +807,14 @@ export const TEMPLATE = `
                     :class="{ active: themeMode === opt.value }" @click="setThemeMode(opt.value); themePickerOpen = false">
                     <span class="theme-swatch"
                         :style="{ background: 'linear-gradient(135deg, ' + opt.swatch.split(',')[0] + ' 50%, ' + opt.swatch.split(',')[1] + ' 50%)' }"></span>
+                    {{ t('pages.dashboard.themes.' + opt.key, opt.fallback) }}
+                    <span v-if="themeMode === opt.value" class="theme-default-tag">{{ t('pages.dashboard.themes.saved_default', 'Default') }}</span>
+                </button>
+                <div class="theme-group-label">{{ t('pages.dashboard.themes.group_special', 'Featured') }}</div>
+                <button v-for="opt in specialThemeOptions" :key="opt.value" type="button" class="theme-option"
+                    :class="{ active: themeMode === opt.value }" @click="setThemeMode(opt.value); themePickerOpen = false">
+                    <span class="theme-swatch"
+                        :style="{ background: 'linear-gradient(135deg, ' + opt.swatch.split(',').join(', ') + ')' }"></span>
                     {{ t('pages.dashboard.themes.' + opt.key, opt.fallback) }}
                     <span v-if="themeMode === opt.value" class="theme-default-tag">{{ t('pages.dashboard.themes.saved_default', 'Default') }}</span>
                 </button>
@@ -688,6 +1385,7 @@ export const TEMPLATE = `
         </template>
     </main>
 </div>
+</template>
 
 <div v-if="contextMenu.open && contextMenu.img" class="item-context-menu" role="menu"
     :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }" @click.stop @contextmenu.prevent>

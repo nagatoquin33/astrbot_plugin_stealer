@@ -158,7 +158,7 @@ class PluginConfig(BaseModel):
     # False：跳过人工审核，自动分析并入库。
     audit_required: bool = True
 
-    # WebUI 默认主题：auto/dark/light/minecraft/fallout。页面内切换后写入 KV，优先于该项。
+    # WebUI 默认主题：auto/dark/light/minecraft/fallout/bili。页面内切换后写入 KV，优先于该项。
     webui_theme: str = "auto"
     show_advanced_settings: bool = False
 

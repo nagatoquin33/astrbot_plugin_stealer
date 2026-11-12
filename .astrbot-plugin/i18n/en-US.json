@@ -212,7 +212,7 @@
         "webui_theme": {
             "description": "Default WebUI theme",
             "hint": "Theme used when opening the sticker manager. Picking a theme in the page is remembered and takes priority over this setting.",
-            "labels": ["Follow host", "Dark gilded", "Light", "Minecraft", "Fallout 4"]
+            "labels": ["Follow host", "Dark gilded", "Light", "Minecraft", "Fallout 4", "Bili Style"]
         },
         "custom_meme_classification_prompt": {
             "description": "VLM classification prompt",
@@ -598,8 +598,10 @@
                 "light": "Light",
                 "minecraft": "Minecraft",
                 "fallout": "Fallout 4",
+                "bili": "Bili Style",
                 "group_original": "Original",
                 "group_game": "Game inventory",
+                "group_special": "Featured",
                 "save_hint": "Your pick is saved as the default theme.",
                 "saved_default": "Default"
             },

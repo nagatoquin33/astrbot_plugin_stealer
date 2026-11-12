@@ -212,7 +212,7 @@
         "webui_theme": {
             "description": "Тема WebUI по умолчанию",
             "hint": "Тема при открытии менеджера стикеров. Выбор на странице запоминается и имеет приоритет.",
-            "labels": ["Как в хосте", "Тёмное золото", "Светлая", "Minecraft", "Fallout 4"]
+            "labels": ["Как в хосте", "Тёмное золото", "Светлая", "Minecraft", "Fallout 4", "Стиль Bili"]
         },
         "custom_meme_classification_prompt": {
             "description": "Промпт классификации VLM",
@@ -284,8 +284,10 @@
                 "light": "Светлая",
                 "minecraft": "Minecraft",
                 "fallout": "Fallout 4",
+                "bili": "Стиль Bili",
                 "group_original": "Оригинал",
                 "group_game": "Игровой инвентарь",
+                "group_special": "Избранное",
                 "save_hint": "Выбор сохранится как тема по умолчанию.",
                 "saved_default": "По умолчанию"
             },

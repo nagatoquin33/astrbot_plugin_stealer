@@ -49,7 +49,7 @@ class PluginAPI(
     ALLOWED_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
     BATCH_TASK_TTL_SECONDS = 30 * 60
     DASHBOARD_PREFS_KEY = "dashboard_prefs"
-    VALID_THEMES = frozenset({"auto", "dark", "light", "minecraft", "fallout"})
+    VALID_THEMES = frozenset({"auto", "dark", "light", "minecraft", "fallout", "bili"})
 
     def __init__(self, plugin: Any) -> None:
         self.plugin = plugin

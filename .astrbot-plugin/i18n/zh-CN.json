@@ -212,7 +212,7 @@
         "webui_theme": {
             "description": "WebUI 默认主题",
             "hint": "页面尚未保存主题选择时使用该默认值；在「表情管理」中切换后，将持续使用页面保存的主题。",
-            "labels": ["跟随宿主", "暗色鎏金", "亮色", "我的世界", "辐射 4"]
+            "labels": ["跟随宿主", "暗色鎏金", "亮色", "我的世界", "辐射 4", "B站风"]
         },
         "custom_meme_classification_prompt": {
             "description": "VLM 分类提示词",
@@ -598,8 +598,10 @@
                 "light": "亮色",
                 "minecraft": "我的世界",
                 "fallout": "辐射4",
+                "bili": "B站风",
                 "group_original": "原版",
                 "group_game": "游戏背包",
+                "group_special": "精选",
                 "save_hint": "点选后会保存为下次打开的默认主题。",
                 "saved_default": "默认"
             },

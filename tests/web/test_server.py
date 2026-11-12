@@ -4,7 +4,7 @@
 用法:
     python tests/web/test_server.py [--port 8091]
 
-- 静态托管 pages/dashboard/{index.html,app.js,app.css,template.js}
+- 静态托管 pages/dashboard/{index.html,app.js,app.css,bili.css,template.js}
 - 注入 mock 版 window.AstrBotPluginPage 桥接（apiGet/apiPost/upload/getLocale/getI18n）
 - 按 plugin_api.py 的路由在 /astrbot_plugin_stealer/* 提供 mock API
 - 内存数据：库内表情 + 待审核池，支持增删改/审核/批量操作的真实交互预览
@@ -347,7 +347,7 @@ class PreviewServer:
         r.add_get("/mock/bridge.js", self.handle_bridge_js)
         r.add_get("/logo.png", self.handle_logo)
         r.add_get("/vaultboy.png", self.handle_vaultboy)
-        for filename in ("app.js", "app.css", "template.js", "image_preview_client.js",
+        for filename in ("app.js", "app.css", "bili.css", "template.js", "image_preview_client.js",
                          "source_actions.js", "source_labels.js", "batch_reanalysis.js"):
             r.add_get("/" + filename, self._make_static_handler(filename))
         r.add_get("/vendor/{filename}", self._make_vendor_handler)
@@ -462,7 +462,7 @@ class PreviewServer:
                           "context_enabled": True, "embedding_enabled": False}}
 
     def api_prefs(self, request, payload):
-        valid_themes = {"auto", "dark", "light", "minecraft", "fallout"}
+        valid_themes = {"auto", "dark", "light", "minecraft", "fallout", "bili"}
         aliases = {"midnight": "dark", "sakura": "light"}
         if request.method == "POST":
             theme = aliases.get(str(payload.get("theme") or ""), str(payload.get("theme") or "").strip())

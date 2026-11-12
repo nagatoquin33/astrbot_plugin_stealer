@@ -314,7 +314,7 @@ createApp({
 
         const observeImages = () => {
             if (!imgObserver) return;
-            document.querySelectorAll('.item-image[data-hash]').forEach((el) => {
+            document.querySelectorAll('.item-image[data-hash], .meme-cover-wrap[data-hash], .hero-slide[data-hash], .rank-item[data-hash], .recent-item[data-hash], .review-cover[data-hash]').forEach((el) => {
                 if (!el.dataset.observed) {
                     el.dataset.observed = 'true';
                     imgObserver.observe(el);
@@ -419,9 +419,11 @@ createApp({
             { value: 'light', key: 'light', fallback: 'Light', swatch: '#faf8f3,#8b6914', group: 'original' },
             { value: 'minecraft', key: 'minecraft', fallback: 'Minecraft', swatch: '#2a1c10,#5d9c3d', group: 'game' },
             { value: 'fallout', key: 'fallout', fallback: 'Fallout 4', swatch: '#021408,#1bff80', group: 'game' },
+            { value: 'bili', key: 'bili', fallback: 'Bili Style', swatch: '#f1f2f3,#fb7299', group: 'special' },
         ];
-        const originalThemeOptions = computed(() => THEME_OPTIONS.filter((o) => o.group !== 'game'));
+        const originalThemeOptions = computed(() => THEME_OPTIONS.filter((o) => o.group === 'original'));
         const gameThemeOptions = computed(() => THEME_OPTIONS.filter((o) => o.group === 'game'));
+        const specialThemeOptions = computed(() => THEME_OPTIONS.filter((o) => o.group === 'special'));
         const resolveThemeValue = (raw) => {
             return THEME_OPTIONS.some((o) => o.value === raw) ? raw : 'auto';
         };
@@ -461,6 +463,179 @@ createApp({
         };
         const themePickerOpen = ref(false);
         const closeThemePicker = () => { themePickerOpen.value = false; };
+
+        // ── B 站风信息流布局状态 ──
+        const isBiliTheme = computed(() => effectiveTheme.value === 'bili');
+        const biliHeaderScrolled = ref(false);
+        const biliShowBackTop = ref(false);
+        const biliMoreOpen = ref(false);
+        const biliSearchOpen = ref(false);
+        const onBiliScroll = () => {
+            biliHeaderScrolled.value = window.scrollY > 12;
+            biliShowBackTop.value = window.scrollY > 600;
+        };
+        const biliBannerIndex = ref(0);
+        let biliBannerTimer = null;
+        const nextBiliBanner = () => {
+            biliBannerIndex.value = (biliBannerIndex.value + 1) % 3;
+        };
+        const biliTab = ref('recommend');
+        const biliHeroIndex = ref(0);
+        const biliPool = computed(() => (
+            [...(images.value || [])].sort((a, b) => (b.use_count || 0) - (a.use_count || 0))
+        ));
+        const biliHeroSlides = computed(() => biliPool.value.slice(0, 3));
+        const biliHot = computed(() => biliPool.value.slice(3, 7));
+        const biliRank = computed(() => biliPool.value.slice(0, 5));
+        const biliRecent = computed(() => (
+            [...(images.value || [])]
+                .sort((a, b) => (b.created_at || 0) - (a.created_at || 0))
+                .slice(0, 3)
+        ));
+        const biliHotKeywords = computed(() => (categories.value || []).slice(0, 8));
+        const biliPages = computed(() => {
+            const pages = Math.max(1, Math.ceil((total.value || 0) / (pageSize.value || 1)));
+            const start = Math.max(1, Math.min((currentPage.value || 1) - 2, pages - 4));
+            const end = Math.min(pages, start + 4);
+            const list = [];
+            for (let i = start; i <= end; i += 1) list.push(i);
+            return list;
+        });
+        const pendingPages = computed(() => {
+            const pages = Math.max(1, Math.ceil((pendingTotal.value || 0) / (pendingPageSize.value || 1)));
+            const start = Math.max(1, Math.min((pendingCurrentPage.value || 1) - 2, pages - 4));
+            const end = Math.min(pages, start + 4);
+            const list = [];
+            for (let i = start; i <= end; i += 1) list.push(i);
+            return list;
+        });
+        const scrollBiliFeed = () => {
+            setTimeout(() => scrollBiliTo('bili-library'), 120);
+        };
+        const goBiliPage = (n) => {
+            if (n === currentPage.value) return;
+            fetchImages(n);
+            scrollBiliFeed();
+        };
+        const submitBiliSearch = () => {
+            biliSearchOpen.value = false;
+            fetchImages(1);
+            scrollBiliFeed();
+        };
+        const quickBiliSearch = (cat) => {
+            biliSearchOpen.value = false;
+            searchQuery.value = cat.name || '';
+            fetchImages(1);
+            scrollBiliFeed();
+        };
+        const scrollBiliTop = () => {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        };
+        const closeBiliPopovers = (event) => {
+            const target = event.target;
+            if (!(target instanceof Element)) return;
+            if (!target.closest('.search')) biliSearchOpen.value = false;
+            if (!target.closest('.nav-more-wrap')) biliMoreOpen.value = false;
+        };
+        // 顶栏「历史 / 创作中心」面板
+        const biliPanelOpen = ref(false);
+        const biliPanelType = ref('studio');
+        const biliHistory = ref([]);
+        const biliHistoryLoading = ref(false);
+        const openBiliStudio = () => {
+            biliPanelType.value = 'studio';
+            biliPanelOpen.value = true;
+        };
+        const closeBiliPanel = () => { biliPanelOpen.value = false; };
+        const openBiliHistory = async () => {
+            biliPanelType.value = 'history';
+            biliPanelOpen.value = true;
+            biliHistoryLoading.value = true;
+            try {
+                const res = await apiFetch('api/images?page=1&size=12&sort=last_used');
+                const data = await res.json();
+                biliHistory.value = (data.images || []).filter((img) => img.last_used_at);
+                biliHistory.value.forEach((img) => { if (img.hash) loadImageData(img.hash); });
+            } catch (e) {
+                biliHistory.value = [];
+            } finally {
+                biliHistoryLoading.value = false;
+            }
+        };
+        const openBiliHistoryItem = (img) => {
+            biliPanelOpen.value = false;
+            openPreview(img);
+        };
+        const nextBiliHero = () => {
+            const count = biliHeroSlides.value.length || 1;
+            biliHeroIndex.value = (biliHeroIndex.value + 1) % count;
+        };
+        const prevBiliHero = () => {
+            const count = biliHeroSlides.value.length || 1;
+            biliHeroIndex.value = (biliHeroIndex.value - 1 + count) % count;
+        };
+        const goBiliLibrary = (library) => {
+            selectedLibrary.value = library || '';
+            selectedCharacter.value = '';
+            selectedCategory.value = '';
+            biliTab.value = 'recommend';
+            biliHeroIndex.value = 0;
+            switchSection('library');
+            scrollBiliFeed();
+        };
+        const goBiliFavorites = () => {
+            selectedLibrary.value = 'favorites';
+            selectedCategory.value = '';
+            biliTab.value = 'fav';
+            switchSection('library');
+            scrollBiliFeed();
+        };
+        const goBiliAll = () => {
+            selectedLibrary.value = '';
+            selectedCategory.value = '';
+            selectedCharacter.value = '';
+            sortBy.value = 'newest';
+            biliTab.value = 'recommend';
+            switchSection('library');
+            scrollBiliFeed();
+        };
+        const goBiliHot = () => {
+            selectedLibrary.value = '';
+            selectedCategory.value = '';
+            sortBy.value = 'most_used';
+            biliTab.value = 'used';
+            switchSection('library');
+            scrollBiliFeed();
+        };
+        const setBiliTab = (tab) => {
+            biliTab.value = tab;
+            if (tab === 'fav') {
+                goBiliFavorites();
+                return;
+            }
+            selectedLibrary.value = '';
+            if (tab === 'used') {
+                sortBy.value = 'most_used';
+            } else {
+                sortBy.value = 'newest';
+            }
+            switchSection('library');
+            scrollBiliFeed();
+        };
+        const scrollBiliTo = (id) => {
+            const el = document.getElementById(id);
+            if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                return;
+            }
+            if (activeSection.value !== 'library') {
+                switchSection('library');
+                setTimeout(() => {
+                    const target = document.getElementById(id);
+                    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }, 450);
+            }
+        };
 
         const viewMode = ref(readStored(VIEW_STORAGE_KEY) === 'list' ? 'list' : 'grid');
         sidebarCollapsed.value = readStored(SIDEBAR_STORAGE_KEY) === 'collapsed';
@@ -876,6 +1051,10 @@ createApp({
                     if (!currentHashes.has(hash)) delete originalDataUrls[hash];
                 }
                 nextTick(() => observeImages());
+                if (isBiliTheme.value) {
+                    // B 站风信息流一次只展示一页，直接预热缩略图，避免骨架/空白封面。
+                    nextImages.forEach((img) => { if (img.hash) loadImageData(img.hash); });
+                }
                 if (selectedImages.value.size > 0) {
                     const visibleHashes = new Set(nextImages.map((img) => img.hash));
                     selectedImages.value = new Set(
@@ -2651,6 +2830,11 @@ createApp({
             window.addEventListener('click', closeThemePicker);
             window.addEventListener('click', closeContextMenu);
             window.addEventListener('scroll', closeContextMenu, true);
+            window.addEventListener('scroll', onBiliScroll, { passive: true });
+            window.addEventListener('click', closeBiliPopovers);
+            biliBannerTimer = setInterval(() => {
+                if (isBiliTheme.value) biliBannerIndex.value = (biliBannerIndex.value + 1) % 3;
+            }, 6500);
             imgObserver = new IntersectionObserver((entries) => {
                 entries.forEach((entry) => {
                     if (entry.isIntersecting) {
@@ -2676,6 +2860,10 @@ createApp({
             window.removeEventListener('click', closeThemePicker);
             window.removeEventListener('click', closeContextMenu);
             window.removeEventListener('scroll', closeContextMenu, true);
+            window.removeEventListener('scroll', onBiliScroll);
+            window.removeEventListener('click', closeBiliPopovers);
+            clearInterval(biliBannerTimer);
+            biliBannerTimer = null;
             if (imgObserver) imgObserver.disconnect();
             clearTimeout(resizeTimer);
             clearTimeout(searchTimeout);
@@ -2684,6 +2872,43 @@ createApp({
 
         return {
             activeSection,
+            isBiliTheme,
+            biliHeaderScrolled,
+            biliShowBackTop,
+            biliMoreOpen,
+            biliSearchOpen,
+            biliHotKeywords,
+            biliPages,
+            pendingPages,
+            biliPanelOpen,
+            biliPanelType,
+            biliHistory,
+            biliHistoryLoading,
+            openBiliStudio,
+            openBiliHistory,
+            closeBiliPanel,
+            openBiliHistoryItem,
+            goBiliPage,
+            submitBiliSearch,
+            quickBiliSearch,
+            scrollBiliTop,
+            biliBannerIndex,
+            nextBiliBanner,
+            biliTab,
+            biliHeroIndex,
+            biliHeroSlides,
+            biliHot,
+            biliRank,
+            biliRecent,
+            nextBiliHero,
+            prevBiliHero,
+            goBiliLibrary,
+            goBiliFavorites,
+            goBiliAll,
+            goBiliHot,
+            setBiliTab,
+            scrollBiliTo,
+            showAlert,
             sidebarOpen,
             sidebarCollapsed,
             toggleSidebarCollapsed,
@@ -2960,6 +3185,7 @@ createApp({
             THEME_OPTIONS,
             originalThemeOptions,
             gameThemeOptions,
+            specialThemeOptions,
             setThemeMode,
             themePickerOpen,
             hudHpPct,
