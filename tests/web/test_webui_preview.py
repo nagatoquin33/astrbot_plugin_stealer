@@ -47,6 +47,9 @@ async def test_index_injects_bridge_and_i18n():
         assert "./vendor/vue.global.prod.js" in html
         assert 'rel="icon"' in html
         assert (DASHBOARD_DIR / "vendor" / "vue.global.prod.js").is_file()
+        for css_name in ("app.css", "light.css", "dark.css", "minecraft.css", "fallout.css", "bili.css"):
+            assert f'href="./{css_name}"' in html
+            assert (DASHBOARD_DIR / css_name).is_file()
 
 
 @pytest.mark.asyncio
@@ -245,7 +248,7 @@ const { pathToFileURL } = require('url');
 
 def test_light_theme_character_filter_uses_readable_surface():
     """验证亮色主题的角色筛选栏使用对应的背景和边框颜色。"""
-    css = (DASHBOARD_DIR / "app.css").read_text(encoding="utf-8")
+    css = (DASHBOARD_DIR / "light.css").read_text(encoding="utf-8")
     selector = '[data-theme="light"] .character-filter-bar'
     start = css.index(selector)
     rule = css[start:css.index("}", start)]
@@ -254,7 +257,10 @@ def test_light_theme_character_filter_uses_readable_surface():
 
 
 def test_dashboard_font_assets_are_pinned():
-    css = (DASHBOARD_DIR / "app.css").read_text(encoding="utf-8")
+    css = "\n".join(
+        (DASHBOARD_DIR / name).read_text(encoding="utf-8")
+        for name in ("app.css", "light.css", "dark.css", "minecraft.css", "fallout.css", "bili.css")
+    )
     assert "@latest" not in css
 
     active_count_selector = '[data-theme="light"] .character-chip.active .character-chip-count'
