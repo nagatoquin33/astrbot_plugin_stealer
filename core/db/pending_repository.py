@@ -144,7 +144,9 @@ class PendingRepository:
         where_clauses: list[str] = []
         params: list[Any] = []
 
-        if category:
+        if category == "unanalysed":
+            where_clauses.append("(p.category = '' OR p.category IS NULL)")
+        elif category:
             where_clauses.append("p.category = ?")
             params.append(category)
 
@@ -170,9 +172,10 @@ class PendingRepository:
             ).fetchone()["cnt"]
 
             category_where_clauses = [
-                clause for clause in where_clauses if clause != "p.category = ?"
+                clause for clause in where_clauses
+                if clause not in ("p.category = ?", "(p.category = '' OR p.category IS NULL)")
             ]
-            category_params = params[1:] if category else params
+            category_params = params[1:] if (category and category != "unanalysed") else params
             category_where_sql = (
                 "WHERE " + " AND ".join(category_where_clauses)
                 if category_where_clauses

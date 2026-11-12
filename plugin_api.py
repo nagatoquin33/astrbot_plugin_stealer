@@ -408,7 +408,7 @@ class PluginAPI(
             known = {c["key"] for c in result}
             for cat_key, count in counts.items():
                 if cat_key not in known:
-                    result.append({"key": cat_key or '', "name": cat_key or '待识图', "count": count})
+                    result.append({"key": cat_key or 'unanalysed', "name": cat_key or '待识图', "count": count})
         result.sort(key=lambda x: x["count"], reverse=True)
         return result
 

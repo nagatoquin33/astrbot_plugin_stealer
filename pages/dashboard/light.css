@@ -1,0 +1,1035 @@
+/* light theme — split from app.css; rules apply only under [data-theme="light"] */
+
+@media (min-width: 769px) and (max-width: 1180px) {
+:root:not([data-theme="fallout"]) .header-text p { display: none; }
+
+:root:not([data-theme="fallout"]) .header-nav { margin-left: 6px; }
+
+:root:not([data-theme="fallout"]) .header-nav .section-tab { padding: 0 10px; }
+
+:root:not([data-theme="fallout"]) .header-nav .section-tab-label { display: none; }
+
+:root:not([data-theme="fallout"]) .stat-item { padding: 0 10px; }
+
+:root:not([data-theme="fallout"]) .health-indicator { padding: 6px 8px; }
+
+
+}
+
+/* Keep the brand and section buttons readable in a narrow desktop panel. */
+
+[data-theme="light"] {
+    /* Claude 风格：暖纸底 + 珊瑚橙 + 衬线标题，中性米色承载页面层级 */
+    --bg-base: #f6f4ee;
+    --bg-elevated: #faf8f3;
+    --bg-card: #ffffff;
+    --bg-card-hover: #f5f2ea;
+    --gold-primary: #c15f3c;
+    --gold-bright: #b4522f;
+    --gold-dim: #e2c7b8;
+    --gold-glow: rgba(217, 119, 87, 0.14);
+    --success: #3f6f52;
+    --warning: #a9761f;
+    --danger: #b3443f;
+    --favorite: #d97757;
+    --text-primary: #1f1e1b;
+    --text-secondary: #4e4a41;
+    --text-tertiary: #857f70;
+    --sidebar-selection-bg: #e7e3d9;
+    --sidebar-selection-text: #1f1e1b;
+    --glass-bg: rgba(250, 249, 245, 0.86);
+    --glass-border: rgba(61, 57, 41, 0.1);
+    --accent-rgb: 217, 119, 87;
+    --accent-soft-rgb: 232, 164, 137;
+    --surface-1: #fbf9f5;
+    --surface-2: #ffffff;
+    --surface-3: #f3f0e8;
+    --surface-inset: #f4f1e9;
+    --hairline: rgba(61, 57, 41, 0.09);
+    --hairline-strong: rgba(61, 57, 41, 0.16);
+    --shadow-1: 0 1px 2px rgba(61, 57, 41, 0.05);
+    --shadow-2: 0 4px 14px rgba(61, 57, 41, 0.07);
+    --shadow-3: 0 16px 40px rgba(61, 57, 41, 0.12);
+    --ring-accent: 0 0 0 1px rgba(193, 95, 60, 0.45), 0 0 0 4px rgba(217, 119, 87, 0.14);
+    --font-display: 'Palatino Linotype', 'Iowan Old Style', 'Songti SC', 'Noto Serif SC', 'SimSun', Georgia, serif;
+    --toolbar-gradient: linear-gradient(to bottom, rgba(250, 249, 245, 0.97), rgba(247, 245, 239, 0.95));
+    --pager-gradient: linear-gradient(to bottom, rgba(247, 245, 239, 0.95), rgba(250, 249, 245, 0.97));
+    --btn-gradient: linear-gradient(180deg, #ffffff 0%, #faf8f2 100%);
+    --btn-gradient-hover: linear-gradient(180deg, #ffffff 0%, #f2efe7 100%);
+    --panel-gradient: linear-gradient(180deg, #fffefb 0%, #fbfaf5 100%);
+    --panel-header-gradient: linear-gradient(to bottom, rgba(61, 57, 41, 0.02), rgba(61, 57, 41, 0));
+    --preview-gradient: radial-gradient(120% 100% at 50% 0%, #fbf8f1 0%, #f1eee5 70%);
+    --toggle-gradient: linear-gradient(145deg, #fdfcf8, #f3f0e8);
+    --bar-solid: rgba(250, 249, 245, 0.96);
+}
+
+[data-theme="light"] .character-chip.active {
+    color: var(--gold-primary);
+    background: rgba(var(--accent-rgb), 0.1);
+}
+
+[data-theme="light"] .item-category {
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+[data-theme="light"] .category-item.active .category-name {
+    color: var(--sidebar-selection-text);
+}
+
+[data-theme="light"] .category-name {
+    color: var(--text-primary);
+}
+
+[data-theme="light"] .inventory-toolbar {
+    background: var(--bg-elevated);
+}
+
+[data-theme="light"] .vlm-compare-card {
+    background: rgba(61, 57, 41, 0.03);
+}
+
+[data-theme="light"] .vlm-compare-card.proposed {
+    border-color: rgba(var(--accent-rgb), 0.45);
+    background: rgba(var(--accent-rgb), 0.06);
+}
+
+[data-theme="light"] .character-filter-bar {
+    background: var(--bg-elevated);
+    border-bottom-color: var(--glass-border);
+}
+
+[data-theme="light"] .character-chip-count {
+    color: var(--text-tertiary);
+}
+
+[data-theme="light"] .character-chip.active .character-chip-count {
+    color: currentColor;
+}
+
+[data-theme="light"] .modal-header {
+    background: var(--bg-elevated);
+}
+
+[data-theme="light"] ::-webkit-scrollbar-track {
+    background: var(--bg-elevated);
+}
+
+[data-theme="light"] ::-webkit-scrollbar-thumb {
+    background: var(--gold-dim);
+}
+
+[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+    background: var(--gold-primary);
+}
+
+[data-theme="light"] .progress-bar {
+    background: rgba(61, 57, 41, 0.08);
+}
+
+[data-theme="light"] .analysis-result {
+    background: linear-gradient(145deg, rgba(var(--accent-rgb), 0.07), rgba(255, 255, 255, 0.8));
+    border-color: rgba(var(--accent-rgb), 0.28);
+}
+
+[data-theme="light"] .scene-tag-btn.active {
+    color: var(--gold-bright);
+}
+
+[data-theme="light"] .pending-capacity-bar {
+    background: rgba(61, 57, 41, 0.08);
+}
+
+[data-theme="light"] .progress-track {
+    background: rgba(61, 57, 41, 0.07);
+    box-shadow: inset 0 1px 2px rgba(61, 57, 41, 0.08);
+}
+
+[data-theme="light"] .source-metrics span {
+    background: rgba(61, 57, 41, 0.05);
+}
+
+[data-theme="light"] h1,
+[data-theme="light"] h2,
+[data-theme="light"] h3,
+[data-theme="light"] .header-text h1,
+[data-theme="light"] .library-heading h2,
+[data-theme="light"] .modal-header h2,
+[data-theme="light"] .stat-value {
+    font-family: var(--font-display);
+    font-weight: 600;
+    letter-spacing: -0.005em;
+}
+
+/* ── 亮色主题：Claude 风格细节（暖纸 + 陶土橙 + 衬线标题） ───── */
+
+[data-theme="light"] .item-preview img {
+    box-shadow: 0 16px 40px rgba(58, 48, 32, 0.18);
+}
+
+[data-theme="light"] body {
+    background-image: none;
+    background-color: var(--bg-base);
+}
+
+/* ══ 亮色主题：Claude 风格二次微调 ══════════════════════════
+   目标：暖纸画布 + 米色层级 + 珊瑚橙点缀 + 衬线标题，
+   控件收敛为「白底 / 细边 / 柔和阴影」，弱化金色与描边堆叠。 */
+
+[data-theme="light"] .codex-header {
+    background: rgba(250, 249, 245, 0.86);
+    border-bottom-color: rgba(61, 57, 41, 0.08);
+}
+
+[data-theme="light"] .header-text h1 {
+    font-size: 1.1875rem;
+    font-weight: 500;
+    letter-spacing: 0;
+    color: var(--text-primary);
+}
+
+[data-theme="light"] .header-text p {
+    color: #8f887a;
+    letter-spacing: 0.12em;
+    font-size: 0.625rem;
+}
+
+[data-theme="light"] .header-sidebar-toggle,
+[data-theme="light"] .theme-menu-btn {
+    background: #ffffff;
+    border-color: rgba(61, 57, 41, 0.1);
+    box-shadow: 0 1px 2px rgba(61, 57, 41, 0.05);
+    color: #575246;
+}
+
+[data-theme="light"] .header-sidebar-toggle:hover,
+[data-theme="light"] .theme-menu-btn:hover {
+    background: #fffefb;
+    border-color: rgba(61, 57, 41, 0.18);
+    color: var(--text-primary);
+}
+
+[data-theme="light"] .header-nav {
+    background: #f1eee7;
+    border-color: transparent;
+    padding: 3px;
+}
+
+[data-theme="light"] .header-nav .section-tab {
+    color: #6b6659;
+    border-radius: 999px;
+}
+
+[data-theme="light"] .header-nav .section-tab:hover {
+    background: rgba(61, 57, 41, 0.05);
+    color: var(--text-primary);
+}
+
+[data-theme="light"] .header-nav .section-tab.active {
+    background: #ffffff;
+    color: var(--text-primary);
+    font-weight: 600;
+    box-shadow: 0 1px 2px rgba(61, 57, 41, 0.1), 0 0 0 1px rgba(61, 57, 41, 0.05);
+}
+
+[data-theme="light"] .health-indicator {
+    background: transparent;
+    border-color: rgba(61, 57, 41, 0.12);
+    color: #6b6659;
+}
+
+[data-theme="light"] .stat-value {
+    font-size: 1.0625rem;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+[data-theme="light"] .stat-label {
+    color: #8f887a;
+    letter-spacing: 0.04em;
+    text-transform: none;
+}
+
+[data-theme="light"] .sidebar {
+    background: #f1eee7;
+    border-right-color: rgba(61, 57, 41, 0.07);
+}
+
+/* 侧栏：米色底 + 中性选中态 */
+
+[data-theme="light"] .sidebar-title {
+    color: #8f887a;
+    letter-spacing: 0.14em;
+}
+
+[data-theme="light"] .sidebar-divider {
+    background: rgba(61, 57, 41, 0.08);
+}
+
+[data-theme="light"] .library-nav-item,
+[data-theme="light"] .category-item {
+    color: #575246;
+}
+
+[data-theme="light"] .library-nav-item:hover,
+[data-theme="light"] .category-item:hover {
+    background: rgba(61, 57, 41, 0.05);
+    color: var(--text-primary);
+}
+
+[data-theme="light"] .library-nav-item.active,
+[data-theme="light"] .category-item.active {
+    background: var(--sidebar-selection-bg);
+    color: var(--sidebar-selection-text);
+}
+
+[data-theme="light"] .library-nav-item.active::before {
+    display: none;
+}
+
+[data-theme="light"] .library-nav-count,
+[data-theme="light"] .category-count {
+    color: #8f887a;
+}
+
+[data-theme="light"] .library-nav-item.active .library-nav-count,
+[data-theme="light"] .category-item.active .category-count {
+    color: #575246;
+}
+
+[data-theme="light"] .inventory-panel {
+    background: #fdfcf9;
+    border-color: rgba(61, 57, 41, 0.09);
+    border-radius: 14px;
+    box-shadow: 0 1px 2px rgba(61, 57, 41, 0.04);
+}
+
+/* 内容面板与标题：白纸 + 衬线大标题 */
+
+[data-theme="light"] .library-heading {
+    padding: 26px 28px 18px;
+    border-bottom-color: rgba(61, 57, 41, 0.07);
+}
+
+[data-theme="light"] .library-eyebrow {
+    color: #8f887a;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+}
+
+[data-theme="light"] .library-eyebrow::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-right: 8px;
+    border-radius: 2px;
+    background: #d97757;
+    vertical-align: 2px;
+}
+
+[data-theme="light"] .library-heading h2 {
+    font-size: 1.625rem;
+    font-weight: 500;
+    letter-spacing: -0.015em;
+    color: var(--text-primary);
+}
+
+[data-theme="light"] .library-result-count {
+    background: #f1eee7;
+    border-color: transparent;
+    color: #6b6659;
+    font-weight: 500;
+}
+
+[data-theme="light"] .library-location {
+    color: #8f887a;
+}
+
+[data-theme="light"] .library-policy,
+[data-theme="light"] .library-policy summary {
+    color: #8f887a;
+}
+
+[data-theme="light"] .usage-guide {
+    background: #f7f4ed;
+    border-color: rgba(61, 57, 41, 0.07);
+    border-radius: 12px;
+    margin: 16px 28px 0;
+}
+
+[data-theme="light"] .usage-guide summary {
+    color: #3d3929;
+    font-weight: 550;
+}
+
+[data-theme="light"] .usage-guide summary::before {
+    color: #b8b1a3;
+}
+
+[data-theme="light"] .inventory-toolbar {
+    border-bottom-color: rgba(61, 57, 41, 0.07);
+    padding: 14px 28px;
+}
+
+[data-theme="light"] .toolbar-search input {
+    height: 40px;
+    background: #ffffff;
+    border-color: rgba(61, 57, 41, 0.12);
+    border-radius: 10px;
+    color: var(--text-primary);
+}
+
+[data-theme="light"] .toolbar-search input::placeholder {
+    color: #a5a093;
+}
+
+[data-theme="light"] .toolbar-search input:hover {
+    border-color: rgba(61, 57, 41, 0.2);
+}
+
+[data-theme="light"] .toolbar-search input:focus {
+    border-color: rgba(217, 119, 87, 0.6);
+    box-shadow: 0 0 0 3px rgba(217, 119, 87, 0.12);
+}
+
+[data-theme="light"] .toolbar-sort-select {
+    height: 40px;
+    background-color: #ffffff;
+    border-color: rgba(61, 57, 41, 0.12);
+    border-radius: 10px;
+}
+
+/* 下拉箭头：暖灰，与白底输入框同色系的安静处理 */
+
+[data-theme="light"] select.codex-input,
+[data-theme="light"] .toolbar-sort-select {
+    background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23857f70%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px top 50%;
+    background-size: 12px auto;
+}
+
+[data-theme="light"] .view-toggle-group {
+    background: #f1eee7;
+    border-color: transparent;
+    border-radius: 10px;
+    padding: 3px;
+}
+
+[data-theme="light"] .view-toggle-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: 7px;
+    color: #8f887a;
+}
+
+[data-theme="light"] .view-toggle-btn.active {
+    background: #ffffff;
+    color: var(--text-primary);
+    box-shadow: 0 1px 2px rgba(61, 57, 41, 0.1);
+}
+
+[data-theme="light"] .codex-btn {
+    background: #ffffff;
+    border-color: rgba(61, 57, 41, 0.12);
+    color: #3d3929;
+    border-radius: 10px;
+    box-shadow: 0 1px 2px rgba(61, 57, 41, 0.04);
+    font-weight: 500;
+}
+
+/* 按钮：白底细边 + 珊瑚橙主按钮 */
+
+[data-theme="light"] .codex-btn:hover {
+    background: #f5f2ea;
+    border-color: rgba(61, 57, 41, 0.18);
+    color: var(--text-primary);
+    transform: none;
+    box-shadow: 0 1px 2px rgba(61, 57, 41, 0.06);
+}
+
+[data-theme="light"] .codex-btn.primary {
+    background: #d97757;
+    border-color: #d97757;
+    color: #ffffff;
+    font-weight: 550;
+    box-shadow: 0 1px 2px rgba(160, 80, 55, 0.18);
+}
+
+[data-theme="light"] .codex-btn.primary:hover {
+    background: #c96442;
+    border-color: #c96442;
+    color: #ffffff;
+    box-shadow: 0 2px 6px rgba(160, 80, 55, 0.22);
+}
+
+[data-theme="light"] .codex-btn.primary:disabled {
+    background: #eadfd8;
+    border-color: transparent;
+    color: #a79e93;
+    box-shadow: none;
+}
+
+[data-theme="light"] .codex-btn.danger {
+    background: transparent;
+    border-color: rgba(179, 68, 63, 0.22);
+    color: #b3443f;
+}
+
+[data-theme="light"] .codex-btn.danger:hover {
+    background: rgba(179, 68, 63, 0.06);
+    border-color: rgba(179, 68, 63, 0.45);
+    color: #9c3733;
+}
+
+[data-theme="light"] .codex-input,
+[data-theme="light"] select.codex-input {
+    background-color: #ffffff;
+    border-color: rgba(61, 57, 41, 0.13);
+    border-radius: 10px;
+    color: var(--text-primary);
+}
+
+[data-theme="light"] .codex-input::placeholder {
+    color: #a5a093;
+}
+
+[data-theme="light"] .codex-input:focus {
+    border-color: rgba(217, 119, 87, 0.6);
+    box-shadow: 0 0 0 3px rgba(217, 119, 87, 0.12);
+}
+
+[data-theme="light"] .form-label {
+    color: #575246;
+    font-weight: 500;
+}
+
+[data-theme="light"] .hint-text,
+[data-theme="light"] .form-hint {
+    color: #8f887a;
+}
+
+[data-theme="light"] .item-slot,
+[data-theme="light"] .pending-card {
+    background: #ffffff;
+    border-color: rgba(61, 57, 41, 0.08);
+    border-radius: 12px;
+    box-shadow: none;
+}
+
+/* 收藏册卡片：白卡 + 细腻边界 + 柔和悬停 */
+
+[data-theme="light"] .item-slot:hover,
+[data-theme="light"] .pending-card:hover {
+    background: #ffffff;
+    border-color: rgba(61, 57, 41, 0.15);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 18px rgba(61, 57, 41, 0.08);
+}
+
+[data-theme="light"] .item-slot.selected {
+    border-color: rgba(217, 119, 87, 0.6);
+    box-shadow: 0 0 0 2px rgba(217, 119, 87, 0.16);
+}
+
+[data-theme="light"] .pending-card.selected {
+    border-color: rgba(217, 119, 87, 0.6);
+    box-shadow: 0 0 0 2px rgba(217, 119, 87, 0.16);
+}
+
+[data-theme="light"] .paused-banner {
+    background: rgba(179, 68, 63, 0.06);
+    border-color: rgba(179, 68, 63, 0.22);
+    color: var(--danger);
+}
+
+[data-theme="light"] .empty-illustration {
+    background: radial-gradient(120% 120% at 32% 22%, #fbf9f3, #f1eee5);
+    border-color: rgba(61, 57, 41, 0.09);
+    box-shadow: 0 1px 2px rgba(61, 57, 41, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+[data-theme="light"] .item-image,
+[data-theme="light"] .pending-image {
+    background: #f5f2ea;
+    padding: 10px;
+}
+
+[data-theme="light"] .item-info {
+    border-top-color: rgba(61, 57, 41, 0.07);
+    padding: 11px 12px 12px;
+}
+
+[data-theme="light"] .card-bottom-row,
+[data-theme="light"] .card-usage {
+    color: #8f887a;
+}
+
+[data-theme="light"] .emotion-chip {
+    background: #f1eee7;
+    border-color: transparent;
+    color: #575246;
+    font-weight: 500;
+}
+
+/* 药丸：中性米色，主标签用浅珊瑚 */
+
+[data-theme="light"] .emotion-chip.primary {
+    background: #f8ebe5;
+    border-color: transparent;
+    color: #a94a2b;
+}
+
+[data-theme="light"] .scope-pill {
+    background: #f1eee7;
+    border-color: transparent;
+    color: #575246;
+    font-weight: 600;
+}
+
+[data-theme="light"] .scope-pill.public {
+    background: #edf3ee;
+    border-color: transparent;
+    color: #3f6f52;
+}
+
+[data-theme="light"] .scope-pill.local {
+    background: #f7ece9;
+    border-color: transparent;
+    color: #a34a43;
+}
+
+[data-theme="light"] .tag {
+    background: #f1eee7;
+    border-color: transparent;
+    color: #575246;
+}
+
+[data-theme="light"] .favorite-btn {
+    background: rgba(255, 255, 255, 0.9);
+    border-color: rgba(61, 57, 41, 0.1);
+    box-shadow: 0 1px 2px rgba(61, 57, 41, 0.08);
+}
+
+[data-theme="light"] .favorite-btn:hover {
+    background: #ffffff;
+    border-color: rgba(61, 57, 41, 0.2);
+}
+
+[data-theme="light"] .favorite-btn svg {
+    stroke: #8f887a;
+}
+
+[data-theme="light"] .favorite-btn.active {
+    background: #ffffff;
+    border-color: rgba(217, 119, 87, 0.35);
+}
+
+[data-theme="light"] .favorite-btn.active svg {
+    fill: #d97757;
+    stroke: #d97757;
+    filter: none;
+}
+
+[data-theme="light"] .item-more-btn {
+    background: rgba(255, 255, 255, 0.9);
+    border-color: rgba(61, 57, 41, 0.1);
+    color: #575246;
+}
+
+[data-theme="light"] .item-more-btn:hover {
+    background: #ffffff;
+    border-color: rgba(61, 57, 41, 0.2);
+    color: var(--text-primary);
+}
+
+[data-theme="light"] .modal-overlay {
+    background: rgba(45, 40, 32, 0.28);
+    backdrop-filter: blur(5px);
+    -webkit-backdrop-filter: blur(5px);
+}
+
+/* 弹窗：奶油面板 + 大圆角 + 暖遮罩 */
+
+[data-theme="light"] .modal-panel {
+    background: #fbfaf6;
+    border-color: rgba(61, 57, 41, 0.1);
+    border-radius: 16px;
+    box-shadow: 0 20px 50px rgba(45, 40, 32, 0.14);
+}
+
+[data-theme="light"] .modal-header {
+    border-bottom-color: rgba(61, 57, 41, 0.08);
+    min-height: 58px;
+    padding: 0 22px;
+}
+
+[data-theme="light"] .modal-header h2 {
+    font-size: 1.125rem;
+    font-weight: 500;
+    letter-spacing: 0;
+    color: var(--text-primary);
+}
+
+[data-theme="light"] .modal-close {
+    color: #8f887a;
+    border-radius: 8px;
+}
+
+[data-theme="light"] .modal-close:hover {
+    background: #f1eee7;
+    border-color: transparent;
+    color: var(--text-primary);
+}
+
+[data-theme="light"] .modal-actions,
+[data-theme="light"] .modal-footer-actions,
+[data-theme="light"] .modal-form-body {
+    background: #fbfaf6;
+}
+
+[data-theme="light"] .modal-actions,
+[data-theme="light"] .modal-footer-actions {
+    border-top-color: rgba(61, 57, 41, 0.08);
+}
+
+[data-theme="light"] .upload-area {
+    background: #f7f4ed;
+    border-color: rgba(61, 57, 41, 0.16);
+    border-radius: 12px;
+}
+
+[data-theme="light"] .upload-area:hover {
+    background: #fbf9f3;
+    border-color: rgba(217, 119, 87, 0.45);
+}
+
+[data-theme="light"] .item-preview {
+    background: #f4f1e9;
+}
+
+[data-theme="light"] .item-stats {
+    background: #fbfaf6;
+    border-left-color: rgba(61, 57, 41, 0.08);
+}
+
+[data-theme="light"] .stat-row {
+    border-bottom-color: rgba(61, 57, 41, 0.07);
+}
+
+[data-theme="light"] .stat-name {
+    color: #8f887a;
+}
+
+[data-theme="light"] .stat-row .stat-value {
+    color: var(--text-primary);
+}
+
+[data-theme="light"] .stat-block {
+    border-bottom-color: rgba(61, 57, 41, 0.07);
+}
+
+[data-theme="light"] .stat-group-title {
+    color: #8f887a;
+}
+
+[data-theme="light"] .stat-group-title::after {
+    background: rgba(61, 57, 41, 0.08);
+}
+
+[data-theme="light"] .preview-counter {
+    background: rgba(255, 255, 255, 0.85);
+    border-color: rgba(61, 57, 41, 0.1);
+    box-shadow: 0 1px 3px rgba(58, 48, 32, 0.08);
+}
+
+[data-theme="light"] .preview-actions-sep {
+    background: rgba(61, 57, 41, 0.1);
+}
+
+[data-theme="light"] .vlm-reanalysis-panel {
+    background: rgba(217, 119, 87, 0.04);
+    border-color: rgba(61, 57, 41, 0.09);
+}
+
+[data-theme="light"] .codex-btn.danger-quiet:hover {
+    background: rgba(179, 68, 63, 0.07);
+    border-color: rgba(179, 68, 63, 0.3);
+}
+
+[data-theme="light"] .desc-quote {
+    background: #f4f1e9;
+    border-color: transparent;
+    border-left: 2px solid #d97757;
+    border-radius: 0 8px 8px 0;
+}
+
+[data-theme="light"] .favorite-toggle-btn:hover {
+    border-color: rgba(217, 119, 87, 0.45);
+    color: var(--gold-bright);
+}
+
+[data-theme="light"] .favorite-toggle-btn.active {
+    background: #f8ebe5;
+    border-color: transparent;
+    color: #a94a2b;
+}
+
+[data-theme="light"] .pagination-bar {
+    background: #fbfaf6;
+    border-top-color: rgba(61, 57, 41, 0.08);
+}
+
+[data-theme="light"] .page-info {
+    color: #6b6659;
+}
+
+[data-theme="light"] .theme-popover {
+    background: #fffefb;
+    border-color: rgba(61, 57, 41, 0.1);
+    box-shadow: 0 12px 32px rgba(45, 40, 32, 0.12);
+}
+
+[data-theme="light"] .theme-save-hint,
+[data-theme="light"] .theme-group-label {
+    color: #8f887a;
+    border-bottom-color: rgba(61, 57, 41, 0.08);
+}
+
+[data-theme="light"] .theme-option {
+    color: #575246;
+}
+
+[data-theme="light"] .theme-option:hover {
+    background: #f3f0e8;
+    color: var(--text-primary);
+}
+
+[data-theme="light"] .theme-option.active {
+    background: rgba(var(--accent-rgb), 0.1);
+    color: var(--gold-primary);
+}
+
+[data-theme="light"] .theme-swatch {
+    border-color: rgba(61, 57, 41, 0.22);
+    box-shadow: inset 0 0 4px rgba(0, 0, 0, 0.16), 0 1px 2px rgba(45, 40, 32, 0.14);
+}
+
+[data-theme="light"] .theme-default-tag {
+    color: #a94a2b;
+}
+
+[data-theme="light"] .kbd-hints kbd {
+    background: #f1eee7;
+    border-color: rgba(61, 57, 41, 0.12);
+    border-bottom-color: rgba(61, 57, 41, 0.2);
+    color: #575246;
+}
+
+[data-theme="light"] .toast-notification {
+    background: #fffefb;
+    border-color: rgba(61, 57, 41, 0.12);
+    color: var(--text-primary);
+    box-shadow: 0 12px 32px rgba(45, 40, 32, 0.14);
+}
+
+[data-theme="light"] .item-context-menu {
+    background: #fffefb;
+    border-color: rgba(61, 57, 41, 0.1);
+}
+
+[data-theme="light"] .context-menu-head {
+    color: #8f887a;
+    border-bottom-color: rgba(61, 57, 41, 0.08);
+}
+
+[data-theme="light"] .item-context-menu > button {
+    color: #575246;
+}
+
+[data-theme="light"] .item-context-menu > button:hover {
+    background: #f3f0e8;
+    color: var(--text-primary);
+}
+
+[data-theme="light"] .source-input-card,
+[data-theme="light"] .source-inspection,
+[data-theme="light"] .source-job,
+[data-theme="light"] .source-registry {
+    background: #ffffff;
+    border-color: rgba(61, 57, 41, 0.09);
+}
+
+[data-theme="light"] .source-safety-note {
+    background: rgba(217, 119, 87, 0.05);
+    border-color: rgba(217, 119, 87, 0.2);
+}
+
+[data-theme="light"] .skeleton-card {
+    background: #ffffff;
+    border-color: rgba(61, 57, 41, 0.06);
+}
+
+[data-theme="light"] .skeleton-image {
+    background: linear-gradient(90deg, #f4f1e9 25%, #ebe7dd 50%, #f4f1e9 75%);
+    background-size: 200% 100%;
+}
+
+[data-theme="light"] .skeleton-text {
+    background: #f1eee7;
+}
+
+[data-theme="light"] .empty-state {
+    color: #8f887a;
+}
+
+[data-theme="light"] .category-add-panel,
+[data-theme="light"] .category-manager-row {
+    background: #ffffff;
+    border-color: rgba(61, 57, 41, 0.09);
+}
+
+[data-theme="light"] .category-manager-key {
+    background: #f1eee7;
+    color: #6b6659;
+}
+
+[data-theme="light"] .modal-form-body {
+    padding: 22px 22px;
+}
+
+[data-theme="light"] .modal-footer-actions {
+    padding: 14px 22px;
+}
+
+[data-theme="light"] .library-grid .favorite-btn {
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
+    opacity: 0;
+}
+
+/* 亮色：卡片附件的图标在静止时隐去，悬停才出现，减少视觉噪音 */
+
+[data-theme="light"] .item-slot:hover .favorite-btn,
+[data-theme="light"] .favorite-btn:focus-visible {
+    opacity: 1;
+}
+
+[data-theme="light"] .library-grid .favorite-btn:hover {
+    background: rgba(255, 255, 255, 0.95);
+    border-color: rgba(61, 57, 41, 0.14);
+}
+
+[data-theme="light"] .library-grid .favorite-btn.active {
+    opacity: 1;
+    background: rgba(255, 255, 255, 0.92);
+    border-color: rgba(217, 119, 87, 0.32);
+    box-shadow: 0 1px 2px rgba(61, 57, 41, 0.08);
+}
+
+[data-theme="light"] .item-more-btn {
+    opacity: 0;
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
+    color: #8f887a;
+}
+
+[data-theme="light"] .item-slot:hover .item-more-btn,
+[data-theme="light"] .item-more-btn:focus-visible {
+    opacity: 1;
+}
+
+[data-theme="light"] .item-more-btn:hover {
+    background: rgba(255, 255, 255, 0.95);
+    border-color: rgba(61, 57, 41, 0.14);
+    color: var(--text-primary);
+}
+
+[data-theme="light"] .item-image img,
+[data-theme="light"] .pending-image img {
+    border-radius: 6px;
+}
+
+/* 卡片图片用更柔的内圆角 */
+
+[data-theme="light"] .cat-dot {
+    opacity: 0.62;
+}
+
+/* 侧栏分类色点降低饱和，整体更克制 */
+
+[data-theme="light"] .item-slot {
+    border-color: rgba(61, 57, 41, 0.07);
+}
+
+/* 卡片描边更浅一档 */
+
+[data-theme="light"] .item-slot:hover {
+    border-color: rgba(61, 57, 41, 0.14);
+}
+
+/* 预览翻页：暖纸玻璃钮，悬停转陶土橙（基础样式是暗色玻璃+金色悬停） */
+
+[data-theme="light"] .nav-btn {
+    background: rgba(255, 253, 249, 0.88);
+    border-color: rgba(61, 57, 41, 0.14);
+    color: #575246;
+}
+
+[data-theme="light"] .nav-btn:hover {
+    background: rgba(217, 119, 87, 0.92);
+    border-color: rgba(255, 255, 255, 0.55);
+    color: #ffffff;
+}
+
+/* 收藏分类侧栏项与主题收藏色（陶土橙）对齐，替换硬编码琥珀色 */
+
+[data-theme="light"] .favorite-category {
+    background: rgba(217, 119, 87, 0.07);
+}
+
+[data-theme="light"] .favorite-category:hover {
+    background: rgba(217, 119, 87, 0.12);
+}
+
+[data-theme="light"] .favorite-category.active {
+    background: rgba(217, 119, 87, 0.16);
+}
+
+[data-theme="light"] .favorite-category .category-icon {
+    filter: drop-shadow(0 0 4px rgba(217, 119, 87, 0.35));
+}
+
+/* 容量条渐变随主题变量，去掉硬编码金色起点 */
+
+[data-theme="light"] .capacity-fill {
+    background: linear-gradient(90deg, var(--gold-dim), var(--gold-primary));
+}
+
+[data-theme="light"] .inventory-grid:not(.list-mode) .item-slot {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 290px;
+}
+
+/* ── 性能优化 ──────────────────────────────────────────────
+   仅渲染层优化，不改变任何视觉样式：
+   - content-visibility: auto 跳过视口外元素的布局/绘制，
+     contain-intrinsic-size 提供占位尺寸避免滚动条跳动；
+     auto 记住上次实际尺寸，估算误差会自校准。
+   - 仅用于无溢出子元素、无 position:fixed 后代的容器；
+     minecraft 溢出式悬浮提示、fallout 自定义 contain、以及
+     需要越界描边/阴影的子元素不用 content-visibility。 */
+
+/* 默认主题（light/dark）图库网格卡片：基础规则已 contain: layout style paint */
+
+[data-theme="light"] .inventory-grid.list-mode .item-slot {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 96px;
+}
+
+/* 默认主题列表行（行高约 84-96px） */
+

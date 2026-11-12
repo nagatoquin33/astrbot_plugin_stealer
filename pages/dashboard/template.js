@@ -34,20 +34,10 @@ export const TEMPLATE = `
         <div class="header-inner">
             <div class="header-left">
                 <a class="brand" href="#" @click.prevent="switchSection('library')" aria-label="表情包小偷首页">
-                    <svg class="brand-mark" viewBox="0 0 36 36" aria-hidden="true">
-                        <defs><linearGradient id="brandGrad" x1="0" y1="0" x2="1" y2="1">
-                            <stop offset="0" stop-color="#FF8CB0"/><stop offset="1" stop-color="#FF6699"/>
-                        </linearGradient></defs>
-                        <rect width="36" height="36" rx="10" fill="url(#brandGrad)"/>
-                        <path d="M12 15.5 8.8 11M24 15.5 27.2 11" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/>
-                        <rect x="7.5" y="14" width="21" height="14" rx="4.5" fill="#fff"/>
-                        <circle cx="14" cy="20.4" r="1.8" fill="#FF6699"/>
-                        <circle cx="22" cy="20.4" r="1.8" fill="#FF6699"/>
-                        <path d="M15.2 24.2c1.8 1.5 3.8 1.5 5.6 0" stroke="#FF6699" stroke-width="1.8" stroke-linecap="round" fill="none"/>
-                    </svg>
+                    <img class="brand-mark" src="./logo.png" alt="表情包小偷">
                     <span class="brand-text">
                         <span class="brand-name">表情包小偷</span>
-                        <span class="brand-sub">MEME THIEF</span>
+                        <span class="brand-sub">MEME STEALER</span>
                     </span>
                 </a>
                 <nav class="main-nav" aria-label="主导航">
@@ -148,12 +138,9 @@ export const TEMPLATE = `
                     <span class="sticker s5">🫠</span>
                 </div>
                 <div class="banner-copy">
-                    <p class="banner-kicker">B-STYLE REBUILD · 表情包小偷</p>
                     <h1 class="banner-title">全网表情包，一网打尽</h1>
-                    <p class="banner-desc">从群聊里偷走每一个高光瞬间。AI 自动起名、分类、贴标签，想用哪张点哪张。</p>
                     <div class="banner-actions">
                         <a class="btn btn-white" href="#" @click.prevent="goBiliLibrary('')">逛逛表情库</a>
-                        <a class="banner-link" href="#" @click.prevent="scrollBiliTo('bili-stats')">看看图库数据<svg class="ico"><use href="#i-arrow-right"/></svg></a>
                     </div>
                 </div>
             </article>
@@ -165,12 +152,9 @@ export const TEMPLATE = `
                     <span class="sticker s5">✨</span>
                 </div>
                 <div class="banner-copy">
-                    <p class="banner-kicker">VLM 智能分类</p>
                     <h1 class="banner-title">看一眼，就懂是什么情绪</h1>
-                    <p class="banner-desc">视觉模型自动识别表情、情绪与使用场景，0.8 秒完成入库，还会给每张图写一句描述。</p>
                     <div class="banner-actions">
                         <a class="btn btn-white" href="#" @click.prevent="goBiliLibrary('')">看 AI 起的名字</a>
-                        <a class="banner-link" href="#" @click.prevent="scrollBiliTo('bili-stats')">了解更多<svg class="ico"><use href="#i-arrow-right"/></svg></a>
                     </div>
                 </div>
             </article>
@@ -182,12 +166,9 @@ export const TEMPLATE = `
                     <span class="sticker s5">💖</span>
                 </div>
                 <div class="banner-copy">
-                    <p class="banner-kicker">收藏永不淘汰</p>
                     <h1 class="banner-title">喜欢的表情，永远留在库里</h1>
-                    <p class="banner-desc">收藏内容不参与自动清理，发送时权重 ×3，优先出现在对话里。还有批量导入和外部源。</p>
                     <div class="banner-actions">
                         <a class="btn btn-white" href="#" @click.prevent="goBiliFavorites()">收藏夹</a>
-                        <a class="banner-link" href="#" @click.prevent="goBiliLibrary('')">全部表情<svg class="ico"><use href="#i-arrow-right"/></svg></a>
                     </div>
                 </div>
             </article>
@@ -236,12 +217,12 @@ export const TEMPLATE = `
                     <a v-for="(slide, i) in biliHeroSlides" :key="'hero-' + slide.hash" class="hero-slide"
                         :data-hash="slide.hash"
                         :class="{ 'is-active': biliHeroIndex === i }" href="#" @click.prevent="openPreview(slide)">
-                        <img v-if="imageDataUrls[slide.hash]" class="hero-img" :src="imageDataUrls[slide.hash]" alt="">
+                        <img v-if="imageDataUrls[slide.hash]" class="hero-img" :src="imageDataUrls[slide.hash]" alt="" :loading="i === 0 ? 'eager' : 'lazy'" decoding="async">
                         <div class="hero-shade"></div>
                         <div class="hero-copy">
                             <span class="hero-badge">{{ getCategoryName(slide.category) }}</span>
                             <h3 class="hero-title">{{ slide.desc || slide.overlay_text || getCategoryName(slide.category) }}</h3>
-                            <p class="hero-desc">{{ (slide.tags || []).join(' · ') || '收藏、分类、检索你的全部表情包' }}</p>
+                            <p v-if="(slide.tags || []).length" class="hero-desc">{{ slide.tags.join(' · ') }}</p>
                             <span class="hero-stats">{{ slide.use_count || 0 }} 次使用 · {{ formatDate(slide.created_at) }}</span>
                         </div>
                     </a>
@@ -257,13 +238,12 @@ export const TEMPLATE = `
                 <article class="meme-card" v-for="img in biliHot" :key="'hot-' + img.hash">
                     <div class="meme-cover-wrap" :data-hash="img.hash" role="button" tabindex="0"
                         @click="openPreview(img)" @keydown.enter.prevent="openPreview(img)">
-                        <img v-if="imageDataUrls[img.hash]" class="meme-cover-bg" :src="imageDataUrls[img.hash]" alt="" aria-hidden="true">
-                        <img v-if="imageDataUrls[img.hash]" class="meme-cover" :src="imageDataUrls[img.hash]" :alt="img.desc">
+                        <img v-if="imageDataUrls[img.hash]" class="meme-cover-bg" :src="imageDataUrls[img.hash]" alt="" aria-hidden="true" loading="lazy" decoding="async">
+                        <img v-if="imageDataUrls[img.hash]" class="meme-cover" :src="imageDataUrls[img.hash]" :alt="img.desc" loading="lazy" decoding="async">
                         <span class="meme-badge">{{ getCategoryName(img.category) }}</span>
                         <div class="meme-stats">
                             <div class="meme-stats-left">
                                 <span class="meme-stat"><svg class="ico"><use href="#i-play"/></svg><b>{{ img.use_count || 0 }}</b></span>
-                                <span class="meme-stat"><svg class="ico"><use href="#i-heart"/></svg><b>{{ img.is_favorite ? 1 : 0 }}</b></span>
                             </div>
                             <span class="meme-format">{{ (img.format || 'img').toUpperCase() }}</span>
                         </div>
@@ -289,7 +269,7 @@ export const TEMPLATE = `
                 <header class="feed-head">
                     <div class="feed-head-main">
                         <h2 class="feed-title">{{ libraryTitle(selectedLibrary) }}<span class="feed-total">{{ total }}</span></h2>
-                        <p class="feed-sub">{{ selectedCategory ? getCategoryName(selectedCategory) : '收集、分类、检索你的全部表情包' }}</p>
+                        <p v-if="selectedCategory" class="feed-sub">{{ getCategoryName(selectedCategory) }}</p>
                     </div>
                     <div class="feed-tabs" role="tablist" aria-label="表情包排序">
                         <button class="feed-tab" :class="{ 'is-active': biliTab === 'recommend' }" type="button" @click="setBiliTab('recommend')">推荐</button>
@@ -337,8 +317,8 @@ export const TEMPLATE = `
                         <div class="meme-cover-wrap" :data-hash="img.hash" role="button" tabindex="0"
                             @click="isBatchMode ? toggleSelection(img) : openPreview(img)"
                             @keydown.enter.prevent="isBatchMode ? toggleSelection(img) : openPreview(img)">
-                            <img v-if="imageDataUrls[img.hash]" class="meme-cover-bg" :src="imageDataUrls[img.hash]" alt="" aria-hidden="true">
-                            <img v-if="imageDataUrls[img.hash]" class="meme-cover" :src="imageDataUrls[img.hash]" :alt="img.desc">
+                            <img v-if="imageDataUrls[img.hash]" class="meme-cover-bg" :src="imageDataUrls[img.hash]" alt="" aria-hidden="true" loading="lazy" decoding="async">
+                            <img v-if="imageDataUrls[img.hash]" class="meme-cover" :src="imageDataUrls[img.hash]" :alt="img.desc" loading="lazy" decoding="async">
                             <span class="meme-badge">{{ getCategoryName(img.category) }}</span>
                             <div class="meme-mask">
                                 <div class="meme-mask-actions">
@@ -350,7 +330,6 @@ export const TEMPLATE = `
                             <div class="meme-stats">
                                 <div class="meme-stats-left">
                                     <span class="meme-stat"><svg class="ico"><use href="#i-play"/></svg><b>{{ img.use_count || 0 }}</b></span>
-                                    <span class="meme-stat"><svg class="ico"><use href="#i-heart"/></svg><b>{{ img.is_favorite ? 1 : 0 }}</b></span>
                                 </div>
                                 <span class="meme-format">{{ (img.format || 'img').toUpperCase() }}</span>
                             </div>
@@ -396,7 +375,7 @@ export const TEMPLATE = `
                     <ol class="rank-list">
                         <li class="rank-item" v-for="(img, i) in biliRank" :key="'rank-' + img.hash" :data-hash="img.hash" @click="openPreview(img)">
                             <span class="rank-num">{{ i + 1 }}</span>
-                            <img v-if="imageDataUrls[img.hash]" class="rank-cover" :src="imageDataUrls[img.hash]" alt="">
+                            <img v-if="imageDataUrls[img.hash]" class="rank-cover" :src="imageDataUrls[img.hash]" alt="" loading="lazy" decoding="async">
                             <span v-else class="rank-cover" :style="{ backgroundColor: hashToColor(img.hash) }"></span>
                             <div class="rank-info">
                                 <p class="rank-title">{{ img.desc || img.overlay_text || getCategoryName(img.category) }}</p>
@@ -413,7 +392,7 @@ export const TEMPLATE = `
                     </div>
                     <ul class="recent-list">
                         <li class="recent-item" v-for="img in biliRecent" :key="'recent-' + img.hash" :data-hash="img.hash" @click="openPreview(img)">
-                            <img v-if="imageDataUrls[img.hash]" class="recent-cover" :src="imageDataUrls[img.hash]" alt="">
+                            <img v-if="imageDataUrls[img.hash]" class="recent-cover" :src="imageDataUrls[img.hash]" alt="" loading="lazy" decoding="async">
                             <span v-else class="recent-cover" :style="{ backgroundColor: hashToColor(img.hash) }"></span>
                             <div class="recent-info">
                                 <p class="recent-title">{{ img.desc || getCategoryName(img.category) }}</p>
@@ -454,7 +433,6 @@ export const TEMPLATE = `
                     <div>
                         <h3 class="floor-title">表情包小偷</h3>
                         <p class="about-text">AstrBot 表情包收集 / 分类 / 检索插件。</p>
-                        <p class="about-note">布局参考 B 站网页端信息流</p>
                     </div>
                 </section>
             </aside>
@@ -463,21 +441,27 @@ export const TEMPLATE = `
         <template v-else>
         <header class="review-head" id="bili-pending">
             <div class="review-head-main">
-                <p class="banner-kicker">REVIEW QUEUE</p>
                 <h1 class="review-title">审核区 <span class="feed-total">{{ pendingTotal }}</span></h1>
                 <p class="review-sub">
-                    待审核 {{ pendingStats.pending }} / {{ pendingStats.capacity }}
-                    <span aria-hidden="true">·</span> 排队 {{ pendingStats.queued }}
-                    <span aria-hidden="true">·</span> 识图中 {{ pendingStats.processing }}
-                    <span aria-hidden="true">·</span> 失败 {{ pendingStats.failed }}
+                    <span class="loc-metric"><span class="loc-label">待审核</span><span class="loc-num">{{ pendingStats.pending }}</span><span class="loc-cap">/ {{ pendingStats.capacity }}</span></span>
+                    <span class="loc-metric"><span class="loc-label">排队</span><span class="loc-num">{{ pendingStats.queued }}</span></span>
+                    <span class="loc-metric"><span class="loc-label">识图中</span><span class="loc-num">{{ pendingStats.processing }}</span></span>
+                    <span class="loc-metric" :class="{ 'loc-metric--warn': pendingStats.failed > 0 }"><span class="loc-label">失败</span><span class="loc-num">{{ pendingStats.failed }}</span></span>
                 </p>
             </div>
             <div class="review-head-side">
+                <div class="capacity-row">
+                    <span class="capacity-name">待审核容量</span>
+                    <span class="capacity-num">{{ pendingStats.pending }}<i>/ {{ pendingStats.capacity }}</i></span>
+                </div>
                 <div class="progress-track">
                     <div class="progress-fill" :class="{ full: pendingStats.paused }"
                         :style="{ width: Math.min(100, pendingStats.pending / (pendingStats.capacity || 1) * 100) + '%' }"></div>
                 </div>
-                <span v-if="pendingStats.paused" class="capacity-paused">偷图已暂停，审核后自动恢复</span>
+                <div v-if="pendingStats.paused" class="paused-banner">
+                    <svg class="ico" aria-hidden="true" viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></svg>
+                    <span>偷图已暂停，审核后自动恢复</span>
+                </div>
             </div>
         </header>
 
@@ -548,8 +532,10 @@ export const TEMPLATE = `
                         <button type="button" class="review-btn approve" :disabled="pendingApproving.has(item.id)"
                             @click.stop="approvePending(item.id)">通过</button>
                         <button type="button" class="review-btn" @click.stop="openPendingEdit(item)">修改</button>
-                        <button type="button" class="review-btn danger" @click.stop="rejectPending(item.id)">删除</button>
-                        <button type="button" class="review-btn danger" @click.stop="rejectPending(item.id, true)">拉黑</button>
+                        <span class="review-danger-group">
+                            <button type="button" class="review-btn danger" @click.stop="rejectPending(item.id)">删除</button>
+                            <button type="button" class="review-btn danger" @click.stop="rejectPending(item.id, true)">拉黑</button>
+                        </span>
                     </div>
                     <div class="review-foot">
                         <span>{{ item.source === 'auto' ? '自动偷取' : '手动收录' }}</span>
@@ -583,12 +569,6 @@ export const TEMPLATE = `
                     <a href="#" @click.prevent="switchSection('pending')">审核区</a>
                     <a href="#" @click.prevent="goBiliFavorites()">收藏夹</a>
                     <a href="#" @click.prevent="scrollBiliTo('bili-stats')">数据面板</a>
-                </div>
-                <div class="footer-col">
-                    <h4>能力</h4>
-                    <a href="#" @click.prevent="showAlert('VLM 分类：视觉模型识别情绪与场景')">VLM 分类</a>
-                    <a href="#" @click.prevent="showAlert('语义检索：BM25 + 向量召回')">语义检索</a>
-                    <a href="#" @click.prevent="showAlert('自动发送：按对话情绪挑选表情')">自动发送</a>
                     <a href="#" @click.prevent="runStorageCleanup">容量清理</a>
                 </div>
                 <div class="footer-col">
@@ -601,7 +581,6 @@ export const TEMPLATE = `
         </div>
         <div class="footer-bottom">
             <p>表情包小偷 · WebUI</p>
-            <p>B-STYLE × MEME THIEF</p>
         </div>
     </footer>
 
@@ -1199,22 +1178,28 @@ export const TEMPLATE = `
                     <span class="library-eyebrow">{{ t('pages.dashboard.pending.pool', '待审核池') }}</span>
                     <h2>{{ t('pages.dashboard.sections.pending', '审核区') }} <span class="library-result-count">{{ pendingTotal }}</span></h2>
                     <div class="library-location">
-                        <span>{{ t('pages.dashboard.pending.progress', 'Pending') }} {{ pendingStats.pending }} / {{ pendingStats.capacity }}</span>
-                        <span aria-hidden="true">/</span>
-                        <span>{{ t('pages.dashboard.pending.queued_count', 'Queued') }}: {{ pendingStats.queued }}</span>
-                        <span aria-hidden="true">/</span>
-                        <span>{{ t('pages.dashboard.pending.processing_count', 'Analyzing') }}: {{ pendingStats.processing }}</span>
-                        <span aria-hidden="true">/</span>
-                        <span>{{ t('pages.dashboard.pending.failed_count', 'Failed') }}: {{ pendingStats.failed }}</span>
+                        <span class="loc-metric"><span class="loc-label">{{ t('pages.dashboard.pending.progress', 'Pending') }}</span><span class="loc-num">{{ pendingStats.pending }}</span><span class="loc-cap">/ {{ pendingStats.capacity }}</span></span>
+                        <span class="loc-metric"><span class="loc-label">{{ t('pages.dashboard.pending.queued_count', 'Queued') }}</span><span class="loc-num">{{ pendingStats.queued }}</span></span>
+                        <span class="loc-metric"><span class="loc-label">{{ t('pages.dashboard.pending.processing_count', 'Analyzing') }}</span><span class="loc-num">{{ pendingStats.processing }}</span></span>
+                        <span class="loc-metric" :class="{ 'loc-metric--warn': (pendingStats.failed || 0) > 0 }"><span class="loc-label">{{ t('pages.dashboard.pending.failed_count', 'Failed') }}</span><span class="loc-num">{{ pendingStats.failed }}</span></span>
                     </div>
                 </div>
                 <div class="pending-heading-side">
+                    <div class="capacity-row">
+                        <span class="capacity-name">{{ t('pages.dashboard.pending.capacity', 'Capacity') }}</span>
+                        <span class="capacity-num">{{ pendingStats.pending }}<i>/ {{ pendingStats.capacity }}</i></span>
+                    </div>
                     <div class="progress-track">
                         <div class="progress-fill"
                             :style="{ width: Math.min(100, pendingStats.pending / pendingStats.capacity * 100) + '%' }"
                             :class="{ full: pendingStats.paused }"></div>
                     </div>
-                    <span v-if="pendingStats.paused" class="progress-paused-label">{{ t('pages.dashboard.pending.paused_hint', 'Stealing is paused and will resume after review.') }}</span>
+                    <div v-if="pendingStats.paused" class="paused-banner">
+                        <svg style="width:13px;height:13px;flex:none" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5v14M15 5v14" />
+                        </svg>
+                        <span>{{ t('pages.dashboard.pending.paused_hint', 'Stealing is paused and will resume after review.') }}</span>
+                    </div>
                 </div>
             </header>
 
@@ -1262,21 +1247,22 @@ export const TEMPLATE = `
                 <span><kbd>Esc</kbd>{{ t('pages.dashboard.kbd.clear_focus', 'Clear focus') }}</span>
             </div>
 
-            <div v-if="pendingLoading" class="skeleton-grid">
+            <div v-if="pendingLoading" class="skeleton-grid pending-skeleton">
                 <div v-for="n in pendingPageSize" :key="n" class="skeleton-card">
                     <div class="skeleton-image"></div>
                     <div class="skeleton-text"></div>
                 </div>
             </div>
 
-            <div v-else-if="pendingImages.length === 0" class="empty-state">
+            <div v-else-if="pendingImages.length === 0" class="empty-state pending-empty">
                 <div class="fo-vaultboy fo-vaultboy-empty" role="img" aria-label="Vault Boy"></div>
-                <svg class="empty-state-icon" style="width:64px;height:64px;opacity:0.3;margin-bottom:16px" fill="none" stroke="currentColor"
-                    viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 13l4 4L19 7" />
-                </svg>
-                <p style="font-family:var(--font-display);font-size:var(--fs-xl)">{{ t('pages.dashboard.empty.pending_title', 'No pending stickers') }}</p>
-                <p style="font-size:var(--fs-md);margin-top:8px;color:var(--text-muted)">{{ t('pages.dashboard.empty.pending_hint', 'Newly stolen stickers will wait here for review.') }}</p>
+                <div class="empty-illustration" aria-hidden="true">
+                    <svg class="empty-state-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 13l4 4L19 7" />
+                    </svg>
+                </div>
+                <p class="empty-title">{{ t('pages.dashboard.empty.pending_title', 'No pending stickers') }}</p>
+                <p class="empty-hint">{{ t('pages.dashboard.empty.pending_hint', 'Newly stolen stickers will wait here for review.') }}</p>
             </div>
 
             <div v-else class="pending-grid">
@@ -1471,97 +1457,150 @@ export const TEMPLATE = `
                     </button>
 
                     <div v-if="previewZoom > 1" class="zoom-indicator">{{ Math.round(previewZoom * 100) }}%</div>
+                    <span v-if="previewListLength > 1 && !isEditing" class="preview-counter">{{ (previewSource === 'pending' ? pendingImages : images).indexOf(previewItem) + 1 }} / {{ previewListLength }}</span>
                 </div>
 
                 <div v-if="!isEditing" class="item-stats">
-                    <div class="stat-row">
-                        <span class="stat-name">{{ t('pages.dashboard.fields.emotions', 'Emotions') }}</span>
-                        <button v-if="previewSource !== 'pending'" type="button" class="codex-btn" @click="startEdit('category')" :title="t('pages.dashboard.actions.edit', 'Edit')"><emotion-labels :item="previewItem" :label="getCategoryName" /></button>
-                        <emotion-labels v-else :item="previewItem" :label="getCategoryName" />
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-name">{{ t('pages.dashboard.fields.scope', 'Scope') }}</span>
-                        <span class="stat-value">
-                            <span class="scope-pill" :class="[previewItem?.scope_mode === 'local' ? 'local' : 'public', { 'editable-detail': previewSource !== 'pending' }]" :role="previewSource !== 'pending' ? 'button' : undefined" :tabindex="previewSource !== 'pending' ? 0 : undefined" @click="previewSource !== 'pending' && startEdit('scope')" @keydown.enter.prevent="previewSource !== 'pending' && startEdit('scope')">{{
-                                getScopeLabel(previewItem?.scope_mode) }}</span>
-                        </span>
-                    </div>
-                    <div v-if="previewSource !== 'pending'" class="stat-row">
-                        <span class="stat-name">{{ t('pages.dashboard.fields.use_count', 'Use Count') }}</span>
-                        <span class="stat-value">{{ previewItem?.use_count || 0 }} {{ t('pages.dashboard.units.times', 'times') }}</span>
-                    </div>
-                    <div v-if="previewSource !== 'pending'" class="stat-row">
-                        <span class="stat-name">{{ t('pages.dashboard.fields.last_used', 'Last Used') }}</span>
-                        <span class="stat-value">{{ previewItem?.last_used_at ? formatDate(previewItem.last_used_at) : t('pages.dashboard.messages.never_used', 'Never used') }}</span>
-                    </div>
-                    <div v-if="previewSource !== 'pending'" class="stat-row">
-                        <span class="stat-name">{{ t('pages.dashboard.fields.favorite', 'Favorite') }}</span>
-                        <button class="favorite-toggle-btn" :class="{ active: previewItem?.is_favorite }"
-                            @click="toggleFavorite(previewItem)">
-                            {{ previewItem?.is_favorite ? t('pages.dashboard.messages.favorited', 'Favorited') : t('pages.dashboard.messages.not_favorited', 'Not favorited') }}
-                        </button>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-name">{{ t('pages.dashboard.fields.origin', 'Origin') }}</span>
-                        <span class="stat-value">{{ formatItemOrigin(previewItem) }}</span>
-                    </div>
-                    <div v-if="previewItem?.width || previewItem?.format || previewItem?.bytes" class="stat-row">
-                        <span class="stat-name">{{ t('pages.dashboard.fields.image_meta', 'Image') }}</span>
-                        <span class="stat-value">{{ [previewItem?.width && previewItem?.height ? previewItem.width + '×' + previewItem.height : '', previewItem?.format ? String(previewItem.format).toUpperCase() : '', formatBytes(previewItem?.bytes)].filter(Boolean).join(' · ') }}</span>
-                    </div>
-                    <div v-if="previewItem?.add_method || previewItem?.reviewed_at" class="stat-row">
-                        <span class="stat-name">{{ t('pages.dashboard.fields.added', 'Added') }}</span>
-                        <span class="stat-value">{{ formatAddMethod(previewItem?.add_method) }}{{ previewItem?.reviewed_at ? ' · ' + t('pages.dashboard.fields.reviewed_at', 'Reviewed') + ' ' + formatDate(previewItem.reviewed_at) : '' }}</span>
-                    </div>
-                    <div v-if="previewItem?.source_url" class="stat-row">
-                        <span class="stat-name">{{ t('pages.dashboard.fields.source', 'Source') }}</span>
-                        <span class="stat-value" style="word-break:break-all">{{ previewItem.source_url }}</span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-name">{{ t('pages.dashboard.fields.description', 'Description') }}</span>
-                    </div>
-                    <div class="desc-quote" :class="{ 'editable-detail': previewSource !== 'pending' }" :role="previewSource !== 'pending' ? 'button' : undefined" :tabindex="previewSource !== 'pending' ? 0 : undefined" @click="previewSource !== 'pending' && startEdit('desc')" @keydown.enter.prevent="previewSource !== 'pending' && startEdit('desc')">
-                        <p style="margin:0;color:var(--text-main);font-style:italic">
-                            {{ previewItem?.desc || t('pages.dashboard.messages.no_description', 'No description') }}
-                        </p>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-name">{{ t('pages.dashboard.fields.character', '角色') }}</span>
-                        <button v-if="previewSource !== 'pending'" type="button" class="detail-edit-link" @click="startEdit('character')">{{ characterLabel(previewItem?.character) }}</button>
-                        <span v-else class="stat-value">{{ characterLabel(previewItem?.character) }}</span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-name">{{ t('pages.dashboard.fields.overlay_text', '图上文字') }}</span>
-                        <button v-if="previewSource !== 'pending'" type="button" class="detail-edit-link" @click="startEdit('overlay')">{{ previewItem?.overlay_text || t('pages.dashboard.messages.no_overlay_text', '无') }}</button>
-                        <span v-else class="stat-value">{{ previewItem?.overlay_text || t('pages.dashboard.messages.no_overlay_text', '无') }}</span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-name">{{ t('pages.dashboard.fields.tags', 'Tags') }}</span>
-                    </div>
-                    <div class="item-tags" style="margin-bottom:12px" :class="{ 'editable-detail': previewSource !== 'pending' }" :role="previewSource !== 'pending' ? 'button' : undefined" :tabindex="previewSource !== 'pending' ? 0 : undefined" @click="previewSource !== 'pending' && startEdit('tags')" @keydown.enter.prevent="previewSource !== 'pending' && startEdit('tags')">
-                        <span v-for="tag in (previewItem?.tags || [])" :key="tag" class="tag">
-                            {{ tag }}
-                        </span>
-                        <span v-if="!(previewItem?.tags || []).length"
-                            style="font-size:var(--fs-sm);color:var(--text-muted)">{{ t('pages.dashboard.messages.no_tags', 'No tags') }}</span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-name">{{ t('pages.dashboard.fields.scenes', 'Scenes') }}</span>
-                    </div>
-                    <div class="item-tags" style="margin-bottom:12px" :class="{ 'editable-detail': previewSource !== 'pending' }" :role="previewSource !== 'pending' ? 'button' : undefined" :tabindex="previewSource !== 'pending' ? 0 : undefined" @click="previewSource !== 'pending' && startEdit('scene')" @keydown.enter.prevent="previewSource !== 'pending' && startEdit('scene')">
-                        <span v-for="scene in (previewItem?.scenes || [])" :key="scene" class="tag scene-tag">
-                            {{ scene }}
-                        </span>
-                        <span v-if="!(previewItem?.scenes || []).length"
-                            style="font-size:var(--fs-sm);color:var(--text-muted)">{{ t('pages.dashboard.messages.no_scenes', 'No scenes') }}</span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-name">{{ t('pages.dashboard.fields.created_at', 'Added At') }}</span>
-                        <span class="stat-value">{{ formatDate(previewItem?.created_at) }}</span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-name">{{ t('pages.dashboard.fields.id', '编号') }}</span>
-                        <span class="stat-value" style="font-size:var(--fs-xs);word-break:break-all">{{ previewItem?.hash?.slice(0, 16) }}...</span>
+                    <section class="stat-group">
+                        <h3 class="stat-group-title">{{ t('pages.dashboard.detail.group_recognition', '图像识别') }}</h3>
+                        <div class="stat-row">
+                            <span class="stat-name">{{ t('pages.dashboard.fields.emotions', 'Emotions') }}</span>
+                            <button v-if="previewSource !== 'pending'" type="button" class="emotion-edit-btn editable-detail" @click="startEdit('category')" :title="t('pages.dashboard.actions.edit', 'Edit')"><emotion-labels :item="previewItem" :label="getCategoryName" /></button>
+                            <emotion-labels v-else :item="previewItem" :label="getCategoryName" />
+                        </div>
+                        <div class="stat-block">
+                            <span class="stat-name">{{ t('pages.dashboard.fields.description', 'Description') }}</span>
+                            <div class="desc-quote" :class="{ 'editable-detail': previewSource !== 'pending' }" :role="previewSource !== 'pending' ? 'button' : undefined" :tabindex="previewSource !== 'pending' ? 0 : undefined" @click="previewSource !== 'pending' && startEdit('desc')" @keydown.enter.prevent="previewSource !== 'pending' && startEdit('desc')">
+                                <p style="margin:0;color:var(--text-main)">
+                                    {{ previewItem?.desc || t('pages.dashboard.messages.no_description', 'No description') }}
+                                </p>
+                            </div>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-name">{{ t('pages.dashboard.fields.overlay_text', '图上文字') }}</span>
+                            <button v-if="previewSource !== 'pending'" type="button" class="detail-edit-link" @click="startEdit('overlay')">{{ previewItem?.overlay_text || t('pages.dashboard.messages.no_overlay_text', '无') }}</button>
+                            <span v-else class="stat-value">{{ previewItem?.overlay_text || t('pages.dashboard.messages.no_overlay_text', '无') }}</span>
+                        </div>
+                    </section>
+
+                    <section class="stat-group">
+                        <h3 class="stat-group-title">{{ t('pages.dashboard.detail.group_tags', '标签与场景') }}</h3>
+                        <div class="stat-block">
+                            <span class="stat-name">{{ t('pages.dashboard.fields.tags', 'Tags') }}</span>
+                            <div class="item-tags" :class="{ 'editable-detail': previewSource !== 'pending' }" :role="previewSource !== 'pending' ? 'button' : undefined" :tabindex="previewSource !== 'pending' ? 0 : undefined" @click="previewSource !== 'pending' && startEdit('tags')" @keydown.enter.prevent="previewSource !== 'pending' && startEdit('tags')">
+                                <span v-for="tag in (previewItem?.tags || [])" :key="tag" class="tag">
+                                    {{ tag }}
+                                </span>
+                                <span v-if="!(previewItem?.tags || []).length" class="stat-empty">{{ t('pages.dashboard.messages.no_tags', 'No tags') }}</span>
+                            </div>
+                        </div>
+                        <div class="stat-block">
+                            <span class="stat-name">{{ t('pages.dashboard.fields.scenes', 'Scenes') }}</span>
+                            <div class="item-tags" :class="{ 'editable-detail': previewSource !== 'pending' }" :role="previewSource !== 'pending' ? 'button' : undefined" :tabindex="previewSource !== 'pending' ? 0 : undefined" @click="previewSource !== 'pending' && startEdit('scene')" @keydown.enter.prevent="previewSource !== 'pending' && startEdit('scene')">
+                                <span v-for="scene in (previewItem?.scenes || [])" :key="scene" class="tag scene-tag">
+                                    {{ scene }}
+                                </span>
+                                <span v-if="!(previewItem?.scenes || []).length" class="stat-empty">{{ t('pages.dashboard.messages.no_scenes', 'No scenes') }}</span>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="stat-group">
+                        <h3 class="stat-group-title">{{ t('pages.dashboard.detail.group_usage', '使用与归属') }}</h3>
+                        <div class="stat-row">
+                            <span class="stat-name">{{ t('pages.dashboard.fields.scope', 'Scope') }}</span>
+                            <span class="stat-value">
+                                <span class="scope-pill" :class="[previewItem?.scope_mode === 'local' ? 'local' : 'public', { 'editable-detail': previewSource !== 'pending' }]" :role="previewSource !== 'pending' ? 'button' : undefined" :tabindex="previewSource !== 'pending' ? 0 : undefined" @click="previewSource !== 'pending' && startEdit('scope')" @keydown.enter.prevent="previewSource !== 'pending' && startEdit('scope')">{{
+                                    getScopeLabel(previewItem?.scope_mode) }}</span>
+                            </span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-name">{{ t('pages.dashboard.fields.character', '角色') }}</span>
+                            <button v-if="previewSource !== 'pending'" type="button" class="detail-edit-link" @click="startEdit('character')">{{ characterLabel(previewItem?.character) }}</button>
+                            <span v-else class="stat-value">{{ characterLabel(previewItem?.character) }}</span>
+                        </div>
+                        <div v-if="previewSource !== 'pending'" class="stat-row">
+                            <span class="stat-name">{{ t('pages.dashboard.fields.favorite', 'Favorite') }}</span>
+                            <button class="favorite-toggle-btn" :class="{ active: previewItem?.is_favorite }"
+                                @click="toggleFavorite(previewItem)">
+                                <svg style="width:11px;height:11px" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="m12 3.6 2.5 5.2 5.7.8-4.1 4 1 5.7-5.1-2.7-5.1 2.7 1-5.7-4.1-4 5.7-.8L12 3.6Z" />
+                                </svg>
+                                {{ previewItem?.is_favorite ? t('pages.dashboard.messages.favorited', 'Favorited') : t('pages.dashboard.messages.not_favorited', 'Not favorited') }}
+                            </button>
+                        </div>
+                        <div v-if="previewSource !== 'pending'" class="stat-row">
+                            <span class="stat-name">{{ t('pages.dashboard.fields.use_count', 'Use Count') }}</span>
+                            <span class="stat-value">{{ previewItem?.use_count || 0 }} {{ t('pages.dashboard.units.times', 'times') }}</span>
+                        </div>
+                        <div v-if="previewSource !== 'pending'" class="stat-row">
+                            <span class="stat-name">{{ t('pages.dashboard.fields.last_used', 'Last Used') }}</span>
+                            <span class="stat-value">{{ previewItem?.last_used_at ? formatDate(previewItem.last_used_at) : t('pages.dashboard.messages.never_used', 'Never used') }}</span>
+                        </div>
+                    </section>
+
+                    <section class="stat-group">
+                        <h3 class="stat-group-title">{{ t('pages.dashboard.detail.group_file', '文件与来源') }}</h3>
+                        <div class="stat-row">
+                            <span class="stat-name">{{ t('pages.dashboard.fields.origin', 'Origin') }}</span>
+                            <span class="stat-value">{{ formatItemOrigin(previewItem) }}</span>
+                        </div>
+                        <div v-if="previewItem?.width || previewItem?.format || previewItem?.bytes" class="stat-row">
+                            <span class="stat-name">{{ t('pages.dashboard.fields.image_meta', 'Image') }}</span>
+                            <span class="stat-value">{{ [previewItem?.width && previewItem?.height ? previewItem.width + '×' + previewItem.height : '', previewItem?.format ? String(previewItem.format).toUpperCase() : '', formatBytes(previewItem?.bytes)].filter(Boolean).join(' · ') }}</span>
+                        </div>
+                        <div v-if="previewItem?.add_method || previewItem?.reviewed_at" class="stat-row">
+                            <span class="stat-name">{{ t('pages.dashboard.fields.added', 'Added') }}</span>
+                            <span class="stat-value">{{ formatAddMethod(previewItem?.add_method) }}{{ previewItem?.reviewed_at ? ' · ' + t('pages.dashboard.fields.reviewed_at', 'Reviewed') + ' ' + formatDate(previewItem.reviewed_at) : '' }}</span>
+                        </div>
+                        <div v-if="previewItem?.source_url" class="stat-row">
+                            <span class="stat-name">{{ t('pages.dashboard.fields.source', 'Source') }}</span>
+                            <span class="stat-value" style="word-break:break-all">{{ previewItem.source_url }}</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-name">{{ t('pages.dashboard.fields.created_at', 'Added At') }}</span>
+                            <span class="stat-value">{{ formatDate(previewItem?.created_at) }}</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-name">{{ t('pages.dashboard.fields.id', '编号') }}</span>
+                            <span class="stat-value" style="font-size:var(--fs-xs);word-break:break-all">{{ previewItem?.hash?.slice(0, 16) }}...</span>
+                        </div>
+                    </section>
+
+                    <div v-if="previewSource !== 'pending'" class="vlm-reanalysis-panel">
+                        <div class="vlm-reanalysis-toolbar">
+                            <div>
+                                <div class="vlm-reanalysis-title">{{ t('pages.dashboard.analysis.reanalysis_title', 'VLM re-analysis') }}</div>
+                                <div class="vlm-reanalysis-hint">{{ t('pages.dashboard.analysis.reanalysis_hint', 'Run the vision model again and compare the stored labels before applying them.') }}</div>
+                            </div>
+                            <button @click="reanalyzePreview" class="codex-btn" :disabled="vlmReanalysisLoading || vlmReanalysisApplying">
+                                <span v-if="vlmReanalysisLoading">{{ t('pages.dashboard.actions.analyzing', 'Analyzing...') }}</span>
+                                <span v-else>{{ t('pages.dashboard.actions.reanalyze', 'Re-analyze') }}</span>
+                            </button>
+                        </div>
+
+                        <div v-if="vlmReanalysisError" class="vlm-reanalysis-error">{{ vlmReanalysisError }}</div>
+
+                        <div v-if="vlmReanalysisResult" class="vlm-compare-grid">
+                            <section v-for="side in ['before', 'after']" :key="side" class="vlm-compare-card" :class="{ proposed: side === 'after' }">
+                                <div class="vlm-compare-label">{{ side === 'before' ? 'A · ' + t('pages.dashboard.analysis.current', 'Current') : 'B · ' + t('pages.dashboard.analysis.new_result', 'New VLM result') }}</div>
+                                <dl>
+                                    <div><dt>{{ t('pages.dashboard.fields.emotions', 'Emotions') }}</dt><dd><emotion-labels :item="vlmReanalysisResult[side]" :label="getCategoryName" /></dd></div>
+                                    <div v-for="field in ['description', 'overlay_text', 'tags', 'scenes']" :key="field">
+                                        <dt>{{ t('pages.dashboard.fields.' + field, field) }}</dt>
+                                        <dd>{{ formatAnalysisValue(vlmReanalysisResult[side][field]) }}</dd>
+                                    </div>
+                                </dl>
+                            </section>
+                        </div>
+
+                        <div v-if="vlmReanalysisResult" class="vlm-reanalysis-actions">
+                            <button @click="applyReanalysis" class="codex-btn primary" :disabled="vlmReanalysisApplying">
+                                <span v-if="vlmReanalysisApplying">{{ t('pages.dashboard.actions.saving', 'Applying...') }}</span>
+                                <span v-else>{{ t('pages.dashboard.actions.apply_vlm', 'Apply B result') }}</span>
+                            </button>
+                            <span class="vlm-reanalysis-preserve">{{ t('pages.dashboard.analysis.reanalysis_preserve', 'Character, scope, favorites and usage history stay unchanged.') }}</span>
+                        </div>
                     </div>
                 </div>
                 <div v-else class="item-stats inline-edit-fields">
@@ -1649,42 +1688,6 @@ export const TEMPLATE = `
                     </div>
                 </div>
                 </div>
-
-                <div v-if="previewSource !== 'pending' && !isEditing" class="vlm-reanalysis-panel">
-                    <div class="vlm-reanalysis-toolbar">
-                        <div>
-                            <div class="vlm-reanalysis-title">{{ t('pages.dashboard.analysis.reanalysis_title', 'VLM re-analysis') }}</div>
-                            <div class="vlm-reanalysis-hint">{{ t('pages.dashboard.analysis.reanalysis_hint', 'Run the vision model again and compare the stored labels before applying them.') }}</div>
-                        </div>
-                        <button @click="reanalyzePreview" class="codex-btn" :disabled="vlmReanalysisLoading || vlmReanalysisApplying">
-                            <span v-if="vlmReanalysisLoading">{{ t('pages.dashboard.actions.analyzing', 'Analyzing...') }}</span>
-                            <span v-else>{{ t('pages.dashboard.actions.reanalyze', 'Re-analyze') }}</span>
-                        </button>
-                    </div>
-
-                    <div v-if="vlmReanalysisError" class="vlm-reanalysis-error">{{ vlmReanalysisError }}</div>
-
-                    <div v-if="vlmReanalysisResult" class="vlm-compare-grid">
-                        <section v-for="side in ['before', 'after']" :key="side" class="vlm-compare-card" :class="{ proposed: side === 'after' }">
-                            <div class="vlm-compare-label">{{ side === 'before' ? 'A · ' + t('pages.dashboard.analysis.current', 'Current') : 'B · ' + t('pages.dashboard.analysis.new_result', 'New VLM result') }}</div>
-                            <dl>
-                                <div><dt>{{ t('pages.dashboard.fields.emotions', 'Emotions') }}</dt><dd><emotion-labels :item="vlmReanalysisResult[side]" :label="getCategoryName" /></dd></div>
-                                <div v-for="field in ['description', 'overlay_text', 'tags', 'scenes']" :key="field">
-                                    <dt>{{ t('pages.dashboard.fields.' + field, field) }}</dt>
-                                    <dd>{{ formatAnalysisValue(vlmReanalysisResult[side][field]) }}</dd>
-                                </div>
-                            </dl>
-                        </section>
-                    </div>
-
-                    <div v-if="vlmReanalysisResult" class="vlm-reanalysis-actions">
-                        <button @click="applyReanalysis" class="codex-btn primary" :disabled="vlmReanalysisApplying">
-                            <span v-if="vlmReanalysisApplying">{{ t('pages.dashboard.actions.saving', 'Applying...') }}</span>
-                            <span v-else>{{ t('pages.dashboard.actions.apply_vlm', 'Apply B result') }}</span>
-                        </button>
-                        <span class="vlm-reanalysis-preserve">{{ t('pages.dashboard.analysis.reanalysis_preserve', 'Character, scope, favorites and usage history stay unchanged.') }}</span>
-                    </div>
-                </div>
             </div>
 
 
@@ -1729,7 +1732,7 @@ export const TEMPLATE = `
                     </svg>
                     {{ t('pages.dashboard.actions.download', 'Download') }}
                 </a>
-                <button @click="startEdit" class="codex-btn" style="flex:1">
+                <button @click="startEdit" class="codex-btn primary" style="flex:1">
                     <svg style="width:16px;height:16px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                             d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
@@ -1740,14 +1743,15 @@ export const TEMPLATE = `
                     class="codex-btn" style="flex:1">
                     {{ previewItem?.scope_mode === 'local' ? t('pages.dashboard.actions.unset_local', 'Unset Local') : t('pages.dashboard.actions.set_local', 'Set Local') }}
                 </button>
-                <button @click="deleteImage(previewItem)" class="codex-btn danger" style="flex:1">
+                <span class="preview-actions-sep" aria-hidden="true"></span>
+                <button @click="deleteImage(previewItem)" class="codex-btn danger danger-quiet" style="flex:1">
                     <svg style="width:16px;height:16px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                             d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                     </svg>
                     {{ t('pages.dashboard.actions.delete', 'Delete') }}
                 </button>
-                <button @click="deleteImage(previewItem, true)" class="codex-btn danger" style="flex:1"
+                <button @click="deleteImage(previewItem, true)" class="codex-btn danger danger-quiet" style="flex:1"
                     :title="t('pages.dashboard.actions.blacklist', 'Blacklist')">
                     <svg style="width:16px;height:16px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"

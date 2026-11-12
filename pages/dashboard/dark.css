@@ -1,0 +1,757 @@
+/* dark theme — split from app.css; rules apply only under [data-theme="dark"] */
+
+@media (min-width: 769px) and (max-width: 1180px) {
+:root:not([data-theme="fallout"]) .header-text p { display: none; }
+
+:root:not([data-theme="fallout"]) .header-nav { margin-left: 6px; }
+
+:root:not([data-theme="fallout"]) .header-nav .section-tab { padding: 0 10px; }
+
+:root:not([data-theme="fallout"]) .header-nav .section-tab-label { display: none; }
+
+:root:not([data-theme="fallout"]) .stat-item { padding: 0 10px; }
+
+:root:not([data-theme="fallout"]) .health-indicator { padding: 6px 8px; }
+
+
+}
+
+/* Keep the brand and section buttons readable in a narrow desktop panel. */
+
+[data-theme="dark"] body {
+    background-color: #0a0b0f;
+    background-image:
+        radial-gradient(920px 540px at 86% -14%, rgba(127, 155, 255, 0.16), transparent 62%),
+        radial-gradient(760px 520px at 2% 110%, rgba(70, 96, 180, 0.1), transparent 60%),
+        radial-gradient(1.4px 1.4px at 16% 24%, rgba(255, 255, 255, 0.3), transparent 100%),
+        radial-gradient(1px 1px at 32% 12%, rgba(255, 255, 255, 0.22), transparent 100%),
+        radial-gradient(1.6px 1.6px at 58% 20%, rgba(255, 255, 255, 0.24), transparent 100%),
+        radial-gradient(1px 1px at 74% 10%, rgba(255, 255, 255, 0.2), transparent 100%),
+        radial-gradient(1.2px 1.2px at 88% 30%, rgba(255, 255, 255, 0.26), transparent 100%),
+        radial-gradient(1px 1px at 42% 40%, rgba(255, 255, 255, 0.16), transparent 100%),
+        radial-gradient(1.3px 1.3px at 66% 52%, rgba(255, 255, 255, 0.18), transparent 100%),
+        radial-gradient(1px 1px at 22% 62%, rgba(255, 255, 255, 0.14), transparent 100%),
+        url("data:image/svg+xml,%3Csvg width='120' height='120' viewBox='0 0 120 120' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.022'/%3E%3C/svg%3E");
+    background-attachment: fixed;
+}
+
+/* 月光光晕稍强一点，星点保持很淡 */
+
+/* ══ 月之暗面（Moonshot）暗色主题 ═══════════════════════════
+   近黑夜空 + 银蓝月光 + 中性灰阶；主按钮反转为白底深字，
+   强调色只做点缀，整体保持 Kimi 式的克制与高对比。 */
+
+[data-theme="dark"] .codex-header {
+    background: linear-gradient(to bottom, rgba(10, 11, 15, 0.92), rgba(10, 11, 15, 0.74));
+    border-bottom-color: rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="dark"] .header-text h1 {
+    font-family: var(--font-display);
+    font-size: 1.0625rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    color: var(--text-primary);
+}
+
+[data-theme="dark"] .header-text p {
+    color: var(--text-tertiary);
+    letter-spacing: 0.12em;
+}
+
+[data-theme="dark"] .header-nav {
+    background: rgba(255, 255, 255, 0.035);
+    border-color: rgba(255, 255, 255, 0.05);
+}
+
+[data-theme="dark"] .header-nav .section-tab {
+    color: var(--text-secondary);
+}
+
+[data-theme="dark"] .header-nav .section-tab:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-primary);
+}
+
+[data-theme="dark"] .header-nav .section-tab.active {
+    background: #1d1e26;
+    color: var(--text-primary);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+
+[data-theme="dark"] .stat-value {
+    font-family: var(--font-display);
+    font-size: 1.0625rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--text-primary);
+}
+
+[data-theme="dark"] .stat-label {
+    color: var(--text-tertiary);
+    letter-spacing: 0.04em;
+    text-transform: none;
+}
+
+[data-theme="dark"] .health-indicator {
+    background: rgba(255, 255, 255, 0.03);
+    border-color: rgba(255, 255, 255, 0.07);
+    color: var(--text-secondary);
+}
+
+[data-theme="dark"] .library-nav-item,
+[data-theme="dark"] .category-item {
+    color: var(--text-secondary);
+}
+
+/* 侧栏：选中态用月光蓝而非金色 */
+
+[data-theme="dark"] .library-nav-item:hover,
+[data-theme="dark"] .category-item:hover {
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-primary);
+}
+
+[data-theme="dark"] .library-nav-item.active,
+[data-theme="dark"] .category-item.active {
+    background: rgba(127, 155, 255, 0.12);
+    color: #dbe6ff;
+}
+
+[data-theme="dark"] .library-nav-item.active::before {
+    background: #9fb6ff;
+}
+
+[data-theme="dark"] .library-nav-item.active .library-nav-count,
+[data-theme="dark"] .category-item.active .category-count {
+    color: #b9c9ff;
+}
+
+[data-theme="dark"] .category-item.active .category-name {
+    color: #dbe6ff;
+}
+
+[data-theme="dark"] .cat-dot {
+    opacity: 0.7;
+}
+
+[data-theme="dark"] .inventory-panel {
+    background: #0e0f14;
+    border-color: rgba(255, 255, 255, 0.06);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+
+/* 内容面板与标题 */
+
+[data-theme="dark"] .library-eyebrow {
+    color: #9fb6ff;
+    letter-spacing: 0.1em;
+    font-weight: 500;
+}
+
+[data-theme="dark"] .library-eyebrow::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-right: 8px;
+    border-radius: 2px;
+    background: #9fb6ff;
+    vertical-align: 2px;
+}
+
+[data-theme="dark"] .library-heading {
+    padding: 26px 28px 18px;
+    border-bottom-color: rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="dark"] .library-heading h2 {
+    font-size: 1.4375rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+}
+
+[data-theme="dark"] .library-result-count {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: transparent;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+[data-theme="dark"] .library-location {
+    color: var(--text-tertiary);
+}
+
+[data-theme="dark"] .usage-guide {
+    background: rgba(127, 155, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.07);
+    margin: 16px 28px 0;
+}
+
+[data-theme="dark"] .usage-guide summary {
+    color: var(--text-primary);
+    font-weight: 550;
+}
+
+[data-theme="dark"] .usage-guide summary::before {
+    color: #7c87a3;
+}
+
+[data-theme="dark"] .inventory-toolbar {
+    padding: 14px 28px;
+    border-bottom-color: rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="dark"] .toolbar-search input,
+[data-theme="dark"] .codex-input {
+    background: #0b0c10;
+    border-color: rgba(255, 255, 255, 0.08);
+    color: var(--text-primary);
+}
+
+/* 控件：近黑内嵌面 + 银蓝焦点 */
+
+[data-theme="dark"] .toolbar-search input::placeholder,
+[data-theme="dark"] .codex-input::placeholder {
+    color: #6c7486;
+}
+
+[data-theme="dark"] .toolbar-search input:hover,
+[data-theme="dark"] .codex-input:hover {
+    border-color: rgba(255, 255, 255, 0.14);
+}
+
+[data-theme="dark"] .toolbar-search input:focus,
+[data-theme="dark"] .codex-input:focus {
+    border-color: rgba(127, 155, 255, 0.6);
+    background-color: #0d0e13;
+    box-shadow: 0 0 0 3px rgba(127, 155, 255, 0.14);
+}
+
+[data-theme="dark"] .toolbar-sort-select {
+    background-color: #0b0c10;
+    border-color: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="dark"] select.codex-input,
+[data-theme="dark"] .toolbar-sort-select {
+    background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23a6adbd%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px top 50%;
+    background-size: 12px auto;
+}
+
+[data-theme="dark"] .view-toggle-group {
+    background: #0b0c10;
+    border-color: rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="dark"] .view-toggle-btn {
+    color: var(--text-tertiary);
+}
+
+[data-theme="dark"] .view-toggle-btn:hover {
+    color: var(--text-primary);
+}
+
+[data-theme="dark"] .view-toggle-btn.active {
+    background: var(--surface-3);
+    color: #e8ecf6;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+[data-theme="dark"] .codex-btn {
+    background: #15161c;
+    border-color: rgba(255, 255, 255, 0.1);
+    color: #d7dbe4;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+/* 按钮：次级近黑，主按钮白底深字 */
+
+[data-theme="dark"] .codex-btn:hover {
+    background: #1c1e27;
+    border-color: rgba(255, 255, 255, 0.18);
+    color: #ffffff;
+    transform: none;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+[data-theme="dark"] .codex-btn.primary {
+    background: #f2f3f7;
+    border-color: #f2f3f7;
+    color: #0b0c0f;
+    font-weight: 600;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+
+[data-theme="dark"] .codex-btn.primary:hover {
+    background: #ffffff;
+    border-color: #ffffff;
+    color: #07080b;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.42);
+}
+
+[data-theme="dark"] .codex-btn.primary:disabled {
+    background: #262933;
+    border-color: transparent;
+    color: #6f7480;
+    box-shadow: none;
+}
+
+[data-theme="dark"] .codex-btn.danger {
+    background: transparent;
+    border-color: rgba(240, 115, 124, 0.28);
+    color: #f0737c;
+}
+
+[data-theme="dark"] .codex-btn.danger:hover {
+    background: rgba(240, 115, 124, 0.08);
+    border-color: rgba(240, 115, 124, 0.5);
+    color: #ff9aa1;
+}
+
+[data-theme="dark"] .item-slot,
+[data-theme="dark"] .pending-card {
+    background: #15161c;
+    border-color: rgba(255, 255, 255, 0.06);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+/* 收藏册卡片 */
+
+[data-theme="dark"] .item-slot:hover,
+[data-theme="dark"] .pending-card:hover {
+    background: #1b1c24;
+    border-color: rgba(127, 155, 255, 0.32);
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(127, 155, 255, 0.1);
+}
+
+[data-theme="dark"] .item-slot.selected {
+    border-color: rgba(127, 155, 255, 0.7);
+    box-shadow: 0 0 0 2px rgba(127, 155, 255, 0.2), 0 14px 34px rgba(0, 0, 0, 0.45);
+}
+
+[data-theme="dark"] .pending-card.selected {
+    border-color: rgba(127, 155, 255, 0.7);
+    box-shadow: 0 0 0 2px rgba(127, 155, 255, 0.2);
+}
+
+[data-theme="dark"] .paused-banner {
+    background: rgba(240, 115, 124, 0.08);
+    border-color: rgba(240, 115, 124, 0.3);
+}
+
+[data-theme="dark"] .empty-illustration {
+    background: radial-gradient(120% 120% at 32% 22%, #1d1e26, #0b0c10);
+    border-color: rgba(255, 255, 255, 0.07);
+}
+
+[data-theme="dark"] .item-image,
+[data-theme="dark"] .pending-image {
+    background: radial-gradient(120% 100% at 50% 0%, rgba(255, 255, 255, 0.035), transparent 70%), #0b0c10;
+}
+
+[data-theme="dark"] .item-info {
+    border-top-color: rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="dark"] .emotion-chip {
+    background: rgba(255, 255, 255, 0.045);
+    border-color: transparent;
+    color: var(--text-secondary);
+}
+
+/* 标签与药丸 */
+
+[data-theme="dark"] .emotion-chip.primary {
+    background: rgba(127, 155, 255, 0.14);
+    border-color: transparent;
+    color: #c7d6ff;
+}
+
+[data-theme="dark"] .scope-pill {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: transparent;
+    color: var(--text-secondary);
+}
+
+[data-theme="dark"] .scope-pill.public {
+    background: rgba(84, 210, 160, 0.12);
+    border-color: transparent;
+    color: #9ce6c5;
+}
+
+[data-theme="dark"] .scope-pill.local {
+    background: rgba(240, 115, 124, 0.12);
+    border-color: transparent;
+    color: #ffb3b8;
+}
+
+[data-theme="dark"] .tag {
+    background: rgba(255, 255, 255, 0.045);
+    border-color: transparent;
+    color: var(--text-secondary);
+}
+
+[data-theme="dark"] .favorite-btn {
+    background: rgba(10, 11, 15, 0.6);
+    border-color: rgba(255, 255, 255, 0.12);
+}
+
+[data-theme="dark"] .favorite-btn:hover {
+    background: rgba(22, 23, 29, 0.92);
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+[data-theme="dark"] .favorite-btn svg {
+    stroke: rgba(230, 236, 248, 0.72);
+}
+
+[data-theme="dark"] .favorite-btn.active {
+    background: rgba(127, 155, 255, 0.16);
+    border-color: rgba(127, 155, 255, 0.45);
+}
+
+[data-theme="dark"] .favorite-btn.active svg {
+    fill: #a9c2ff;
+    stroke: #a9c2ff;
+    filter: drop-shadow(0 0 6px rgba(127, 155, 255, 0.5));
+}
+
+[data-theme="dark"] .item-more-btn {
+    background: rgba(10, 11, 15, 0.62);
+    border-color: rgba(255, 255, 255, 0.12);
+    color: var(--text-secondary);
+}
+
+[data-theme="dark"] .item-more-btn:hover {
+    background: rgba(22, 23, 29, 0.92);
+    border-color: rgba(255, 255, 255, 0.2);
+    color: var(--text-primary);
+}
+
+[data-theme="dark"] .modal-overlay {
+    background: rgba(4, 5, 8, 0.74);
+}
+
+/* 弹窗 */
+
+[data-theme="dark"] .modal-panel {
+    background: #101116;
+    border-color: rgba(255, 255, 255, 0.08);
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.03) inset;
+}
+
+[data-theme="dark"] .modal-header {
+    border-bottom-color: rgba(255, 255, 255, 0.07);
+}
+
+[data-theme="dark"] .modal-close {
+    color: var(--text-tertiary);
+}
+
+[data-theme="dark"] .modal-close:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: transparent;
+    color: var(--text-primary);
+}
+
+[data-theme="dark"] .modal-actions,
+[data-theme="dark"] .modal-footer-actions,
+[data-theme="dark"] .modal-form-body {
+    background: #101116;
+}
+
+[data-theme="dark"] .modal-actions,
+[data-theme="dark"] .modal-footer-actions {
+    border-top-color: rgba(255, 255, 255, 0.07);
+}
+
+[data-theme="dark"] .item-stats {
+    background: rgba(255, 255, 255, 0.012);
+    border-left-color: rgba(255, 255, 255, 0.07);
+}
+
+[data-theme="dark"] .stat-row {
+    border-bottom-color: rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="dark"] .stat-name {
+    color: var(--text-tertiary);
+}
+
+[data-theme="dark"] .desc-quote {
+    background: rgba(127, 155, 255, 0.06);
+    border-color: transparent;
+    border-left: 2px solid rgba(127, 155, 255, 0.55);
+    border-radius: 0 8px 8px 0;
+}
+
+[data-theme="dark"] .upload-area {
+    background: #0b0c10;
+    border-color: rgba(255, 255, 255, 0.13);
+}
+
+[data-theme="dark"] .upload-area:hover {
+    background: #0e0f14;
+    border-color: rgba(127, 155, 255, 0.42);
+}
+
+[data-theme="dark"] .upload-preview {
+    border-color: rgba(255, 255, 255, 0.14);
+}
+
+[data-theme="dark"] .vlm-reanalysis-panel {
+    background: rgba(127, 155, 255, 0.03);
+    border-color: rgba(255, 255, 255, 0.07);
+}
+
+[data-theme="dark"] .vlm-compare-card {
+    background: rgba(255, 255, 255, 0.025);
+    border-color: rgba(255, 255, 255, 0.07);
+}
+
+[data-theme="dark"] .vlm-compare-card.proposed {
+    border-color: rgba(127, 155, 255, 0.45);
+    background: rgba(127, 155, 255, 0.06);
+}
+
+[data-theme="dark"] .favorite-toggle-btn:hover {
+    border-color: rgba(127, 155, 255, 0.45);
+    color: #c7d6ff;
+}
+
+[data-theme="dark"] .favorite-toggle-btn.active {
+    background: rgba(127, 155, 255, 0.14);
+    border-color: transparent;
+    color: #c7d6ff;
+}
+
+[data-theme="dark"] .item-preview img {
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
+}
+
+[data-theme="dark"] .pagination-bar {
+    border-top-color: rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="dark"] .page-info {
+    color: var(--text-secondary);
+}
+
+[data-theme="dark"] .theme-popover {
+    background: #14161c;
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: 0 20px 48px rgba(0, 0, 0, 0.55);
+}
+
+/* 主题选择器 / 提示 / 菜单 */
+
+[data-theme="dark"] .theme-save-hint,
+[data-theme="dark"] .theme-group-label {
+    color: var(--text-tertiary);
+    border-bottom-color: rgba(255, 255, 255, 0.07);
+}
+
+[data-theme="dark"] .theme-option {
+    color: var(--text-secondary);
+}
+
+[data-theme="dark"] .theme-option:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-primary);
+}
+
+[data-theme="dark"] .theme-option.active {
+    background: rgba(127, 155, 255, 0.12);
+    color: #dbe6ff;
+}
+
+[data-theme="dark"] .theme-default-tag {
+    color: #b9c9ff;
+    border-color: rgba(127, 155, 255, 0.4);
+}
+
+[data-theme="dark"] .kbd-hints kbd {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.12);
+    border-bottom-color: rgba(255, 255, 255, 0.2);
+    color: var(--text-secondary);
+}
+
+[data-theme="dark"] .toast-notification {
+    background: #14161c;
+    border-color: rgba(255, 255, 255, 0.12);
+    color: var(--text-primary);
+    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55);
+}
+
+[data-theme="dark"] .item-context-menu {
+    background: #14161c;
+    border-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme="dark"] .context-menu-head {
+    color: var(--text-tertiary);
+    border-bottom-color: rgba(255, 255, 255, 0.07);
+}
+
+[data-theme="dark"] .item-context-menu > button {
+    color: var(--text-secondary);
+}
+
+[data-theme="dark"] .item-context-menu > button:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-primary);
+}
+
+[data-theme="dark"] .skeleton-card {
+    background: #15161c;
+    border-color: rgba(255, 255, 255, 0.05);
+}
+
+[data-theme="dark"] .skeleton-image {
+    background: linear-gradient(90deg, #111318 25%, #1b1d25 50%, #111318 75%);
+    background-size: 200% 100%;
+}
+
+[data-theme="dark"] .empty-state {
+    color: var(--text-tertiary);
+}
+
+[data-theme="dark"] .source-input-card,
+[data-theme="dark"] .source-inspection,
+[data-theme="dark"] .source-job,
+[data-theme="dark"] .source-registry {
+    background: rgba(255, 255, 255, 0.02);
+    border-color: rgba(255, 255, 255, 0.07);
+}
+
+[data-theme="dark"] .source-safety-note {
+    background: rgba(127, 155, 255, 0.05);
+    border-color: rgba(127, 155, 255, 0.22);
+}
+
+[data-theme="dark"] .category-add-panel,
+[data-theme="dark"] .category-manager-row {
+    background: rgba(255, 255, 255, 0.02);
+    border-color: rgba(255, 255, 255, 0.07);
+}
+
+[data-theme="dark"] .category-manager-key {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-tertiary);
+}
+
+[data-theme="dark"] .modal-form-body {
+    padding: 22px 22px;
+}
+
+[data-theme="dark"] .modal-footer-actions {
+    padding: 14px 22px;
+}
+
+[data-theme="dark"] .library-grid .favorite-btn {
+    background: transparent;
+    border-color: transparent;
+    opacity: 0;
+}
+
+/* 暗色：卡片图标静止隐去，悬停才出现 */
+
+[data-theme="dark"] .item-slot:hover .favorite-btn,
+[data-theme="dark"] .favorite-btn:focus-visible {
+    opacity: 1;
+}
+
+[data-theme="dark"] .library-grid .favorite-btn:hover {
+    background: rgba(22, 23, 29, 0.95);
+    border-color: rgba(255, 255, 255, 0.18);
+}
+
+[data-theme="dark"] .library-grid .favorite-btn.active {
+    opacity: 1;
+    background: rgba(127, 155, 255, 0.16);
+    border-color: rgba(127, 155, 255, 0.45);
+}
+
+[data-theme="dark"] .item-more-btn {
+    opacity: 0;
+}
+
+[data-theme="dark"] .item-slot:hover .item-more-btn,
+[data-theme="dark"] .item-more-btn:focus-visible {
+    opacity: 1;
+}
+
+[data-theme="dark"] .item-slot:hover,
+[data-theme="dark"] .pending-card:hover {
+    transform: translateY(-2px);
+}
+
+/* 卡片悬停幅度收一点，贴近 Moonshot 的克制感 */
+
+/* 预览翻页：保留暗色玻璃，悬停从硬编码金色改为银蓝月光 */
+
+[data-theme="dark"] .nav-btn:hover {
+    background: rgba(159, 182, 255, 0.92);
+    border-color: rgba(255, 255, 255, 0.3);
+    color: #0b0c0f;
+}
+
+/* 收藏分类侧栏项与主题收藏色（银蓝）对齐，替换硬编码琥珀色 */
+
+[data-theme="dark"] .favorite-category {
+    background: rgba(127, 155, 255, 0.08);
+}
+
+[data-theme="dark"] .favorite-category:hover {
+    background: rgba(127, 155, 255, 0.13);
+}
+
+[data-theme="dark"] .favorite-category.active {
+    background: rgba(127, 155, 255, 0.18);
+}
+
+[data-theme="dark"] .favorite-category .category-icon {
+    filter: drop-shadow(0 0 4px rgba(127, 155, 255, 0.4));
+}
+
+/* 容量条渐变随主题变量；场景标签选中态用银蓝文字替代浅金 */
+
+[data-theme="dark"] .capacity-fill {
+    background: linear-gradient(90deg, var(--gold-dim), var(--gold-primary));
+}
+
+[data-theme="dark"] .scene-tag-btn.active {
+    color: #c7d6ff;
+}
+
+[data-theme="dark"] .character-chip.active .character-chip-count {
+    color: currentColor;
+}
+
+[data-theme="dark"] .inventory-grid:not(.list-mode) .item-slot {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 290px;
+}
+
+/* ── 性能优化 ──────────────────────────────────────────────
+   仅渲染层优化，不改变任何视觉样式：
+   - content-visibility: auto 跳过视口外元素的布局/绘制，
+     contain-intrinsic-size 提供占位尺寸避免滚动条跳动；
+     auto 记住上次实际尺寸，估算误差会自校准。
+   - 仅用于无溢出子元素、无 position:fixed 后代的容器；
+     minecraft 溢出式悬浮提示、fallout 自定义 contain、以及
+     需要越界描边/阴影的子元素不用 content-visibility。 */
+
+/* 默认主题（light/dark）图库网格卡片：基础规则已 contain: layout style paint */
+
+[data-theme="dark"] .inventory-grid.list-mode .item-slot {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 96px;
+}
+
+/* 默认主题列表行（行高约 84-96px） */
+

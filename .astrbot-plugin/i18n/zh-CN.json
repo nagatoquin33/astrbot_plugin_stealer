@@ -360,7 +360,7 @@
             },
             "empty": {
                 "library_title": "暂无表情包",
-                "library_hint": "先上传并分析图片，或到待审核区通过已收集的表情。只有正式图库的表情会参与发送。",
+                "library_hint": "上传图片，或到审核区通过已收集的表情。",
                 "pending_title": "暂无待审核表情包",
                 "pending_hint": "新偷取的表情包会出现在这里等待审核。",
                 "no_categories": "暂无分类",
@@ -475,7 +475,7 @@
                 "scenes_title": "识别到的适用对话",
                 "scenes_hint": "点击可添加或移除到「适用对话」输入框。写成群友会说的话，不是空标签。",
                 "reanalysis_title": "VLM 重新分析",
-                "reanalysis_hint": "再次调用视觉模型，与当前标注对比后再决定是否应用。",
+                "reanalysis_hint": "重新生成标注并与当前结果对比。",
                 "current": "当前标注",
                 "new_result": "新的 VLM 结果",
                 "reanalysis_preserve": "角色、作用域、收藏和使用记录保持不变。"
@@ -694,7 +694,7 @@
                 "review_hint": "在待审核区通过图片；检查图上文字和“适合回应”的句子，再分配角色。",
                 "chat": "正常聊天",
                 "chat_hint": "Bot 在聊天中结合语境主动用表情表达情绪、接梗和回应，选择贴合语境的图片。",
-                "pending_hint": "待审核图片不会参与发送。图片已入库但仍选不准时，可预览重新分析，再确认写回。",
+                "pending_hint": "待审核图片不参与发送；选不准时可预览重新分析。",
                 "upload": "上传并分析",
                 "pending": "去审核",
                 "auto": "自动发送",

@@ -470,9 +470,14 @@ createApp({
         const biliShowBackTop = ref(false);
         const biliMoreOpen = ref(false);
         const biliSearchOpen = ref(false);
+        let biliScrollRaf = 0;
         const onBiliScroll = () => {
-            biliHeaderScrolled.value = window.scrollY > 12;
-            biliShowBackTop.value = window.scrollY > 600;
+            if (biliScrollRaf) return;
+            biliScrollRaf = requestAnimationFrame(() => {
+                biliScrollRaf = 0;
+                biliHeaderScrolled.value = window.scrollY > 12;
+                biliShowBackTop.value = window.scrollY > 600;
+            });
         };
         const biliBannerIndex = ref(0);
         let biliBannerTimer = null;
@@ -734,7 +739,7 @@ createApp({
             panStartY = e.clientY;
             panBaseX = previewPanX.value;
             panBaseY = previewPanY.value;
-            window.addEventListener('mousemove', onPanMove);
+            window.addEventListener('mousemove', onPanMove, { passive: true });
             window.addEventListener('mouseup', endPan);
         };
         const toggleZoom = () => {
@@ -1119,8 +1124,7 @@ createApp({
                 pendingCurrentPage.value = page;
                 pendingImages.value = nextImages;
                 pendingTotal.value = nextTotal;
-                pendingCategories.value = nextCategories.map(category => category.key ? category :
-                    { ...category, name: t('pages.dashboard.messages.analysis_unanalysed', 'Waiting for analysis') });
+                pendingCategories.value = nextCategories.filter(category => category.count > 0);
                 pendingCategoryTotal.value = Number.isFinite(nextCategoryTotal)
                     ? nextCategoryTotal
                     : nextCategories.reduce((sum, category) => sum + category.count, 0);
@@ -2826,10 +2830,10 @@ createApp({
             });
             updatePageSize();
             window.addEventListener('keydown', handleKeydown);
-            window.addEventListener('resize', handleResize);
+            window.addEventListener('resize', handleResize, { passive: true });
             window.addEventListener('click', closeThemePicker);
             window.addEventListener('click', closeContextMenu);
-            window.addEventListener('scroll', closeContextMenu, true);
+            window.addEventListener('scroll', closeContextMenu, { capture: true, passive: true });
             window.addEventListener('scroll', onBiliScroll, { passive: true });
             window.addEventListener('click', closeBiliPopovers);
             biliBannerTimer = setInterval(() => {
@@ -2864,6 +2868,7 @@ createApp({
             window.removeEventListener('click', closeBiliPopovers);
             clearInterval(biliBannerTimer);
             biliBannerTimer = null;
+            if (biliScrollRaf) { cancelAnimationFrame(biliScrollRaf); biliScrollRaf = 0; }
             if (imgObserver) imgObserver.disconnect();
             clearTimeout(resizeTimer);
             clearTimeout(searchTimeout);

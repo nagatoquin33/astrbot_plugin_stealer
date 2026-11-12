@@ -748,6 +748,32 @@ class TestPendingPool:
         assert items[0]["hash"] == "ha"
         assert counts["happy"] == 1
 
+    def test_get_pending_paginated_unanalysed_filter(self, db: DatabaseService):
+        self._insert(db, path="/data/pending/a.jpg", hash="ha", category="happy")
+        self._insert(db, path="/data/pending/b.jpg", hash="hb", category="")
+        self._insert(db, path="/data/pending/c.jpg", hash="hc", category="")
+
+        items, total, counts = db.get_pending_paginated(
+            page=1, page_size=50, category="unanalysed"
+        )
+
+        assert total == 2
+        assert {item["hash"] for item in items} == {"hb", "hc"}
+        assert counts.get("") == 2
+        assert counts.get("happy") == 1
+
+    def test_get_pending_paginated_unanalysed_plus_search(self, db: DatabaseService):
+        self._insert(db, path="/data/pending/a.jpg", hash="ha", category="", desc="猫咪")
+        self._insert(db, path="/data/pending/b.jpg", hash="hb", category="", desc="狗狗")
+        self._insert(db, path="/data/pending/c.jpg", hash="hc", category="happy", desc="猫咪")
+
+        items, total, _ = db.get_pending_paginated(
+            page=1, page_size=50, category="unanalysed", search_query="猫咪"
+        )
+
+        assert total == 1
+        assert items[0]["hash"] == "ha"
+
     def test_get_pending_paginated_splits_tags_and_scenes(self, db: DatabaseService):
         self._insert(
             db,

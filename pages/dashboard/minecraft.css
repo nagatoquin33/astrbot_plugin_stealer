@@ -1,0 +1,1005 @@
+/* minecraft theme — split from app.css; rules apply only under [data-theme="minecraft"] */
+
+@media (min-width: 769px) and (max-width: 1180px) {
+:root:not([data-theme="fallout"]) .header-text p { display: none; }
+
+:root:not([data-theme="fallout"]) .header-nav { margin-left: 6px; }
+
+:root:not([data-theme="fallout"]) .header-nav .section-tab { padding: 0 10px; }
+
+:root:not([data-theme="fallout"]) .header-nav .section-tab-label { display: none; }
+
+:root:not([data-theme="fallout"]) .stat-item { padding: 0 10px; }
+
+:root:not([data-theme="fallout"]) .health-indicator { padding: 6px 8px; }
+
+
+}
+
+/* Keep the brand and section buttons readable in a narrow desktop panel. */
+
+[data-theme="minecraft"] .modal-footer-actions {
+    background: #c6c6c6;
+}
+
+[data-theme="minecraft"] {
+    --bg-base: #1a1008;
+    --bg-elevated: #c6c6c6;
+    --bg-card: #8b8b8b;
+    --bg-card-hover: #9a9a9a;
+    --gold-primary: #ffff55;
+    --gold-bright: #ffffa0;
+    --gold-dim: #3f3f3f;
+    --gold-glow: rgba(255, 255, 80, 0.18);
+    --success: #7eff32;
+    --warning: #ffaa00;
+    --danger: #ff5555;
+    --favorite: #aa00ff;
+    --text-primary: #404040;
+    --text-secondary: #2c2c2c;
+    --text-tertiary: #5a5a5a;
+    --text-main: var(--text-primary);
+    --text-muted: #5a5a5a;
+    --glass-bg: #c6c6c6;
+    --glass-border: #373737;
+    --accent-rgb: 255, 255, 85;
+    --accent-soft-rgb: 255, 255, 160;
+    --toolbar-gradient: #c6c6c6;
+    --pager-gradient: #c6c6c6;
+    --btn-gradient: #6f6f6f;
+    --btn-gradient-hover: #7f7f7f;
+    --panel-gradient: #c6c6c6;
+    --panel-header-gradient: #bdbdbd;
+    --preview-gradient: #8b8b8b;
+    --toggle-gradient: #6f6f6f;
+    --bar-solid: #2b2b2b;
+    --mc-font: 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+    --mc-pixel: 'Silkscreen', ui-monospace, monospace;
+    --mc-outline: 2px 0 #000, -2px 0 #000, 0 2px #000, 0 -2px #000, 2px 2px #000, -2px -2px #000, 2px -2px #000, -2px 2px #000;
+    --mc-raised: inset 3px 3px 0 #ffffff, inset -3px -3px 0 #373737;
+    --mc-inset: inset 3px 3px 0 #373737, inset -3px -3px 0 #ffffff;
+    color-scheme: dark;
+}
+
+/* ─────────────── Minecraft：箱子 / 物品栏 ─────────────── */
+
+html[data-theme="minecraft"],
+[data-theme="minecraft"] body {
+    font-family: var(--mc-font);
+    direction: ltr;
+    unicode-bidi: isolate;
+}
+
+[data-theme="minecraft"] body {
+    background-color: #140c08;
+    background-image:
+        linear-gradient(rgba(0, 0, 0, 0.32), rgba(0, 0, 0, 0.32)),
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' shape-rendering='crispEdges'%3E%3Crect width='16' height='16' fill='%231a100a'/%3E%3Crect width='8' height='8' fill='%233d2818'/%3E%3Crect x='8' width='8' height='8' fill='%232a1a10'/%3E%3Crect y='8' width='8' height='8' fill='%2324140c'/%3E%3Crect x='8' y='8' width='8' height='8' fill='%234a301c'/%3E%3Crect x='2' y='2' width='2' height='2' fill='%235c3c20'/%3E%3Crect x='11' y='3' width='2' height='2' fill='%23100804'/%3E%3Crect x='4' y='10' width='2' height='2' fill='%23604428'/%3E%3Crect x='12' y='12' width='2' height='2' fill='%231c1008'/%3E%3C/svg%3E");
+    background-size: auto, 64px 64px;
+    background-repeat: repeat;
+    color: var(--text-primary);
+}
+
+[data-theme="minecraft"] h1,
+[data-theme="minecraft"] h2,
+[data-theme="minecraft"] h3 {
+    font-family: var(--mc-font);
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: 0;
+    text-shadow: none;
+    color: #404040;
+    border-bottom: none;
+}
+
+[data-theme="minecraft"] .codex-header {
+    background: #c6c6c6;
+    backdrop-filter: none;
+    border-bottom: 0;
+    box-shadow: var(--mc-raised);
+}
+
+[data-theme="minecraft"] .header-sidebar-toggle {
+    background: #8b8b8b;
+    border: 0;
+    box-shadow: var(--mc-inset);
+    border-radius: 0;
+}
+
+[data-theme="minecraft"] .header-sidebar-toggle svg { color: #404040; }
+
+[data-theme="minecraft"] .header-text h1 {
+    color: #404040;
+    font-size: var(--fs-xl);
+}
+
+[data-theme="minecraft"] .header-text p {
+    color: #5a5a5a;
+    letter-spacing: 0.04em;
+    text-transform: none;
+}
+
+[data-theme="minecraft"] .stats-bar {
+    background: #8b8b8b;
+    border: 0;
+    border-radius: 0;
+    box-shadow: var(--mc-inset);
+    gap: 2px;
+    padding: 3px;
+}
+
+[data-theme="minecraft"] .stat-item {
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    min-width: 64px;
+}
+
+[data-theme="minecraft"] .stat-value {
+    font-family: var(--mc-pixel);
+    color: #ffffa0;
+    text-shadow: var(--mc-outline);
+    font-size: var(--fs-xl);
+    -webkit-font-smoothing: none;
+}
+
+[data-theme="minecraft"] .stat-label {
+    color: #e0e0e0;
+    text-shadow: 1px 1px 0 #000;
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+[data-theme="minecraft"] .health-indicator { color: #404040; }
+
+[data-theme="minecraft"] .health-indicator.ok .health-dot {
+    background: #7eff32;
+    box-shadow: none;
+    border-radius: 0;
+}
+
+[data-theme="minecraft"] .sidebar {
+    background: #c6c6c6;
+    border-right: 0;
+    box-shadow: var(--mc-raised);
+}
+
+[data-theme="minecraft"] .sidebar-title {
+    font-family: var(--mc-font);
+    color: #404040;
+    text-transform: none;
+    letter-spacing: 0;
+    text-shadow: none;
+    border-bottom: 2px solid #373737;
+    text-align: left;
+    padding-left: 8px;
+}
+
+[data-theme="minecraft"] .section-tab {
+    border-radius: 0;
+    min-height: 40px;
+    color: #e0e0e0;
+    background: #6f6f6f;
+    border: 2px solid #000;
+    box-shadow: inset 2px 2px 0 #ffffff55, inset -2px -2px 0 #3f3f3f;
+    text-shadow: 2px 2px 0 #3f3f3f;
+}
+
+[data-theme="minecraft"] .section-tab:hover {
+    background: #7f7f7f;
+    color: #ffffa0;
+    border-color: #000;
+}
+
+[data-theme="minecraft"] .section-tab.active {
+    background: #c6c6c6;
+    color: #404040;
+    border-color: #000;
+    box-shadow: var(--mc-raised);
+    text-shadow: none;
+}
+
+[data-theme="minecraft"] .section-badge {
+    border-radius: 0;
+    background: #ff5555;
+}
+
+[data-theme="minecraft"] .category-item {
+    border-radius: 0;
+    border-left: 0;
+    gap: 8px;
+    padding: 8px;
+    background: #8b8b8b;
+    box-shadow: var(--mc-inset);
+}
+
+[data-theme="minecraft"] .category-item + .category-item::before { display: none; }
+
+[data-theme="minecraft"] .category-item:hover {
+    background: #9a9a9a;
+}
+
+[data-theme="minecraft"] .category-item.active {
+    background: #c6c6c6;
+    box-shadow: var(--mc-raised);
+}
+
+[data-theme="minecraft"] .category-name { color: #404040; }
+
+[data-theme="minecraft"] .category-item.active .category-name { color: #3f3f3f; }
+
+[data-theme="minecraft"] .category-count {
+    font-family: var(--mc-pixel);
+    background: #2b2b2b;
+    color: #ffffa0;
+    border: 0;
+    border-radius: 0;
+    padding: 1px 6px;
+    text-shadow: 1px 1px 0 #000;
+    -webkit-font-smoothing: none;
+}
+
+[data-theme="minecraft"] .cat-dot { border-radius: 0; box-shadow: none; }
+
+[data-theme="minecraft"] .inventory-panel {
+    background: #c6c6c6;
+    border: 0;
+    box-shadow: var(--mc-raised);
+}
+
+[data-theme="minecraft"] .inventory-panel::before,
+[data-theme="minecraft"] .inventory-panel::after,
+[data-theme="minecraft"] .modal-panel-corner-bl,
+[data-theme="minecraft"] .modal-panel-corner-br { display: none !important; }
+
+[data-theme="minecraft"] .inventory-toolbar {
+    background: #c6c6c6;
+    border-bottom: 2px solid #8b8b8b;
+}
+
+[data-theme="minecraft"] .character-filter-bar {
+    background: #c6c6c6;
+    border-bottom: 2px solid #8b8b8b;
+}
+
+[data-theme="minecraft"] .character-chip {
+    background: #8b8b8b;
+    border: 0;
+    box-shadow: var(--mc-raised);
+    color: #111;
+    border-radius: 0;
+    padding: 6px 12px;
+    font-family: var(--mc-font);
+}
+
+[data-theme="minecraft"] .character-chip:hover {
+    background: #9a9a9a;
+}
+
+[data-theme="minecraft"] .character-chip.active {
+    background: #ffffa0;
+    color: #111;
+}
+
+[data-theme="minecraft"] .item-character-badge,
+[data-theme="minecraft"] .item-character-tag {
+    border-radius: 0;
+    font-family: var(--mc-font);
+    background: #000;
+    color: #ffffa0;
+    border: 0;
+}
+
+[data-theme="minecraft"] .toolbar-search input,
+[data-theme="minecraft"] .codex-input {
+    background: #000;
+    border: 0;
+    border-radius: 0;
+    color: #fff;
+    box-shadow: var(--mc-inset);
+    font-family: var(--mc-font);
+}
+
+[data-theme="minecraft"] .toolbar-search input:focus,
+[data-theme="minecraft"] .codex-input:focus {
+    border-color: transparent;
+    box-shadow: var(--mc-inset), 0 0 0 2px #ffffa0;
+    outline: none;
+}
+
+[data-theme="minecraft"] select.codex-input {
+    background-color: #000;
+    background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath fill='%23ffffa0' d='M0 0l6 8 6-8z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 10px auto;
+    color: #fff;
+}
+
+[data-theme="minecraft"] .view-toggle-group {
+    background: #8b8b8b;
+    border: 0;
+    border-radius: 0;
+    box-shadow: var(--mc-inset);
+}
+
+[data-theme="minecraft"] .view-toggle-btn { border-radius: 0; color: #2c2c2c; }
+
+[data-theme="minecraft"] .view-toggle-btn.active {
+    background: #6f6f6f;
+    color: #ffffa0;
+}
+
+[data-theme="minecraft"] .inventory-grid:not(.list-mode) {
+    columns: unset;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(var(--slot-size), 1fr));
+    gap: 3px;
+    padding: 10px;
+    align-content: start;
+}
+
+[data-theme="minecraft"] .inventory-grid:not(.list-mode) .item-slot {
+    margin-bottom: 0;
+    aspect-ratio: 1;
+    background: #8b8b8b;
+    border: 0;
+    border-radius: 0;
+    box-shadow: var(--mc-inset);
+    overflow: visible;
+    contain: none;
+    animation: none;
+}
+
+[data-theme="minecraft"] .inventory-grid:not(.list-mode) .item-slot:hover {
+    transform: none;
+    box-shadow: var(--mc-inset);
+    outline: 2px solid #fff;
+    outline-offset: -2px;
+    z-index: 40;
+}
+
+[data-theme="minecraft"] .inventory-grid:not(.list-mode) .item-slot.selected {
+    outline: 2px solid #ffff55;
+    outline-offset: -2px;
+    box-shadow: var(--mc-inset);
+}
+
+[data-theme="minecraft"] .inventory-grid:not(.list-mode) .item-image {
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    padding: 4px;
+    background: transparent;
+}
+
+[data-theme="minecraft"] .inventory-grid:not(.list-mode) .item-image img,
+[data-theme="minecraft"] .inventory-grid:not(.list-mode) .image-placeholder {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    filter: none;
+    border-radius: 0;
+    image-rendering: auto;
+}
+
+[data-theme="minecraft"] .inventory-grid:not(.list-mode) .item-info {
+    position: absolute;
+    left: 50%;
+    bottom: calc(100% + 8px);
+    transform: translateX(-50%);
+    width: max-content;
+    max-width: 220px;
+    min-height: 0;
+    padding: 6px 8px;
+    background: #100010;
+    border: 2px solid #24005a;
+    box-shadow: 0 0 0 2px #000;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 30;
+    text-align: left;
+    gap: 4px;
+}
+
+[data-theme="minecraft"] .inventory-grid:not(.list-mode) .item-slot:hover .item-info {
+    opacity: 1;
+    transform: translateX(-50%);
+    background: #100010;
+}
+
+[data-theme="minecraft"] .inventory-grid:not(.list-mode) .item-slot.tooltip-below .item-info {
+    top: calc(100% + 8px);
+    bottom: auto;
+}
+
+[data-theme="minecraft"] .inventory-grid:not(.list-mode) .item-slot.tooltip-start .item-info {
+    left: 0;
+    transform: none;
+}
+
+[data-theme="minecraft"] .inventory-grid:not(.list-mode) .item-slot.tooltip-end .item-info {
+    left: auto;
+    right: 0;
+    transform: none;
+}
+
+[data-theme="minecraft"] .inventory-grid:not(.list-mode) .item-slot.tooltip-start:hover .item-info,
+[data-theme="minecraft"] .inventory-grid:not(.list-mode) .item-slot.tooltip-end:hover .item-info {
+    transform: none;
+}
+
+[data-theme="minecraft"] .inventory-grid:not(.list-mode) .item-category {
+    color: #fff;
+    text-shadow: var(--mc-outline);
+    font-size: var(--fs-xs);
+    white-space: normal;
+}
+
+[data-theme="minecraft"] .inventory-grid:not(.list-mode) .scope-pill {
+    border-radius: 0;
+    border: 0;
+    background: transparent;
+    color: #aaa;
+    padding: 0;
+}
+
+[data-theme="minecraft"] .item-stack-count {
+    display: block;
+    position: absolute;
+    right: 4px;
+    bottom: 2px;
+    z-index: 8;
+    font-family: var(--mc-pixel);
+    font-size: var(--fs-md);
+    line-height: 1;
+    color: #fff;
+    text-shadow: var(--mc-outline);
+    pointer-events: none;
+    -webkit-font-smoothing: none;
+}
+
+[data-theme="minecraft"] .favorite-btn {
+    border-radius: 0;
+    background: #2b2b2b;
+    top: 2px;
+    right: 2px;
+    width: 22px;
+    height: 22px;
+}
+
+[data-theme="minecraft"] .favorite-btn.active {
+    background: #5a0099;
+}
+
+[data-theme="minecraft"] .favorite-btn.active svg {
+    fill: #e57dff;
+    stroke: #e57dff;
+    filter: drop-shadow(0 0 4px #aa00ff);
+}
+
+[data-theme="minecraft"] .inventory-grid:not(.list-mode) .item-slot:has(.favorite-btn.active) {
+    box-shadow: var(--mc-inset), inset 0 0 10px rgba(170, 0, 255, 0.35);
+}
+
+[data-theme="minecraft"] .codex-btn {
+    background: #6f6f6f;
+    border: 2px solid #000;
+    border-radius: 0;
+    color: #fff;
+    font-family: var(--mc-font);
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: 0;
+    text-shadow: 2px 2px 0 #3f3f3f;
+    box-shadow: inset 2px 2px 0 #ffffff66, inset -2px -2px 0 #3f3f3f;
+    min-height: 36px;
+}
+
+[data-theme="minecraft"] .codex-btn::before { display: none; }
+
+[data-theme="minecraft"] .codex-btn:hover {
+    background: #7f7f7f;
+    color: #ffffa0;
+    border-color: #000;
+    transform: none;
+    box-shadow: inset 2px 2px 0 #ffffff77, inset -2px -2px 0 #3f3f3f;
+}
+
+[data-theme="minecraft"] .codex-btn.primary {
+    background: #3c8527;
+    color: #fff;
+    border-color: #000;
+    text-shadow: 2px 2px 0 #1d3d12;
+}
+
+[data-theme="minecraft"] .codex-btn.primary:hover {
+    background: #49a334;
+    color: #ffffa0;
+}
+
+[data-theme="minecraft"] .codex-btn.danger {
+    color: #ffaaaa;
+    border-color: #000;
+}
+
+[data-theme="minecraft"] .pagination-bar {
+    background: #c6c6c6;
+    border-top: 2px solid #8b8b8b;
+}
+
+[data-theme="minecraft"] .page-info {
+    font-family: var(--mc-pixel);
+    color: #404040;
+    -webkit-font-smoothing: none;
+}
+
+[data-theme="minecraft"] .modal-overlay {
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: none;
+}
+
+[data-theme="minecraft"] .modal-panel {
+    background: #c6c6c6;
+    border: 0;
+    border-radius: 0;
+    box-shadow: var(--mc-raised), 8px 8px 0 rgba(0, 0, 0, 0.45);
+}
+
+[data-theme="minecraft"] .modal-header {
+    background: #c6c6c6;
+    border-bottom: 2px solid #8b8b8b;
+    border-radius: 0;
+}
+
+[data-theme="minecraft"] .modal-close {
+    border-radius: 0;
+    background: #6f6f6f;
+    border: 2px solid #000;
+    color: #fff;
+}
+
+[data-theme="minecraft"] .item-preview {
+    background: #8b8b8b;
+    box-shadow: var(--mc-inset);
+}
+
+[data-theme="minecraft"] .item-stats {
+    background: #c6c6c6;
+    border-left: 2px solid #8b8b8b;
+}
+
+[data-theme="minecraft"] .stat-row { border-bottom-color: #8b8b8b; }
+
+[data-theme="minecraft"] .stat-name { color: #5a5a5a; text-transform: none; }
+
+[data-theme="minecraft"] .item-stats .stat-value {
+    color: #2c2c2c;
+    text-shadow: none;
+    font-family: var(--mc-pixel);
+}
+
+[data-theme="minecraft"] .stat-block { border-bottom-color: #8b8b8b; }
+
+[data-theme="minecraft"] .stat-group-title {
+    color: #5a5a5a;
+    font-family: var(--mc-pixel);
+    font-size: 0.5625rem;
+}
+
+[data-theme="minecraft"] .stat-group-title::after { background: #8b8b8b; height: 2px; }
+
+[data-theme="minecraft"] .preview-counter {
+    border-radius: 0;
+    background: #2b2b2b;
+    border: 2px solid #000;
+    color: #ffffa0;
+    font-family: var(--mc-pixel);
+}
+
+[data-theme="minecraft"] .preview-actions-sep { background: #8b8b8b; width: 2px; }
+
+[data-theme="minecraft"] .codex-btn.danger-quiet:hover {
+    background: rgba(255, 85, 85, 0.18);
+    border-color: #000;
+    color: #ffaaaa;
+}
+
+[data-theme="minecraft"] .vlm-reanalysis-panel {
+    border: 2px solid #373737;
+    border-radius: 0;
+    background: rgba(0, 0, 0, 0.18);
+}
+
+[data-theme="minecraft"] .vlm-compare-card {
+    border: 2px solid #373737;
+    border-radius: 0;
+    background: rgba(0, 0, 0, 0.12);
+}
+
+[data-theme="minecraft"] .vlm-compare-card.proposed { border-color: #555; }
+
+[data-theme="minecraft"] .vlm-compare-label { color: #ffffa0; }
+
+[data-theme="minecraft"] .emotion-edit-btn { border-radius: 0; }
+
+[data-theme="minecraft"] .zoom-indicator {
+    border-radius: 0;
+    border: 2px solid #000;
+    font-family: var(--mc-pixel);
+}
+
+[data-theme="minecraft"] .nav-btn {
+    border-radius: 0;
+    background: #6f6f6f;
+    border: 2px solid #000;
+    color: #fff;
+}
+
+[data-theme="minecraft"] .nav-btn:hover {
+    background: #7f7f7f;
+    color: #ffffa0;
+    transform: translateY(-50%);
+}
+
+[data-theme="minecraft"] .tag {
+    border-radius: 0;
+    background: #c6c6c6;
+    color: #2c2c2c;
+    border: 2px solid #000;
+    box-shadow: inset 2px 2px 0 #ffffff, inset -2px -2px 0 #555555;
+}
+
+/* ── 详情弹窗：分组卡片与可读性 ───────────────────────────── */
+
+[data-theme="minecraft"] .stat-name {
+    color: #404040;
+    font-weight: 600;
+}
+
+[data-theme="minecraft"] .stat-group-title {
+    color: #3a3a3a;
+    font-size: 0.625rem;
+}
+
+[data-theme="minecraft"] .stat-block,
+[data-theme="minecraft"] .desc-quote {
+    border-radius: 0;
+    background: #bdbdbd;
+    border: 0;
+    box-shadow: var(--mc-inset);
+    padding: 10px 12px;
+}
+
+[data-theme="minecraft"] .stat-empty { color: #6a6a6a; }
+
+[data-theme="minecraft"] .scene-tag,
+[data-theme="minecraft"] .emotion-chip {
+    border-radius: 0;
+    border: 2px solid #000;
+    background: #c6c6c6;
+    color: #2c2c2c;
+    box-shadow: inset 2px 2px 0 #ffffff, inset -2px -2px 0 #555555;
+}
+
+[data-theme="minecraft"] .emotion-chip.primary {
+    background: #a8d8a8;
+    color: #1e3a1e;
+    border-color: #000;
+}
+
+[data-theme="minecraft"] .item-meta-row .scope-pill {
+    border-radius: 0;
+    border: 2px solid #000;
+    box-shadow: inset 2px 2px 0 #ffffff, inset -2px -2px 0 #555555;
+}
+
+[data-theme="minecraft"] .emotion-edit-btn {
+    border-radius: 0;
+    border: 2px solid #000;
+    background: #c6c6c6;
+    color: #2c2c2c;
+    box-shadow: var(--mc-raised);
+}
+
+[data-theme="minecraft"] .emotion-edit-btn:hover {
+    background: #d6d6d6;
+    color: #000;
+}
+
+[data-theme="minecraft"] .vlm-reanalysis-panel,
+[data-theme="minecraft"] .vlm-compare-card {
+    border: 0;
+    box-shadow: var(--mc-inset);
+    background: #a9a9a9;
+}
+
+[data-theme="minecraft"] .vlm-compare-card.proposed { box-shadow: var(--mc-inset), 0 0 0 2px #555; }
+
+[data-theme="minecraft"] .vlm-compare-label { color: #2c2c2c; }
+
+[data-theme="minecraft"] .vlm-compare-card dt { color: #404040; }
+
+[data-theme="minecraft"] .vlm-compare-card dd { color: #1e1e1e; }
+
+[data-theme="minecraft"] .upload-area {
+    border: 2px dashed #373737;
+    border-radius: 0;
+    background: #8b8b8b;
+}
+
+[data-theme="minecraft"] .batch-bar {
+    background: #2b2b2b;
+    border: 2px solid #000;
+    border-radius: 0;
+    box-shadow: var(--mc-raised);
+    color: #fff;
+}
+
+[data-theme="minecraft"] .toast-notification {
+    font-family: var(--mc-font);
+    background: #100010;
+    border: 2px solid #24005a;
+    border-radius: 0;
+    color: #fff;
+    text-shadow: var(--mc-outline);
+}
+
+[data-theme="minecraft"] .skeleton-grid {
+    columns: unset;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(var(--slot-size), 1fr));
+    gap: 3px;
+    padding: 10px;
+}
+
+[data-theme="minecraft"] .skeleton-card {
+    border-radius: 0;
+    aspect-ratio: 1;
+    background: #8b8b8b;
+    box-shadow: var(--mc-inset);
+    margin-bottom: 0;
+}
+
+[data-theme="minecraft"] .pending-card {
+    border-radius: 0;
+    background: #c6c6c6;
+    border: 0;
+    box-shadow: var(--mc-raised);
+}
+
+[data-theme="minecraft"] .pending-capacity-bar,
+[data-theme="minecraft"] .progress-track {
+    border-radius: 0;
+    background: #404040;
+    box-shadow: inset 2px 2px 0 #2a2a2a;
+    height: 6px;
+}
+
+[data-theme="minecraft"] .capacity-fill,
+[data-theme="minecraft"] .progress-fill {
+    border-radius: 0;
+    background: linear-gradient(180deg, #b7ff2a 0%, #7eff32 40%, #3d9a18 100%);
+    box-shadow: none;
+}
+
+[data-theme="minecraft"] .theme-menu-btn {
+    border-radius: 0;
+    background: #6f6f6f;
+    border: 2px solid #000;
+    box-shadow: inset 2px 2px 0 #ffffff55, inset -2px -2px 0 #3f3f3f;
+}
+
+[data-theme="minecraft"] .theme-menu-btn svg { color: #ffffa0; }
+
+[data-theme="minecraft"] .theme-popover {
+    border-radius: 0;
+    background: #c6c6c6;
+    border: 2px solid #000;
+    box-shadow: var(--mc-raised);
+}
+
+[data-theme="minecraft"] .theme-option { border-radius: 0; color: #404040; }
+
+[data-theme="minecraft"] .theme-option.active {
+    color: #2c2c2c;
+    background: #9a9a9a;
+    box-shadow: var(--mc-inset);
+}
+
+[data-theme="minecraft"] .theme-swatch {
+    border-radius: 0;
+    border: 2px solid #000;
+    box-shadow: none;
+}
+
+[data-theme="minecraft"] .theme-option.active .theme-swatch {
+    border-color: #000;
+    box-shadow: 0 0 0 2px #ffffa0;
+}
+
+[data-theme="minecraft"] .mobile-menu-button {
+    border-radius: 0;
+    background: #6f6f6f;
+    color: #fff;
+    border: 2px solid #000;
+}
+
+[data-theme="minecraft"] ::-webkit-scrollbar-track { background: #8b8b8b; border-radius: 0; }
+
+[data-theme="minecraft"] ::-webkit-scrollbar-thumb { background: #5a5a5a; border-radius: 0; }
+
+[data-theme="minecraft"] .inventory-grid.list-mode .item-slot {
+    background: #8b8b8b;
+    border-radius: 0;
+    box-shadow: var(--mc-inset);
+    border: 0;
+}
+
+[data-theme="minecraft"] .inventory-grid.list-mode .item-info {
+    background: transparent;
+    border: 0;
+}
+
+[data-theme="minecraft"] .inventory-grid.list-mode .item-stack-count {
+    display: none;
+}
+
+[data-theme="minecraft"] .skeleton-grid.pending-skeleton {
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+}
+
+/* 游戏皮肤的横向审核骨架与方形卡片网格分开 */
+
+[data-theme="minecraft"] .paused-banner {
+    border: 2px solid #000;
+    border-radius: 0;
+    background: rgba(0, 0, 0, 0.72);
+    color: #ff5555;
+    box-shadow: none;
+}
+
+[data-theme="minecraft"] .empty-illustration {
+    border: 0;
+    border-radius: 0;
+    background: #8b8b8b;
+    box-shadow: var(--mc-inset);
+    color: #3f3f3f;
+}
+
+[data-theme="minecraft"] .pending-batch-actions {
+    background: #8b8b8b;
+    border: 0;
+    border-radius: 0;
+    box-shadow: var(--mc-inset);
+}
+
+@media (max-width: 768px) {
+[data-theme="minecraft"] .inventory-grid:not(.list-mode),
+[data-theme="minecraft"] .skeleton-grid {
+        grid-template-columns: repeat(auto-fill, minmax(var(--slot-size), 1fr));
+        gap: 2px;
+        padding: 8px;
+    }
+
+
+}
+
+[data-theme="minecraft"] .library-nav-item.active { background: #c6c6c6; color: #3f3f3f; box-shadow: var(--mc-raised); }
+
+[data-theme="minecraft"] .library-nav-item { border-radius: 0; }
+
+[data-theme="minecraft"] .stats-bar {
+    margin-left: 0;
+}
+
+/* ── 游戏皮肤兼容：收藏册几何共用，卡片内部视觉交还皮肤 ────── */
+
+[data-theme="minecraft"] .stat-item {
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    padding: 4px 10px;
+    border-left: 0;
+}
+
+[data-theme="minecraft"] .inventory-grid.library-grid:not(.list-mode) .item-image {
+    background: var(--bg-base);
+    padding: 6px;
+}
+
+[data-theme="minecraft"] .inventory-grid.library-grid:not(.list-mode) .item-info {
+    border-top-color: var(--glass-border);
+    background: var(--bg-card);
+}
+
+[data-theme="minecraft"] .card-usage,
+[data-theme="minecraft"] .card-bottom-row,
+[data-theme="minecraft"] .list-side {
+    color: #3f3f3f;
+}
+
+/* 像素皮肤：卡片元信息用深灰，保证灰底可读 */
+
+[data-theme="minecraft"] .item-meta-row .scope-pill.public,
+[data-theme="minecraft"] .item-meta-row .scope-pill.local {
+    color: #1f1f1f;
+}
+
+[data-theme="minecraft"] .pending-card {
+    box-shadow: none;
+    background: var(--bg-card);
+}
+
+[data-theme="minecraft"] .pending-image {
+    background: var(--bg-base);
+    padding: 4px;
+}
+
+[data-theme="minecraft"] .pending-grid {
+    padding: 10px;
+    gap: 8px;
+}
+
+[data-theme="minecraft"] .library-heading {
+    border-bottom-color: var(--glass-border);
+}
+
+[data-theme="minecraft"] .modal-panel {
+    box-shadow: 0 25px 80px rgba(0, 0, 0, 0.8);
+}
+
+[data-theme="minecraft"] .item-preview {
+    background-image: var(--preview-gradient);
+}
+
+[data-theme="minecraft"] .modal-pad {
+    background: #c6c6c6;
+}
+
+/* ── 我的世界皮肤：弹窗表单可读性 ─────────────────────────── */
+
+[data-theme="minecraft"] .codex-input::placeholder,
+[data-theme="minecraft"] .toolbar-search input::placeholder {
+    color: #a8a8a8;
+    opacity: 1;
+}
+
+[data-theme="minecraft"] .form-label {
+    color: #3f3f3f;
+    font-family: var(--mc-font);
+    font-weight: 400;
+}
+
+[data-theme="minecraft"] .hint-text,
+[data-theme="minecraft"] .form-hint {
+    color: #4a4a4a;
+}
+
+[data-theme="minecraft"] .codex-input {
+    font-size: 0.9375rem;
+    line-height: 1.5;
+    background: #0d0d0d;
+    border: 2px solid #000;
+    box-shadow: inset 2px 2px 0 #2f2f2f, inset -2px -2px 0 #c6c6c6;
+}
+
+[data-theme="minecraft"] select.codex-input {
+    border: 2px solid #000;
+    box-shadow: inset 2px 2px 0 #2f2f2f, inset -2px -2px 0 #c6c6c6;
+    background-color: #0d0d0d;
+}
+
+[data-theme="minecraft"] textarea.codex-input {
+    padding: 8px 10px;
+}
+
+[data-theme="minecraft"] .upload-area {
+    box-shadow: var(--mc-inset);
+}
+
+[data-theme="minecraft"] .modal-actions {
+    border-top: 2px solid #8b8b8b;
+    padding: 12px 16px;
+}
+
