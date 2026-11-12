@@ -91,9 +91,9 @@ API clients may include `Accept`, `Authorization`, `User-Agent`, or `X-API-Key` 
 
 1. Preflight reads manifests and catalog metadata without adding images.
 2. Source categories are mapped explicitly or matched to an existing local category.
-3. Each image is downloaded/read within byte limits, decoded with Pillow, format-checked, pixel-limited, and hashed with SHA-256.
+3. Each image is downloaded/read within byte limits, decoded with Pillow, format-checked, pixel-limited, hashed with SHA-256, and (for still images) given a perceptual hash for visual deduplication.
 4. New images are atomically copied into the selected category or Pending Review.
-5. Existing formal or pending hashes are linked to the source without creating a second copy.
+5. Existing formal or pending entries with the same bytes, or with a visually identical image (including re-encoded copies), are linked to the source without creating a second copy.
 6. A successful sync marks seen source items current. Previously known items missing from the new catalog remain in the library and become `stale` in provenance.
 
 Imported metadata includes description, visible text, tags, scenes, emotions, source URL, original filename, dimensions, format, license, and attribution. Enabling the plugin's content filtration always forces review for external imports.

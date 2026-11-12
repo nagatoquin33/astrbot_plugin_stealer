@@ -2220,6 +2220,11 @@ createApp({
                     return;
                 }
                 closeUploadModal();
+                if (uploadData.duplicate) {
+                    showAlert(t('pages.dashboard.alerts.duplicate_image', 'This sticker already exists; skipped the duplicate.'));
+                } else if (uploadData.similar) {
+                    showAlert(t('pages.dashboard.alerts.similar_image', 'A similar sticker exists; added as a new image.'), 'info');
+                }
                 fetchImages(1);
                 fetchStats();
             } catch (e) {

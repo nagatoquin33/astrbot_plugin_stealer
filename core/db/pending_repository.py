@@ -272,6 +272,41 @@ class PendingRepository:
             ).fetchone()
             return dict(row) if row else None
 
+    def get_pending_phash_map(self) -> dict[str, str]:
+        """返回待审核池的 path→phash 映射，用于视觉去重。"""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT path, phash FROM emoji_pending WHERE phash IS NOT NULL AND phash != ''"
+            ).fetchall()
+            return {r["path"]: r["phash"] for r in rows}
+
+    def list_pending_missing_phash(self, limit: int = 500) -> list[dict[str, Any]]:
+        """列出缺少感知哈希的待审核记录，供启动回填。"""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT id, path FROM emoji_pending "
+                "WHERE (phash IS NULL OR phash = '') AND path != '' "
+                "ORDER BY id LIMIT ?",
+                (max(0, int(limit)),),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    async def set_pending_phash(self, path: str, phash: str) -> bool:
+        """只更新待审核记录的感知哈希，不触碰审核状态和人工字段。"""
+        if not path or not phash:
+            return False
+        async with self._write_lock:
+            return await asyncio.to_thread(self._set_pending_phash_sync, path, phash)
+
+    def _set_pending_phash_sync(self, path: str, phash: str) -> bool:
+        with self._get_connection() as conn:
+            cur = conn.execute(
+                "UPDATE emoji_pending SET phash = ? "
+                "WHERE path = ? AND (phash IS NULL OR phash = '')",
+                (phash, path),
+            )
+            return bool(cur.rowcount)
+
     async def queue_pending_analysis(self, pending_id: int) -> bool:
         async with self._write_lock:
             return await asyncio.to_thread(self._queue_pending_analysis_sync, pending_id)

@@ -561,6 +561,8 @@
                 "select_category_or_auto": "请选择分类或启用自动识别。",
                 "upload_failed": "上传失败。",
                 "upload_error": "上传出错。",
+                "duplicate_image": "该表情包已存在，已跳过重复入库。",
+                "similar_image": "库里已有相似表情包，已作为新图入库。",
                 "batch_import_failed": "批量导入失败。",
                 "select_image_first": "请先选择图片。",
                 "analyze_failed": "分析失败。",

@@ -28,6 +28,7 @@ from ..util.normalization import (
     normalize_scope_mode,
 )
 from ..util.safe_io import write_image_file
+from ..processing.phash_dedup_service import PHashDedupService
 from .github_source import GitHubSource
 from .http_source import HTTPSource
 from .models import (
@@ -105,6 +106,7 @@ class SourceService:
             raise ValueError("plugin data directory must be absolute")
         self.data_dir = self.data_dir.resolve()
         self.import_dir = self.data_dir / "external_sources"
+        self._phash_service = PHashDedupService(plugin)
         self._jobs: dict[str, dict[str, Any]] = {}
         self._tasks: dict[str, asyncio.Task[Any]] = {}
         self._closed = False
@@ -715,41 +717,49 @@ class SourceService:
         width, height, image_format, suffix = self._validate_image(raw)
         existing = self.db.get_emoji_by_hash(image_hash) if self.db else None
         if existing:
-            if (
-                character
-                and self.db
-                and hasattr(self.db, "update_path")
-                and not str((existing[1] or {}).get("character") or "").strip()
-            ):
-                await self.db.update_path(existing[0], {"character": character})
-                await refresh_search_entry(self.plugin, existing[0])
-            await self._link_item(source, item, image_hash, existing[0])
+            await self._link_library_duplicate(
+                source, item, image_hash, existing[0], existing[1], character
+            )
             return "duplicates"
-        if self.db and hasattr(self.db, "get_pending_by_hash"):
-            pending = self.db.get_pending_by_hash(image_hash)
-            if pending:
-                if (
-                    character
-                    and not str(pending.get("character") or "").strip()
-                    and pending.get("id")
-                    and hasattr(self.db, "update_pending")
-                ):
-                    await self.db.update_pending(
-                        int(pending["id"]),
-                        {"character": character},
-                    )
+        pending = (
+            self.db.get_pending_by_hash(image_hash)
+            if self.db and hasattr(self.db, "get_pending_by_hash")
+            else None
+        )
+        if pending:
+            await self._link_pending_duplicate(
+                source, item, image_hash, pending, character
+            )
+            return "duplicates"
+        phash = await self._phash_service.compute_phash_bytes(raw)
+        visual = (
+            await self._phash_service.find_duplicate(
+                phash, self.db, include_pending=True
+            )
+            if self.db
+            else None
+        )
+        if visual:
+            matched_path, matched_is_pending = visual
+            if matched_is_pending:
                 await self._link_item(
-                    source,
-                    item,
-                    image_hash,
-                    None,
-                    pending_path=str(pending.get("path") or ""),
+                    source, item, image_hash, None, pending_path=matched_path
                 )
-                return "duplicates"
+            else:
+                existing_meta = (
+                    await asyncio.to_thread(self.db.get_emoji, matched_path)
+                    if character
+                    else None
+                )
+                await self._link_library_duplicate(
+                    source, item, image_hash, matched_path, existing_meta, character
+                )
+            return "duplicates"
         category = self._map_category(item.category, category_map)
         now = int(time.time())
         metadata = {
             "hash": image_hash,
+            "phash": phash or None,
             "category": category,
             "tags": self._normalize_labels(item.tags),
             "scenes": self._normalize_labels(item.scenes),
@@ -827,6 +837,53 @@ class SourceService:
         if not config.update_config({"characters": [*known, character], "character_info": info}):
             raise ExternalSourceError("failed to save character configuration")
         return character
+
+    async def _link_library_duplicate(
+        self,
+        source: dict[str, Any],
+        item: SourceItem,
+        image_hash: str,
+        path: str,
+        existing_meta: dict[str, Any] | None,
+        character: str,
+    ) -> None:
+        """记录与正式库已有图片重复的源条目，必要时补上角色归属。"""
+        if (
+            character
+            and self.db
+            and hasattr(self.db, "update_path")
+            and not str((existing_meta or {}).get("character") or "").strip()
+        ):
+            await self.db.update_path(path, {"character": character})
+            await refresh_search_entry(self.plugin, path)
+        await self._link_item(source, item, image_hash, path)
+
+    async def _link_pending_duplicate(
+        self,
+        source: dict[str, Any],
+        item: SourceItem,
+        image_hash: str,
+        pending: dict[str, Any],
+        character: str,
+    ) -> None:
+        """记录与待审核池已有图片重复的源条目，必要时补上角色归属。"""
+        if (
+            character
+            and not str(pending.get("character") or "").strip()
+            and pending.get("id")
+            and hasattr(self.db, "update_pending")
+        ):
+            await self.db.update_pending(
+                int(pending["id"]),
+                {"character": character},
+            )
+        await self._link_item(
+            source,
+            item,
+            image_hash,
+            None,
+            pending_path=str(pending.get("path") or ""),
+        )
 
     async def _link_item(
         self,

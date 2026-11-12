@@ -428,7 +428,7 @@ class ImageProcessorService:
                 return False, None
             # 检查去重
             if await self._is_duplicate_or_blacklisted(
-                hash_val, idx, file_path, is_temp, phash_val
+                hash_val, idx, file_path, is_temp, phash_val, include_pending=to_pending
             ):
                 return False, None
             # 标记为处理中
@@ -543,6 +543,7 @@ class ImageProcessorService:
         file_path: str,
         is_temp: bool,
         phash_val: str = "",
+        include_pending: bool = False,
     ) -> bool:
         """检查图片是否已存在于索引或黑名单中。
 
@@ -561,23 +562,52 @@ class ImageProcessorService:
                 await _cleanup_temp()
                 return True
             image_phash = phash_val or await self._phash_service.compute_phash(file_path)
-            if image_phash:
-                for existing_path, existing_phash in db.get_phash_map().items():
-                    distance = self._phash_service.hamming_distance(image_phash, existing_phash)
-                    if distance <= self._phash_service.PHASH_HAMMING_THRESHOLD:
-                        # Older databases can contain first-frame hashes for animations.
-                        if not os.path.isfile(existing_path):
-                            continue
-                        if not await self._phash_service.compute_phash(existing_path):
-                            continue
-                        logger.debug(f"[去重] 感知哈希命中: 距离={distance}")
-                        await _cleanup_temp()
-                        return True
+            if await self._phash_service.find_duplicate(
+                image_phash, db, include_pending=include_pending
+            ):
+                await _cleanup_temp()
+                return True
         elif any(isinstance(meta, dict) and meta.get("hash") == hash_val for meta in idx.values()):
             await _cleanup_temp()
             return True
 
         return False
+
+    async def backfill_missing_phash(self, limit: int = 2000) -> int:
+        """为历史记录补齐感知哈希，使视觉去重覆盖导入前入库的图片。
+
+        外部导入和 WebUI 上传的历史记录可能没有 phash，补算后偷图与再次导入
+        才能命中这些记录。只写入缺失的 phash，不改动其他字段和审核状态。
+        """
+        db = getattr(self.plugin, "db_service", None)
+        if db is None:
+            return 0
+
+        filled = 0
+        try:
+            paths = await asyncio.to_thread(db.list_paths_missing_phash, limit)
+        except Exception as exc:
+            logger.warning(f"读取待回填感知哈希列表失败: {exc}")
+            paths = []
+        for path in paths:
+            phash = await self._phash_service.compute_phash(path)
+            if phash and await db.update_path(path, {"phash": phash}):
+                filled += 1
+
+        try:
+            rows = await asyncio.to_thread(db.list_pending_missing_phash, limit)
+        except Exception as exc:
+            logger.warning(f"读取待审核池待回填感知哈希失败: {exc}")
+            rows = []
+        for row in rows:
+            path = str(row.get("path") or "")
+            phash = await self._phash_service.compute_phash(path)
+            if phash and await db.set_pending_phash(path, phash):
+                filled += 1
+
+        if filled:
+            logger.info(f"[去重] 已回填 {filled} 条感知哈希")
+        return filled
 
     def _get_valid_cache(self, hash_val: str, model_sig: str = "") -> dict | None:
         """获取有效（未过期且模型签名一致）的分类缓存，过期或换模型则清除。"""
@@ -770,12 +800,15 @@ class ImageProcessorService:
         hash_val = await self._compute_hash(file_path)
         if not hash_val:
             return False, "无法计算图片哈希"
+        phash_val = await self._phash_service.compute_phash(file_path)
 
         # 3. 去重检查（使用完整索引）
         async with self._process_lock:
             if hash_val in self._processing_hashes:
                 return False, "图片正在处理中，跳过"
-            if await self._is_duplicate_or_blacklisted(hash_val, full_idx, file_path, is_temp):
+            if await self._is_duplicate_or_blacklisted(
+                hash_val, full_idx, file_path, is_temp, phash_val
+            ):
                 return False, "图片已存在或相似度过高"
             self._processing_hashes.add(hash_val)
 
@@ -789,6 +822,7 @@ class ImageProcessorService:
                 is_temp=False,
                 category=category,
                 hash_val=hash_val,
+                phash_val=phash_val,
                 idx=full_idx,
                 extra_meta=extra_meta,
                 tags=normalized_tags,

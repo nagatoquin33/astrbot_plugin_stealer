@@ -12,6 +12,7 @@ from astrbot.api import logger
 
 from .core.util.blacklist import add_blacklist_hash
 from .core.db.index_manager import refresh_search_entry
+from .core.processing.phash_dedup_service import PHashDedupService
 from .core.processing.semantic_schema import SEARCH_METADATA_FIELDS, validate_emotion_labels
 from .core.util.normalization import (
     canonicalize_path,
@@ -53,6 +54,7 @@ class PluginAPI(
     def __init__(self, plugin: Any) -> None:
         self.plugin = plugin
         self.batch_upload_tasks: dict[str, dict] = {}
+        self._phash_service = PHashDedupService(plugin)
 
     # ── Registration ──────────────────────────────────────────
 
@@ -466,14 +468,32 @@ class PluginAPI(
         final_cat = str(category or "").strip() or "unknown"
         if final_cat not in self._cfg.categories:
             raise ValueError("分类已被移除，请重新选择分类")
+        db = self._db
+        if db is None:
+            raise RuntimeError("database unavailable")
+        img_hash = file_hash or hashlib.sha256(file_content).hexdigest()
+
+        # 完全相同的图片不重复入库；视觉相似只提示，仍按用户上传的新图入库。
+        existing = db.get_emoji_by_hash(img_hash)
+        if existing:
+            return self._duplicate_upload_result(existing[0], existing[1], img_hash, final_cat)
+        phash = await self._phash_service.compute_phash_bytes(file_content)
+        visual = await self._phash_service.find_duplicate(phash, db, include_pending=True)
+        if visual:
+            matched_path, matched_pending = visual
+            logger.info(
+                f"[Upload] 库里已有相似图片，仍按新图入库: {matched_path} "
+                f"(pending={matched_pending})"
+            )
+
         ts = int(datetime.now().timestamp())
         filename = f"{ts}_{uuid.uuid4().hex[:8]}{file_ext}"
         cat_dir = self._cfg.ensure_category_dir(final_cat)
         file_path = cat_dir / filename
 
-        img_hash = file_hash or hashlib.sha256(file_content).hexdigest()
         data = {
             "hash": img_hash,
+            "phash": phash or None,
             "path": str(file_path),
             "category": final_cat,
             "tags": list(tags or []),
@@ -486,9 +506,6 @@ class PluginAPI(
             "origin_target": str(origin_target or "").strip(),
             "created_at": ts,
         }
-        db = self._db
-        if db is None:
-            raise RuntimeError("database unavailable")
         async def commit_upload(_target):
             if final_cat not in self._cfg.categories:
                 raise ValueError("分类已被移除，请重新选择分类")
@@ -496,4 +513,20 @@ class PluginAPI(
                 raise RuntimeError("insert image metadata failed")
         await write_image_file(file_content, file_path, commit_upload)
         await refresh_search_entry(self.plugin, str(file_path), data)
-        return {"hash": img_hash, "category": final_cat}
+        result = {"hash": img_hash, "category": final_cat}
+        if visual:
+            result["similar"] = True
+        return result
+
+    @staticmethod
+    def _duplicate_upload_result(
+        path: str, meta: dict, requested_hash: str, fallback_category: str
+    ) -> dict:
+        """返回已存在图片的上传结果，避免同一图片重复入正式库。"""
+        entry = meta if isinstance(meta, dict) else {}
+        logger.debug(f"[Upload] 图片已存在，跳过入库: {path}")
+        return {
+            "hash": str(entry.get("hash") or requested_hash),
+            "category": str(entry.get("category") or fallback_category),
+            "duplicate": True,
+        }

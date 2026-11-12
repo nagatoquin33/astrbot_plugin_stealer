@@ -64,7 +64,12 @@ class ImageMutationRoutes:
             if not self._db:
                 logger.warning("[PluginAPI] DB 不可用，无法上传图片")
                 return jsonify({"success": False, "error": "db_service unavailable"}), 503
-            return jsonify({"success": True, "image": image, "hash": image["hash"]})
+            response = {"success": True, "image": image, "hash": image["hash"]}
+            # 去重结果供前端提示：完全重复已跳过，视觉相似仍已入库。
+            for flag in ("duplicate", "similar"):
+                if image.get(flag):
+                    response[flag] = True
+            return jsonify(response)
         except Exception as e:
             logger.error(f"上传图片失败: {e}", exc_info=True)
             return jsonify({"success": False, "error": str(e)})

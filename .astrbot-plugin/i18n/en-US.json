@@ -561,6 +561,8 @@
                 "select_category_or_auto": "Select a category or enable auto analyze.",
                 "upload_failed": "Upload failed.",
                 "upload_error": "Upload error.",
+                "duplicate_image": "This sticker already exists; skipped the duplicate.",
+                "similar_image": "A similar sticker exists; added as a new image.",
                 "batch_import_failed": "Batch import failed.",
                 "select_image_first": "Select an image first.",
                 "analyze_failed": "Analyze failed.",

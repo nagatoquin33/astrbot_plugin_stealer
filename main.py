@@ -915,6 +915,10 @@ class Main(MemeSearchToolWorkflow, MemeStealToolWorkflow, Star):
             self._sync_image_processor_from_runtime()
             self._sync_similarity_weights()  # 启动时把持久化的文字距离权重同步到 text_similarity 模块
             self.maintenance.start_periodic_tasks()
+            # 历史导入/上传记录可能没有感知哈希，补齐后视觉去重才能覆盖它们。
+            self.task_scheduler.create_task(
+                "phash_backfill", self.image_processor_service.backfill_missing_phash()
+            )
             await self.event_handler.start_background_workers()
             from .core.processing.pending_analysis_worker import PendingAnalysisWorker
             self.pending_analysis_worker = PendingAnalysisWorker(self)
