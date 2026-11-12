@@ -448,7 +448,11 @@ class ImageProcessorService:
                         analysis_state="unanalysed",
                     )
             # 3. 缓存检查（锁外；缓存带 VLM model_sig，换模型即失效）
-            model_sig = str(await self._vlm_call_service._resolve_vision_provider(event) or "")
+            provider_id = str(
+                await self._vlm_call_service._resolve_vision_provider(event) or ""
+            )
+            vision_model = str(getattr(self.plugin_config, "vision_model", "") or "")
+            model_sig = f"{provider_id}|{vision_model}"
             cached = self._get_valid_cache(hash_val, model_sig)
             if cached is not None:
                 async with self._process_lock:

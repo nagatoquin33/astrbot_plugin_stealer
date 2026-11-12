@@ -16,6 +16,21 @@ def _service() -> VLMCallService:
     return VLMCallService(plugin)
 
 
+def _service_with(**cfg) -> VLMCallService:
+    """带完整配置的 VLM 服务；模型请求间隔与重试延迟归零以加速测试。"""
+    defaults = {
+        "vision_provider_id": "vision",
+        "model_request_interval": 0,
+        "vision_retry_delay": 0,
+    }
+    defaults.update(cfg)
+    plugin = SimpleNamespace(
+        plugin_config=SimpleNamespace(**defaults),
+        context=SimpleNamespace(llm_generate=AsyncMock()),
+    )
+    return VLMCallService(plugin)
+
+
 def _write_color_gif(path: Path, colors: list[tuple[int, int, int]], size=(40, 24)) -> None:
     frames = [Image.new("RGB", size, color) for color in colors]
     frames[0].save(
@@ -118,3 +133,104 @@ async def test_animated_prompt_explains_storyboard_and_temp_file_is_removed(tmp_
     assert "同一句文字跨格重复时只记录一次" in actual_prompt
     assert actual_prompt.endswith("BASE PROMPT")
     assert not prepared.exists()
+
+
+@pytest.mark.asyncio
+async def test_candidates_keep_order_and_dedup_fallbacks():
+    service = _service_with(
+        vision_fallback_provider_ids=["vision-b", "vision", "vision-b", " vision-c "]
+    )
+
+    candidates = await service._resolve_vision_candidates()
+
+    assert candidates == ["vision", "vision-b", "vision-c"]
+
+
+@pytest.mark.asyncio
+async def test_fallback_provider_used_after_retries_exhausted():
+    service = _service_with()
+    calls = []
+
+    async def fake_llm(chat_provider_id, **kwargs):
+        calls.append(chat_provider_id)
+        if chat_provider_id == "vision":
+            raise RuntimeError("provider exploded")
+        return SimpleNamespace(completion_text="{}")
+
+    service.plugin.context.llm_generate = fake_llm
+
+    text = await service._do_vlm_call(["vision", "vision-b"], "prompt", "/tmp/x.png")
+
+    assert text == "{}"
+    assert calls == ["vision"] * 3 + ["vision-b"]
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_retries_same_provider():
+    service = _service_with()
+    calls = []
+
+    async def fake_llm(chat_provider_id, **kwargs):
+        calls.append(chat_provider_id)
+        if len(calls) == 1:
+            raise RuntimeError("429 too many requests")
+        return SimpleNamespace(completion_text="{}")
+
+    service.plugin.context.llm_generate = fake_llm
+
+    text = await service._do_vlm_call(["vision"], "prompt", "/tmp/x.png")
+
+    assert text == "{}"
+    assert calls == ["vision", "vision"]
+
+
+@pytest.mark.asyncio
+async def test_empty_response_falls_back_after_retries():
+    service = _service_with()
+    calls = []
+
+    async def fake_llm(chat_provider_id, **kwargs):
+        calls.append(chat_provider_id)
+        empty = chat_provider_id == "vision"
+        return SimpleNamespace(completion_text="" if empty else "{}")
+
+    service.plugin.context.llm_generate = fake_llm
+
+    text = await service._do_vlm_call(["vision", "vision-b"], "prompt", "/tmp/x.png")
+
+    assert text == "{}"
+    assert calls == ["vision"] * 3 + ["vision-b"]
+
+
+@pytest.mark.asyncio
+async def test_model_and_thinking_effort_passed_to_llm_generate():
+    service = _service_with(vision_model="gpt-5-mini", vision_thinking_effort="low")
+    captured = {}
+
+    async def fake_llm(chat_provider_id, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(completion_text="{}")
+
+    service.plugin.context.llm_generate = fake_llm
+
+    await service._do_vlm_call(["vision"], "prompt", "/tmp/x.png")
+
+    assert captured["model"] == "gpt-5-mini"
+    assert captured["reasoning_effort"] == "low"
+
+
+@pytest.mark.asyncio
+async def test_no_model_kwargs_by_default():
+    service = _service_with()
+    captured = {}
+
+    async def fake_llm(chat_provider_id, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(completion_text="{}")
+
+    service.plugin.context.llm_generate = fake_llm
+
+    await service._do_vlm_call(["vision"], "prompt", "/tmp/x.png")
+
+    assert "model" not in captured
+    assert "reasoning_effort" not in captured

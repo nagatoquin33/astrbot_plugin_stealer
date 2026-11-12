@@ -115,6 +115,19 @@
             "description": "Vision model",
             "hint": "Used for image classification. Leave blank to auto-use AstrBot's global default_image_caption_provider_id."
         },
+        "vision_model": {
+            "description": "Vision model name",
+            "hint": "Leave blank to use the provider's own model. When set, requests use this model name (e.g. gpt-5-mini, qwen-vl-max)."
+        },
+        "vision_fallback_provider_ids": {
+            "description": "Vision model fallback",
+            "hint": "Switch to these providers in order when vision model requests fail (same idea as AstrBot's fallback chat model)."
+        },
+        "vision_thinking_effort": {
+            "description": "Vision thinking effort",
+            "hint": "Passed to the vision model as reasoning_effort. 'Follow provider' sends no parameter and keeps the provider's own thinking config. Only effective for OpenAI-compatible providers.",
+            "labels": ["Follow provider", "Low", "Medium", "High"]
+        },
         "send_target_whitelist": {
             "description": "Send target whitelist",
             "hint": "Format: group:group_id or user:user_id. When non-empty, only whitelisted targets can receive stickers."

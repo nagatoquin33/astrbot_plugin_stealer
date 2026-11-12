@@ -271,6 +271,46 @@
     "hint": "用于图片分类。留空则自动使用 AstrBot 全局配置的图片描述模型（default_image_caption_provider_id）。",
     "_special": "select_provider"
   },
+  "vision_model": {
+    "description": "视觉模型名称",
+    "type": "string",
+    "default": "",
+    "hint": "留空使用提供商自身配置的模型；填写后按此模型名请求（如 gpt-5-mini、qwen-vl-max）。",
+    "condition": {
+      "show_advanced_settings": true
+    }
+  },
+  "vision_fallback_provider_ids": {
+    "description": "视觉模型回落",
+    "type": "list",
+    "items": {
+      "type": "string"
+    },
+    "default": [],
+    "_special": "select_providers",
+    "hint": "视觉模型请求失败时按顺序切换到这些提供商（与 AstrBot 回退对话模型同理）。",
+    "condition": {
+      "show_advanced_settings": true
+    }
+  },
+  "vision_thinking_effort": {
+    "description": "视觉模型思考强度",
+    "type": "string",
+    "options": [
+      "",
+      "low",
+      "medium",
+      "high"
+    ],
+    "labels": [
+      "跟随提供商",
+      "低",
+      "中",
+      "高"
+    ],
+    "default": "",
+    "hint": "作为 reasoning_effort 参数传给视觉模型；跟随提供商则不传参，使用提供商自身思考配置。仅对 OpenAI 兼容提供商生效。"
+  },
   "enable_embedding_search": {
     "description": "启用语义检索（可选）",
     "type": "bool",

@@ -83,6 +83,35 @@ class VLMCallService:
         )
         return None
 
+    async def _resolve_vision_candidates(self, event=None) -> list[str]:
+        """按序返回视觉模型候选提供商：主提供商在前，回落提供商随后且去重。"""
+        primary = await self._resolve_vision_provider(event)
+        candidates = [primary] if primary else []
+        fallbacks = getattr(self.plugin_config, "vision_fallback_provider_ids", None) or []
+        for fallback_id in fallbacks:
+            fallback_id = str(fallback_id or "").strip()
+            if fallback_id and fallback_id not in candidates:
+                candidates.append(fallback_id)
+        return candidates
+
+    def _model_request_kwargs(self) -> dict:
+        """生成透传给 llm_generate 的可选参数（模型覆盖与思考强度）。
+
+        reasoning_effort 经 AstrBot 进入 OpenAI 兼容 provider 的 extra_body；
+        Anthropic/Gemini provider 忽略未知 kwargs，其思考配置仍在 provider 层。
+        """
+        cfg = self.plugin_config
+        kwargs: dict = {}
+        model = str(getattr(cfg, "vision_model", "") or "").strip() if cfg else ""
+        if model:
+            kwargs["model"] = model
+        effort = (
+            str(getattr(cfg, "vision_thinking_effort", "") or "").strip() if cfg else ""
+        )
+        if effort:
+            kwargs["reasoning_effort"] = effort
+        return kwargs
+
     async def _call_vision_model(
         self, event: AstrMessageEvent | None, img_path: str, prompt: str,
         *, validate_response: Callable[[str], None] | None = None,
@@ -117,9 +146,9 @@ class VLMCallService:
         if not os.path.exists(img_path):
             raise FileNotFoundError(f"图片文件不存在: {img_path}")
 
-        # 解析 provider
-        provider_id = await self._resolve_vision_provider(event)
-        if not provider_id:
+        # 解析 provider（含回落候选）
+        provider_ids = await self._resolve_vision_candidates(event)
+        if not provider_ids:
             raise ValueError(
                 "未配置视觉模型(vision_provider_id)，无法进行图片分析。"
                 "请在插件配置或 AstrBot 全局配置中设置。"
@@ -141,7 +170,7 @@ class VLMCallService:
                 actual_prompt = self.ANIMATED_STORYBOARD_PROMPT + prompt
 
             return await self._do_vlm_call(
-                provider_id, actual_prompt, resolved_img_path, validate_response=validate_response
+                provider_ids, actual_prompt, resolved_img_path, validate_response=validate_response
             )
         finally:
             # 清理临时文件
@@ -310,13 +339,16 @@ class VLMCallService:
         return max(1, int(width * scale)), max(1, int(height * scale))
 
     async def _do_vlm_call(
-        self, provider_id: str, prompt: str, file_url: str,
+        self, provider_ids: list[str], prompt: str, file_url: str,
         *, validate_response: Callable[[str], None] | None = None,
     ) -> str:
-        """执行 VLM 调用（带重试）。
+        """执行 VLM 调用（带重试与回落）。
+
+        每个提供商保留原有重试语义（异常/空响应/限流均按指数退避重试），
+        重试耗尽后按候选顺序回落下一个提供商（与 AstrBot 回退对话模型同理）。
 
         Args:
-            provider_id: 提供商 ID
+            provider_ids: 按序尝试的提供商 ID 列表
             prompt: 提示词
             file_url: 文件 URL
 
@@ -333,57 +365,64 @@ class VLMCallService:
         except (TypeError, ValueError):
             retry_delay = 1.0
         last_error: Exception | None = None
+        request_kwargs = self._model_request_kwargs()
 
-        for attempt in range(max_retries):
-            try:
-                logger.debug(
-                    f"调用VLM (尝试 {attempt + 1}/{max_retries}), "
-                    f"provider={provider_id}, 图片={file_url}"
-                )
-                result = await model_request_gate(self.plugin).call(
-                    provider_id,
-                    lambda: self.plugin.context.llm_generate(
-                        chat_provider_id=provider_id, prompt=prompt, image_urls=[file_url],
-                    ),
-                )
-
-                # LLMResponse.completion_text 是 @property，自动处理 result_chain
-                text = (result.completion_text or "").strip() if result else ""
-                if text:
-                    if validate_response is not None:
-                        validate_response(text)
-                    logger.debug(f"VLM响应: {text[:200]}")
-                    return text
-
-                logger.warning("VLM返回空响应")
-                last_error = Exception("VLM返回空响应")
-
-            except Exception as e:
-                last_error = e
-                error_msg = str(e)
-                is_rate_limit = any(
-                    kw in error_msg
-                    for kw in (
-                        "429",
-                        "RateLimit",
-                        "exceeded your current request limit",
+        for index, provider_id in enumerate(provider_ids):
+            if index > 0:
+                logger.info(f"切换到回落视觉模型: {provider_id}")
+            for attempt in range(max_retries):
+                try:
+                    logger.debug(
+                        f"调用VLM (尝试 {attempt + 1}/{max_retries}), "
+                        f"provider={provider_id}, 图片={file_url}"
                     )
-                )
-                is_provider_error = "Provider" in error_msg or "提供商" in error_msg
-                if is_rate_limit:
-                    logger.warning(f"VLM请求被限流 ({attempt + 1}/{max_retries})")
-                elif is_provider_error:
-                    logger.error(
-                        f"VLM模型提供商错误 ({attempt + 1}/{max_retries}): {e}\n"
-                        f"  当前provider_id: {provider_id}\n"
-                        f"  提示: 请检查插件配置中的'视觉模型'是否有效，"
-                        f"  或尝试清空该配置使用框架全局的图片描述模型"
+                    result = await model_request_gate(self.plugin).call(
+                        provider_id,
+                        lambda: self.plugin.context.llm_generate(
+                            chat_provider_id=provider_id,
+                            prompt=prompt,
+                            image_urls=[file_url],
+                            **request_kwargs,
+                        ),
                     )
-                else:
-                    logger.error(f"VLM调用失败 ({attempt + 1}/{max_retries}): {e}")
 
-            # 指数退避
-            if attempt < max_retries - 1:
-                await asyncio.sleep(retry_delay * (2**attempt))
+                    # LLMResponse.completion_text 是 @property，自动处理 result_chain
+                    text = (result.completion_text or "").strip() if result else ""
+                    if text:
+                        if validate_response is not None:
+                            validate_response(text)
+                        logger.debug(f"VLM响应: {text[:200]}")
+                        return text
 
-        raise Exception(f"视觉模型调用失败（已重试{max_retries}次）: {last_error}") from last_error
+                    logger.warning("VLM返回空响应")
+                    last_error = Exception("VLM返回空响应")
+
+                except Exception as e:
+                    last_error = e
+                    error_msg = str(e)
+                    is_rate_limit = any(
+                        kw in error_msg
+                        for kw in (
+                            "429",
+                            "RateLimit",
+                            "exceeded your current request limit",
+                        )
+                    )
+                    is_provider_error = "Provider" in error_msg or "提供商" in error_msg
+                    if is_rate_limit:
+                        logger.warning(f"VLM请求被限流 ({attempt + 1}/{max_retries})")
+                    elif is_provider_error:
+                        logger.error(
+                            f"VLM模型提供商错误 ({attempt + 1}/{max_retries}): {e}\n"
+                            f"  当前provider_id: {provider_id}\n"
+                            f"  提示: 请检查插件配置中的'视觉模型'是否有效，"
+                            f"  或尝试清空该配置使用框架全局的图片描述模型"
+                        )
+                    else:
+                        logger.error(f"VLM调用失败 ({attempt + 1}/{max_retries}): {e}")
+
+                # 指数退避
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delay * (2**attempt))
+
+        raise Exception(f"视觉模型调用失败（已重试，候选{len(provider_ids)}个）: {last_error}") from last_error

@@ -56,6 +56,9 @@ class PluginConfig(BaseModel):
 
     # === 模型配置 ===
     vision_provider_id: str = ""
+    vision_model: str = ""  # 留空使用提供商自身配置的模型
+    vision_fallback_provider_ids: list[str] = []  # 视觉模型失败时按顺序回落的提供商
+    vision_thinking_effort: str = ""  # 视觉模型思考强度；留空不传 reasoning_effort
 
     # === 内部常量/高级配置 ===
     max_reg_num: int = 100
