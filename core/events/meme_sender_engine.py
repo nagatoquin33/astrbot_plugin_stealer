@@ -10,6 +10,11 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 from astrbot.api.message_components import Image as MessageImage
 
+try:
+    from astrbot.api.message_components import Record as MessageRecord
+except ImportError:
+    MessageRecord = None  # type: ignore[assignment]
+
 from ..processing.natural_emotion_analyzer import EmotionQuery
 from ..search.jev_selector import JevSelector, JevSelectionError
 from ..search.punctuation_emotion import punctuation_emotion_weights
@@ -236,6 +241,14 @@ class MemeSenderEngine:
         if state.is_auto_claimed():
             self.cancel_pending_auto_emoji(event, reason="reply_source_changed")
 
+    @staticmethod
+    def _is_record_component(comp: Any) -> bool:
+        if MessageRecord is not None and isinstance(comp, MessageRecord):
+            return True
+        comp_type = getattr(comp, "type", None)
+        type_name = getattr(comp_type, "name", str(comp_type or ""))
+        return type_name.lower() == "record"
+
     def is_auto_emoji_source_current(self, event: AstrMessageEvent, text: str) -> bool:
         """在异步分析和发送边界复核本轮回复的来源。"""
         state = self.emoji_turn_state(event)
@@ -248,11 +261,16 @@ class MemeSenderEngine:
         if not self.is_llm_reply_result(result):
             state.invalidate_llm_reply()
             return False
-        if any(isinstance(comp, MessageImage) for comp in getattr(result, "chain", [])):
+        chain = getattr(result, "chain", None) or []
+        if any(isinstance(comp, MessageImage) for comp in chain):
             return False
         content_type = getattr(result, "result_content_type", None)
         name = getattr(content_type, "name", str(content_type).rsplit(".", 1)[-1])
-        return bool(result.get_plain_text().strip()) or name == "STREAMING_RESULT"
+        return (
+            bool(result.get_plain_text().strip())
+            or any(self._is_record_component(comp) for comp in chain)
+            or name == "STREAMING_RESULT"
+        )
 
     def should_skip_auto_emoji_by_gate(self, text: str) -> bool:
         """根据文本内容判断是否跳过自动发送。"""
