@@ -166,12 +166,13 @@ class PreviewState:
             for j in range(rng.randint(1, 3)):
                 created = now - (idx * 7 + j * 13) * 3600
                 uses = rng.randint(0, 30)
+                has_semantics = (j == 0 and idx < 12)
                 item = self._new_library_item(
                     category=emotion["key"],
-                    emotions=[emotion["key"], EMOTIONS[(idx + 1) % len(EMOTIONS)]["key"]],
-                    desc=f"{emotion['name']}示例表情包 #{idx}{j}",
-                    tags=[emotion["name"], "示例"],
-                    scenes=rng.choice([["聊天"], ["群聊", "斗图"], []]),
+                    emotions=[emotion["key"], EMOTIONS[(idx + 1) % len(EMOTIONS)]["key"]] if has_semantics else [emotion["key"]],
+                    desc=f"{emotion['name']}示例表情包 #{idx}{j}" if has_semantics else "",
+                    tags=[emotion["name"], "示例"] if has_semantics else [],
+                    scenes=rng.choice([["聊天"], ["群聊", "斗图"]]) if has_semantics else [],
                     created_at=created,
                     use_count=uses,
                     last_used_at=created + uses * 600,
@@ -347,8 +348,20 @@ class PreviewServer:
         r.add_get("/mock/bridge.js", self.handle_bridge_js)
         r.add_get("/logo.png", self.handle_logo)
         r.add_get("/vaultboy.png", self.handle_vaultboy)
-        for filename in ("app.js", "app.css", "bili.css", "template.js", "image_preview_client.js",
-                         "source_actions.js", "source_labels.js", "batch_reanalysis.js"):
+        for filename in (
+            "app.js",
+            "app.css",
+            "light.css",
+            "dark.css",
+            "minecraft.css",
+            "fallout.css",
+            "bili.css",
+            "template.js",
+            "image_preview_client.js",
+            "source_actions.js",
+            "source_labels.js",
+            "batch_reanalysis.js",
+        ):
             r.add_get("/" + filename, self._make_static_handler(filename))
         r.add_get("/vendor/{filename}", self._make_vendor_handler)
         r.add_route("*", PLUGIN_BASE + "/{endpoint:.+}", self.handle_api)
@@ -909,11 +922,27 @@ class PreviewServer:
                     entries.append((base64.b64decode(raw), str(entry.get("name", "batch.png"))))
                 except Exception:
                     continue
+        auto_analyze = str(payload.get("auto_analyze", "false")).lower() == "true"
+        character = str(payload.get("character") or "").strip()
         task_id = uuid.uuid4().hex[:12]
         success_count = failed_count = 0
         for content, filename in entries:
             try:
-                self._store_upload(content, filename, self._parse_upload_meta(payload))
+                meta = self._parse_upload_meta(payload)
+                if auto_analyze:
+                    if not meta["desc"]:
+                        meta["desc"] = "[mock VLM] 入库自动语义化"
+                    if not meta["tags"]:
+                        meta["tags"] = ["自动语义化"]
+                    if not meta["scenes"]:
+                        meta["scenes"] = ["日常聊天"]
+                    if meta["category"] == "unknown":
+                        meta["category"] = "happy"
+                stored = self._store_upload(content, filename, meta)
+                if character:
+                    item = self._find_library_item(stored["hash"])
+                    if item is not None:
+                        item["character"] = character
                 success_count += 1
             except Exception:
                 failed_count += 1
@@ -926,7 +955,47 @@ class PreviewServer:
             "failed_count": failed_count,
             "updated_at": int(time.time()),
         }
-        return {"success": True, "task_id": task_id}
+        return {"success": True, "task_id": task_id, "total": total}
+
+    def api_images_reanalyze_missing(self, request, payload):
+        st = self.state
+        library = str(request.query.get("library", "") or "").strip()
+        category = str(request.query.get("category", "") or "").strip()
+        character = str(request.query.get("character", "") or "").strip()
+        favorite_only = str(request.query.get("favorite_only", "false")).lower() == "true"
+
+        def group(item):
+            return "favorites" if item.get("is_favorite") else "characters" if item.get("character") else "general"
+
+        def match_char(item):
+            if not character:
+                return True
+            if character == "__none__":
+                return not item.get("character")
+            return item.get("character") == character
+
+        missing = [
+            item["hash"]
+            for item in st.library
+            if (not str(item.get("desc") or "").strip() or (not item.get("tags") and not item.get("scenes")))
+            and st._match(item, q="", category=category, favorite_only=favorite_only)
+            and (not library or group(item) == library)
+            and match_char(item)
+        ]
+        return {
+            "success": True,
+            "missing": {
+                "hashes": missing[:500],
+                "total_missing": len(missing),
+                "max_images": 500,
+                "scope": {
+                    "library": library,
+                    "category": category,
+                    "character": character,
+                    "favorite_only": favorite_only,
+                },
+            },
+        }
 
     def api_images_reanalyze(self, request, payload):
         if self.reanalysis_job and (self.reanalysis_job["status"] == "running" or self.reanalysis_job["pending"]):
@@ -937,6 +1006,7 @@ class PreviewServer:
             "id": uuid.uuid4().hex, "status": "running", "total": len(self.reanalysis_hashes),
             "processed": 0, "succeeded": 0, "failed": 0, "skipped": 0,
             "pending": 0, "saved": 0, "discarded": 0, "results": [],
+            "concurrency": 2, "fill_empty_only": bool(payload.get("fill_empty_only")),
             "current": "", "errors": [], "created_at": time.time(),
         }
         return {"success": True, "task": self.reanalysis_job}
@@ -975,6 +1045,23 @@ class PreviewServer:
         job = self.reanalysis_job
         if not job or payload.get("task_id") != job["id"]:
             return {"success": False, "error": "任务不存在"}
+        if payload.get("all"):
+            for draft in self.reanalysis_results.values():
+                if draft["status"] != "ready":
+                    continue
+                if payload["decision"] == "save":
+                    item = next((i for i in self.state.library if i["hash"] == draft["hash"]), None)
+                    if item:
+                        item.update(draft["after"])
+                    draft["status"] = "saved"
+                    job["saved"] += 1
+                else:
+                    draft["status"] = "discarded"
+                    job["discarded"] += 1
+                job["pending"] -= 1
+            for summary in job["results"]:
+                summary["status"] = self.reanalysis_results[summary["hash"]]["status"]
+            return {"success": True, "task": job}
         draft = self.reanalysis_results[payload["hash"]]
         if draft["status"] != "ready":
             return {"success": False, "error": "结果已处理"}

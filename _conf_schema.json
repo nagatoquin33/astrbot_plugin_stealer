@@ -543,8 +543,8 @@
     ],
     "labels": [
       "跟随宿主",
-      "X之暗面",
-      "亮色",
+      "黑夜",
+      "白天",
       "我的世界",
       "辐射 4",
       "B站风"
@@ -581,11 +581,25 @@
     "description": "模型请求最小间隔（秒）",
     "type": "float",
     "default": 5.0,
-    "hint": "本插件对同一提供商的识图、嵌入请求串行执行，默认至少间隔 5 秒开始下一次请求。免费模型额度较低时可调大；付费模型可调小。限流时遵守 Retry-After 并退避，失败任务保留重试。",
+    "hint": "本插件对同一提供商的识图、嵌入请求按此最小发车间隔调度（默认 5 秒）。免费模型额度较低时可调大；付费模型可调小。限流时遵守 Retry-After 并退避，失败任务保留重试。",
     "slider": {
       "min": 0,
       "max": 60,
       "step": 0.5
+    },
+    "condition": {
+      "show_advanced_settings": true
+    }
+  },
+  "reanalysis_concurrency": {
+    "description": "批量语义化后台并发数",
+    "type": "int",
+    "default": 2,
+    "hint": "批量重新分析及补充表情包语义时的后台视觉模型最大并发数（默认 2）。免费模型配额紧张时可设为 1；高配额付费或本地模型可适当调大。",
+    "slider": {
+      "min": 1,
+      "max": 8,
+      "step": 1
     },
     "condition": {
       "show_advanced_settings": true

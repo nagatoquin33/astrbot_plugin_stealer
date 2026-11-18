@@ -41,6 +41,67 @@ class LibraryQueries:
             ).fetchall()
             return [r["path"] for r in rows]
 
+    def list_hashes_missing_semantics(
+        self,
+        limit: int = 500,
+        *,
+        library: str = "",
+        category: str | None = None,
+        character: str | None = None,
+        favorite_only: bool = False,
+        include_secondary: bool = True,
+    ) -> tuple[list[str], int]:
+        """筛选缺少完整语义元数据的正式库图片 hash，支持按子库、分类、角色过滤。"""
+        missing_clause = (
+            "TRIM(COALESCE(e.desc, '')) = '' "
+            "OR (NOT EXISTS (SELECT 1 FROM emoji_tag t WHERE t.path = e.path) "
+            "    AND NOT EXISTS (SELECT 1 FROM emoji_scene s WHERE s.path = e.path))"
+        )
+        where_clauses: list[str] = ["e.hash != ''", f"({missing_clause})"]
+        params: list[Any] = []
+
+        library_clause = self._LIBRARY_CLAUSES.get(library)
+        if library_clause:
+            where_clauses.append(library_clause)
+
+        if category:
+            if include_secondary:
+                where_clauses.append(
+                    "(e.category = ? OR EXISTS ("
+                    "SELECT 1 FROM json_each("
+                    "CASE WHEN json_valid(e.emotions_json) THEN e.emotions_json ELSE '[]' END"
+                    ") j WHERE j.value = ?))"
+                )
+                params.extend([category, category])
+            else:
+                where_clauses.append("e.category = ?")
+                params.append(category)
+
+        if character == "__none__":
+            where_clauses.append("(e.character IS NULL OR e.character = '')")
+        elif character:
+            where_clauses.append("e.character = ?")
+            params.append(character)
+
+        if favorite_only:
+            where_clauses.append("e.is_favorite = 1")
+
+        where_sql = " AND ".join(where_clauses)
+        with self._get_connection() as conn:
+            total_row = conn.execute(
+                f"SELECT COUNT(DISTINCT e.hash) AS cnt FROM emoji e WHERE {where_sql}",
+                params,
+            ).fetchone()
+            total_missing = int(total_row["cnt"] or 0) if total_row else 0
+            if total_missing == 0 or limit <= 0:
+                return [], total_missing
+            rows = conn.execute(
+                f"SELECT e.hash FROM emoji e WHERE {where_sql} "
+                "GROUP BY e.hash ORDER BY MAX(e.created_at) DESC, MIN(e.path) ASC LIMIT ?",
+                [*params, max(0, int(limit))],
+            ).fetchall()
+            return [r["hash"] for r in rows], total_missing
+
     def get_category_counts(self) -> dict[str, int]:
         with self._get_connection() as conn:
             return {row["category"]: row["cnt"] for row in conn.execute(

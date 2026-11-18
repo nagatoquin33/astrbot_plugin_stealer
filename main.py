@@ -27,7 +27,7 @@ from .core.search.meme_selector import MemeSelector
 from .core.events.event_handler import EventHandler
 from .core.events.meme_sender_engine import MemeSenderEngine
 from .core.processing.library_reanalysis import BatchReanalysisService
-from .core.db.index_manager import IndexManager, refresh_search_entry
+from .core.db.index_manager import IndexManager, refresh_search_entries, refresh_search_entry
 from .core.processing.natural_emotion_analyzer import NaturalEmotionAnalyzer
 from .core.processing.image_processor_service import ImageProcessorService
 from .core.processing.image_render_service import ImageRenderService
@@ -106,6 +106,7 @@ class Main(MemeSearchToolWorkflow, MemeStealToolWorkflow, Star):
         self.batch_reanalysis = BatchReanalysisService(
             self.db_service, self.image_processor_service, self.plugin_config,
             self.task_scheduler, lambda path: refresh_search_entry(self, path),
+            on_batch_updated=lambda paths: refresh_search_entries(self, paths),
         )
         self.plugin_api = PluginAPI(self)
         self.plugin_api.register(context)

@@ -283,3 +283,46 @@ async def test_failed_save_keeps_result_ready_for_explicit_retry(batch, monkeypa
     assert batch.db.get_emoji(str(path))["desc"] == "old"
     monkeypatch.setattr(batch.db, "update_path", original_update)
     assert (await api.handle_batch_reanalyze_review())["task"]["saved"] == 1
+
+
+@pytest.mark.asyncio
+async def test_review_all_isolates_modified_item_and_batches_index_refresh_once(tmp_path):
+    """验证一键全部保存时：被并发修改的单图隔离为冲突不覆盖人工改动，其余正常保存且只触发一次批量索引刷新。"""
+    db = DatabaseService(tmp_path / "emoji.db")
+    processor = SimpleNamespace(
+        CATEGORY_FILTERED="filtered", CATEGORY_NOT_EMOJI="not-emoji",
+        classify_image=AsyncMock(return_value=("happy", ["ai_tag"], "ai desc", "happy", ["ai_scene"], "TXT", ["happy"])),
+    )
+    config = SimpleNamespace(categories=["happy", "sad"], reanalysis_concurrency=2)
+    scheduler = TaskScheduler()
+    single_updated = AsyncMock()
+    batch_updated = AsyncMock()
+    service = BatchReanalysisService(db, processor, config, scheduler, single_updated, on_batch_updated=batch_updated)
+
+    paths = {}
+    for key, desc, tags in (("a", "", ["user_tag"]), ("b", "", []), ("c", "", [])):
+        p = tmp_path / f"{key}.png"
+        p.write_bytes(b"image-" + key.encode())
+        await db.insert_batch([{"path": str(p), "hash": key, "category": "sad", "desc": desc, "tags": tags}])
+        paths[key] = str(p)
+
+    job = service.start(["a", "b", "c"], fill_empty_only=True)
+    await scheduler._tasks[service.TASK_NAME]
+
+    # 确认前模拟用户在其它页面手工修改了 b 的描述
+    await db.update_path(paths["b"], {"desc": "manual override"})
+
+    summary = await service.review_all(job["id"], "save")
+    assert summary["saved"] == 2
+    assert summary["pending"] == 0
+    assert any(err["hash"] == "b" and err["status"] == "conflict" for err in summary["errors"])
+
+    # a 仅补全空字段并保留原有 user_tag；b 保留人工修改不被覆盖；c 正常写回
+    assert db.get_emoji(paths["a"])["desc"] == "ai desc"
+    assert db.get_emoji(paths["a"])["tags"] == ["user_tag"]
+    assert db.get_emoji(paths["b"])["desc"] == "manual override"
+    assert db.get_emoji(paths["c"])["desc"] == "ai desc"
+
+    # 检索索引仅通过 on_batch_updated 合并刷新一次，且不包含冲突失败的 b
+    single_updated.assert_not_awaited()
+    batch_updated.assert_awaited_once_with([paths["a"], paths["c"]])

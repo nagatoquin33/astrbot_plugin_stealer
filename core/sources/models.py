@@ -71,6 +71,14 @@ class SourceInspection:
                 result.append(key)
         return result
 
+    @property
+    def missing_semantics_count(self) -> int:
+        return sum(
+            1
+            for item in self.items
+            if not item.text_description or (not item.tags and not item.scenes)
+        )
+
     def as_dict(self, *, preview_limit: int = 20) -> dict[str, Any]:
         return {
             "source_type": self.source_type,
@@ -79,6 +87,7 @@ class SourceInspection:
             "endpoint": self.endpoint,
             "manifest": self.manifest,
             "item_count": len(self.items),
+            "missing_semantics_count": self.missing_semantics_count,
             "total_bytes": self.total_bytes,
             "categories": self.categories,
             "warnings": list(self.warnings),

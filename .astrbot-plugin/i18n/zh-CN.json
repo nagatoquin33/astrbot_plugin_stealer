@@ -1,708 +1,762 @@
 {
-    "metadata": {
-        "display_name": "表情包小偷",
-        "short_desc": "自动偷取并智能发送表情包",
-        "desc": "监听聊天中的图片并使用 VLM 自动分类存储，对话时根据情绪智能匹配并发送表情包。支持 LLM 主动搜索表情包、WebUI 管理面板、存储清理、作用域修复、智能情绪匹配和多平台适配。"
+  "metadata": {
+    "display_name": "表情包小偷",
+    "short_desc": "自动偷取并智能发送表情包",
+    "desc": "监听聊天中的图片并使用 VLM 自动分类存储，对话时根据情绪智能匹配并发送表情包。支持 LLM 主动搜索表情包、WebUI 管理面板、存储清理、作用域修复、智能情绪匹配和多平台适配。"
+  },
+  "config": {
+    "_steal_section": {
+      "description": "=== 偷图设置 ===",
+      "hint": ""
     },
-    "config": {
-        "_steal_section": {
-            "description": "=== 偷图设置 ===",
-            "hint": ""
-        },
-        "_send_section": {
-            "description": "=== 发送设置 ===",
-            "hint": ""
-        },
-        "_model_section": {
-            "description": "=== 模型配置 ===",
-            "hint": ""
-        },
-        "_group_section": {
-            "description": "=== 群聊过滤 ===",
-            "hint": ""
-        },
-        "_storage_section": {
-            "description": "=== 存储及进阶管理 ===",
-            "hint": ""
-        },
-        "steal_meme": {
-            "description": "开启表情包偷取功能",
-            "hint": "开启后监听并保存聊天中的图片。启用人工审核时先保存原图，通过后再使用视觉模型分类入库。"
-        },
-        "persona_character_isolation": {
-            "description": "按人格隔离角色表情库",
-            "hint": "按当前会话生效的人格关联角色库，优先使用角色表情，无合适候选时回退通用库。"
-        },
-        "persona_character_map": {
-            "description": "人格与角色对应关系",
-            "hint": "可选：人格 ID 到角色 key 的映射；未映射时使用人格 ID。"
-        },
-        "steal_mode": {
-            "description": "偷图模式",
-            "hint": "概率模式：每次收到图片时按设定概率决定是否偷取。冷却模式：两次偷取之间必须间隔指定秒数。",
-            "labels": ["概率模式", "冷却模式"]
-        },
-        "steal_chance": {
-            "description": "偷图概率",
-            "hint": "设为 0 时从不偷取，设为 1 时每次都偷取。建议 0.2~0.5。仅概率模式生效。"
-        },
-        "content_filtration": {
-            "description": "内容审核",
-            "hint": "开启后使用 VLM 审核图片内容，过滤不当图片。开启后会增加单张图片的处理时间。"
-        },
-        "qqofficial_steal_mode": {
-            "description": "表情收录模式（QQ_Official）",
-            "hint": "QQ_Official 平台的大表情/表情包是普通图片附件，无 OneBot 的 sub_type 标记。默认仅收录带表情 CDN 特征的图片（如商城表情）；可选全部收录，或仅收录 GIF。",
-            "labels": ["所有图片按表情收录", "仅收录表情 CDN 特征", "仅收录 GIF 格式"]
-        },
-        "auto_send_meme": {
-            "description": "自动随聊发送表情包",
-            "hint": "开启后 Bot 会在聊天中根据语境和发送概率主动搭配表情。LLM 也可通过表情工具主动回应。"
-        },
-        "auto_meme_cancel_on_new_message": {
-            "description": "新消息取消待发送表情",
-            "hint": "开启后同一会话有新消息到达时，会取消上一轮仍在延迟等待中的自动表情，避免旧回复配新图。"
-        },
-        "meme_chance": {
-            "description": "表情包发送概率",
-            "hint": "设为 0 时从不发送，设为 1 时每次都发送。建议 0.1~0.3，避免刷屏。"
-        },
-        "send_meme_as_qq_sticker": {
-            "description": "以 QQ 表情包形式发送",
-            "hint": "开启后在 QQ 中按自定义表情包展示；关闭后按普通图片发送。仅对 QQ（aiocqhttp/NapCat）生效，与图片是否转换为 GIF 独立。"
-        },
-        "send_meme_as_gif": {
-            "description": "以 GIF 格式发送",
-            "hint": "开启后始终以 GIF 输出。QQ 中是否按表情包展示由「以 QQ 表情包形式发送」控制。关闭时按原文件格式发送（png/jpg/gif 等）。开启后高频发送大图/动图场景会有较高瞬时内存占用。"
-        },
-        "meme_send_delay": {
-            "description": "回复后的等待时间（秒）",
-            "hint": "默认等待 5 秒后发表情。高级选项中的秒/字大于 0 时优先按字数计算。新消息可取消尚未发出的表情。"
-        },
-        "smart_meme_selection": {
-            "description": "智能表情包选择",
-            "hint": "开启后使用综合评分（多样性 + 匹配度 + 相似度）选出最合适的表情包。关闭则随机选择（仍会避免短期重复）。"
-        },
-        "_emotion_section": {
-            "description": "=== 情绪识别 ===",
-            "hint": ""
-        },
-        "enable_natural_emotion_analysis": {
-            "description": "用模型理解对话语境",
-            "hint": "开启后根据你的回复与用户消息提取表情包使用场景；留空模型时跟随当前会话。会增加模型调用。关闭后使用本地匹配。"
-        },
-        "emotion_analysis_provider_id": {
-            "description": "语境理解模型（可留空）",
-            "hint": "留空使用当前会话模型。可选择响应快的文本模型；高级设置中的 JEV 可替代这一步。"
-        },
-        "enable_jev": {
-            "description": "启用 JEV 选图",
-            "hint": "需同时开启上方“用模型理解对话语境”。未勾选时使用传统 LLM；勾选后由 JEV 从最多 10 张粗筛候选中选图。默认使用官方接口和 jev-latest 模型，也可在下方配置可信的 API Base URL 和 JEV 模型 ID。会发送候选元数据、最近约 3 轮文本及本轮对话；选择 none 时不发送，缺少 key 或调用失败时回退 LLM。"
-        },
-        "typesafe_api_key": {
-            "description": "TypeSafe API Key",
-            "hint": "在 console.typesafe.ai 创建。同时勾选“用模型理解对话语境”和“启用 JEV 选图”后使用；留空时回退传统 LLM。"
-        },
-        "typesafe_api_base_url": {
-            "description": "TypeSafe API Base URL",
-            "hint": "默认使用 TypeSafe 官方 API。通常只填写到域名；也兼容以 /v1 结尾或完整的 /v1/systemone 地址。API Key 会发送到此地址，请仅配置可信服务。"
-        },
-        "typesafe_model_id": {
-            "description": "JEV 模型 ID",
-            "hint": "留空使用默认模型 jev-latest。兼容代理可填写其要求的模型 ID，例如 Command Code 使用 typesafe/jev。"
-        },
-        "vision_provider_id": {
-            "description": "视觉模型",
-            "hint": "用于图片分类。留空则自动使用 AstrBot 全局配置的图片描述模型（default_image_caption_provider_id）。"
-        },
-        "vision_fallback_provider_ids": {
-            "description": "视觉模型回落",
-            "hint": "视觉模型请求失败时按顺序切换到这些提供商（与 AstrBot 回退对话模型同理）。"
-        },
-        "vision_thinking_effort": {
-            "description": "视觉模型思考强度",
-            "hint": "作为 reasoning_effort 参数传给视觉模型；跟随提供商则不传参，使用提供商自身思考配置。仅对 OpenAI 兼容提供商生效。",
-            "labels": ["跟随提供商", "低", "中", "高"]
-        },
-        "send_target_whitelist": {
-            "description": "发表情白名单",
-            "hint": "格式：group:群号 或 user:QQ号。非空时仅白名单内的目标允许自动发送表情包。"
-        },
-        "send_target_blacklist": {
-            "description": "发表情黑名单",
-            "hint": "格式：group:群号 或 user:QQ号。可与白名单同时生效，冲突时按下方优先级规则判定。"
-        },
-        "send_target_filter_mode": {
-            "description": "发表情名单优先级",
-            "hint": "白名单优先：白名单命中时允许，否则再查黑名单。黑名单优先：黑名单命中时拒绝，否则再查白名单。",
-            "labels": ["白名单优先", "黑名单优先"]
-        },
-        "steal_target_whitelist": {
-            "description": "偷表情白名单",
-            "hint": "格式：group:群号 或 user:QQ号。非空时仅白名单内的目标允许自动偷取。"
-        },
-        "steal_target_blacklist": {
-            "description": "偷表情黑名单",
-            "hint": "格式：group:群号 或 user:QQ号。可与白名单同时生效，冲突时按下方优先级规则判定。"
-        },
-        "steal_target_filter_mode": {
-            "description": "偷表情名单优先级",
-            "hint": "白名单优先：白名单命中时允许，否则再查黑名单。黑名单优先：黑名单命中时拒绝，否则再查白名单。",
-            "labels": ["白名单优先", "黑名单优先"]
-        },
-        "max_reg_num": {
-            "description": "通用表情库自动淘汰上限",
-            "hint": "仅计算通用库中未收藏、未指定角色的普通表情；收藏、角色表情及受保护外部导入不占额度。超限按使用次数和入库时间加权淘汰。"
-        },
-        "eviction_usage_weight": {
-            "description": "淘汰评分：低使用次数权重",
-            "hint": "默认 0.7，入库时间权重为 1 减此值。两项归一化后加权，使用越少、入库越旧越优先淘汰；0 仅按最旧，1 仅按使用最少。"
-        },
-        "steal_pool_capacity": {
-            "description": "待审核池容量上限",
-            "hint": "自动偷取的图片先进「待审核池」。达到此数量后暂停自动偷取，待人工在 WebUI 审核区处理（通过入库或删除）腾出空间后自动恢复。调整后即时生效，无需重启。"
-        },
-        "audit_required": {
-            "description": "自动偷取需人工审核",
-            "hint": "开启后自动收集的原图先进入待审核池，人工通过后立即排队，后台识图成功再正式入库。失败原图保留，可重新通过以重试。关闭后自动识图入库；主动偷图继续立即分析。"
-        },
-        "enable_embedding_search": {
-            "description": "启用语义检索（可选）",
-            "hint": "开启后用远程文本嵌入按语义召回（图上文字 + 使用场景 + 描述）。关闭则只用关键词（BM25）。不使用本地 CLIP。未配置嵌入模型时自动降级为 BM25。"
-        },
-        "embedding_provider_id": {
-            "description": "语义检索模型",
-            "hint": "留空使用框架首个嵌入提供商。本插件自动检测模型实际输出维度，无需为插件填写维度；模型或维度变化时后台重建向量，期间使用本地匹配。若服务拒绝 dimensions 请求参数，请在 AstrBot 嵌入提供商配置中关闭发送该参数或填写模型支持的值。"
-        },
-        "_smart_section": {
-            "description": "=== 智能选择：文字距离融合权重预设 ===",
-            "hint": ""
-        },
-        "_external_source_section": {
-            "description": "=== 外部表情包源（v3） ===",
-            "hint": ""
-        },
-        "external_sources_enabled": {
-            "description": "启用外部表情包源",
-            "hint": "允许从 Meme Manager / AstrBot Meme Pack、GitHub 资源包仓库和外部 JSON API 预检并导入。所有图片都会复制进本插件目录，外部插件原文件不会被修改。"
-        },
-        "external_source_allow_http": {
-            "description": "允许明文 HTTP 外部源",
-            "hint": "默认仅允许 HTTPS，并阻止回环、内网、链路本地和保留地址。仅在完全可信的隔离网络中开启。"
-        },
-        "external_source_default_review": {
-            "description": "外部导入默认进入待审核池",
-            "hint": "开启后，外部源图片先进入待审核区；关闭时经格式、体积和像素校验后直接入库。导入界面可逐次覆盖此设置。"
-        },
-        "external_source_max_items": {
-            "description": "单个外部源最大图片数",
-            "hint": "预检和单次同步最多处理的图片数量，防止超大资源包拖垮实例。"
-        },
-        "external_source_max_image_bytes": {
-            "description": "外部单图字节上限",
-            "hint": "默认 32 MiB。下载和解包都会在写入前强制检查。"
-        },
-        "external_source_max_archive_bytes": {
-            "description": "资源包压缩体积上限",
-            "hint": "默认 1 GiB，兼容 Meme Manager 大型资源包。"
-        },
-        "external_source_max_uncompressed_bytes": {
-            "description": "资源包解压体积上限",
-            "hint": "默认 4 GiB；预检会累计 ZIP 成员声明大小并拦截压缩炸弹。"
-        },
-        "external_source_max_pixels": {
-            "description": "外部单图最大像素数",
-            "hint": "宽乘高的上限，默认 4000 万像素。"
-        },
-        "_webui_section": {
-            "description": "=== WebUI ===",
-            "hint": ""
-        },
-        "webui_theme": {
-            "description": "WebUI 默认主题",
-            "hint": "页面尚未保存主题选择时使用该默认值；在「表情管理」中切换后，将持续使用页面保存的主题。",
-            "labels": ["跟随宿主", "暗色鎏金", "亮色", "我的世界", "辐射 4", "B站风"]
-        },
-        "custom_meme_classification_prompt": {
-            "description": "VLM 分类提示词",
-            "hint": "支持占位符：{emotion_list}（分类列表）。为空时使用默认提示词。"
-        },
-        "custom_meme_classification_with_filter_prompt": {
-            "description": "VLM 分类提示词（带审核）",
-            "hint": "开启内容审核时使用的 VLM 分类提示词。支持占位符：{emotion_list}（分类列表）。为空时使用默认提示词。"
-        },
-        "emotion_analysis_prompt": {
-            "description": "情绪分析提示词",
-            "hint": "留空使用内置语境提示词。query 会保留助手的立场、互动意图和关键台词；自定义内容继续生效。"
-        },
-        "sim_weight_preset": {
-            "description": "本地文字匹配风格",
-            "hint": "预设决定多个相似度算法的融合权重：均衡（默认）、关键词优先（子串/字符重叠更敏感）、语义优先（n-gram/余弦更重）、严格匹配（编辑距离和字符级更重，减少误发）。",
-            "labels": ["均衡", "关键词优先", "语义优先", "严格匹配"]
-        },
-        "show_advanced_settings": {
-            "description": "显示高级选项",
-            "hint": "展开群聊名单、模型提示词、外部源限制及匹配调优。关闭仅收起界面，已有设置继续生效。"
-        },
-        "meme_send_char_delay": {
-            "description": "按字数计算延迟（秒/字）",
-            "hint": "0 使用上方固定延迟；大于 0 时按回复长度计算。保留已有自定义值。"
-        },
-        "model_request_interval": {
-            "description": "模型请求最小间隔（秒）",
-            "hint": "本插件对同一提供商的识图、嵌入请求串行执行，默认至少间隔 5 秒开始下一次请求。免费模型额度较低时可调大；付费模型可调小。限流时遵守 Retry-After 并退避，失败任务保留重试。"
-        }
+    "_send_section": {
+      "description": "=== 发送设置 ===",
+      "hint": ""
     },
-    "pages": {
-        "dashboard": {
-            "title": "表情包管理面板",
-            "header": {
-                "brand": "亨利的战利品",
-                "subtitle": "表情包小偷管理面板"
-            },
-            "health": {
-                "ok": "正常",
-                "slow": "缓慢",
-                "error": "异常",
-                "checking": "检测中"
-            },
-            "stats": {
-                "total": "总数",
-                "categories": "分类",
-                "today": "今日新增"
-            },
-            "sections": {
-                "pending": "审核区",
-                "library": "表情包库"
-            },
-            "categories": {
-                "key_hint": "Key 以英文字母开头，仅使用小写字母、数字、_、-，最长48字符。显示名称可以使用中文。",
-                "title": "分类",
-                "favorites": "收藏",
-                "all": "全部",
-                "add_new": "新增分类"
-            },
-            "pending": {
-                "pool": "待审核池",
-                "capacity": "容量",
-                "paused": "已暂停",
-                "category_filter": "分类筛选",
-                "progress": "待审核",
-                "paused_hint": "偷取已暂停，审核后自动恢复。",
-                "queued_count": "排队",
-                "processing_count": "识图中",
-                "failed_count": "失败"
-            },
-            "search": {
-                "library": "台词、标签、文件名；多个词用空格分隔",
-                "pending": "搜索待审核表情包..."
-            },
-            "sort": {
-                "newest": "最新入库",
-                "oldest": "最早入库",
-                "most_used": "最常发送",
-                "last_used": "最近发送",
-                "least_used": "使用最少"
-            },
-            "actions": {
-                "done": "完成",
-                "batch": "批量",
-                "categories": "分类",
-                "add": "添加",
-                "batch_import": "批量导入",
-                "storage_cleanup": "存储清理",
-                "unfavorite": "取消收藏",
-                "favorite": "收藏",
-                "approve_all": "全部通过",
-                "delete_all": "全部删除",
-                "delete_blacklist": "删除并拉黑",
-                "approve": "通过",
-                "delete": "删除",
-                "blacklist": "拉黑",
-                "download": "下载",
-                "edit": "编辑",
-                "edit_approve": "修改后通过",
-                "save_only": "仅保存",
-                "save_and_approve": "保存并通过",
-                "unset_local": "解除限定",
-                "set_local": "限定本群",
-                "cancel": "取消",
-                "save": "保存",
-                "analyzing": "分析中...",
-                "reanalyze": "重新 VLM 分析",
-                "saving": "应用中...",
-                "apply_vlm": "应用 B 结果",
-                "auto_analyze": "自动识别",
-                "uploading": "上传中...",
-                "confirm_add": "确认添加",
-                "clear_selection": "清除选择",
-                "retry": "重试",
-                "close": "关闭",
-                "confirm_move": "确认移动",
-                "confirm_set": "确认设置",
-                "select_all": "全选",
-                "deselect_all": "取消全选",
-                "move": "移动",
-                "repair_origin": "修复来源",
-                "confirm": "确认",
-                "characters": "角色管理",
-                "sources": "外部源",
-                "assign_character": "分配角色",
-                "open_navigation": "打开导航",
-                "collapse_sidebar": "折叠侧栏",
-                "expand_sidebar": "展开侧栏",
-                "more": "更多操作"
-            },
-            "context_menu": {
-                "preview": "查看详情",
-                "select": "加入批量选择",
-                "unselect": "取消选择"
-            },
-            "empty": {
-                "library_title": "暂无表情包",
-                "library_hint": "上传图片，或到审核区通过已收集的表情。",
-                "pending_title": "暂无待审核表情包",
-                "pending_hint": "新偷取的表情包会出现在这里等待审核。",
-                "no_categories": "暂无分类",
-                "no_characters": "还没有角色。先创建一个，再到图库里分配。"
-            },
-            "pagination": {
-                "prev": "上一页",
-                "next": "下一页"
-            },
-            "scope": {
-                "public": "公共",
-                "local": "本群限定",
-                "local_short": "本群"
-            },
-            "modal": {
-                "edit": "编辑",
-                "edit_pending": "编辑待审核表情包",
-                "review_pending": "审核表情包",
-                "details": "详情",
-                "add_sticker": "添加表情包",
-                "batch_import": "批量导入表情包",
-                "category_manager": "分类管理",
-                "batch_move": "批量移动",
-                "batch_scope": "批量作用域",
-                "confirm": "确认操作",
-                "input": "输入信息",
-                "character_manager": "角色管理",
-                "batch_character": "批量分配角色"
-            },
-            "fields": {
-                "category": "分类",
-                "scope": "作用域",
-                "use_count": "使用次数",
-                "last_used": "最后使用",
-                "favorite": "收藏",
-                "origin": "来源",
-                "description": "描述",
-                "tags": "标签",
-                "scenes": "适用对话",
-                "created_at": "添加时间",
-                "target_category": "目标分类",
-                "target_scope": "目标作用域",
-                "image_meta": "图片信息",
-                "added": "入库方式",
-                "reviewed_at": "审核于",
-                "source": "来源链接",
-                "add_method_auto": "自动收集",
-                "add_method_manual": "手动入库",
-                "add_method_llm": "LLM 入库",
-                "add_method_api": "API 入库",
-                "add_method_external": "外部导入",
-                "add_method_unknown": "未知",
-                "source_channel_pack": "资源包",
-                "source_channel_github": "GitHub",
-                "source_channel_http_json": "JSON API",
-                "character": "角色",
-                "overlay_text": "图上文字",
-                "emotions": "情绪",
-                "secondary_emotions": "副情绪",
-                "id": "编号"
-            },
-            "units": {
-                "times": "次"
-            },
-            "messages": {
-                "origin_unset": "未记录",
-                "origin_group": "群",
-                "origin_user": "用户",
-                "unknown_error": "未知错误",
-                "unknown": "未知",
-                "no_description": "暂无描述",
-                "loading_original": "正在加载原图…",
-                "never_used": "从未使用",
-                "favorited": "已收藏",
-                "not_favorited": "未收藏",
-                "no_tags": "无标签",
-                "no_scenes": "暂无适用对话",
-                "no_overlay_text": "无",
-                "none": "无",
-                "no_preview": "无预览",
-                "scene_separator_hint": "逗号分隔",
-                "tag_separator_hint": "逗号分隔",
-                "scene_input_hint": "支持使用逗号或分号分隔。",
-                "analysis_pending": "待人工审核",
-                "analysis_queued": "已通过 · 等待识图",
-                "analysis_processing": "后台识图中",
-                "analysis_failed": "处理失败 · 点击通过重试",
-                "analysis_unanalysed": "待识图"
-            },
-            "labels": {
-                "hash": "哈希"
-            },
-            "placeholders": {
-                "edit_scene": "例如：又要加班了、你能帮帮我吗",
-                "edit_tags": "例如: 可爱, 搞怪, 稀有",
-                "select_category": "请选择分类...",
-                "upload_scene": "填写对方可能说的话，例如：又要加班了",
-                "upload_tags": "例如: 可爱, 搞怪",
-                "upload_desc": "关于此表情包的描述...",
-                "category_key": "标识 (如: happy)",
-                "category_name": "名称 (如: 开心)",
-                "category_desc": "描述 (可选)",
-                "select": "请选择...",
-                "character_key": "标识（如 neurosama）",
-                "character_name": "显示名（如 Neuro-sama）",
-                "overlay_text": "图上印的字"
-            },
-            "upload": {
-                "click_to_upload": "点击上传图片"
-            },
-            "analysis": {
-                "scenes_title": "识别到的适用对话",
-                "scenes_hint": "点击可添加或移除到「适用对话」输入框。写成群友会说的话，不是空标签。",
-                "reanalysis_title": "VLM 重新分析",
-                "reanalysis_hint": "重新生成标注并与当前结果对比。",
-                "current": "当前标注",
-                "new_result": "新的 VLM 结果",
-                "reanalysis_preserve": "角色、作用域、收藏和使用记录保持不变。"
-            },
-            "reanalysis": {
-                "title": "批量重新分析",
-                "progress": "分析进度",
-                "request_failed": "请求失败，请重试。",
-                "confirm": "分析选中的 {count} 张图片？\n只生成待确认结果，之后逐张查看并保存，不会自动覆盖图库内容。",
-                "hint": "分析完成后逐张对照并确认保存。分类、角色、收藏、来源和作用域保持不变。",
-                "background_hint": "关闭面板或页面后仍会继续分析，刷新可恢复待确认结果。重启插件会终止任务并清空未保存的结果。",
-                "interrupted": "插件已重启，未保存的分析结果已清空，图库内容未受影响。",
-                "running": "正在分析",
-                "stopping": "当前图片完成后停止",
-                "completed": "分析完成",
-                "cancelled": "已停止",
-                "failed": "任务启动失败",
-                "saved": "已保存",
-                "failed_count": "失败",
-                "skipped": "已跳过",
-                "details": "失败与跳过详情",
-                "stop": "完成当前图片后停止",
-                "retry": "重试失败图片",
-                "analyzed": "已分析",
-                "pending_review": "待确认",
-                "choose_result": "选择待确认图片",
-                "loading_result": "正在加载对比…",
-                "before": "分析前",
-                "after": "新结果",
-                "discard_one": "保留原内容，下一张",
-                "save_one": "保存这张，下一张",
-                "no_pending": "暂无待确认结果。",
-                "field_desc": "描述",
-                "field_tags": "标签",
-                "field_scenes": "场景",
-                "field_overlay_text": "图中文字",
-                "field_emotions": "情绪"
-            },
-            "batch": {
-                "include_subfolders": "包含子文件夹",
-                "selected_count": "已选择 {count} 张图片",
-                "more_count": "还有 {count} 张...",
-                "drag_upload": "点击或拖拽上传多张图片",
-                "supported_formats": "支持 PNG, JPG, GIF, WEBP, BMP",
-                "default_category": "默认分类",
-                "default_category_hint": "图片会保存到此分类，启用自动识别时无需选择。",
-                "auto_analyze": "自动识别（使用 AI 分析每张图片并自动分类）",
-                "auto_analyze_disabled_hint": "请先取消分类选择才能启用自动识别。",
-                "auto_analyze_warning": "图片会逐张分析，并遵循所选模型的请求间隔；可关闭面板等待后台完成。",
-                "start_import": "开始导入 ({count})",
-                "processing": "正在处理...",
-                "completed": "导入完成",
-                "failed": "导入失败",
-                "success": "成功",
-                "failed_count": "失败",
-                "continue_import": "继续导入",
-                "selected_images": "已选择 {count} 张图片",
-                "scope_hint": "批量设为 local 时，缺少来源群信息的图片会被自动跳过。",
-                "selected_short": "已选择 {count}",
-                "character": "角色",
-                "character_hint": "这批图会打上该角色标记。可稍后在图库里再改。"
-            },
-            "alerts": {
-                "pending_approved": "已通过 {count} 条。",
-                "pending_saved": "已保存修改。",
-                "approve_failed": "通过失败",
-                "and_blacklisted": "已拉黑",
-                "pending_deleted": "已删除 {count} 条。",
-                "delete_failed": "删除失败",
-                "select_pending_first": "请先选择待审核项。",
-                "failed_count": "{count} 条失败。",
-                "batch_approve_failed": "批量通过失败",
-                "blacklisted_count": "已拉黑 {count} 条。",
-                "batch_delete_failed": "批量删除失败",
-                "save_failed": "保存失败",
-                "action_failed": "操作失败",
-                "move_failed": "转移失败",
-                "batch_scope_partial": "已更新 {count} 张，另有 {skipped} 张缺少来源群信息，无法设为 local。",
-                "scope_set_failed": "作用域设置失败。",
-                "scope_origin_missing": "该图片缺少来源群信息，无法设置为 local。",
-                "scope_update_failed": "作用域更新失败。",
-                "favorite_failed": "收藏操作失败",
-                "batch_favorite_added": "已收藏 {count} 张图片。",
-                "batch_favorite_removed": "已取消收藏 {count} 张图片。",
-                "batch_action_failed": "批量操作失败",
-                "storage_scan_failed": "存储扫描失败。",
-                "storage_nothing_to_clean": "没有发现需要清理的存储项。",
-                "storage_cleanup_failed": "存储清理失败。",
-                "storage_cleanup_done": "存储清理完成，已处理 {count} 项。",
-                "scope_repaired": "已修复 {count} 张图片的来源作用域。",
-                "scope_repair_failed": "来源修复失败。",
-                "select_category_or_auto": "请选择分类或启用自动识别。",
-                "upload_failed": "上传失败。",
-                "upload_error": "上传出错。",
-                "duplicate_image": "该表情包已存在，已跳过重复入库。",
-                "similar_image": "库里已有相似表情包，已作为新图入库。",
-                "batch_import_failed": "批量导入失败。",
-                "select_image_first": "请先选择图片。",
-                "analyze_failed": "分析失败。",
-                "reanalyze_failed": "重新分析失败。",
-                "reanalyze_apply_failed": "应用 VLM 结果失败。",
-                "reanalyze_applied": "VLM 结果已应用。",
-                "no_valid_info": "未能识别有效信息。",
-                "add_failed": "添加失败。",
-                "invalid_category_key": "分类 key 需以英文字母开头，仅含小写字母、数字、_、-，最长48字符。",
-                "reserved_category_key": "该分类 key 是系统保留名称，请更换。",
-                "duplicate_category_name": "分类显示名称已被使用。",
-                "pending_queued": "其中 {count} 条已进入后台识图队列。"
-            },
-            "confirm": {
-                "pending_approve_batch": "确认通过 {count} 条待审核项？",
-                "pending_delete_blacklist_batch": "确认删除并拉黑 {count} 条待审核项？",
-                "pending_delete_batch": "确认删除 {count} 条待审核项？",
-                "delete_and_blacklist_image": "确定要删除并拉黑这张图片吗？\n拉黑后将不再自动收集此图片。",
-                "delete_image": "确定要删除这张图片吗？此操作无法撤销。",
-                "delete_selected_images": "确定要删除选中的 {count} 张图片吗？",
-                "storage_cleanup": "发现 {count} 个可清理项。将清理失效索引、孤儿文件、缩略图缓存和临时文件，是否继续？",
-                "update_existing_category": "分类 {key} 已存在，确定要更新吗？",
-                "delete_category": "确定要删除分类 {key} 吗？该分类下的图片会被直接删除且无法恢复。",
-                "delete_character": "确定删除角色 {key}？表情包文件会保留，只去掉角色标记。"
-            },
-            "prompt": {
-                "origin_scope": "请输入来源作用域，例如 group:123456 或 user:123456。"
-            },
-            "themes": {
-                "title": "主题",
-                "auto": "跟随宿主",
-                "dark": "X之暗面",
-                "light": "亮色",
-                "minecraft": "我的世界",
-                "fallout": "辐射4",
-                "bili": "B站风",
-                "group_original": "原版",
-                "group_game": "游戏背包",
-                "group_special": "精选",
-                "save_hint": "点选后会保存为下次打开的默认主题。",
-                "saved_default": "默认"
-            },
-            "view": {
-                "grid": "网格视图",
-                "list": "列表视图"
-            },
-            "kbd": {
-                "navigate": "选择",
-                "preview": "预览",
-                "clear_focus": "取消聚焦"
-            },
-            "characters": {
-                "persona_isolation": "启用人格表情库隔离",
-                "no_personas_available": "未找到人格，请先在 AstrBot 中创建。",
-                "persona_hint": "关联后，启用隔离时优先使用该角色表情，无合适候选时使用通用表情。一个角色可以关联多个人格。",
-                "unlink_persona": "解除关联",
-                "no_persona": "未关联人格",
-                "select_persona": "选择人格",
-                "bind_persona": "关联",
-                "title": "角色",
-                "all": "全部角色",
-                "unassigned": "通用表情库",
-                "hint": "角色由你在管理面板手工归档，VLM 不会识别角色。先创建角色，再点卡片编辑或用批量分配。",
-                "manage": "角色管理",
-                "bar_hint": "点角色筛选图库；「角色管理」里新增或删除角色。"
-            },
-            "sources": {
-                "title": "外部表情包源",
-                "copy_title": "安全本地副本",
-                "copy_hint": "导入时会校验格式、查重并复制到本插件目录，其他插件的原文件保持不变。",
-                "pack": "导入资源包",
-                "pack_hint": "ZIP / .meme-pack 导出文件",
-                "github": "GitHub 表情包仓库",
-                "api": "外部 JSON 目录",
-                "preflight": "预检",
-                "checking": "正在检查外部源…",
-                "format_title": "支持的资源包格式",
-                "format_hint": "推荐 AstrBot Meme Pack v2：manifest.json + memes/，可附带 semantic_metadata.json；也接受含 PNG/JPG/GIF/WEBP/BMP 的 ZIP，previews/ 会跳过。",
-                "license": "许可证",
-                "attribution": "署名",
-                "capacity_note": "该资源包超过原生收集上限；外部副本使用独立保留等级，不会触发原生容量淘汰。",
-                "auto_map": "自动映射",
-                "review": "导入后先进入待审核池",
-                "scope": "作用域",
-                "assign_character": "为整套图片分配角色",
-                "character_placeholder": "已有角色或新角色标识",
-                "character_hint": "已有标识会直接复用；新标识会在导入时创建角色。",
-                "import": "导入",
-                "sync": "同步",
-                "import_job": "导入任务",
-                "available": "可用外部源",
-                "empty": "尚无已注册外部源。同一 AstrBot 实例中的 Meme Manager 资源包会自动显示。",
-                "forget": "移除记录",
-                "forget_confirm": "移除此外部源记录？已经导入的图片会继续保留在图库中。"
-            },
-            "libraries": {
-                "all": "全部表情",
-                "general": "通用表情库",
-                "favorites": "收藏",
-                "characters": "角色表情库",
-                "quota": "自动淘汰计数",
-                "hint": "仅通用库普通表情参与加权自动淘汰；收藏、角色库及受保护外部导入另行管理。取消收藏或移除角色后，普通表情重新计入额度。"
-            },
-            "layout": {
-                "libraries": "表情库",
-                "emotions": "当前库 · 情绪分类",
-                "all_emotions": "全部情绪",
-                "collection": "表情收藏册",
-                "all_characters": "全部角色",
-                "favorite": "收藏保护",
-                "character": "角色保护",
-                "protected": "独立保留",
-                "automatic": "参与自动淘汰"
-            },
-            "guide": {
-                "title": "开始使用 · 让表情接上你的话",
-                "collect": "准备图库",
-                "collect_hint": "上传图片并分析，或在插件配置中开启收集、选择视觉模型。",
-                "review": "确认内容",
-                "review_hint": "在待审核区通过图片；检查图上文字和“适合回应”的句子，再分配角色。",
-                "chat": "正常聊天",
-                "chat_hint": "Bot 在聊天中结合语境主动用表情表达情绪、接梗和回应，选择贴合语境的图片。",
-                "pending_hint": "待审核图片不参与发送；选不准时可预览重新分析。",
-                "upload": "上传并分析",
-                "pending": "去审核",
-                "auto": "自动发送",
-                "on": "开启",
-                "off": "关闭",
-                "context": "语境理解",
-                "embedding": "语义检索"
-            }
-        }
+    "_model_section": {
+      "description": "=== 模型配置 ===",
+      "hint": ""
+    },
+    "_group_section": {
+      "description": "=== 群聊过滤 ===",
+      "hint": ""
+    },
+    "_storage_section": {
+      "description": "=== 存储及进阶管理 ===",
+      "hint": ""
+    },
+    "steal_meme": {
+      "description": "开启表情包偷取功能",
+      "hint": "开启后监听并保存聊天中的图片。启用人工审核时先保存原图，通过后再使用视觉模型分类入库。"
+    },
+    "persona_character_isolation": {
+      "description": "按人格隔离角色表情库",
+      "hint": "按当前会话生效的人格关联角色库，优先使用角色表情，无合适候选时回退通用库。"
+    },
+    "persona_character_map": {
+      "description": "人格与角色对应关系",
+      "hint": "可选：人格 ID 到角色 key 的映射；未映射时使用人格 ID。"
+    },
+    "steal_mode": {
+      "description": "偷图模式",
+      "hint": "概率模式：每次收到图片时按设定概率决定是否偷取。冷却模式：两次偷取之间必须间隔指定秒数。",
+      "labels": [
+        "概率模式",
+        "冷却模式"
+      ]
+    },
+    "steal_chance": {
+      "description": "偷图概率",
+      "hint": "设为 0 时从不偷取，设为 1 时每次都偷取。建议 0.2~0.5。仅概率模式生效。"
+    },
+    "content_filtration": {
+      "description": "内容审核",
+      "hint": "开启后使用 VLM 审核图片内容，过滤不当图片。开启后会增加单张图片的处理时间。"
+    },
+    "qqofficial_steal_mode": {
+      "description": "表情收录模式（QQ_Official）",
+      "hint": "QQ_Official 平台的大表情/表情包是普通图片附件，无 OneBot 的 sub_type 标记。默认仅收录带表情 CDN 特征的图片（如商城表情）；可选全部收录，或仅收录 GIF。",
+      "labels": [
+        "所有图片按表情收录",
+        "仅收录表情 CDN 特征",
+        "仅收录 GIF 格式"
+      ]
+    },
+    "auto_send_meme": {
+      "description": "自动随聊发送表情包",
+      "hint": "开启后 Bot 会在聊天中根据语境和发送概率主动搭配表情。LLM 也可通过表情工具主动回应。"
+    },
+    "auto_meme_cancel_on_new_message": {
+      "description": "新消息取消待发送表情",
+      "hint": "开启后同一会话有新消息到达时，会取消上一轮仍在延迟等待中的自动表情，避免旧回复配新图。"
+    },
+    "meme_chance": {
+      "description": "表情包发送概率",
+      "hint": "设为 0 时从不发送，设为 1 时每次都发送。建议 0.1~0.3，避免刷屏。"
+    },
+    "send_meme_as_qq_sticker": {
+      "description": "以 QQ 表情包形式发送",
+      "hint": "开启后在 QQ 中按自定义表情包展示；关闭后按普通图片发送。仅对 QQ（aiocqhttp/NapCat）生效，与图片是否转换为 GIF 独立。"
+    },
+    "send_meme_as_gif": {
+      "description": "以 GIF 格式发送",
+      "hint": "开启后始终以 GIF 输出。QQ 中是否按表情包展示由「以 QQ 表情包形式发送」控制。关闭时按原文件格式发送（png/jpg/gif 等）。开启后高频发送大图/动图场景会有较高瞬时内存占用。"
+    },
+    "meme_send_delay": {
+      "description": "回复后的等待时间（秒）",
+      "hint": "默认等待 5 秒后发表情。高级选项中的秒/字大于 0 时优先按字数计算。新消息可取消尚未发出的表情。"
+    },
+    "smart_meme_selection": {
+      "description": "智能表情包选择",
+      "hint": "开启后使用综合评分（多样性 + 匹配度 + 相似度）选出最合适的表情包。关闭则随机选择（仍会避免短期重复）。"
+    },
+    "_emotion_section": {
+      "description": "=== 情绪识别 ===",
+      "hint": ""
+    },
+    "enable_natural_emotion_analysis": {
+      "description": "用模型理解对话语境",
+      "hint": "开启后根据你的回复与用户消息提取表情包使用场景；留空模型时跟随当前会话。会增加模型调用。关闭后使用本地匹配。"
+    },
+    "emotion_analysis_provider_id": {
+      "description": "语境理解模型（可留空）",
+      "hint": "留空使用当前会话模型。可选择响应快的文本模型；高级设置中的 JEV 可替代这一步。"
+    },
+    "enable_jev": {
+      "description": "启用 JEV 选图",
+      "hint": "需同时开启上方“用模型理解对话语境”。未勾选时使用传统 LLM；勾选后由 JEV 从最多 10 张粗筛候选中选图。默认使用官方接口和 jev-latest 模型，也可在下方配置可信的 API Base URL 和 JEV 模型 ID。会发送候选元数据、最近约 3 轮文本及本轮对话；选择 none 时不发送，缺少 key 或调用失败时回退 LLM。"
+    },
+    "typesafe_api_key": {
+      "description": "TypeSafe API Key",
+      "hint": "在 console.typesafe.ai 创建。同时勾选“用模型理解对话语境”和“启用 JEV 选图”后使用；留空时回退传统 LLM。"
+    },
+    "typesafe_api_base_url": {
+      "description": "TypeSafe API Base URL",
+      "hint": "默认使用 TypeSafe 官方 API。通常只填写到域名；也兼容以 /v1 结尾或完整的 /v1/systemone 地址。API Key 会发送到此地址，请仅配置可信服务。"
+    },
+    "typesafe_model_id": {
+      "description": "JEV 模型 ID",
+      "hint": "留空使用默认模型 jev-latest。兼容代理可填写其要求的模型 ID，例如 Command Code 使用 typesafe/jev。"
+    },
+    "vision_provider_id": {
+      "description": "视觉模型",
+      "hint": "用于图片分类。留空则自动使用 AstrBot 全局配置的图片描述模型（default_image_caption_provider_id）。"
+    },
+    "vision_fallback_provider_ids": {
+      "description": "视觉模型回落",
+      "hint": "视觉模型请求失败时按顺序切换到这些提供商（与 AstrBot 回退对话模型同理）。"
+    },
+    "vision_thinking_effort": {
+      "description": "视觉模型思考强度",
+      "hint": "作为 reasoning_effort 参数传给视觉模型；跟随提供商则不传参，使用提供商自身思考配置。仅对 OpenAI 兼容提供商生效。",
+      "labels": [
+        "跟随提供商",
+        "低",
+        "中",
+        "高"
+      ]
+    },
+    "send_target_whitelist": {
+      "description": "发表情白名单",
+      "hint": "格式：group:群号 或 user:QQ号。非空时仅白名单内的目标允许自动发送表情包。"
+    },
+    "send_target_blacklist": {
+      "description": "发表情黑名单",
+      "hint": "格式：group:群号 或 user:QQ号。可与白名单同时生效，冲突时按下方优先级规则判定。"
+    },
+    "send_target_filter_mode": {
+      "description": "发表情名单优先级",
+      "hint": "白名单优先：白名单命中时允许，否则再查黑名单。黑名单优先：黑名单命中时拒绝，否则再查白名单。",
+      "labels": [
+        "白名单优先",
+        "黑名单优先"
+      ]
+    },
+    "steal_target_whitelist": {
+      "description": "偷表情白名单",
+      "hint": "格式：group:群号 或 user:QQ号。非空时仅白名单内的目标允许自动偷取。"
+    },
+    "steal_target_blacklist": {
+      "description": "偷表情黑名单",
+      "hint": "格式：group:群号 或 user:QQ号。可与白名单同时生效，冲突时按下方优先级规则判定。"
+    },
+    "steal_target_filter_mode": {
+      "description": "偷表情名单优先级",
+      "hint": "白名单优先：白名单命中时允许，否则再查黑名单。黑名单优先：黑名单命中时拒绝，否则再查白名单。",
+      "labels": [
+        "白名单优先",
+        "黑名单优先"
+      ]
+    },
+    "max_reg_num": {
+      "description": "通用表情库自动淘汰上限",
+      "hint": "仅计算通用库中未收藏、未指定角色的普通表情；收藏、角色表情及受保护外部导入不占额度。超限按使用次数和入库时间加权淘汰。"
+    },
+    "eviction_usage_weight": {
+      "description": "淘汰评分：低使用次数权重",
+      "hint": "默认 0.7，入库时间权重为 1 减此值。两项归一化后加权，使用越少、入库越旧越优先淘汰；0 仅按最旧，1 仅按使用最少。"
+    },
+    "steal_pool_capacity": {
+      "description": "待审核池容量上限",
+      "hint": "自动偷取的图片先进「待审核池」。达到此数量后暂停自动偷取，待人工在 WebUI 审核区处理（通过入库或删除）腾出空间后自动恢复。调整后即时生效，无需重启。"
+    },
+    "audit_required": {
+      "description": "自动偷取需人工审核",
+      "hint": "开启后自动收集的原图先进入待审核池，人工通过后立即排队，后台识图成功再正式入库。失败原图保留，可重新通过以重试。关闭后自动识图入库；主动偷图继续立即分析。"
+    },
+    "enable_embedding_search": {
+      "description": "启用语义检索（可选）",
+      "hint": "开启后用远程文本嵌入按语义召回（图上文字 + 使用场景 + 描述）。关闭则只用关键词（BM25）。不使用本地 CLIP。未配置嵌入模型时自动降级为 BM25。"
+    },
+    "embedding_provider_id": {
+      "description": "语义检索模型",
+      "hint": "留空使用框架首个嵌入提供商。本插件自动检测模型实际输出维度，无需为插件填写维度；模型或维度变化时后台重建向量，期间使用本地匹配。若服务拒绝 dimensions 请求参数，请在 AstrBot 嵌入提供商配置中关闭发送该参数或填写模型支持的值。"
+    },
+    "_smart_section": {
+      "description": "=== 智能选择：文字距离融合权重预设 ===",
+      "hint": ""
+    },
+    "_external_source_section": {
+      "description": "=== 外部表情包源（v3） ===",
+      "hint": ""
+    },
+    "external_sources_enabled": {
+      "description": "启用外部表情包源",
+      "hint": "允许从 Meme Manager / AstrBot Meme Pack、GitHub 资源包仓库和外部 JSON API 预检并导入。所有图片都会复制进本插件目录，外部插件原文件不会被修改。"
+    },
+    "external_source_allow_http": {
+      "description": "允许明文 HTTP 外部源",
+      "hint": "默认仅允许 HTTPS，并阻止回环、内网、链路本地和保留地址。仅在完全可信的隔离网络中开启。"
+    },
+    "external_source_default_review": {
+      "description": "外部导入默认进入待审核池",
+      "hint": "开启后，外部源图片先进入待审核区；关闭时经格式、体积和像素校验后直接入库。导入界面可逐次覆盖此设置。"
+    },
+    "external_source_max_items": {
+      "description": "单个外部源最大图片数",
+      "hint": "预检和单次同步最多处理的图片数量，防止超大资源包拖垮实例。"
+    },
+    "external_source_max_image_bytes": {
+      "description": "外部单图字节上限",
+      "hint": "默认 32 MiB。下载和解包都会在写入前强制检查。"
+    },
+    "external_source_max_archive_bytes": {
+      "description": "资源包压缩体积上限",
+      "hint": "默认 1 GiB，兼容 Meme Manager 大型资源包。"
+    },
+    "external_source_max_uncompressed_bytes": {
+      "description": "资源包解压体积上限",
+      "hint": "默认 4 GiB；预检会累计 ZIP 成员声明大小并拦截压缩炸弹。"
+    },
+    "external_source_max_pixels": {
+      "description": "外部单图最大像素数",
+      "hint": "宽乘高的上限，默认 4000 万像素。"
+    },
+    "_webui_section": {
+      "description": "=== WebUI ===",
+      "hint": ""
+    },
+    "webui_theme": {
+      "description": "WebUI 默认主题",
+      "hint": "页面尚未保存主题选择时使用该默认值；在「表情管理」中切换后，将持续使用页面保存的主题。",
+      "labels": [
+        "跟随宿主",
+        "黑夜",
+        "白天",
+        "我的世界",
+        "辐射 4",
+        "B站风"
+      ]
+    },
+    "custom_meme_classification_prompt": {
+      "description": "VLM 分类提示词",
+      "hint": "支持占位符：{emotion_list}（分类列表）。为空时使用默认提示词。"
+    },
+    "custom_meme_classification_with_filter_prompt": {
+      "description": "VLM 分类提示词（带审核）",
+      "hint": "开启内容审核时使用的 VLM 分类提示词。支持占位符：{emotion_list}（分类列表）。为空时使用默认提示词。"
+    },
+    "emotion_analysis_prompt": {
+      "description": "情绪分析提示词",
+      "hint": "留空使用内置语境提示词。query 会保留助手的立场、互动意图和关键台词；自定义内容继续生效。"
+    },
+    "sim_weight_preset": {
+      "description": "本地文字匹配风格",
+      "hint": "预设决定多个相似度算法的融合权重：均衡（默认）、关键词优先（子串/字符重叠更敏感）、语义优先（n-gram/余弦更重）、严格匹配（编辑距离和字符级更重，减少误发）。",
+      "labels": [
+        "均衡",
+        "关键词优先",
+        "语义优先",
+        "严格匹配"
+      ]
+    },
+    "show_advanced_settings": {
+      "description": "显示高级选项",
+      "hint": "展开群聊名单、模型提示词、外部源限制及匹配调优。关闭仅收起界面，已有设置继续生效。"
+    },
+    "meme_send_char_delay": {
+      "description": "按字数计算延迟（秒/字）",
+      "hint": "0 使用上方固定延迟；大于 0 时按回复长度计算。保留已有自定义值。"
+    },
+    "model_request_interval": {
+      "description": "模型请求最小间隔（秒）",
+      "hint": "本插件对同一提供商的识图、嵌入请求串行执行，默认至少间隔 5 秒开始下一次请求。免费模型额度较低时可调大；付费模型可调小。限流时遵守 Retry-After 并退避，失败任务保留重试。"
+    },
+    "reanalysis_concurrency": {
+      "description": "批量语义化后台并发数",
+      "hint": "批量重新分析及补充表情包语义时的后台视觉模型最大并发数（默认 2）。免费模型配额紧张时可设为 1；高配额付费或本地模型可适当调大。"
     }
+  },
+  "pages": {
+    "dashboard": {
+      "title": "表情包管理面板",
+      "header": {
+        "brand": "亨利的战利品",
+        "subtitle": "表情包小偷管理面板"
+      },
+      "health": {
+        "ok": "正常",
+        "slow": "缓慢",
+        "error": "异常",
+        "checking": "检测中"
+      },
+      "stats": {
+        "total": "总数",
+        "categories": "分类",
+        "today": "今日新增"
+      },
+      "sections": {
+        "pending": "审核区",
+        "library": "表情包库"
+      },
+      "categories": {
+        "key_hint": "Key 以英文字母开头，仅使用小写字母、数字、_、-，最长48字符。显示名称可以使用中文。",
+        "title": "分类",
+        "favorites": "收藏",
+        "all": "全部",
+        "add_new": "新增分类",
+        "edit_title": "编辑分类",
+        "update_action": "保存修改",
+        "cancel_edit": "取消编辑",
+        "clear_filters": "清除筛选"
+      },
+      "pending": {
+        "pool": "待审核池",
+        "capacity": "容量",
+        "paused": "已暂停",
+        "category_filter": "分类筛选",
+        "progress": "待审核",
+        "paused_hint": "偷取已暂停，审核后自动恢复。",
+        "queued_count": "排队",
+        "processing_count": "识图中",
+        "failed_count": "失败"
+      },
+      "search": {
+        "library": "台词、标签、文件名；多个词用空格分隔",
+        "pending": "搜索待审核表情包..."
+      },
+      "sort": {
+        "newest": "最新入库",
+        "oldest": "最早入库",
+        "most_used": "最常发送",
+        "last_used": "最近发送",
+        "least_used": "使用最少"
+      },
+      "actions": {
+        "done": "完成",
+        "batch": "批量",
+        "categories": "分类",
+        "add": "添加",
+        "batch_import": "批量导入",
+        "storage_cleanup": "存储清理",
+        "unfavorite": "取消收藏",
+        "favorite": "收藏",
+        "approve_all": "全部通过",
+        "delete_all": "全部删除",
+        "delete_blacklist": "删除并拉黑",
+        "approve": "通过",
+        "delete": "删除",
+        "blacklist": "拉黑",
+        "download": "下载",
+        "edit": "编辑",
+        "edit_approve": "修改后通过",
+        "save_only": "仅保存",
+        "save_and_approve": "保存并通过",
+        "unset_local": "解除限定",
+        "set_local": "限定本群",
+        "cancel": "取消",
+        "save": "保存",
+        "analyzing": "分析中...",
+        "reanalyze": "重新 VLM 分析",
+        "saving": "应用中...",
+        "apply_vlm": "应用 B 结果",
+        "auto_analyze": "自动识别",
+        "uploading": "上传中...",
+        "confirm_add": "确认添加",
+        "clear_selection": "清除选择",
+        "retry": "重试",
+        "close": "关闭",
+        "confirm_move": "确认移动",
+        "confirm_set": "确认设置",
+        "select_all": "全选",
+        "deselect_all": "取消全选",
+        "move": "移动",
+        "repair_origin": "修复来源",
+        "confirm": "确认",
+        "characters": "角色管理",
+        "sources": "外部源",
+        "assign_character": "分配角色",
+        "open_navigation": "打开导航",
+        "collapse_sidebar": "折叠侧栏",
+        "expand_sidebar": "展开侧栏",
+        "more": "更多操作"
+      },
+      "context_menu": {
+        "preview": "查看详情",
+        "select": "加入批量选择",
+        "unselect": "取消选择"
+      },
+      "empty": {
+        "library_title": "暂无表情包",
+        "library_hint": "上传图片，或到审核区通过已收集的表情。",
+        "pending_title": "暂无待审核表情包",
+        "pending_hint": "新偷取的表情包会出现在这里等待审核。",
+        "no_categories": "暂无分类",
+        "no_characters": "还没有角色。先创建一个，再到图库里分配。"
+      },
+      "pagination": {
+        "prev": "上一页",
+        "next": "下一页"
+      },
+      "scope": {
+        "public": "公共",
+        "local": "本群限定",
+        "local_short": "本群"
+      },
+      "modal": {
+        "edit": "编辑",
+        "edit_pending": "编辑待审核表情包",
+        "review_pending": "审核表情包",
+        "details": "详情",
+        "add_sticker": "添加表情包",
+        "batch_import": "批量导入表情包",
+        "category_manager": "分类管理",
+        "batch_move": "批量移动",
+        "batch_scope": "批量作用域",
+        "confirm": "确认操作",
+        "input": "输入信息",
+        "character_manager": "角色管理",
+        "batch_character": "批量分配角色"
+      },
+      "fields": {
+        "category": "分类",
+        "scope": "作用域",
+        "use_count": "使用次数",
+        "last_used": "最后使用",
+        "favorite": "收藏",
+        "origin": "来源",
+        "description": "描述",
+        "tags": "标签",
+        "scenes": "适用对话",
+        "created_at": "添加时间",
+        "target_category": "目标分类",
+        "target_scope": "目标作用域",
+        "image_meta": "图片信息",
+        "added": "入库方式",
+        "reviewed_at": "审核于",
+        "source": "来源链接",
+        "add_method_auto": "自动收集",
+        "add_method_manual": "手动入库",
+        "add_method_llm": "LLM 入库",
+        "add_method_api": "API 入库",
+        "add_method_external": "外部导入",
+        "add_method_unknown": "未知",
+        "source_channel_pack": "资源包",
+        "source_channel_github": "GitHub",
+        "source_channel_http_json": "JSON API",
+        "character": "角色",
+        "overlay_text": "图上文字",
+        "emotions": "情绪",
+        "secondary_emotions": "副情绪",
+        "id": "编号"
+      },
+      "units": {
+        "times": "次"
+      },
+      "messages": {
+        "origin_unset": "未记录",
+        "origin_group": "群",
+        "origin_user": "用户",
+        "unknown_error": "未知错误",
+        "unknown": "未知",
+        "no_description": "暂无描述",
+        "loading_original": "正在加载原图…",
+        "never_used": "从未使用",
+        "favorited": "已收藏",
+        "not_favorited": "未收藏",
+        "no_tags": "无标签",
+        "no_scenes": "暂无适用对话",
+        "no_overlay_text": "无",
+        "none": "无",
+        "no_preview": "无预览",
+        "scene_separator_hint": "逗号分隔",
+        "tag_separator_hint": "逗号分隔",
+        "scene_input_hint": "支持使用逗号或分号分隔。",
+        "analysis_pending": "待人工审核",
+        "analysis_queued": "已通过 · 等待识图",
+        "analysis_processing": "后台识图中",
+        "analysis_failed": "处理失败 · 点击通过重试",
+        "analysis_unanalysed": "待识图"
+      },
+      "labels": {
+        "hash": "哈希"
+      },
+      "placeholders": {
+        "edit_scene": "例如：又要加班了、你能帮帮我吗",
+        "edit_tags": "例如: 可爱, 搞怪, 稀有",
+        "select_category": "请选择分类...",
+        "upload_scene": "填写对方可能说的话，例如：又要加班了",
+        "upload_tags": "例如: 可爱, 搞怪",
+        "upload_desc": "关于此表情包的描述...",
+        "category_key": "标识 (如: happy)",
+        "category_name": "名称 (如: 开心)",
+        "category_desc": "描述 (可选)",
+        "select": "请选择...",
+        "character_key": "标识（如 neurosama）",
+        "character_name": "显示名（如 Neuro-sama）",
+        "overlay_text": "图上印的字"
+      },
+      "upload": {
+        "click_to_upload": "点击上传图片"
+      },
+      "analysis": {
+        "scenes_title": "识别到的适用对话",
+        "scenes_hint": "点击可添加或移除到「适用对话」输入框。写成群友会说的话，不是空标签。",
+        "reanalysis_title": "VLM 重新分析",
+        "reanalysis_hint": "重新生成标注并与当前结果对比。",
+        "current": "当前标注",
+        "new_result": "新的 VLM 结果",
+        "reanalysis_preserve": "角色、作用域、收藏和使用记录保持不变。"
+      },
+      "reanalysis": {
+        "title": "批量重新分析",
+        "progress": "分析进度",
+        "request_failed": "请求失败，请重试。",
+        "confirm": "分析选中的 {count} 张图片？\n只生成待确认结果，之后逐张查看并保存，不会自动覆盖图库内容。",
+        "hint": "分析完成后逐张对照并确认保存。分类、角色、收藏、来源和作用域保持不变。",
+        "background_hint": "关闭面板或页面后仍会继续分析，刷新可恢复待确认结果。重启插件会终止任务并清空未保存的结果。",
+        "interrupted": "插件已重启，未保存的分析结果已清空，图库内容未受影响。",
+        "running": "正在分析",
+        "stopping": "当前图片完成后停止",
+        "completed": "分析完成",
+        "cancelled": "已停止",
+        "failed": "任务启动失败",
+        "saved": "已保存",
+        "failed_count": "失败",
+        "skipped": "已跳过",
+        "details": "失败与跳过详情",
+        "stop": "完成当前图片后停止",
+        "retry": "重试失败图片",
+        "analyzed": "已分析",
+        "pending_review": "待确认",
+        "choose_result": "选择待确认图片",
+        "loading_result": "正在加载对比…",
+        "before": "分析前",
+        "after": "新结果",
+        "discard_one": "保留原内容，下一张",
+        "save_one": "保存这张，下一张",
+        "no_pending": "暂无待确认结果。",
+        "field_desc": "描述",
+        "field_tags": "标签",
+        "field_scenes": "场景",
+        "field_overlay_text": "图中文字",
+        "field_emotions": "情绪",
+        "missing_short": "补充表情包语义",
+        "missing_title": "补充表情包语义",
+        "no_missing": "所有表情均已包含完整语义元数据，无需补充分析。",
+        "no_missing_scoped": "当前范围「{scope}」内所有表情均已包含完整语义元数据，无需补充分析。",
+        "scope_notice": "当前筛选范围：{scope}",
+        "confirm_missing": "为筛出的 {count} 张无语义图片进行视觉模型分析？\n分析后支持一键全部保存或逐张抽查。",
+        "token_warning": "待分析图片过多（共 {count} 张），请注意 token 消耗，是否继续？",
+        "capped_notice": "共筛出 {total} 张无语义图片，单批最多先处理前 {count} 张。",
+        "concurrency_badge": "并发 {n}",
+        "bulk_hint": "待确认 {count} 张 · 可一键全部保存，或在下方逐张抽查对比",
+        "save_all": "全部保存 ({count})",
+        "discard_all": "全部放弃"
+      },
+      "batch": {
+        "include_subfolders": "包含子文件夹",
+        "selected_count": "已选择 {count} 张图片",
+        "more_count": "还有 {count} 张...",
+        "drag_upload": "点击或拖拽上传多张图片",
+        "supported_formats": "支持 PNG, JPG, GIF, WEBP, BMP",
+        "default_category": "默认分类",
+        "default_category_hint": "指定分类时先快速入库并保留该分类；留空且开启自动语义化时由模型自动归类。",
+        "auto_analyze": "入库时自动语义化（保留已选分类与角色，未选分类时自动归类）",
+        "auto_analyze_disabled_hint": "请先取消分类选择才能启用自动识别。",
+        "auto_analyze_warning": "将按后台并发与请求间隔自动调用视觉模型补全描述、标签与场景；可关闭面板等待后台完成。",
+        "start_import": "开始导入 ({count})",
+        "processing": "正在处理...",
+        "completed": "导入完成",
+        "failed": "导入失败",
+        "success": "成功",
+        "failed_count": "失败",
+        "continue_import": "继续导入",
+        "selected_images": "已选择 {count} 张图片",
+        "scope_hint": "批量设为 local 时，缺少来源群信息的图片会被自动跳过。",
+        "selected_short": "已选择 {count}",
+        "character": "角色",
+        "character_hint": "这批图会打上该角色标记。可稍后在图库里再改。"
+      },
+      "alerts": {
+        "pending_approved": "已通过 {count} 条。",
+        "pending_saved": "已保存修改。",
+        "approve_failed": "通过失败",
+        "and_blacklisted": "已拉黑",
+        "pending_deleted": "已删除 {count} 条。",
+        "delete_failed": "删除失败",
+        "select_pending_first": "请先选择待审核项。",
+        "failed_count": "{count} 条失败。",
+        "batch_approve_failed": "批量通过失败",
+        "blacklisted_count": "已拉黑 {count} 条。",
+        "batch_delete_failed": "批量删除失败",
+        "save_failed": "保存失败",
+        "action_failed": "操作失败",
+        "move_failed": "转移失败",
+        "batch_scope_partial": "已更新 {count} 张，另有 {skipped} 张缺少来源群信息，无法设为 local。",
+        "scope_set_failed": "作用域设置失败。",
+        "scope_origin_missing": "该图片缺少来源群信息，无法设置为 local。",
+        "scope_update_failed": "作用域更新失败。",
+        "favorite_failed": "收藏操作失败",
+        "batch_favorite_added": "已收藏 {count} 张图片。",
+        "batch_favorite_removed": "已取消收藏 {count} 张图片。",
+        "batch_action_failed": "批量操作失败",
+        "storage_scan_failed": "存储扫描失败。",
+        "storage_nothing_to_clean": "没有发现需要清理的存储项。",
+        "storage_cleanup_failed": "存储清理失败。",
+        "storage_cleanup_done": "存储清理完成，已处理 {count} 项。",
+        "scope_repaired": "已修复 {count} 张图片的来源作用域。",
+        "scope_repair_failed": "来源修复失败。",
+        "select_category_or_auto": "请选择分类或启用自动识别。",
+        "upload_failed": "上传失败。",
+        "upload_error": "上传出错。",
+        "duplicate_image": "该表情包已存在，已跳过重复入库。",
+        "similar_image": "库里已有相似表情包，已作为新图入库。",
+        "batch_import_failed": "批量导入失败。",
+        "select_image_first": "请先选择图片。",
+        "analyze_failed": "分析失败。",
+        "reanalyze_failed": "重新分析失败。",
+        "reanalyze_apply_failed": "应用 VLM 结果失败。",
+        "reanalyze_applied": "VLM 结果已应用。",
+        "no_valid_info": "未能识别有效信息。",
+        "add_failed": "添加失败。",
+        "invalid_category_key": "分类 key 需以英文字母开头，仅含小写字母、数字、_、-，最长48字符。",
+        "reserved_category_key": "该分类 key 是系统保留名称，请更换。",
+        "duplicate_category_name": "分类显示名称已被使用。",
+        "pending_queued": "其中 {count} 条已进入后台识图队列。"
+      },
+      "confirm": {
+        "pending_approve_batch": "确认通过 {count} 条待审核项？",
+        "pending_delete_blacklist_batch": "确认删除并拉黑 {count} 条待审核项？",
+        "pending_delete_batch": "确认删除 {count} 条待审核项？",
+        "delete_and_blacklist_image": "确定要删除并拉黑这张图片吗？\n拉黑后将不再自动收集此图片。",
+        "delete_image": "确定要删除这张图片吗？此操作无法撤销。",
+        "delete_selected_images": "确定要删除选中的 {count} 张图片吗？",
+        "storage_cleanup": "发现 {count} 个可清理项。将清理失效索引、孤儿文件、缩略图缓存和临时文件，是否继续？",
+        "update_existing_category": "分类 {key} 已存在，确定要更新吗？",
+        "delete_category": "确定要删除分类 {key} 吗？该分类下的图片会被直接删除且无法恢复。",
+        "delete_character": "确定删除角色 {key}？表情包文件会保留，只去掉角色标记。"
+      },
+      "prompt": {
+        "origin_scope": "请输入来源作用域，例如 group:123456 或 user:123456。"
+      },
+      "themes": {
+        "title": "主题",
+        "auto": "跟随宿主",
+        "dark": "黑夜",
+        "light": "白天",
+        "minecraft": "我的世界",
+        "fallout": "辐射4",
+        "bili": "B站风",
+        "group_original": "原版",
+        "group_game": "游戏背包",
+        "group_special": "精选",
+        "save_hint": "点选后会保存为下次打开的默认主题。",
+        "saved_default": "默认"
+      },
+      "view": {
+        "grid": "网格视图",
+        "list": "列表视图"
+      },
+      "kbd": {
+        "navigate": "选择",
+        "preview": "预览",
+        "clear_focus": "取消聚焦"
+      },
+      "characters": {
+        "persona_isolation": "启用人格表情库隔离",
+        "no_personas_available": "未找到人格，请先在 AstrBot 中创建。",
+        "persona_hint": "关联后，启用隔离时优先使用该角色表情，无合适候选时使用通用表情。一个角色可以关联多个人格。",
+        "unlink_persona": "解除关联",
+        "no_persona": "未关联人格",
+        "select_persona": "选择人格",
+        "bind_persona": "关联",
+        "title": "角色",
+        "all": "全部角色",
+        "unassigned": "通用表情库",
+        "hint": "角色由你在管理面板手工归档，VLM 不会识别角色。先创建角色，再点卡片编辑或用批量分配。",
+        "manage": "角色管理",
+        "bar_hint": "点角色筛选图库；「角色管理」里新增或删除角色。"
+      },
+      "sources": {
+        "title": "外部表情包源",
+        "copy_title": "安全本地副本",
+        "copy_hint": "导入时会校验格式、查重并复制到本插件目录，其他插件的原文件保持不变。",
+        "pack": "导入资源包",
+        "pack_hint": "ZIP / .meme-pack 导出文件",
+        "github": "GitHub 表情包仓库",
+        "api": "外部 JSON 目录",
+        "preflight": "预检",
+        "checking": "正在检查外部源…",
+        "format_title": "支持的资源包格式",
+        "format_hint": "推荐 AstrBot Meme Pack v2：manifest.json + memes/，可附带 semantic_metadata.json；也接受含 PNG/JPG/GIF/WEBP/BMP 的 ZIP，previews/ 会跳过。",
+        "license": "许可证",
+        "attribution": "署名",
+        "capacity_note": "该资源包超过原生收集上限；外部副本使用独立保留等级，不会触发原生容量淘汰。",
+        "auto_map": "自动映射",
+        "review": "导入后先进入待审核池",
+        "auto_analyze": "入库后自动补充表情包语义（保留原分类与角色）",
+        "missing_count": "待补全 {count} 张",
+        "analyzing_phase": "语义化中",
+        "analyzed_stat": "语义化 {done}/{total}",
+        "scope": "作用域",
+        "assign_character": "为整套图片分配角色",
+        "character_placeholder": "已有角色或新角色标识",
+        "character_hint": "已有标识会直接复用；新标识会在导入时创建角色。",
+        "import": "导入",
+        "sync": "同步",
+        "import_job": "导入任务",
+        "available": "可用外部源",
+        "empty": "尚无已注册外部源。同一 AstrBot 实例中的 Meme Manager 资源包会自动显示。",
+        "forget": "移除记录",
+        "forget_confirm": "移除此外部源记录？已经导入的图片会继续保留在图库中。"
+      },
+      "libraries": {
+        "all": "全部表情",
+        "general": "通用表情库",
+        "favorites": "收藏",
+        "characters": "角色表情库",
+        "quota": "自动淘汰计数",
+        "hint": "仅通用库普通表情参与加权自动淘汰；收藏、角色库及受保护外部导入另行管理。取消收藏或移除角色后，普通表情重新计入额度。"
+      },
+      "layout": {
+        "libraries": "表情库",
+        "emotions": "当前库 · 情绪分类",
+        "all_emotions": "全部情绪",
+        "collection": "表情收藏册",
+        "all_characters": "全部角色",
+        "favorite": "收藏保护",
+        "character": "角色保护",
+        "protected": "独立保留",
+        "automatic": "参与自动淘汰"
+      },
+      "guide": {
+        "title": "开始使用 · 让表情接上你的话",
+        "collect": "准备图库",
+        "collect_hint": "上传图片并分析，或在插件配置中开启收集、选择视觉模型。",
+        "review": "确认内容",
+        "review_hint": "在待审核区通过图片；检查图上文字和“适合回应”的句子，再分配角色。",
+        "chat": "正常聊天",
+        "chat_hint": "Bot 在聊天中结合语境主动用表情表达情绪、接梗和回应，选择贴合语境的图片。",
+        "pending_hint": "待审核图片不参与发送；选不准时可预览重新分析。",
+        "upload": "上传并分析",
+        "pending": "去审核",
+        "auto": "自动发送",
+        "on": "开启",
+        "off": "关闭",
+        "context": "语境理解",
+        "embedding": "语义检索"
+      }
+    }
+  }
 }

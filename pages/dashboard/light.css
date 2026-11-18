@@ -1031,5 +1031,86 @@
     contain-intrinsic-size: auto 96px;
 }
 
-/* 默认主题列表行（行高约 84-96px） */
+/* ── Claude 暖纸白天主题：新增分类导航与筛选控件适配 ── */
+
+[data-theme="light"] .category-item.active::before {
+    display: none;
+}
+
+[data-theme="light"] .category-count {
+    background: rgba(61, 57, 41, 0.06);
+    color: #8f887a;
+}
+
+[data-theme="light"] .category-item.active .category-count {
+    background: rgba(61, 57, 41, 0.09);
+    color: #3d3929;
+}
+
+[data-theme="light"] .sidebar-head-btn {
+    background: transparent;
+    border-color: rgba(61, 57, 41, 0.12);
+    color: #6b6659;
+}
+
+[data-theme="light"] .sidebar-head-btn:hover {
+    background: #ffffff;
+    border-color: rgba(61, 57, 41, 0.2);
+    color: var(--text-primary);
+}
+
+[data-theme="light"] .search-clear-btn {
+    background: rgba(61, 57, 41, 0.07);
+    color: #6b6659;
+}
+
+[data-theme="light"] .search-clear-btn:hover {
+    background: rgba(217, 119, 87, 0.16);
+    color: #a94a2b;
+}
+
+[data-theme="light"] .active-filter-pill {
+    background: #f8ebe5;
+    border-color: rgba(217, 119, 87, 0.32);
+    color: #a94a2b;
+}
+
+[data-theme="light"] .active-filter-pill:hover {
+    background: #f4e1d8;
+    border-color: rgba(193, 95, 60, 0.5);
+}
+
+[data-theme="light"] .category-quick-rail {
+    background: #faf8f3;
+    border-bottom-color: rgba(61, 57, 41, 0.07);
+}
+
+[data-theme="light"] .category-rail-chip {
+    background: #ffffff;
+    border-color: rgba(61, 57, 41, 0.1);
+    color: #575246;
+}
+
+[data-theme="light"] .category-rail-chip:hover {
+    background: #f5f2ea;
+    border-color: rgba(61, 57, 41, 0.18);
+    color: var(--text-primary);
+}
+
+[data-theme="light"] .category-rail-chip.active {
+    background: #e7e3d9;
+    border-color: rgba(61, 57, 41, 0.18);
+    color: #1f1e1b;
+}
+
+[data-theme="light"] .category-add-panel.is-editing,
+[data-theme="light"] .category-manager-row.is-editing {
+    background: #fdf6f2;
+    border-color: rgba(217, 119, 87, 0.42);
+}
+
+[data-theme="light"] .category-manager-count {
+    background: #f8ebe5;
+    color: #a94a2b;
+}
 

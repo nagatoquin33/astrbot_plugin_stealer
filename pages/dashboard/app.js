@@ -38,7 +38,11 @@ createApp({
     components: {
         EmotionLabels: {
             props: ['item', 'label', 'compact'],
-            computed: { keys() { return emotionKeys(this.item); } },
+            computed: {
+                keys() { return emotionKeys(this.item); },
+                visibleKeys() { return this.compact ? this.keys.slice(0, 2) : this.keys; },
+                overflowCount() { return this.compact ? Math.max(0, this.keys.length - 2) : 0; },
+            },
             template: EMOTION_LABELS_TEMPLATE,
         },
     },
@@ -142,8 +146,8 @@ createApp({
             const w = window.innerWidth;
             const h = window.innerHeight;
             const isMobile = w < 768;
-            const gap = isMobile ? 8 : 12;
-            const sidebarWidth = isMobile ? 0 : 180;
+            const gap = isMobile ? 8 : 14;
+            const sidebarWidth = isMobile ? 0 : (sidebarCollapsed.value ? 72 : 212);
             const chromeX = isMobile ? 32 : 64;
             const availableWidth = Math.max(200, w - sidebarWidth - chromeX);
 
@@ -296,6 +300,7 @@ createApp({
             endpoint: '',
             github: '',
             review: false,
+            auto_analyze: false,
             scope_mode: 'public',
             origin_target: '',
             assign_character: false,
@@ -314,7 +319,7 @@ createApp({
 
         const observeImages = () => {
             if (!imgObserver) return;
-            document.querySelectorAll('.item-image[data-hash], .meme-cover-wrap[data-hash], .hero-slide[data-hash], .rank-item[data-hash], .recent-item[data-hash], .review-cover[data-hash]').forEach((el) => {
+            document.querySelectorAll('[data-hash]').forEach((el) => {
                 if (!el.dataset.observed) {
                     el.dataset.observed = 'true';
                     imgObserver.observe(el);
@@ -415,10 +420,10 @@ createApp({
 
         const THEME_OPTIONS = [
             { value: 'auto', key: 'auto', fallback: 'Follow host', group: 'original' },
-            { value: 'dark', key: 'dark', fallback: 'Dark Side of X', swatch: '#0a0b0f,#9fb6ff', group: 'original' },
-            { value: 'light', key: 'light', fallback: 'Light', swatch: '#faf8f3,#8b6914', group: 'original' },
-            { value: 'minecraft', key: 'minecraft', fallback: 'Minecraft', swatch: '#2a1c10,#5d9c3d', group: 'game' },
-            { value: 'fallout', key: 'fallout', fallback: 'Fallout 4', swatch: '#021408,#1bff80', group: 'game' },
+            { value: 'dark', key: 'dark', fallback: 'Night', swatch: '#0a0b0f,#9fb6ff', group: 'original' },
+            { value: 'light', key: 'light', fallback: 'Day', swatch: '#f6f4ee,#c15f3c', group: 'original' },
+            { value: 'minecraft', key: 'minecraft', fallback: 'Minecraft', swatch: '#1e1e1f,#3c8527', group: 'game' },
+            { value: 'fallout', key: 'fallout', fallback: 'Fallout 4', swatch: '#031409,#18ff62', group: 'game' },
             { value: 'bili', key: 'bili', fallback: 'Bili Style', swatch: '#f1f2f3,#fb7299', group: 'special' },
         ];
         const originalThemeOptions = computed(() => THEME_OPTIONS.filter((o) => o.group === 'original'));
@@ -459,10 +464,52 @@ createApp({
             themeMode.value = mode;
             writeStored(THEME_STORAGE_KEY, mode);
             applyTheme();
+            nextTick(observeImages);
             if (persist) persistPrefs({ theme: mode });
         };
         const themePickerOpen = ref(false);
         const closeThemePicker = () => { themePickerOpen.value = false; };
+
+        // ── 辐射 4（Pip-Boy 3000 Mk IV）与 我的世界（背包 / 基岩商城）独立布局状态 ──
+        const isFalloutTheme = computed(() => effectiveTheme.value === 'fallout');
+        const isMinecraftTheme = computed(() => effectiveTheme.value === 'minecraft');
+
+        const foTab = ref('inv');
+        const foPhosphor = ref('green');
+        const foFocusedHash = ref('');
+        const FO_PHOSPHOR_MODES = ['green', 'amber', 'cyan'];
+        const setFoPhosphor = (mode) => {
+            if (FO_PHOSPHOR_MODES.includes(mode)) foPhosphor.value = mode;
+        };
+        const cycleFoPhosphor = () => {
+            const idx = FO_PHOSPHOR_MODES.indexOf(foPhosphor.value);
+            foPhosphor.value = FO_PHOSPHOR_MODES[(idx + 1) % FO_PHOSPHOR_MODES.length];
+        };
+        const foInspectItem = computed(() => {
+            if (foTab.value === 'data') {
+                const list = pendingImages.value || [];
+                return list.find((i) => i.hash === foFocusedHash.value) || list[0] || null;
+            }
+            const list = images.value || [];
+            return list.find((i) => i.hash === foFocusedHash.value) || list[0] || null;
+        });
+
+        const mcHeroIndex = ref(0);
+        const mcTotalPages = computed(() => Math.max(1, Math.ceil((total.value || 0) / (pageSize.value || 1))));
+        const mcPendingTotalPages = computed(() => Math.max(1, Math.ceil((pendingTotal.value || 0) / (pendingPageSize.value || 1))));
+        const mcHeroSlides = computed(() => (
+            [...(images.value || [])].sort((a, b) => (b.use_count || 0) - (a.use_count || 0)).slice(0, 3)
+        ));
+        const mcFeaturedItem = computed(() => {
+            const slides = mcHeroSlides.value;
+            if (!slides.length) return null;
+            return slides[mcHeroIndex.value % slides.length] || slides[0];
+        });
+        const stepMcHero = (delta) => {
+            const count = mcHeroSlides.value.length || 1;
+            mcHeroIndex.value = (mcHeroIndex.value + delta + count) % count;
+            nextTick(observeImages);
+        };
 
         // ── B 站风信息流布局状态 ──
         const isBiliTheme = computed(() => effectiveTheme.value === 'bili');
@@ -691,11 +738,13 @@ createApp({
             const cleanKey = String(key || '').trim();
             if (!cleanKey || cleanKey === '__favorite__') return {};
             const hue = CATEGORY_HUES[cleanKey] ?? hashHue(cleanKey);
-            const isLightFamily = effectiveTheme.value === 'light';
-            const light = isLightFamily ? 36 : 66;
+            const isLightFamily = effectiveTheme.value === 'light' || effectiveTheme.value === 'bili';
+            const isWarmYellow = hue >= 35 && hue <= 85;
+            const light = isLightFamily ? (isWarmYellow ? 29 : 38) : 68;
+            const sat = isLightFamily ? (isWarmYellow ? 74 : 62) : 64;
             return {
-                '--cat-accent': `hsl(${hue}, 58%, ${light}%)`,
-                '--cat-accent-soft': `hsla(${hue}, 55%, ${light}%, 0.16)`,
+                '--cat-accent': `hsl(${hue}, ${sat}%, ${light}%)`,
+                '--cat-accent-soft': `hsla(${hue}, ${sat}%, ${light}%, ${isLightFamily ? 0.13 : 0.16})`,
             };
         };
 
@@ -1137,11 +1186,30 @@ createApp({
             activeSection.value = section;
             sidebarOpen.value = false;
             if (section === 'pending') {
+                if (foTab.value === 'inv') foTab.value = 'data';
                 fetchPendingStats();
                 fetchPendingImages(1);
             } else {
+                if (foTab.value === 'data') foTab.value = 'inv';
                 fetchImages(1);
             }
+        };
+
+        const switchFoTab = (tab) => {
+            foTab.value = tab;
+            if (tab === 'inv' && activeSection.value !== 'library') {
+                switchSection('library');
+            } else if (tab === 'data' && activeSection.value !== 'pending') {
+                switchSection('pending');
+            } else {
+                nextTick(observeImages);
+            }
+        };
+
+        const jumpFoCategory = (categoryKey) => {
+            foTab.value = 'inv';
+            activeSection.value = 'library';
+            selectLibraryCategory(categoryKey);
         };
 
         const libraryTitle = (library) => t('pages.dashboard.libraries.' + (library || 'all'), library || '全部表情');
@@ -1176,6 +1244,27 @@ createApp({
             pendingCategory.value = category;
             sidebarOpen.value = false;
             fetchPendingImages(1);
+        };
+
+        const hasActiveLibraryFilters = computed(() => (
+            Boolean(selectedCategory.value || selectedCharacter.value || String(searchQuery.value || '').trim())
+        ));
+        const clearLibrarySearch = () => {
+            if (!searchQuery.value) return;
+            searchQuery.value = '';
+            fetchImages(1);
+        };
+        const clearPendingSearch = () => {
+            if (!pendingSearchQuery.value) return;
+            pendingSearchQuery.value = '';
+            fetchPendingImages(1);
+        };
+        const clearLibraryFilters = () => {
+            selectedCategory.value = '';
+            selectedCharacter.value = '';
+            if (selectedLibrary.value === 'characters') selectedLibrary.value = '';
+            searchQuery.value = '';
+            fetchImages(1);
         };
 
         const pendingDebouncedSearch = () => {
@@ -1390,19 +1479,51 @@ createApp({
             await fetchStats();
         };
 
+        const buildMissingReanalysisScope = () => {
+            const lib = selectedLibrary.value || '';
+            const rawCat = selectedCategory.value || '';
+            const isFavCat = rawCat === '__favorite__';
+            const cat = isFavCat ? '' : rawCat;
+            const charKey = selectedCharacter.value || '';
+            const params = {};
+            if (lib) params.library = lib;
+            if (cat) params.category = cat;
+            if (charKey) params.character = charKey;
+            if (isFavCat) params.favorite_only = 'true';
+
+            const labels = [];
+            if (lib) labels.push(libraryTitle(lib));
+            if (charKey) {
+                const cl = charKey === '__none__'
+                    ? t('pages.dashboard.characters.unassigned', '通用表情库')
+                    : characterLabel(charKey);
+                if (!labels.includes(cl)) labels.push(cl);
+            }
+            if (isFavCat) {
+                const fl = libraryTitle('favorites');
+                if (!labels.includes(fl)) labels.push(fl);
+            } else if (cat) {
+                labels.push(getCategoryName(cat));
+            }
+            return { params, label: labels.join(' · ') };
+        };
+
         const reanalysis = createBatchReanalysis({
-            ref, computed, apiFetch, selectedImages, showConfirm, refreshView, t,
+            ref, computed, apiFetch, selectedImages, showConfirm, showAlert, refreshView, t,
             loadThumbnail: (hash) => imagePreviewClient.loadThumbnail(hash),
+            getMissingScope: buildMissingReanalysisScope,
         });
         const {
             job: reanalysisJob, open: reanalysisOpen, error: reanalysisError,
             submitting: reanalysisSubmitting, busy: reanalysisBusy,
-            startSelected: startBatchReanalysis, retryFailed: retryBatchReanalysis,
+            startSelected: startBatchReanalysis, startMissing: startMissingReanalysis,
+            retryFailed: retryBatchReanalysis,
             cancel: cancelBatchReanalysis,
             readyResults: reanalysisReady, reviewHash: reanalysisHash,
             reviewResult: reanalysisResult, reviewImage: reanalysisImage,
             reviewLoading: reanalysisLoading, selectResult: selectReanalysisResult,
             saveResult: saveReanalysisResult, discardResult: discardReanalysisResult,
+            saveAllResults: saveAllReanalysisResults, discardAllResults: discardAllReanalysisResults,
         } = reanalysis;
 
         const sourceActions = createSourceActions({
@@ -2296,6 +2417,13 @@ createApp({
                 batchUploadError.value = t('pages.dashboard.alerts.select_category_or_auto', 'Select a category or enable auto analyze.');
                 return;
             }
+            if (batchUploadForm.autoAnalyze && batchFiles.value.length > 20) {
+                const warnMsg = t(
+                    'pages.dashboard.reanalysis.token_warning',
+                    '待分析图片过多（共 {count} 张），请注意 token 消耗，是否继续？',
+                ).replace('{count}', batchFiles.value.length);
+                if (!await showConfirm(warnMsg)) return;
+            }
             batchUploading.value = true;
             batchUploadError.value = null;
             try {
@@ -2519,12 +2647,33 @@ createApp({
             }
         };
 
+        const editingEmotionKey = ref('');
+        const categoryCountFor = (key) => {
+            const found = categories.value.find((item) => item.key === key);
+            return found ? Number(found.count || 0) : 0;
+        };
+        const startEditEmotion = (cat) => {
+            if (!cat?.key) return;
+            editingEmotionKey.value = cat.key;
+            newEmotion.key = cat.key;
+            newEmotion.name = cat.name || '';
+            newEmotion.desc = cat.desc || '';
+        };
+        const cancelEditEmotion = () => {
+            editingEmotionKey.value = '';
+            newEmotion.key = '';
+            newEmotion.name = '';
+            newEmotion.desc = '';
+        };
+
         const openEmotionsModal = () => {
+            editingEmotionKey.value = '';
             emotionsOpen.value = true;
             fetchEmotions();
         };
 
         const closeEmotionsModal = () => {
+            editingEmotionKey.value = '';
             emotionsOpen.value = false;
         };
 
@@ -2557,7 +2706,7 @@ createApp({
                 const currentList = [...availableEmotions.value];
                 const existingIdx = currentList.findIndex((c) => c.key === newCat.key);
                 if (existingIdx >= 0) {
-                    if (!await showConfirm(
+                    if (editingEmotionKey.value !== newCat.key && !await showConfirm(
                         t('pages.dashboard.confirm.update_existing_category', 'Category {key} already exists. Update it?')
                             .replace('{key}', newCat.key)
                     )) {
@@ -2578,6 +2727,7 @@ createApp({
                 if (data.success) {
                     await fetchEmotions();
                     await fetchImages(1);
+                    editingEmotionKey.value = '';
                     newEmotion.key = '';
                     newEmotion.name = '';
                     newEmotion.desc = '';
@@ -3016,9 +3166,11 @@ createApp({
             isBatchMode,
             selectedImages,
             reanalysisJob, reanalysisOpen, reanalysisError, reanalysisSubmitting,
-            reanalysisBusy, startBatchReanalysis, retryBatchReanalysis, cancelBatchReanalysis,
+            reanalysisBusy, startBatchReanalysis, startMissingReanalysis,
+            retryBatchReanalysis, cancelBatchReanalysis,
             reanalysisReady, reanalysisHash, reanalysisResult, reanalysisImage, reanalysisLoading,
             selectReanalysisResult, saveReanalysisResult, discardReanalysisResult,
+            saveAllReanalysisResults, discardAllReanalysisResults,
             contextMenu,
             openContextMenu,
             closeContextMenu,
@@ -3134,12 +3286,20 @@ createApp({
 
             emotionsOpen,
             newEmotion,
+            editingEmotionKey,
             addingEmotion,
             deletingEmotionKey,
+            categoryCountFor,
+            startEditEmotion,
+            cancelEditEmotion,
             openEmotionsModal,
             closeEmotionsModal,
             addEmotion,
             deleteEmotion,
+            hasActiveLibraryFilters,
+            clearLibraryFilters,
+            clearLibrarySearch,
+            clearPendingSearch,
 
             fetchImages,
             debouncedSearch,
@@ -3187,6 +3347,22 @@ createApp({
             // 主题选择 / 视图模式 / 分类 accent
             themeMode,
             effectiveTheme,
+            isFalloutTheme,
+            isMinecraftTheme,
+            foTab,
+            foPhosphor,
+            foFocusedHash,
+            foInspectItem,
+            setFoPhosphor,
+            cycleFoPhosphor,
+            switchFoTab,
+            jumpFoCategory,
+            mcHeroIndex,
+            mcHeroSlides,
+            mcTotalPages,
+            mcPendingTotalPages,
+            mcFeaturedItem,
+            stepMcHero,
             THEME_OPTIONS,
             originalThemeOptions,
             gameThemeOptions,

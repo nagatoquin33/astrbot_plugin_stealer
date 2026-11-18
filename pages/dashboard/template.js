@@ -1,7 +1,38 @@
 export const EMOTION_LABELS_TEMPLATE = `
 <span class="emotion-labels" :class="{ compact }" :title="keys.map(label).join(' · ')">
-    <span v-for="(key, index) in keys" :key="key" class="emotion-chip" :class="{ primary: index === 0 }">{{ label(key) }}</span>
+    <span v-for="(key, index) in visibleKeys" :key="key" class="emotion-chip" :class="{ primary: index === 0 }">{{ label(key) }}</span>
+    <span v-if="overflowCount > 0" class="emotion-chip emotion-chip-more">+{{ overflowCount }}</span>
 </span>`;
+
+const THEME_POPOVER_HTML = `
+<div v-if="themePickerOpen" class="theme-popover" @click.stop>
+    <p class="theme-save-hint">{{ t('pages.dashboard.themes.save_hint', 'Your pick is saved as the default theme.') }}</p>
+    <div class="theme-group-label">{{ t('pages.dashboard.themes.group_original', 'Original') }}</div>
+    <button v-for="opt in originalThemeOptions" :key="opt.value" type="button" class="theme-option"
+        :class="{ active: themeMode === opt.value }" @click="setThemeMode(opt.value); themePickerOpen = false">
+        <span v-if="opt.swatch" class="theme-swatch"
+            :style="{ background: 'linear-gradient(135deg, ' + opt.swatch.split(',')[0] + ' 50%, ' + opt.swatch.split(',')[1] + ' 50%)' }"></span>
+        <span v-else class="theme-swatch" style="background: conic-gradient(#0a0b0f 50%, #f6f4ee 50%)"></span>
+        {{ t('pages.dashboard.themes.' + opt.key, opt.fallback) }}
+        <span v-if="themeMode === opt.value" class="theme-default-tag">{{ t('pages.dashboard.themes.saved_default', 'Default') }}</span>
+    </button>
+    <div class="theme-group-label">{{ t('pages.dashboard.themes.group_game', 'Game inventory') }}</div>
+    <button v-for="opt in gameThemeOptions" :key="opt.value" type="button" class="theme-option"
+        :class="{ active: themeMode === opt.value }" @click="setThemeMode(opt.value); themePickerOpen = false">
+        <span class="theme-swatch"
+            :style="{ background: 'linear-gradient(135deg, ' + opt.swatch.split(',')[0] + ' 50%, ' + opt.swatch.split(',')[1] + ' 50%)' }"></span>
+        {{ t('pages.dashboard.themes.' + opt.key, opt.fallback) }}
+        <span v-if="themeMode === opt.value" class="theme-default-tag">{{ t('pages.dashboard.themes.saved_default', 'Default') }}</span>
+    </button>
+    <div class="theme-group-label">{{ t('pages.dashboard.themes.group_special', 'Featured') }}</div>
+    <button v-for="opt in specialThemeOptions" :key="opt.value" type="button" class="theme-option"
+        :class="{ active: themeMode === opt.value }" @click="setThemeMode(opt.value); themePickerOpen = false">
+        <span class="theme-swatch"
+            :style="{ background: 'linear-gradient(135deg, ' + opt.swatch.split(',').join(', ') + ')' }"></span>
+        {{ t('pages.dashboard.themes.' + opt.key, opt.fallback) }}
+        <span v-if="themeMode === opt.value" class="theme-default-tag">{{ t('pages.dashboard.themes.saved_default', 'Default') }}</span>
+    </button>
+</div>`;
 
 export const TEMPLATE = `
 <template v-if="isBiliTheme">
@@ -49,6 +80,7 @@ export const TEMPLATE = `
                     <div class="nav-more-wrap">
                         <button class="nav-item nav-more" type="button" @click.stop="biliMoreOpen = !biliMoreOpen">更多<svg class="ico ico-chevron"><use href="#i-chevron"/></svg></button>
                         <div v-if="biliMoreOpen" class="nav-more-menu" @click.stop>
+                            <button type="button" @click="startMissingReanalysis(); biliMoreOpen = false">{{ t('pages.dashboard.reanalysis.missing_title', '补充表情包语义') }}</button>
                             <button type="button" @click="openSourceModal(); biliMoreOpen = false">外部源</button>
                             <button type="button" @click="openEmotionsModal(); biliMoreOpen = false">分类管理</button>
                             <button type="button" @click="openCharactersModal(); biliMoreOpen = false">角色管理</button>
@@ -94,34 +126,7 @@ export const TEMPLATE = `
                         </svg>
                         <span>主题</span>
                     </button>
-                    <div v-if="themePickerOpen" class="theme-popover" @click.stop>
-                        <p class="theme-save-hint">{{ t('pages.dashboard.themes.save_hint', 'Your pick is saved as the default theme.') }}</p>
-                        <div class="theme-group-label">{{ t('pages.dashboard.themes.group_original', 'Original') }}</div>
-                        <button v-for="opt in originalThemeOptions" :key="opt.value" type="button" class="theme-option"
-                            :class="{ active: themeMode === opt.value }" @click="setThemeMode(opt.value); themePickerOpen = false">
-                            <span v-if="opt.swatch" class="theme-swatch"
-                                :style="{ background: 'linear-gradient(135deg, ' + opt.swatch.split(',')[0] + ' 50%, ' + opt.swatch.split(',')[1] + ' 50%)' }"></span>
-                            <span v-else class="theme-swatch" style="background: conic-gradient(#161b2a 50%, #faf8f3 50%)"></span>
-                            {{ t('pages.dashboard.themes.' + opt.key, opt.fallback) }}
-                            <span v-if="themeMode === opt.value" class="theme-default-tag">{{ t('pages.dashboard.themes.saved_default', 'Default') }}</span>
-                        </button>
-                        <div class="theme-group-label">{{ t('pages.dashboard.themes.group_game', 'Game inventory') }}</div>
-                        <button v-for="opt in gameThemeOptions" :key="opt.value" type="button" class="theme-option"
-                            :class="{ active: themeMode === opt.value }" @click="setThemeMode(opt.value); themePickerOpen = false">
-                            <span class="theme-swatch"
-                                :style="{ background: 'linear-gradient(135deg, ' + opt.swatch.split(',')[0] + ' 50%, ' + opt.swatch.split(',')[1] + ' 50%)' }"></span>
-                            {{ t('pages.dashboard.themes.' + opt.key, opt.fallback) }}
-                            <span v-if="themeMode === opt.value" class="theme-default-tag">{{ t('pages.dashboard.themes.saved_default', 'Default') }}</span>
-                        </button>
-                        <div class="theme-group-label">{{ t('pages.dashboard.themes.group_special', 'Featured') }}</div>
-                        <button v-for="opt in specialThemeOptions" :key="opt.value" type="button" class="theme-option"
-                            :class="{ active: themeMode === opt.value }" @click="setThemeMode(opt.value); themePickerOpen = false">
-                            <span class="theme-swatch"
-                                :style="{ background: 'linear-gradient(135deg, ' + opt.swatch.split(',').join(', ') + ')' }"></span>
-                            {{ t('pages.dashboard.themes.' + opt.key, opt.fallback) }}
-                            <span v-if="themeMode === opt.value" class="theme-default-tag">{{ t('pages.dashboard.themes.saved_default', 'Default') }}</span>
-                        </button>
-                    </div>
+                    ${THEME_POPOVER_HTML}
                 </div>
                 <button class="avatar" type="button" aria-label="个人中心" @click="showAlert('个人中心')"><span>偷</span></button>
             </div>
@@ -573,8 +578,8 @@ export const TEMPLATE = `
                 </div>
                 <div class="footer-col">
                     <h4>视图</h4>
-                    <a href="#" @click.prevent="setThemeMode('dark')">切换暗色主题</a>
-                    <a href="#" @click.prevent="setThemeMode('light')">切换亮色主题</a>
+                    <a href="#" @click.prevent="setThemeMode('dark')">切换黑夜主题</a>
+                    <a href="#" @click.prevent="setThemeMode('light')">切换白天主题</a>
                     <a href="#" @click.prevent="setThemeMode('auto')">跟随宿主</a>
                 </div>
             </div>
@@ -671,25 +676,755 @@ export const TEMPLATE = `
     </button>
 </div>
 </template>
-<template v-else>
-<div class="fo-chassis" aria-hidden="true">
-    <div class="fo-bezel fo-bezel-l">
-        <div class="fo-thumbwheel"></div>
-        <div class="fo-screw"></div>
-        <div class="fo-screw"></div>
+<template v-else-if="isFalloutTheme">
+<div class="fo-rig" :data-fo-color="foPhosphor">
+    <div class="fo-chassis" aria-hidden="true">
+        <div class="fo-bezel fo-bezel-l">
+            <div class="fo-screw"></div>
+            <div class="fo-thumbwheel"></div>
+            <div class="fo-led-wrap"><span class="fo-led"></span><small>PWR</small></div>
+            <div class="fo-screw"></div>
+        </div>
+        <div class="fo-bezel fo-bezel-r">
+            <div class="fo-screw"></div>
+            <div class="fo-radio-knob"></div>
+            <div class="fo-vent"><i></i><i></i><i></i><i></i></div>
+            <div class="fo-screw"></div>
+        </div>
     </div>
-    <div class="fo-bezel fo-bezel-r">
-        <div class="fo-radio-knob"></div>
-        <div class="fo-screw"></div>
-        <div class="fo-screw"></div>
+
+    <div class="fo-screen">
+        <div class="fo-crt-overlay" aria-hidden="true"></div>
+
+        <header class="fo-topbar">
+            <div class="fo-boot">
+                <span>ROBCO INDUSTRIES UNIFIED OPERATING SYSTEM // PIP-BOY 3000 MK IV</span>
+                <span class="fo-os-ver">PIP-OS V7.1.0.8</span>
+            </div>
+            <div class="fo-top-controls">
+                <button type="button" class="fo-mini-btn" @click="cycleFoPhosphor" title="切换 CRT 荧光色">
+                    CRT: {{ foPhosphor.toUpperCase() }}
+                </button>
+                <div class="theme-picker">
+                    <button type="button" class="fo-mini-btn" @click.stop="themePickerOpen = !themePickerOpen"
+                        :aria-label="t('pages.dashboard.themes.title', 'Theme')">
+                        SKIN ▾
+                    </button>
+                    ${THEME_POPOVER_HTML}
+                </div>
+            </div>
+        </header>
+
+        <nav class="fo-pip-tabs" aria-label="Pip-Boy Primary Navigation">
+            <button type="button" class="fo-pip-tab" :class="{ active: foTab === 'stat' }" @click="switchFoTab('stat')">STAT</button>
+            <button type="button" class="fo-pip-tab" :class="{ active: foTab === 'inv' }" @click="switchFoTab('inv')">INV</button>
+            <button type="button" class="fo-pip-tab" :class="{ active: foTab === 'data' }" @click="switchFoTab('data')">
+                DATA<span v-if="pendingStats.pending > 0" class="fo-tab-badge">{{ pendingStats.pending }}</span>
+            </button>
+            <button type="button" class="fo-pip-tab" :class="{ active: foTab === 'map' }" @click="switchFoTab('map')">MAP</button>
+            <button type="button" class="fo-pip-tab" :class="{ active: foTab === 'radio' }" @click="switchFoTab('radio')">RADIO</button>
+        </nav>
+
+        <!-- INV: 废土全息表情库存 -->
+        <template v-if="foTab === 'inv'">
+            <div class="fo-subbar">
+                <div class="fo-subtabs">
+                    <button v-for="key in ['', 'general', 'favorites', 'characters']" :key="'fo-lib-' + key"
+                        type="button" class="fo-subtab" :class="{ active: selectedLibrary === key }"
+                        @click="selectLibrary(key)">
+                        {{ libraryTitle(key) }} [{{ key ? libraries[key] : libraries.general + libraries.favorites + libraries.characters }}]
+                    </button>
+                </div>
+                <div class="fo-subactions">
+                    <button type="button" class="fo-cmd-btn" @click="openUploadModal">[+ {{ t('pages.dashboard.actions.add', '添加') }}]</button>
+                    <button type="button" class="fo-cmd-btn" @click="openBatchUploadModal">[{{ t('pages.dashboard.actions.batch_import', '批量导入') }}]</button>
+                    <button type="button" class="fo-cmd-btn" @click="startMissingReanalysis">[{{ t('pages.dashboard.reanalysis.missing_short', '补充表情包语义') }}]</button>
+                    <button type="button" class="fo-cmd-btn" @click="openSourceModal">[{{ t('pages.dashboard.actions.sources', '外部源') }}]</button>
+                    <button type="button" class="fo-cmd-btn" :class="{ active: isBatchMode }" @click="toggleBatchMode">
+                        [{{ isBatchMode ? t('pages.dashboard.actions.done', '完成') : t('pages.dashboard.actions.batch', '多选') }}]
+                    </button>
+                    <button type="button" class="fo-cmd-btn" @click="setViewMode(viewMode === 'list' ? 'grid' : 'list')">
+                        [{{ viewMode === 'list' ? 'MATRIX' : 'LIST' }}]
+                    </button>
+                </div>
+            </div>
+
+            <div v-if="selectedLibrary === 'characters'" class="fo-char-strip">
+                <span class="fo-char-kicker">PERSONA //</span>
+                <button type="button" class="fo-char-chip" :class="{ active: !selectedCharacter }" @click="selectLibrary('characters')">
+                    {{ t('pages.dashboard.characters.all', '全部角色') }}
+                </button>
+                <button v-for="item in characters" :key="'fo-ch-' + item.key" type="button" class="fo-char-chip"
+                    :class="{ active: selectedCharacter === item.key }" @click="selectLibraryCharacter(item.key)">
+                    {{ item.name }} ({{ item.count || 0 }})
+                </button>
+                <button type="button" class="fo-cmd-btn" @click="openCharactersModal">[{{ t('pages.dashboard.actions.characters', '角色管理') }}]</button>
+            </div>
+
+            <div class="fo-stage fo-inv-stage">
+                <aside class="fo-dir-pane">
+                    <div class="fo-prompt-box">
+                        <span class="fo-prompt-caret">&gt;</span>
+                        <input v-model="searchQuery" @input="debouncedSearch"
+                            :placeholder="t('pages.dashboard.search.library', 'SEARCH HOLOTAPES...')">
+                        <button v-if="searchQuery" type="button" class="fo-clear-x" @click="clearLibrarySearch">×</button>
+                    </div>
+                    <div class="fo-sort-row">
+                        <span>SORT:</span>
+                        <select v-model="sortBy" @change="fetchImages(1)" class="fo-select">
+                            <option value="newest">{{ t('pages.dashboard.sort.newest', '最新入库') }}</option>
+                            <option value="most_used">{{ t('pages.dashboard.sort.most_used', '高频调用') }}</option>
+                            <option value="least_used">{{ t('pages.dashboard.sort.least_used', '最少使用') }}</option>
+                            <option value="last_used">{{ t('pages.dashboard.sort.last_used', '最近使用') }}</option>
+                            <option value="oldest">{{ t('pages.dashboard.sort.oldest', '最早入库') }}</option>
+                        </select>
+                    </div>
+                    <div class="fo-dir-head">
+                        <span>EMOTION CLASSES</span>
+                        <button type="button" class="fo-mini-btn" @click="openEmotionsModal">+ EDIT</button>
+                    </div>
+                    <div class="fo-dir-list">
+                        <button type="button" class="fo-dir-item" :class="{ active: selectedCategory === '' }" @click="selectLibraryCategory('')">
+                            <span class="fo-pip-mark">{{ selectedCategory === '' ? '■' : '·' }}</span>
+                            <span class="fo-dir-name">{{ t('pages.dashboard.layout.all_emotions', '全部情绪') }}</span>
+                            <span class="fo-dir-count">{{ libraryCategoryTotal }}</span>
+                        </button>
+                        <button v-for="cat in categories" :key="'fo-cat-' + cat.key" type="button" class="fo-dir-item"
+                            :class="{ active: selectedCategory === cat.key, 'is-empty': !cat.count }"
+                            @click="selectLibraryCategory(cat.key)">
+                            <span class="fo-pip-mark">{{ selectedCategory === cat.key ? '■' : '·' }}</span>
+                            <span class="fo-dir-name">{{ cat.name }}</span>
+                            <span class="fo-dir-count">{{ cat.count }}</span>
+                        </button>
+                    </div>
+                </aside>
+
+                <main class="fo-main-pane">
+                    <div v-if="hasActiveLibraryFilters" class="fo-filter-strip">
+                        <span>ACTIVE FILTER:</span>
+                        <button v-if="selectedCategory" type="button" class="fo-filter-tag" @click="selectLibraryCategory('')">
+                            {{ getCategoryName(selectedCategory) }} [×]
+                        </button>
+                        <button v-if="selectedCharacter" type="button" class="fo-filter-tag" @click="selectLibraryCharacter('')">
+                            {{ characterLabel(selectedCharacter) }} [×]
+                        </button>
+                        <button v-if="searchQuery.trim()" type="button" class="fo-filter-tag" @click="clearLibrarySearch">
+                            "{{ searchQuery.trim() }}" [×]
+                        </button>
+                        <button type="button" class="fo-mini-btn" @click="clearLibraryFilters">CLEAR</button>
+                    </div>
+
+                    <div v-if="loading" class="fo-empty-box">
+                        <p>&gt; ACCESSING VAULT-TEC HOLOTAPE DRIVE...</p>
+                    </div>
+                    <div v-else-if="images.length === 0" class="fo-empty-box">
+                        <div class="fo-vaultboy fo-vaultboy-empty" role="img" aria-label="Vault Boy"></div>
+                        <p>&gt; {{ t('pages.dashboard.empty.library_title', 'NO HOLOTAPES FOUND') }}</p>
+                        <button type="button" class="fo-cmd-btn" @click="openUploadModal">[+ UPLOAD HOLOTAPE]</button>
+                    </div>
+                    <div v-else class="fo-holotape-view" :class="{ 'is-list': viewMode === 'list' }">
+                        <div v-for="img in images" :key="'fo-img-' + img.hash" class="fo-holotape-slot"
+                            :class="{ selected: selectedImages.has(img.hash), focused: foInspectItem?.hash === img.hash }"
+                            role="button" tabindex="0"
+                            @mouseenter="foFocusedHash = img.hash; onItemSlotEnter($event)"
+                            @focus="foFocusedHash = img.hash"
+                            @contextmenu.prevent.stop="openContextMenu($event, img)"
+                            @click="isBatchMode ? toggleSelection(img) : openPreview(img)"
+                            @keydown.enter.prevent="isBatchMode ? toggleSelection(img) : openPreview(img)">
+                            <div class="fo-slot-thumb" :data-hash="img.hash">
+                                <div v-if="!imageDataUrls[img.hash]" class="image-placeholder" :style="{ backgroundColor: hashToColor(img.hash) }"></div>
+                                <img v-else :src="imageDataUrls[img.hash]" loading="lazy" decoding="async" :alt="img.desc">
+                                <span v-if="img.is_favorite" class="fo-slot-fav">★</span>
+                                <span v-if="isBatchMode" class="fo-slot-check">{{ selectedImages.has(img.hash) ? '[✓]' : '[ ]' }}</span>
+                            </div>
+                            <div class="fo-slot-caption">
+                                <span class="fo-slot-title">{{ getCategoryName(img.category) }}</span>
+                                <span v-if="viewMode === 'list'" class="fo-slot-desc">{{ img.desc || img.overlay_text || '—' }}</span>
+                                <span class="fo-slot-val">USE {{ img.use_count || 0 }}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <footer v-if="total > pageSize" class="fo-pager">
+                        <button type="button" class="fo-cmd-btn" :disabled="currentPage === 1" @click="prevPage">&lt; PREV</button>
+                        <span>SECTOR {{ currentPage }} / {{ mcTotalPages }} ({{ total }})</span>
+                        <button type="button" class="fo-cmd-btn" :disabled="currentPage * pageSize >= total" @click="nextPage">NEXT &gt;</button>
+                    </footer>
+                </main>
+
+                <aside class="fo-inspector-pane">
+                    <template v-if="foInspectItem">
+                        <div class="fo-reticle-box" :data-hash="foInspectItem.hash" @click="openPreview(foInspectItem)">
+                            <img v-if="imageDataUrls[foInspectItem.hash]" :src="imageDataUrls[foInspectItem.hash]" :alt="foInspectItem.desc">
+                            <div v-else class="fo-vaultboy fo-vaultboy-inspector" role="img" aria-label="Vault Boy"></div>
+                            <span class="fo-reticle-corner tl"></span>
+                            <span class="fo-reticle-corner tr"></span>
+                            <span class="fo-reticle-corner bl"></span>
+                            <span class="fo-reticle-corner br"></span>
+                        </div>
+                        <div class="fo-stat-rows">
+                            <div class="fo-stat-row"><span>CLASS</span><strong>{{ getCategoryName(foInspectItem.category) }}</strong></div>
+                            <div class="fo-stat-row"><span>USAGE</span><strong>{{ foInspectItem.use_count || 0 }}</strong></div>
+                            <div class="fo-stat-row"><span>SCOPE</span><strong>{{ getScopeLabel(foInspectItem.scope_mode) }}</strong></div>
+                            <div class="fo-stat-row"><span>STATUS</span><strong>{{ retentionLabel(foInspectItem) }}</strong></div>
+                            <div v-if="foInspectItem.character" class="fo-stat-row"><span>PERSONA</span><strong>{{ characterLabel(foInspectItem.character) }}</strong></div>
+                            <div class="fo-stat-row"><span>DATE</span><strong>{{ formatDate(foInspectItem.created_at) }}</strong></div>
+                        </div>
+                        <div class="fo-lore-box">
+                            <p>{{ foInspectItem.desc || foInspectItem.overlay_text || t('pages.dashboard.messages.no_description', 'NO TRANSCRIPT RECORDED') }}</p>
+                            <div v-if="(foInspectItem.tags || []).length" class="fo-tag-line">
+                                <span v-for="tag in foInspectItem.tags.slice(0, 5)" :key="'fot-' + tag">#{{ tag }}</span>
+                            </div>
+                        </div>
+                        <div class="fo-keybar">
+                            <button type="button" class="fo-cmd-btn" @click="openPreview(foInspectItem)">[E] 详情</button>
+                            <button type="button" class="fo-cmd-btn" @click="toggleFavorite(foInspectItem)">[F] {{ foInspectItem.is_favorite ? '取消收藏' : '收藏' }}</button>
+                            <button type="button" class="fo-cmd-btn" @click="openContextMenu($event, foInspectItem)">[R] 菜单</button>
+                        </div>
+                    </template>
+                    <div v-else class="fo-inspector-idle">
+                        <div class="fo-vaultboy fo-vaultboy-inspector" role="img" aria-label="Vault Boy"></div>
+                        <p>VAULT-TEC ARCHIVE TERMINAL READY</p>
+                    </div>
+                </aside>
+            </div>
+        </template>
+
+        <!-- DATA: 待审核隔离信号 -->
+        <template v-else-if="foTab === 'data'">
+            <div class="fo-subbar">
+                <div class="fo-subtabs">
+                    <span class="fo-subtab active">QUARANTINE QUEUE [{{ pendingStats.pending || 0 }} / {{ pendingStats.capacity || 200 }}]</span>
+                    <span v-if="pendingStats.paused" class="fo-alert-flag">! BUFFER FULL — AUTO-CAPTURE PAUSED</span>
+                </div>
+                <div class="fo-subactions">
+                    <button type="button" class="fo-cmd-btn" :class="{ active: pendingBatchMode }" @click="togglePendingBatchMode">
+                        [{{ pendingBatchMode ? t('pages.dashboard.actions.done', '完成') : t('pages.dashboard.actions.batch', '批量审核') }}]
+                    </button>
+                    <template v-if="pendingBatchMode">
+                        <button type="button" class="fo-cmd-btn" @click="toggleSelectAllPending">[{{ allPendingSelected ? '取消全选' : '全选本页' }}]</button>
+                        <button type="button" class="fo-cmd-btn" @click="approvePendingBatch">[✔ 批量通过]</button>
+                        <button type="button" class="fo-cmd-btn" @click="rejectPendingBatch(false)">[✖ 批量删除]</button>
+                        <button type="button" class="fo-cmd-btn" @click="rejectPendingBatch(true)">[⊘ 批量拉黑]</button>
+                    </template>
+                </div>
+            </div>
+
+            <div class="fo-stage fo-inv-stage">
+                <aside class="fo-dir-pane">
+                    <div class="fo-prompt-box">
+                        <span class="fo-prompt-caret">&gt;</span>
+                        <input v-model="pendingSearchQuery" @input="pendingDebouncedSearch"
+                            :placeholder="t('pages.dashboard.search.pending', 'FILTER INCOMING...')">
+                        <button v-if="pendingSearchQuery" type="button" class="fo-clear-x" @click="clearPendingSearch">×</button>
+                    </div>
+                    <div class="fo-dir-head"><span>SIGNAL FILTER</span></div>
+                    <div class="fo-dir-list">
+                        <button type="button" class="fo-dir-item" :class="{ active: pendingCategory === '' }" @click="selectPendingCategory('')">
+                            <span class="fo-pip-mark">{{ pendingCategory === '' ? '■' : '·' }}</span>
+                            <span class="fo-dir-name">{{ t('pages.dashboard.categories.all', '全部待审') }}</span>
+                            <span class="fo-dir-count">{{ pendingCategoryTotal }}</span>
+                        </button>
+                        <button v-for="cat in pendingCategories" :key="'fop-' + cat.key" type="button" class="fo-dir-item"
+                            :class="{ active: pendingCategory === cat.key }" @click="selectPendingCategory(cat.key)">
+                            <span class="fo-pip-mark">{{ pendingCategory === cat.key ? '■' : '·' }}</span>
+                            <span class="fo-dir-name">{{ cat.name }}</span>
+                            <span class="fo-dir-count">{{ cat.count }}</span>
+                        </button>
+                    </div>
+                </aside>
+
+                <main class="fo-main-pane">
+                    <div v-if="pendingLoading" class="fo-empty-box"><p>&gt; DECODING INCOMING TRANSMISSIONS...</p></div>
+                    <div v-else-if="pendingImages.length === 0" class="fo-empty-box">
+                        <div class="fo-vaultboy fo-vaultboy-empty" role="img" aria-label="Vault Boy"></div>
+                        <p>&gt; {{ t('pages.dashboard.empty.pending_title', 'QUARANTINE BUFFER CLEAR') }}</p>
+                    </div>
+                    <div v-else class="fo-data-list">
+                        <div v-for="item in pendingImages" :key="'fop-item-' + item.id" class="fo-data-row"
+                            :class="{ selected: pendingSelectedImages.has(item.id), focused: foInspectItem?.hash === item.hash }"
+                            @mouseenter="foFocusedHash = item.hash"
+                            @click="pendingBatchMode ? togglePendingSelection(item) : openPendingPreview(item)">
+                            <div class="fo-data-thumb" :data-hash="item.hash">
+                                <div v-if="!imageDataUrls[item.hash]" class="image-placeholder" :style="{ backgroundColor: hashToColor(item.hash) }"></div>
+                                <img v-else :src="imageDataUrls[item.hash]" loading="lazy" decoding="async" :alt="item.desc">
+                            </div>
+                            <div class="fo-data-meta">
+                                <div class="fo-data-head">
+                                    <strong>{{ getCategoryName(item.category) }}</strong>
+                                    <span>{{ pendingStatusLabel(item) }}</span>
+                                </div>
+                                <p>{{ item.desc || t('pages.dashboard.messages.no_description', 'AWAITING VLM ANALYSIS') }}</p>
+                            </div>
+                            <div v-if="!pendingBatchMode" class="fo-data-btns" @click.stop>
+                                <button type="button" class="fo-cmd-btn" :disabled="pendingApproving.has(item.id) || ['queued', 'processing'].includes(item.review_status)" @click="approvePending(item.id)">[✔ 通过]</button>
+                                <button type="button" class="fo-cmd-btn" :disabled="['queued', 'processing'].includes(item.review_status)" @click="openPendingEdit(item)">[✎ 编辑]</button>
+                                <button type="button" class="fo-cmd-btn" :disabled="item.review_status === 'processing'" @click="rejectPending(item.id)">[✖ 删除]</button>
+                                <button type="button" class="fo-cmd-btn" :disabled="item.review_status === 'processing'" @click="rejectPending(item.id, true)">[⊘ 拉黑]</button>
+                            </div>
+                        </div>
+                    </div>
+                    <footer v-if="pendingTotal > pendingPageSize" class="fo-pager">
+                        <button type="button" class="fo-cmd-btn" :disabled="pendingCurrentPage === 1" @click="fetchPendingImages(pendingCurrentPage - 1)">&lt; PREV</button>
+                        <span>QUEUE {{ pendingCurrentPage }} / {{ mcPendingTotalPages }}</span>
+                        <button type="button" class="fo-cmd-btn" :disabled="pendingCurrentPage * pendingPageSize >= pendingTotal" @click="fetchPendingImages(pendingCurrentPage + 1)">NEXT &gt;</button>
+                    </footer>
+                </main>
+
+                <aside class="fo-inspector-pane">
+                    <template v-if="foInspectItem">
+                        <div class="fo-reticle-box" :data-hash="foInspectItem.hash" @click="openPendingPreview(foInspectItem)">
+                            <img v-if="imageDataUrls[foInspectItem.hash]" :src="imageDataUrls[foInspectItem.hash]" :alt="foInspectItem.desc">
+                            <div v-else class="fo-vaultboy fo-vaultboy-inspector" role="img" aria-label="Vault Boy"></div>
+                            <span class="fo-reticle-corner tl"></span><span class="fo-reticle-corner tr"></span>
+                            <span class="fo-reticle-corner bl"></span><span class="fo-reticle-corner br"></span>
+                        </div>
+                        <div class="fo-stat-rows">
+                            <div class="fo-stat-row"><span>CLASS</span><strong>{{ getCategoryName(foInspectItem.category) }}</strong></div>
+                            <div class="fo-stat-row"><span>STATE</span><strong>{{ pendingStatusLabel(foInspectItem) }}</strong></div>
+                            <div class="fo-stat-row"><span>SOURCE</span><strong>{{ foInspectItem.source === 'auto' ? 'AUTO CAPTURE' : 'MANUAL' }}</strong></div>
+                        </div>
+                    </template>
+                </aside>
+            </div>
+        </template>
+
+        <!-- STAT: 避难所小子状态与系统维护面板 -->
+        <template v-else-if="foTab === 'stat'">
+            <div class="fo-stage fo-stat-stage">
+                <div class="fo-stat-grid">
+                    <div class="fo-limb-col">
+                        <div class="fo-limb-card">
+                            <span>ARCHIVE TOTAL</span>
+                            <strong>{{ stats.total || 0 }}</strong>
+                            <div class="fo-bar"><i :style="{ width: hudHpPct }"></i></div>
+                        </div>
+                        <div class="fo-limb-card">
+                            <span>EMOTION CLASSES</span>
+                            <strong>{{ stats.categories || 0 }}</strong>
+                            <div class="fo-bar"><i style="width: 82%"></i></div>
+                        </div>
+                        <div class="fo-limb-card">
+                            <span>TODAY INGESTED</span>
+                            <strong>+{{ stats.today || 0 }}</strong>
+                            <div class="fo-bar"><i :style="{ width: hudXpPct }"></i></div>
+                        </div>
+                    </div>
+
+                    <div class="fo-vaultboy-center">
+                        <div class="fo-vaultboy fo-vaultboy-hero" role="img" aria-label="Vault Boy"></div>
+                        <div class="fo-status-caption">{{ t('pages.dashboard.header.brand', '亨利的战利品') }} // {{ getHealthText(healthStatus) }}</div>
+                    </div>
+
+                    <div class="fo-limb-col">
+                        <div class="fo-limb-card">
+                            <span>QUARANTINE POOL</span>
+                            <strong>{{ pendingStats.pending || 0 }} / {{ pendingStats.capacity || 200 }}</strong>
+                            <div class="fo-bar"><i :style="{ width: hudApPct }"></i></div>
+                        </div>
+                        <div class="fo-limb-card">
+                            <span>AUTO EVICTION POOL</span>
+                            <strong>{{ libraries.automatic || 0 }} / {{ automaticLimit }}</strong>
+                            <div class="fo-bar"><i :style="{ width: Math.min(100, ((libraries.automatic || 0) / Math.max(1, automaticLimit)) * 100) + '%' }"></i></div>
+                        </div>
+                        <div class="fo-limb-card">
+                            <span>FAVORITE VAULT</span>
+                            <strong>{{ libraries.favorites || 0 }}</strong>
+                            <div class="fo-bar"><i style="width: 68%"></i></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="fo-maint-deck">
+                    <button type="button" class="fo-cmd-btn" @click="openUploadModal">[+ 上传单张表情]</button>
+                    <button type="button" class="fo-cmd-btn" @click="openBatchUploadModal">[批量导入目录/图片]</button>
+                    <button type="button" class="fo-cmd-btn" @click="startMissingReanalysis">[{{ t('pages.dashboard.reanalysis.missing_title', '补充表情包语义') }}]</button>
+                    <button type="button" class="fo-cmd-btn" @click="openSourceModal">[外部表情包源同步]</button>
+                    <button type="button" class="fo-cmd-btn" @click="openEmotionsModal">[情绪分类终端]</button>
+                    <button type="button" class="fo-cmd-btn" @click="openCharactersModal">[角色归档终端]</button>
+                    <button type="button" class="fo-cmd-btn" @click="runStorageCleanup">[存储体检与清理]</button>
+                    <button v-if="reanalysisJob" type="button" class="fo-cmd-btn" @click="reanalysisOpen = true">
+                        [重分析任务 {{ reanalysisJob.processed }}/{{ reanalysisJob.total }}]
+                    </button>
+                </div>
+            </div>
+        </template>
+
+        <!-- MAP: 图库扇区分布雷达 -->
+        <template v-else-if="foTab === 'map'">
+            <div class="fo-stage fo-map-stage">
+                <div class="fo-map-header">
+                    <span>COMMONWEALTH ARCHIVE TELEMETRY // CLICK ANY SECTOR TO DEPLOY</span>
+                    <span>TOTAL SIGNALS: {{ libraryCategoryTotal }}</span>
+                </div>
+                <div class="fo-sector-bars">
+                    <button v-for="cat in categories" :key="'fomap-' + cat.key" type="button" class="fo-sector-row"
+                        @click="jumpFoCategory(cat.key)">
+                        <span class="fo-sector-name">{{ cat.name }} ({{ cat.key }})</span>
+                        <div class="fo-sector-track">
+                            <i :style="{ width: (libraryCategoryTotal ? Math.max(2, (cat.count / libraryCategoryTotal) * 100) : 0) + '%' }"></i>
+                        </div>
+                        <span class="fo-sector-val">{{ cat.count }}</span>
+                    </button>
+                </div>
+            </div>
+        </template>
+
+        <!-- RADIO: CRT 荧光调谐器与界面切换电台 -->
+        <template v-else-if="foTab === 'radio'">
+            <div class="fo-stage fo-radio-stage">
+                <div class="fo-radio-left">
+                    <h3>CRT PHOSPHOR FREQUENCY</h3>
+                    <button type="button" class="fo-radio-station" :class="{ active: foPhosphor === 'green' }" @click="setFoPhosphor('green')">
+                        <span>{{ foPhosphor === 'green' ? '■' : '·' }} COMMONWEALTH PHOSPHOR GREEN (DEFAULT)</span>
+                        <small>#18FF62</small>
+                    </button>
+                    <button type="button" class="fo-radio-station" :class="{ active: foPhosphor === 'amber' }" @click="setFoPhosphor('amber')">
+                        <span>{{ foPhosphor === 'amber' ? '■' : '·' }} MOJAVE OUTPOST AMBER (NEW VEGAS)</span>
+                        <small>#FFB641</small>
+                    </button>
+                    <button type="button" class="fo-radio-station" :class="{ active: foPhosphor === 'cyan' }" @click="setFoPhosphor('cyan')">
+                        <span>{{ foPhosphor === 'cyan' ? '■' : '·' }} INSTITUTE SYNTH CYAN (VAULT-TEC)</span>
+                        <small>#2ECFFF</small>
+                    </button>
+
+                    <h3 style="margin-top:18px">HOLOTAPE INTERFACE OVERRIDE</h3>
+                    <button v-for="opt in THEME_OPTIONS" :key="'forad-' + opt.value" type="button" class="fo-radio-station"
+                        :class="{ active: themeMode === opt.value }" @click="setThemeMode(opt.value)">
+                        <span>{{ themeMode === opt.value ? '■' : '·' }} {{ t('pages.dashboard.themes.' + opt.key, opt.fallback) }}</span>
+                        <small>{{ opt.value.toUpperCase() }}</small>
+                    </button>
+                </div>
+                <div class="fo-radio-wave" aria-hidden="true">
+                    <div class="fo-oscilloscope">
+                        <span></span><span></span><span></span><span></span><span></span><span></span>
+                        <span></span><span></span><span></span><span></span><span></span><span></span>
+                    </div>
+                    <p>SIGNAL LOCKED // 98.7 MHZ VAULT-TEC BROADCAST</p>
+                </div>
+            </div>
+        </template>
+
+        <footer class="fo-hud">
+            <div class="fo-hud-cell">
+                <span class="fo-hud-key">HP</span>
+                <div class="fo-hud-meter"><i :style="{ width: hudHpPct }"></i></div>
+                <strong class="fo-hud-val">{{ stats.total || 0 }}</strong>
+            </div>
+            <div class="fo-hud-cell is-level">
+                <span class="fo-hud-key">LEVEL {{ stats.categories || 0 }}</span>
+                <div class="fo-hud-meter"><i :style="{ width: hudXpPct }"></i></div>
+                <strong class="fo-hud-val">+{{ stats.today || 0 }}</strong>
+            </div>
+            <div class="fo-hud-cell">
+                <span class="fo-hud-key">AP</span>
+                <div class="fo-hud-meter"><i :style="{ width: hudApPct }"></i></div>
+                <strong class="fo-hud-val">{{ pendingStats.pending || 0 }}/{{ pendingStats.capacity || 200 }}</strong>
+            </div>
+        </footer>
     </div>
-    <div class="fo-bezel fo-bezel-b"></div>
 </div>
-<header class="codex-header">
-    <div class="fo-boot" aria-hidden="true">
-        <span>ROBCO INDUSTRIES UNIFIED OPERATING SYSTEM</span>
-        <span>COPYRIGHT 2075-2077 ROBCO INDUSTRIES</span>
+</template>
+<template v-else-if="isMinecraftTheme">
+<div class="mc-root is-marketplace">
+    <header class="mc-ore-header">
+        <div class="mc-ore-left">
+            <button type="button" class="mc-ore-icon-btn" @click="toggleSidebarCollapsed"
+                :aria-label="sidebarCollapsed ? t('pages.dashboard.actions.expand_sidebar', '展开侧栏') : t('pages.dashboard.actions.collapse_sidebar', '折叠侧栏')"
+                :title="sidebarCollapsed ? t('pages.dashboard.actions.expand_sidebar', '展开侧栏') : t('pages.dashboard.actions.collapse_sidebar', '折叠侧栏')">
+                ☰
+            </button>
+            <div class="mc-ore-brand" @click="switchSection('library'); selectLibrary('')" role="button" tabindex="0">
+                <span class="mc-ore-emblem" aria-hidden="true">⛏</span>
+                <div class="mc-ore-brand-copy">
+                    <strong>MINECRAFT 表情商城</strong>
+                    <small>BEDROCK MARKETPLACE · {{ t('pages.dashboard.header.brand', '亨利的战利品') }}</small>
+                </div>
+            </div>
+        </div>
+
+        <div class="mc-ore-search">
+            <span class="mc-ore-search-ico" aria-hidden="true">🔍</span>
+            <input v-if="activeSection === 'library'" v-model="searchQuery" @input="debouncedSearch"
+                :placeholder="t('pages.dashboard.search.library', '搜索商城表情包、标签、文字...')">
+            <input v-else v-model="pendingSearchQuery" @input="pendingDebouncedSearch"
+                :placeholder="t('pages.dashboard.search.pending', '搜索待审核工坊...')">
+            <button v-if="activeSection === 'library' && searchQuery" type="button" class="mc-ore-clear" @click="clearLibrarySearch">×</button>
+            <button v-if="activeSection === 'pending' && pendingSearchQuery" type="button" class="mc-ore-clear" @click="clearPendingSearch">×</button>
+        </div>
+
+        <div class="mc-ore-right">
+            <div class="mc-minecoin-pill" title="已收录表情总数 / 今日新增">
+                <span class="mc-coin-ico" aria-hidden="true">◆</span>
+                <strong>{{ stats.total || 0 }}</strong>
+                <small v-if="stats.today">+{{ stats.today }}</small>
+                <button type="button" class="mc-coin-plus" @click="openUploadModal" title="上架新表情">+</button>
+            </div>
+            <button type="button" class="mc-ore-btn" :class="{ 'is-green': activeSection === 'pending' }"
+                @click="switchSection(activeSection === 'pending' ? 'library' : 'pending')">
+                📥 审核工坊
+                <span v-if="pendingStats.pending > 0" class="mc-ore-count-pill">{{ pendingStats.pending }}</span>
+            </button>
+            <div class="theme-picker">
+                <button type="button" class="mc-ore-btn" @click.stop="themePickerOpen = !themePickerOpen"
+                    :aria-label="t('pages.dashboard.themes.title', 'Theme')">🎨 主题</button>
+                ${THEME_POPOVER_HTML}
+            </div>
+        </div>
+    </header>
+
+    <div class="mc-ore-body" :class="{ 'is-collapsed': sidebarCollapsed }">
+        <aside v-if="!sidebarCollapsed" class="mc-ore-sidebar">
+            <div class="mc-ore-nav-group">
+                <div class="mc-ore-kicker"><span>商城分区</span></div>
+                <button v-for="key in ['', 'general', 'favorites', 'characters']" :key="'ore-lib-' + key"
+                    type="button" class="mc-ore-nav" :class="{ active: activeSection === 'library' && selectedLibrary === key }"
+                    @click="switchSection('library'); selectLibrary(key)">
+                    <span>{{ libraryTitle(key) }}</span>
+                    <small>{{ key ? libraries[key] : libraries.general + libraries.favorites + libraries.characters }}</small>
+                </button>
+                <button type="button" class="mc-ore-nav" :class="{ active: activeSection === 'pending' }" @click="switchSection('pending')">
+                    <span>待审创作工坊</span>
+                    <small>{{ pendingStats.pending || 0 }}</small>
+                </button>
+            </div>
+
+            <div class="mc-ore-nav-group">
+                <div class="mc-ore-kicker"><span>创作者工具台</span></div>
+                <button type="button" class="mc-ore-nav" @click="startMissingReanalysis">
+                    <span>✨ {{ t('pages.dashboard.reanalysis.missing_title', '补充表情包语义') }}</span>
+                </button>
+                <button type="button" class="mc-ore-nav" @click="openBatchUploadModal">
+                    <span>📂 {{ t('pages.dashboard.actions.batch_import', '批量上架') }}</span>
+                </button>
+                <button type="button" class="mc-ore-nav" @click="openSourceModal">
+                    <span>🌐 {{ t('pages.dashboard.actions.sources', '外部资源源') }}</span>
+                </button>
+                <button type="button" class="mc-ore-nav" @click="openCharactersModal">
+                    <span>🧑 {{ t('pages.dashboard.actions.characters', '角色管理') }}</span>
+                </button>
+                <button type="button" class="mc-ore-nav" @click="runStorageCleanup">
+                    <span>🧹 {{ t('pages.dashboard.actions.storage_cleanup', '存储清理') }}</span>
+                </button>
+                <button v-if="reanalysisJob" type="button" class="mc-ore-nav active" @click="reanalysisOpen = true">
+                    <span>✨ 重分析进度</span>
+                    <small>{{ reanalysisJob.processed }}/{{ reanalysisJob.total }}</small>
+                </button>
+            </div>
+
+            <div v-if="activeSection === 'library'" class="mc-ore-nav-group">
+                <div class="mc-ore-kicker">
+                    <span>情绪标签包</span>
+                    <button type="button" class="mc-ore-link" @click="openEmotionsModal">管理</button>
+                </div>
+                <button type="button" class="mc-ore-nav" :class="{ active: selectedCategory === '' }" @click="selectLibraryCategory('')">
+                    <span>全部情绪</span>
+                    <small>{{ libraryCategoryTotal }}</small>
+                </button>
+                <button v-for="cat in categories" :key="'ore-cat-' + cat.key" type="button" class="mc-ore-nav"
+                    :class="{ active: selectedCategory === cat.key, 'is-empty': !cat.count }" @click="selectLibraryCategory(cat.key)">
+                    <span>{{ cat.name }}</span>
+                    <small>{{ cat.count }}</small>
+                </button>
+            </div>
+
+            <div v-else class="mc-ore-nav-group">
+                <div class="mc-ore-kicker"><span>工坊情绪筛选</span></div>
+                <button type="button" class="mc-ore-nav" :class="{ active: pendingCategory === '' }" @click="selectPendingCategory('')">
+                    <span>全部待审</span>
+                    <small>{{ pendingCategoryTotal }}</small>
+                </button>
+                <button v-for="cat in pendingCategories" :key="'ore-pcat-' + cat.key" type="button" class="mc-ore-nav"
+                    :class="{ active: pendingCategory === cat.key }" @click="selectPendingCategory(cat.key)">
+                    <span>{{ cat.name }}</span>
+                    <small>{{ cat.count }}</small>
+                </button>
+            </div>
+        </aside>
+
+        <main class="mc-ore-main">
+            <template v-if="activeSection === 'library'">
+                <nav v-if="sidebarCollapsed" class="mc-ore-rail" aria-label="情绪快选">
+                    <button type="button" class="mc-ore-chip" :class="{ active: selectedCategory === '' }" @click="selectLibraryCategory('')">
+                        全部情绪 ({{ libraryCategoryTotal }})
+                    </button>
+                    <button v-for="cat in categories" :key="'orerail-' + cat.key" type="button" class="mc-ore-chip"
+                        :class="{ active: selectedCategory === cat.key, 'is-empty': !cat.count }" @click="selectLibraryCategory(cat.key)">
+                        {{ cat.name }} ({{ cat.count }})
+                    </button>
+                </nav>
+
+                <section v-if="mcFeaturedItem && !hasActiveLibraryFilters && currentPage === 1" class="mc-ore-hero">
+                    <div class="mc-ore-hero-copy">
+                        <div class="mc-ore-hero-top">
+                            <span class="mc-ore-badge">FEATURED PACK · 商城精选</span>
+                            <span class="mc-ore-hero-stat">★ 已发送 {{ mcFeaturedItem.use_count || 0 }} 次 · {{ getScopeLabel(mcFeaturedItem.scope_mode) }}</span>
+                        </div>
+                        <h2>{{ getCategoryName(mcFeaturedItem.category) }} · 精选表情藏品</h2>
+                        <p>{{ mcFeaturedItem.desc || mcFeaturedItem.overlay_text || '高频互动表情包，在群聊与对话中结合语境自动匹配发送。' }}</p>
+                        <div class="mc-ore-hero-btns">
+                            <button type="button" class="mc-ore-cta" @click="openPreview(mcFeaturedItem)">立即查看详情</button>
+                            <button type="button" class="mc-ore-btn" @click="openBatchUploadModal">📂 批量上架</button>
+                            <button type="button" class="mc-ore-btn" @click="openSourceModal">🌐 导入资源包</button>
+                            <div v-if="mcHeroSlides.length > 1" class="mc-ore-hero-arrows">
+                                <button type="button" class="mc-ore-icon-btn" @click="stepMcHero(-1)" aria-label="上一张精选">◀</button>
+                                <button type="button" class="mc-ore-icon-btn" @click="stepMcHero(1)" aria-label="下一张精选">▶</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mc-ore-hero-art" :data-hash="mcFeaturedItem.hash" @click="openPreview(mcFeaturedItem)">
+                        <img v-if="imageDataUrls[mcFeaturedItem.hash]" :src="imageDataUrls[mcFeaturedItem.hash]" :alt="mcFeaturedItem.desc">
+                    </div>
+                </section>
+
+                <div v-if="selectedLibrary === 'characters'" class="mc-ore-rail">
+                    <button type="button" class="mc-ore-chip" :class="{ active: !selectedCharacter }" @click="selectLibrary('characters')">全部角色</button>
+                    <button v-for="item in characters" :key="'ore-ch-' + item.key" type="button" class="mc-ore-chip"
+                        :class="{ active: selectedCharacter === item.key }" @click="selectLibraryCharacter(item.key)">
+                        {{ item.name }} ({{ item.count || 0 }})
+                    </button>
+                    <button type="button" class="mc-ore-link" @click="openCharactersModal">+ 角色管理</button>
+                </div>
+
+                <div class="mc-ore-subbar">
+                    <div class="mc-ore-subleft">
+                        <strong>{{ libraryTitle(selectedLibrary) }}</strong>
+                        <span>共 {{ total }} 件商品 · 分类 {{ stats.categories || 0 }} · {{ getHealthText(healthStatus) }}</span>
+                        <template v-if="hasActiveLibraryFilters">
+                            <button v-if="selectedCategory" type="button" class="mc-ore-chip active" @click="selectLibraryCategory('')">
+                                {{ getCategoryName(selectedCategory) }} ×
+                            </button>
+                            <button v-if="selectedCharacter" type="button" class="mc-ore-chip active" @click="selectLibraryCharacter('')">
+                                {{ characterLabel(selectedCharacter) }} ×
+                            </button>
+                            <button v-if="searchQuery.trim()" type="button" class="mc-ore-chip active" @click="clearLibrarySearch">
+                                "{{ searchQuery.trim() }}" ×
+                            </button>
+                            <button type="button" class="mc-ore-link" @click="clearLibraryFilters">清除筛选</button>
+                        </template>
+                    </div>
+                    <div class="mc-ore-subright">
+                        <select v-model="sortBy" @change="fetchImages(1)" class="mc-ore-select">
+                            <option value="newest">{{ t('pages.dashboard.sort.newest', '最新上架') }}</option>
+                            <option value="most_used">{{ t('pages.dashboard.sort.most_used', '最受欢迎') }}</option>
+                            <option value="last_used">{{ t('pages.dashboard.sort.last_used', '最近使用') }}</option>
+                            <option value="least_used">{{ t('pages.dashboard.sort.least_used', '冷门宝藏') }}</option>
+                            <option value="oldest">{{ t('pages.dashboard.sort.oldest', '最早收录') }}</option>
+                        </select>
+                        <button type="button" class="mc-ore-btn" @click="setViewMode(viewMode === 'list' ? 'grid' : 'list')">
+                            {{ viewMode === 'list' ? '▦ 卡片视图' : '☰ 列表视图' }}
+                        </button>
+                        <button type="button" class="mc-ore-btn" :class="{ 'is-green': isBatchMode }" @click="toggleBatchMode">
+                            {{ isBatchMode ? '✔ 完成多选' : '☑ 批量管理' }}
+                        </button>
+                        <button type="button" class="mc-ore-cta" @click="openUploadModal">+ 上架表情</button>
+                    </div>
+                </div>
+
+                <div v-if="loading" class="mc-ore-empty">正在加载商城目录...</div>
+                <div v-else-if="images.length === 0" class="mc-ore-empty">
+                    <p>暂无匹配的商城表情包</p>
+                    <button type="button" class="mc-ore-cta" @click="openUploadModal">+ 立即上架第一张表情</button>
+                </div>
+                <div v-else class="mc-ore-grid" :class="{ 'is-list': viewMode === 'list' }">
+                    <article v-for="img in images" :key="'ore-card-' + img.hash" class="mc-ore-card"
+                        :class="{ selected: selectedImages.has(img.hash) }"
+                        role="button" tabindex="0"
+                        @mouseenter="onItemSlotEnter($event)"
+                        @contextmenu.prevent.stop="openContextMenu($event, img)"
+                        @click="isBatchMode ? toggleSelection(img) : openPreview(img)"
+                        @keydown.enter.prevent="isBatchMode ? toggleSelection(img) : openPreview(img)">
+                        <div class="mc-ore-thumb" :data-hash="img.hash">
+                            <div v-if="!imageDataUrls[img.hash]" class="image-placeholder" :style="{ backgroundColor: hashToColor(img.hash) }"></div>
+                            <img v-else :src="imageDataUrls[img.hash]" loading="lazy" decoding="async" :alt="img.desc">
+                            <span v-if="isBatchMode" class="mc-ore-check">{{ selectedImages.has(img.hash) ? '✔' : '' }}</span>
+                            <button type="button" class="mc-ore-more" @click.stop="openContextMenu($event, img)" title="更多操作">⋮</button>
+                            <button type="button" class="mc-ore-fav" :class="{ active: img.is_favorite }" @click.stop="toggleFavorite(img)" title="收藏">★</button>
+                        </div>
+                        <div class="mc-ore-card-body">
+                            <div class="mc-ore-card-title">
+                                <emotion-labels :item="img" :label="getCategoryName" :compact="true" />
+                            </div>
+                            <div class="mc-ore-card-creator">
+                                <span>{{ img.character ? characterLabel(img.character) : retentionLabel(img) }}</span>
+                                <span>· {{ getScopeLabel(img.scope_mode) }}</span>
+                            </div>
+                            <div v-if="viewMode === 'list' && (img.desc || img.overlay_text)" class="mc-ore-card-desc">
+                                {{ img.desc || img.overlay_text }}
+                            </div>
+                            <div class="mc-ore-card-foot">
+                                <span class="mc-ore-rating">★ {{ img.use_count || 0 }} 次使用</span>
+                                <span class="mc-ore-price">{{ img.is_favorite ? '★ 珍藏' : 'FREE · 已拥有' }}</span>
+                            </div>
+                        </div>
+                    </article>
+                </div>
+
+                <footer v-if="total > pageSize" class="mc-ore-pager">
+                    <button type="button" class="mc-ore-btn" :disabled="currentPage === 1" @click="prevPage">◀ 上一页</button>
+                    <span>第 {{ currentPage }} / {{ mcTotalPages }} 页</span>
+                    <button type="button" class="mc-ore-btn" :disabled="currentPage * pageSize >= total" @click="nextPage">下一页 ▶</button>
+                </footer>
+            </template>
+
+            <template v-else>
+                <div class="mc-ore-subbar">
+                    <div class="mc-ore-subleft">
+                        <strong>待审创作工坊</strong>
+                        <span>待处理 {{ pendingStats.pending || 0 }} / 容量 {{ pendingStats.capacity || 200 }}</span>
+                        <span v-if="pendingStats.paused" class="mc-ore-warn">容量已满，自动收集已暂停</span>
+                    </div>
+                    <div class="mc-ore-subright">
+                        <button type="button" class="mc-ore-btn" :class="{ 'is-green': pendingBatchMode }" @click="togglePendingBatchMode">
+                            {{ pendingBatchMode ? '✔ 完成批量' : '☑ 批量审核' }}
+                        </button>
+                        <template v-if="pendingBatchMode">
+                            <button type="button" class="mc-ore-btn" @click="toggleSelectAllPending">{{ allPendingSelected ? '取消全选' : '全选本页' }}</button>
+                            <button type="button" class="mc-ore-cta" @click="approvePendingBatch">✔ 批量通过</button>
+                            <button type="button" class="mc-ore-btn" @click="rejectPendingBatch(false)">✖ 批量删除</button>
+                            <button type="button" class="mc-ore-btn" @click="rejectPendingBatch(true)">⊘ 删除并拉黑</button>
+                        </template>
+                    </div>
+                </div>
+
+                <div v-if="pendingLoading" class="mc-ore-empty">正在读取工坊待审作品...</div>
+                <div v-else-if="pendingImages.length === 0" class="mc-ore-empty">工坊暂无待审核作品</div>
+                <div v-else class="mc-ore-grid">
+                    <article v-for="item in pendingImages" :key="'ore-p-' + item.id" class="mc-ore-card"
+                        :class="{ selected: pendingSelectedImages.has(item.id) }"
+                        @click="pendingBatchMode ? togglePendingSelection(item) : openPendingPreview(item)">
+                        <div class="mc-ore-thumb" :data-hash="item.hash">
+                            <div v-if="!imageDataUrls[item.hash]" class="image-placeholder" :style="{ backgroundColor: hashToColor(item.hash) }"></div>
+                            <img v-else :src="imageDataUrls[item.hash]" loading="lazy" decoding="async" :alt="item.desc">
+                            <span v-if="pendingBatchMode" class="mc-ore-check">{{ pendingSelectedImages.has(item.id) ? '✔' : '' }}</span>
+                        </div>
+                        <div class="mc-ore-card-body">
+                            <div class="mc-ore-card-title">
+                                <emotion-labels :item="item" :label="getCategoryName" :compact="true" />
+                            </div>
+                            <div class="mc-ore-card-creator">{{ pendingStatusLabel(item) }}</div>
+                            <div v-if="!pendingBatchMode" class="mc-ore-card-btns" @click.stop>
+                                <button type="button" class="mc-ore-cta" :disabled="pendingApproving.has(item.id) || ['queued', 'processing'].includes(item.review_status)" @click="approvePending(item.id)">通过</button>
+                                <button type="button" class="mc-ore-btn" :disabled="['queued', 'processing'].includes(item.review_status)" @click="openPendingEdit(item)">编辑</button>
+                                <button type="button" class="mc-ore-btn" :disabled="item.review_status === 'processing'" @click="rejectPending(item.id)">删除</button>
+                                <button type="button" class="mc-ore-btn" :disabled="item.review_status === 'processing'" @click="rejectPending(item.id, true)">拉黑</button>
+                            </div>
+                        </div>
+                    </article>
+                </div>
+
+                <footer v-if="pendingTotal > pendingPageSize" class="mc-ore-pager">
+                    <button type="button" class="mc-ore-btn" :disabled="pendingCurrentPage === 1" @click="fetchPendingImages(pendingCurrentPage - 1)">◀ 上一页</button>
+                    <span>第 {{ pendingCurrentPage }} / {{ mcPendingTotalPages }} 页</span>
+                    <button type="button" class="mc-ore-btn" :disabled="pendingCurrentPage * pendingPageSize >= pendingTotal" @click="fetchPendingImages(pendingCurrentPage + 1)">下一页 ▶</button>
+                </footer>
+            </template>
+        </main>
     </div>
+</div>
+</template>
+<template v-else>
+<header class="codex-header">
     <div class="header-left">
     <div class="header-title">
         <button class="mobile-menu-button" type="button" @click="sidebarOpen = true"
@@ -710,14 +1445,9 @@ export const TEMPLATE = `
                 <path v-else d="m17 9-3 3 3 3" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" />
             </svg>
         </button>
-        <div class="fo-vaultboy fo-vaultboy-header" role="img" aria-label="Vault Boy"></div>
         <div class="header-text">
             <h1>{{ t('pages.dashboard.header.brand', 'Henry\\'s Spoils') }}</h1>
             <p>{{ t('pages.dashboard.header.subtitle', 'Sticker Manager') }}</p>
-        </div>
-        <div class="fo-title" aria-hidden="true">
-            <span class="fo-title-os">PIP-BOY 3000 MK IV</span>
-            <span class="fo-title-sub">VAULT-TEC  //  HOLOTAPE ARCHIVE</span>
         </div>
     </div>
 
@@ -770,43 +1500,9 @@ export const TEMPLATE = `
                         d="M7 21a4.000 4.000 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4.000 4.000 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
                 </svg>
             </button>
-            <div v-if="themePickerOpen" class="theme-popover" @click.stop>
-                <p class="theme-save-hint">{{ t('pages.dashboard.themes.save_hint', 'Your pick is saved as the default theme.') }}</p>
-                <div class="theme-group-label">{{ t('pages.dashboard.themes.group_original', 'Original') }}</div>
-                <button v-for="opt in originalThemeOptions" :key="opt.value" type="button" class="theme-option"
-                    :class="{ active: themeMode === opt.value }" @click="setThemeMode(opt.value); themePickerOpen = false">
-                    <span v-if="opt.swatch" class="theme-swatch"
-                        :style="{ background: 'linear-gradient(135deg, ' + opt.swatch.split(',')[0] + ' 50%, ' + opt.swatch.split(',')[1] + ' 50%)' }"></span>
-                    <span v-else class="theme-swatch" style="background: conic-gradient(#161b2a 50%, #faf8f3 50%)"></span>
-                    {{ t('pages.dashboard.themes.' + opt.key, opt.fallback) }}
-                    <span v-if="themeMode === opt.value" class="theme-default-tag">{{ t('pages.dashboard.themes.saved_default', 'Default') }}</span>
-                </button>
-                <div class="theme-group-label">{{ t('pages.dashboard.themes.group_game', 'Game inventory') }}</div>
-                <button v-for="opt in gameThemeOptions" :key="opt.value" type="button" class="theme-option"
-                    :class="{ active: themeMode === opt.value }" @click="setThemeMode(opt.value); themePickerOpen = false">
-                    <span class="theme-swatch"
-                        :style="{ background: 'linear-gradient(135deg, ' + opt.swatch.split(',')[0] + ' 50%, ' + opt.swatch.split(',')[1] + ' 50%)' }"></span>
-                    {{ t('pages.dashboard.themes.' + opt.key, opt.fallback) }}
-                    <span v-if="themeMode === opt.value" class="theme-default-tag">{{ t('pages.dashboard.themes.saved_default', 'Default') }}</span>
-                </button>
-                <div class="theme-group-label">{{ t('pages.dashboard.themes.group_special', 'Featured') }}</div>
-                <button v-for="opt in specialThemeOptions" :key="opt.value" type="button" class="theme-option"
-                    :class="{ active: themeMode === opt.value }" @click="setThemeMode(opt.value); themePickerOpen = false">
-                    <span class="theme-swatch"
-                        :style="{ background: 'linear-gradient(135deg, ' + opt.swatch.split(',').join(', ') + ')' }"></span>
-                    {{ t('pages.dashboard.themes.' + opt.key, opt.fallback) }}
-                    <span v-if="themeMode === opt.value" class="theme-default-tag">{{ t('pages.dashboard.themes.saved_default', 'Default') }}</span>
-                </button>
-            </div>
+            ${THEME_POPOVER_HTML}
         </div>
     </div>
-    <nav class="fo-pip-tabs" aria-label="Pip-Boy">
-        <span class="fo-pip-tab is-chrome">STAT</span>
-        <button type="button" class="fo-pip-tab" :class="{ active: activeSection === 'library' }" @click="switchSection('library')">INV</button>
-        <button type="button" class="fo-pip-tab" :class="{ active: activeSection === 'pending' }" @click="switchSection('pending')">DATA</button>
-        <span class="fo-pip-tab is-chrome">MAP</span>
-        <span class="fo-pip-tab is-chrome">RADIO</span>
-    </nav>
 </header>
 
 <div class="main-container" :class="{ 'sidebar-collapsed': sidebarCollapsed }">
@@ -845,16 +1541,24 @@ export const TEMPLATE = `
                 </button>
             </nav>
             <div class="sidebar-divider"></div>
-            <div class="sidebar-title">{{ t('pages.dashboard.layout.emotions', '当前库 · 情绪分类') }}</div>
+            <div class="sidebar-section-head">
+                <div class="sidebar-title">{{ t('pages.dashboard.layout.emotions', '当前库 · 情绪分类') }}</div>
+                <button type="button" class="sidebar-head-btn" @click="openEmotionsModal"
+                    :title="t('pages.dashboard.modal.category_manager', 'Category Manager')"
+                    :aria-label="t('pages.dashboard.modal.category_manager', 'Category Manager')">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 5v14M5 12h14" />
+                    </svg>
+                </button>
+            </div>
             <div class="category-list">
                 <button type="button" class="category-item" :class="{ active: selectedCategory === '' }" @click="selectLibraryCategory('')">
                     <span class="category-name">{{ t('pages.dashboard.layout.all_emotions', '全部情绪') }}</span>
                     <span class="category-count">{{ libraryCategoryTotal }}</span>
                 </button>
                 <button v-for="cat in categories" :key="cat.key" type="button" class="category-item"
-                    :class="{ active: selectedCategory === cat.key }" :style="catAccent(cat.key)"
+                    :class="{ active: selectedCategory === cat.key, 'is-empty': !cat.count }"
                     @click="selectLibraryCategory(cat.key)">
-                    <span class="cat-dot"></span>
                     <span class="category-name">{{ cat.name }}</span>
                     <span class="category-count">{{ cat.count }}</span>
                 </button>
@@ -878,7 +1582,9 @@ export const TEMPLATE = `
                     <span v-if="pendingStats.paused" class="capacity-paused">{{ t('pages.dashboard.pending.paused', 'Paused') }}</span>
                 </div>
             </div>
-            <div class="sidebar-title">{{ t('pages.dashboard.pending.category_filter', 'Category Filter') }}</div>
+            <div class="sidebar-section-head">
+                <div class="sidebar-title">{{ t('pages.dashboard.pending.category_filter', 'Category Filter') }}</div>
+            </div>
             <div class="category-list">
                 <button type="button" class="category-item" :class="{ active: pendingCategory === '' }"
                     @click="selectPendingCategory('')">
@@ -886,9 +1592,8 @@ export const TEMPLATE = `
                     <span class="category-count">{{ pendingCategoryTotal }}</span>
                 </button>
                 <button v-for="cat in pendingCategories" :key="cat.key" type="button" class="category-item"
-                    :class="{ active: pendingCategory === cat.key }" :style="catAccent(cat.key)"
+                    :class="{ active: pendingCategory === cat.key, 'is-empty': !cat.count }"
                     @click="selectPendingCategory(cat.key)">
-                    <span class="cat-dot"></span>
                     <span class="category-name">{{ cat.name }}</span>
                     <span class="category-count">{{ cat.count }}</span>
                 </button>
@@ -903,12 +1608,31 @@ export const TEMPLATE = `
         <template v-if="activeSection === 'library'">
             <header class="library-heading">
                 <div class="library-heading-main">
-                    <span class="library-eyebrow">{{ t('pages.dashboard.layout.collection', '表情收藏册') }}</span>
-                    <h2>{{ libraryTitle(selectedLibrary) }} <span class="library-result-count">{{ total }}</span></h2>
-                    <div class="library-location">
-                        <span>{{ selectedCharacter ? characterLabel(selectedCharacter) : t('pages.dashboard.layout.all_characters', '全部角色') }}</span>
-                        <span aria-hidden="true">/</span>
-                        <span>{{ selectedCategory ? getCategoryName(selectedCategory) : t('pages.dashboard.layout.all_emotions', '全部情绪') }}</span>
+                    <div class="library-heading-top">
+                        <span class="library-eyebrow">{{ t('pages.dashboard.layout.collection', '表情收藏册') }}</span>
+                    </div>
+                    <div class="library-title-row">
+                        <h2>{{ libraryTitle(selectedLibrary) }} <span class="library-result-count">{{ total }}</span></h2>
+                        <div class="library-location">
+                            <span>{{ selectedCharacter ? characterLabel(selectedCharacter) : t('pages.dashboard.layout.all_characters', '全部角色') }}</span>
+                            <span aria-hidden="true">/</span>
+                            <span>{{ selectedCategory ? getCategoryName(selectedCategory) : t('pages.dashboard.layout.all_emotions', '全部情绪') }}</span>
+                        </div>
+                    </div>
+                    <div v-if="hasActiveLibraryFilters" class="active-filter-bar">
+                        <button v-if="selectedCategory" type="button" class="active-filter-pill" @click="selectLibraryCategory('')">
+                            <span>{{ getCategoryName(selectedCategory) }}</span>
+                            <i aria-hidden="true">×</i>
+                        </button>
+                        <button v-if="selectedCharacter" type="button" class="active-filter-pill" @click="selectLibraryCharacter('')">
+                            <span>{{ characterLabel(selectedCharacter) }}</span>
+                            <i aria-hidden="true">×</i>
+                        </button>
+                        <button v-if="searchQuery.trim()" type="button" class="active-filter-pill" @click="clearLibrarySearch">
+                            <span>"{{ searchQuery.trim() }}"</span>
+                            <i aria-hidden="true">×</i>
+                        </button>
+                        <button type="button" class="filter-reset-link" @click="clearLibraryFilters">{{ t('pages.dashboard.categories.clear_filters', '清除筛选') }}</button>
                     </div>
                 </div>
                 <details class="library-policy">
@@ -936,20 +1660,21 @@ export const TEMPLATE = `
             </details>
             <div class="inventory-toolbar">
                 <div class="toolbar-search">
-                    <svg style="width:16px;height:16px;position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--text-muted)"
-                        fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg class="toolbar-search-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                             d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                     </svg>
                     <input v-model="searchQuery" @input="debouncedSearch"
                         :placeholder="t('pages.dashboard.search.library', 'Search stickers...')">
+                    <button v-if="searchQuery" type="button" class="search-clear-btn" @click="clearLibrarySearch"
+                        :aria-label="t('pages.dashboard.actions.clear_selection', 'Clear')">×</button>
                 </div>
 
                 <div class="toolbar-controls">
                     <div class="toolbar-group mobile-category-select">
                         <select v-model="selectedCategory" @change="fetchImages(1)" class="codex-input">
                             <option value="">{{ t('pages.dashboard.categories.all', 'All') }}</option>
-                            <option v-for="cat in categories" :key="cat.key" :value="cat.key">{{ cat.name }}</option>
+                            <option v-for="cat in categories" :key="cat.key" :value="cat.key">{{ cat.name }} ({{ cat.count }})</option>
                         </select>
                     </div>
 
@@ -999,37 +1724,20 @@ export const TEMPLATE = `
                         <button v-if="reanalysisJob" @click="reanalysisOpen = true" class="codex-btn">
                             {{ t('pages.dashboard.reanalysis.progress', 'Analysis progress') }} · {{ reanalysisJob.processed }}/{{ reanalysisJob.total }}
                         </button>
+                        <button v-else @click="startMissingReanalysis" :disabled="reanalysisSubmitting" class="codex-btn"
+                            :title="t('pages.dashboard.reanalysis.missing_title', '补充表情包语义')">
+                            <svg style="width:16px;height:16px" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M13 10V3L4 14h7v7l9-11h-7z" />
+                            </svg>
+                            {{ t('pages.dashboard.reanalysis.missing_short', '补充表情包语义') }}
+                        </button>
                         <button @click="openEmotionsModal" class="codex-btn">
                             <svg style="width:16px;height:16px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                     d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
                             </svg>
                             {{ t('pages.dashboard.actions.categories', 'Categories') }}
-                        </button>
-                    </div>
-
-                    <div class="toolbar-group">
-                        <button @click="openUploadModal" class="codex-btn primary">
-                            <svg style="width:16px;height:16px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M12 4v16m8-8H4" />
-                            </svg>
-                            {{ t('pages.dashboard.actions.add', 'Add') }}
-                        </button>
-
-                        <button @click="openBatchUploadModal" class="codex-btn">
-                            <svg style="width:16px;height:16px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                            </svg>
-                            {{ t('pages.dashboard.actions.batch_import', 'Batch Import') }}
-                        </button>
-                        <button @click="openSourceModal" class="codex-btn source-open-btn">
-                            <svg style="width:16px;height:16px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M8 12h8m-4-4v8M5 19a4 4 0 010-8 7 7 0 0113.8 1.6A3.5 3.5 0 0118.5 19H5z" />
-                            </svg>
-                            {{ t('pages.dashboard.actions.sources', 'Sources') }}
                         </button>
                         <button @click="runStorageCleanup" class="codex-btn">
                             <svg style="width:16px;height:16px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1039,8 +1747,46 @@ export const TEMPLATE = `
                             {{ t('pages.dashboard.actions.storage_cleanup', 'Storage Cleanup') }}
                         </button>
                     </div>
+
+                    <div class="toolbar-group toolbar-primary-group">
+                        <button @click="openSourceModal" class="codex-btn source-open-btn">
+                            <svg style="width:16px;height:16px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M8 12h8m-4-4v8M5 19a4 4 0 010-8 7 7 0 0113.8 1.6A3.5 3.5 0 0118.5 19H5z" />
+                            </svg>
+                            {{ t('pages.dashboard.actions.sources', 'Sources') }}
+                        </button>
+                        <button @click="openBatchUploadModal" class="codex-btn">
+                            <svg style="width:16px;height:16px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                            </svg>
+                            {{ t('pages.dashboard.actions.batch_import', 'Batch Import') }}
+                        </button>
+                        <button @click="openUploadModal" class="codex-btn primary">
+                            <svg style="width:16px;height:16px" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M12 4v16m8-8H4" />
+                            </svg>
+                            {{ t('pages.dashboard.actions.add', 'Add') }}
+                        </button>
+                    </div>
                 </div>
             </div>
+
+            <nav v-if="sidebarCollapsed" class="category-quick-rail" :aria-label="t('pages.dashboard.layout.emotions', '情绪分类')">
+                <button type="button" class="category-rail-chip" :class="{ active: selectedCategory === '' }"
+                    @click="selectLibraryCategory('')">
+                    <span>{{ t('pages.dashboard.layout.all_emotions', '全部情绪') }}</span>
+                    <span class="category-rail-count">{{ libraryCategoryTotal }}</span>
+                </button>
+                <button v-for="cat in categories" :key="'rail-' + cat.key" type="button" class="category-rail-chip"
+                    :class="{ active: selectedCategory === cat.key, 'is-empty': !cat.count }"
+                    @click="selectLibraryCategory(cat.key)">
+                    <span>{{ cat.name }}</span>
+                    <span class="category-rail-count">{{ cat.count }}</span>
+                </button>
+            </nav>
 
             <div v-if="selectedLibrary === 'characters'" class="character-filter-bar">
                 <span class="character-filter-label">{{ t('pages.dashboard.characters.title', '角色') }}</span>
@@ -1067,7 +1813,6 @@ export const TEMPLATE = `
             </div>
 
             <div v-else-if="images.length === 0" class="empty-state">
-                <div class="fo-vaultboy fo-vaultboy-empty" role="img" aria-label="Vault Boy"></div>
                 <svg class="empty-state-icon" style="width:64px;height:64px;opacity:0.3;margin-bottom:16px" fill="none" stroke="currentColor"
                     viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
@@ -1205,13 +1950,14 @@ export const TEMPLATE = `
 
             <div class="inventory-toolbar">
                 <div class="toolbar-search">
-                    <svg style="width:16px;height:16px;position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--text-muted)"
-                        fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg class="toolbar-search-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                             d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                     </svg>
                     <input v-model="pendingSearchQuery" @input="pendingDebouncedSearch"
                         :placeholder="t('pages.dashboard.search.pending', 'Search pending stickers...')">
+                    <button v-if="pendingSearchQuery" type="button" class="search-clear-btn" @click="clearPendingSearch"
+                        :aria-label="t('pages.dashboard.actions.clear_selection', 'Clear')">×</button>
                 </div>
 
                 <div class="toolbar-actions">
@@ -1237,6 +1983,20 @@ export const TEMPLATE = `
                 </div>
             </div>
 
+            <nav v-if="sidebarCollapsed" class="category-quick-rail" :aria-label="t('pages.dashboard.pending.category_filter', 'Category Filter')">
+                <button type="button" class="category-rail-chip" :class="{ active: pendingCategory === '' }"
+                    @click="selectPendingCategory('')">
+                    <span>{{ t('pages.dashboard.categories.all', 'All') }}</span>
+                    <span class="category-rail-count">{{ pendingCategoryTotal }}</span>
+                </button>
+                <button v-for="cat in pendingCategories" :key="'prail-' + cat.key" type="button" class="category-rail-chip"
+                    :class="{ active: pendingCategory === cat.key, 'is-empty': !cat.count }"
+                    @click="selectPendingCategory(cat.key)">
+                    <span>{{ cat.name }}</span>
+                    <span class="category-rail-count">{{ cat.count }}</span>
+                </button>
+            </nav>
+
             <div v-if="!pendingLoading && pendingImages.length" class="kbd-hints">
                 <span><kbd>←</kbd><kbd>→</kbd>{{ t('pages.dashboard.kbd.navigate', 'Navigate') }}</span>
                 <span><kbd>Enter</kbd>{{ t('pages.dashboard.kbd.preview', 'Preview') }}</span>
@@ -1255,7 +2015,6 @@ export const TEMPLATE = `
             </div>
 
             <div v-else-if="pendingImages.length === 0" class="empty-state pending-empty">
-                <div class="fo-vaultboy fo-vaultboy-empty" role="img" aria-label="Vault Boy"></div>
                 <div class="empty-illustration" aria-hidden="true">
                     <svg class="empty-state-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 13l4 4L19 7" />
@@ -1936,14 +2695,14 @@ export const TEMPLATE = `
                     </div>
 
                     <div v-if="batchFiles.length">
-                        <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-                            <svg style="width:32px;height:32px;color:var(--gold-primary)" fill="none"
+                        <div class="batch-selected-summary">
+                            <svg class="batch-selected-icon" fill="none"
                                 stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
                                     d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                             </svg>
                             <div>
-                                <p style="margin:0 0 4px 0;color:var(--gold-primary);font-family:var(--font-display)">{{ t('pages.dashboard.batch.selected_count', 'Selected {count} image(s)').replace('{count}', batchFiles.length) }}</p>
+                                <p class="batch-selected-title">{{ t('pages.dashboard.batch.selected_count', 'Selected {count} image(s)').replace('{count}', batchFiles.length) }}</p>
                                 <p style="margin:0;color:var(--text-muted);font-size:0.85rem">{{ formatBatchSize() }}</p>
                             </div>
                         </div>
@@ -1975,13 +2734,13 @@ export const TEMPLATE = `
 
                 <div class="mt-20">
                     <label
-                        class="form-label">{{ t('pages.dashboard.batch.default_category', 'Default Category') }} *</label>
+                        class="form-label">{{ t('pages.dashboard.batch.default_category', 'Default Category') }} <span v-if="!batchUploadForm.autoAnalyze">*</span></label>
                     <select v-model="batchUploadForm.emotion" class="codex-input"
-                        :disabled="batchUploadForm.autoAnalyze" required>
+                        :required="!batchUploadForm.autoAnalyze">
                         <option value="">{{ t('pages.dashboard.placeholders.select_category', 'Select a category...') }}</option>
                         <option v-for="emo in availableEmotions" :key="emo.key" :value="emo.key">{{ emo.name || emo.key }}</option>
                     </select>
-                    <p class="hint-text" style="margin:8px 0 0">{{ t('pages.dashboard.batch.default_category_hint', 'Images will be saved into this category unless auto analyze is enabled.') }}</p>
+                    <p class="hint-text" style="margin:8px 0 0">{{ t('pages.dashboard.batch.default_category_hint', '指定分类时先快速入库并保留该分类；留空且开启自动分析时由模型自动归类。') }}</p>
                 </div>
 
                 <div class="mt-16">
@@ -1995,15 +2754,12 @@ export const TEMPLATE = `
 
                 <div class="mt-16">
                     <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-                        <input type="checkbox" v-model="batchUploadForm.autoAnalyze" class="codex-checkbox"
-                            :disabled="batchUploadForm.emotion !== ''">
-                        <span style="font-size:0.85rem;color:var(--text-main)">{{ t('pages.dashboard.batch.auto_analyze', 'Auto analyze each image and classify automatically') }}</span>
+                        <input type="checkbox" v-model="batchUploadForm.autoAnalyze" class="codex-checkbox">
+                        <span style="font-size:0.85rem;color:var(--text-main)">{{ t('pages.dashboard.batch.auto_analyze', '入库时自动语义化（保留已选分类与角色，未选分类时自动归类）') }}</span>
                     </label>
-                    <p v-if="batchUploadForm.emotion !== ''"
-                        style="margin:4px 0 0 24px;font-size:0.75rem;color:var(--gold-dim)">{{ t('pages.dashboard.batch.auto_analyze_disabled_hint', 'Clear the selected category before enabling auto analyze.') }}</p>
                     <p v-if="batchUploadForm.autoAnalyze"
                         style="margin:8px 0 0 24px;font-size:0.75rem;color:#f59e0b;padding:8px;background:rgba(245,158,11,0.1);border-radius:4px">
-                        {{ t('pages.dashboard.batch.auto_analyze_warning', 'Images are analyzed one at a time using the configured model request interval.') }}
+                        {{ t('pages.dashboard.batch.auto_analyze_warning', '将按后台并发与请求间隔自动调用视觉模型补全描述、标签与场景。') }}
                     </p>
                 </div>
 
@@ -2190,6 +2946,13 @@ export const TEMPLATE = `
                         {{ t('pages.dashboard.sources.review', 'Send imports to Pending first') }}
                     </label>
                     <label>
+                        <input type="checkbox" v-model="sourceForm.auto_analyze">
+                        {{ t('pages.dashboard.sources.auto_analyze', '入库后自动补充表情包语义') }}
+                        <small v-if="sourceInspection.missing_semantics_count !== undefined" style="opacity:0.75">
+                            ({{ t('pages.dashboard.sources.missing_count', '待补全 {count} 张').replace('{count}', sourceInspection.missing_semantics_count) }})
+                        </small>
+                    </label>
+                    <label>
                         {{ t('pages.dashboard.sources.scope', 'Scope') }}
                         <select v-model="sourceForm.scope_mode" class="codex-input">
                             <option value="public">{{ t('pages.dashboard.scope.public', 'Public') }}</option>
@@ -2221,16 +2984,17 @@ export const TEMPLATE = `
             <section v-if="sourceJob" class="source-job" :class="'is-' + sourceJob.status">
                 <div class="source-job-head">
                     <strong>{{ sourceJob.source_name || t('pages.dashboard.sources.import_job', 'Import job') }}</strong>
-                    <span>{{ sourceJob.status }}</span>
+                    <span>{{ sourceJob.phase === 'analyzing' ? t('pages.dashboard.sources.analyzing_phase', '语义化中') : sourceJob.status }}</span>
                 </div>
                 <div class="progress-bar">
-                    <div class="progress-fill" :style="{ width: (sourceJob.total ? sourceJob.processed / sourceJob.total * 100 : 0) + '%' }"></div>
+                    <div class="progress-fill" :style="{ width: (sourceJob.phase === 'analyzing' ? (sourceJob.analyze_total ? sourceJob.analyze_processed / sourceJob.analyze_total * 100 : 0) : (sourceJob.total ? sourceJob.processed / sourceJob.total * 100 : 0)) + '%' }"></div>
                 </div>
                 <div class="source-job-stats">
                     <span>{{ sourceJob.processed }} / {{ sourceJob.total }}</span>
                     <span class="source-ok">+{{ sourceJob.imported }} imported</span>
                     <span>{{ sourceJob.duplicates }} duplicates</span>
                     <span v-if="sourceJob.pending">{{ sourceJob.pending }} pending</span>
+                    <span v-if="sourceJob.analyze_total" class="source-ok">{{ t('pages.dashboard.sources.analyzed_stat', '语义化 {done}/{total}').replace('{done}', sourceJob.analyze_processed || 0).replace('{total}', sourceJob.analyze_total) }}</span>
                     <span v-if="sourceJob.failed" class="source-failed">{{ sourceJob.failed }} failed</span>
                     <button v-if="sourceJob.status === 'queued' || sourceJob.status === 'running'"
                         type="button" class="codex-btn" @click="cancelSourceJob">Cancel</button>
@@ -2290,33 +3054,44 @@ export const TEMPLATE = `
         </div>
 
         <div class="modal-pad category-manager">
-            <section class="category-add-panel">
-                <h3 class="category-add-title">{{ t('pages.dashboard.categories.add_new', 'Add Category') }}</h3>
+            <section class="category-add-panel" :class="{ 'is-editing': editingEmotionKey }">
+                <div class="category-add-head">
+                    <h3 class="category-add-title">{{ editingEmotionKey ? t('pages.dashboard.categories.edit_title', 'Edit Category') : t('pages.dashboard.categories.add_new', 'Add Category') }}</h3>
+                    <button v-if="editingEmotionKey" type="button" class="filter-reset-link" @click="cancelEditEmotion">{{ t('pages.dashboard.categories.cancel_edit', 'Cancel') }}</button>
+                </div>
                 <div class="category-add-grid">
                     <input v-model="newEmotion.key" maxlength="48" autocapitalize="none" spellcheck="false"
+                        :readonly="Boolean(editingEmotionKey)"
                         pattern="[a-z][a-z0-9_-]{0,47}" :placeholder="t('pages.dashboard.placeholders.category_key', 'Key (e.g. happy)')" class="codex-input">
                     <input v-model="newEmotion.name" maxlength="40" :placeholder="t('pages.dashboard.placeholders.category_name', 'Name (e.g. Happy)')" class="codex-input">
                     <input v-model="newEmotion.desc" maxlength="200" :placeholder="t('pages.dashboard.placeholders.category_desc', 'Description (optional)')" class="codex-input">
                     <button @click="addEmotion" :disabled="!newEmotion.key || addingEmotion" class="codex-btn primary">
-                        {{ addingEmotion ? '...' : t('pages.dashboard.actions.add', 'Add') }}
+                        {{ addingEmotion ? '...' : (editingEmotionKey ? t('pages.dashboard.categories.update_action', 'Save Changes') : t('pages.dashboard.actions.add', 'Add')) }}
                     </button>
                 </div>
                 <p class="hint-text category-add-hint">{{ t('pages.dashboard.categories.key_hint', 'Key 以英文字母开头，仅使用小写字母、数字、_、-，最长48字符。显示名称可以使用中文。') }}</p>
             </section>
 
             <div class="category-manager-list">
-                <div v-for="cat in availableEmotions" :key="cat.key" class="category-manager-row">
+                <div v-for="cat in availableEmotions" :key="cat.key" class="category-manager-row"
+                    :class="{ 'is-editing': editingEmotionKey === cat.key }">
                     <div class="category-manager-main">
                         <div class="category-manager-name">
                             <span class="category-manager-label">{{ cat.name || cat.key }}</span>
                             <span class="category-manager-key">{{ cat.key }}</span>
+                            <span class="category-manager-count">{{ categoryCountFor(cat.key) }}</span>
                         </div>
                         <p class="category-manager-desc">{{ cat.desc || t('pages.dashboard.messages.no_description', 'No description') }}</p>
                     </div>
-                    <button @click="deleteEmotion(cat)" :disabled="deletingEmotionKey === cat.key"
-                        class="codex-btn danger">
-                        {{ deletingEmotionKey === cat.key ? '...' : t('pages.dashboard.actions.delete', 'Delete') }}
-                    </button>
+                    <div class="category-manager-actions">
+                        <button type="button" @click="startEditEmotion(cat)" class="codex-btn">
+                            {{ t('pages.dashboard.actions.edit', 'Edit') }}
+                        </button>
+                        <button type="button" @click="deleteEmotion(cat)" :disabled="deletingEmotionKey === cat.key"
+                            class="codex-btn danger">
+                            {{ deletingEmotionKey === cat.key ? '...' : t('pages.dashboard.actions.delete', 'Delete') }}
+                        </button>
+                    </div>
                 </div>
 
                 <div v-if="availableEmotions.length === 0" class="empty-state" style="padding:40px">
@@ -2342,8 +3117,8 @@ export const TEMPLATE = `
         </div>
         <div class="modal-pad">
             <p class="hint-text" style="margin:0 0 16px">{{ t('pages.dashboard.characters.hint', '角色由你在管理面板手工归档，VLM 不会识别角色。先创建角色，再点卡片编辑或用批量分配。') }}</p>
-            <div style="background:var(--bg-main);padding:16px;margin-bottom:20px;border:1px solid var(--gold-dark)">
-                <h3 style="margin:0 0 16px 0;font-size:0.9rem;color:var(--gold-primary);font-family:var(--font-display)">{{ t('pages.dashboard.actions.characters', '角色管理') }}</h3>
+            <div class="category-add-panel character-add-panel">
+                <h3 class="category-add-title">{{ t('pages.dashboard.actions.characters', '角色管理') }}</h3>
                 <div class="character-create-row">
                     <input v-model="newCharacter.key" class="codex-input"
                         :placeholder="t('pages.dashboard.placeholders.character_key', '标识（如 neurosama）')">
@@ -2362,14 +3137,14 @@ export const TEMPLATE = `
             </label>
             <p class="hint-text">{{ t('pages.dashboard.characters.persona_hint', '关联后，启用人格隔离时会使用该角色与通用表情。一个角色可以关联多个人格。') }}</p>
             <p v-if="!personaIds.length && !personaBindingError" class="hint-text">{{ t('pages.dashboard.characters.no_personas_available', '未找到人格，请先在 AstrBot 中创建。') }}</p>
-            <div style="display:flex;flex-direction:column;gap:8px;max-height:400px;overflow-y:auto">
+            <div class="category-manager-list">
                 <div v-for="item in characters" :key="item.key" class="character-list-row">
                     <div>
-                        <div style="display:flex;align-items:center;gap:12px;margin-bottom:4px">
-                            <span style="font-family:var(--font-display);color:var(--gold-primary);font-size:1.1rem">{{ item.name || item.key }}</span>
-                            <span style="font-size:0.75rem;color:var(--text-muted);background:var(--bg-main);padding:2px 8px;border:1px solid var(--gold-dark)">{{ item.key }}</span>
+                        <div class="category-manager-name">
+                            <span class="category-manager-label">{{ item.name || item.key }}</span>
+                            <span class="category-manager-key">{{ item.key }}</span>
+                            <span class="category-manager-count">{{ item.count || 0 }}</span>
                         </div>
-                        <p style="margin:0;color:var(--text-muted);font-size:0.85rem">{{ item.count || 0 }}</p>
                         <div class="persona-bindings">
                             <span v-for="id in characterPersonas(item.key)" :key="id" class="persona-binding-chip">
                                 {{ id }}
@@ -2515,7 +3290,10 @@ export const TEMPLATE = `
             <template v-if="reanalysisJob">
                 <div class="reanalysis-status" aria-live="polite">
                     <strong>{{ t('pages.dashboard.reanalysis.' + reanalysisJob.status, reanalysisJob.status) }}</strong>
-                    <span>{{ reanalysisJob.processed }} / {{ reanalysisJob.total }}</span>
+                    <span>
+                        <i v-if="reanalysisJob.concurrency" class="reanalysis-concurrency-tag">{{ t('pages.dashboard.reanalysis.concurrency_badge', '并发 {n}').replace('{n}', reanalysisJob.concurrency) }}</i>
+                        {{ reanalysisJob.processed }} / {{ reanalysisJob.total }}
+                    </span>
                 </div>
                 <progress class="reanalysis-progress" :value="reanalysisJob.processed" :max="reanalysisJob.total" :aria-label="t('pages.dashboard.reanalysis.progress', 'Analysis progress')"></progress>
                 <div class="reanalysis-counts">
@@ -2528,6 +3306,17 @@ export const TEMPLATE = `
                 <p v-if="reanalysisJob.current" class="reanalysis-current">{{ reanalysisJob.current }}</p>
                 <p class="hint-text">{{ t('pages.dashboard.reanalysis.background_hint', 'You can close this panel or page. Reload to see progress; restarting the plugin ends this batch.') }}</p>
                 <div v-if="reanalysisReady.length" class="reanalysis-review-section">
+                    <div class="reanalysis-bulk-bar">
+                        <span class="reanalysis-bulk-hint">{{ t('pages.dashboard.reanalysis.bulk_hint', '待确认 {count} 张 · 可一键全部保存，或在下方逐张抽查对比').replace('{count}', reanalysisReady.length) }}</span>
+                        <div class="reanalysis-bulk-btns">
+                            <button type="button" @click="discardAllReanalysisResults" :disabled="reanalysisSubmitting" class="codex-btn">
+                                {{ t('pages.dashboard.reanalysis.discard_all', '全部放弃') }}
+                            </button>
+                            <button type="button" @click="saveAllReanalysisResults" :disabled="reanalysisSubmitting" class="codex-btn primary">
+                                {{ t('pages.dashboard.reanalysis.save_all', '全部保存 ({count})').replace('{count}', reanalysisReady.length) }}
+                            </button>
+                        </div>
+                    </div>
                     <div class="reanalysis-review-picker">
                         <img v-if="reanalysisImage" :src="reanalysisImage" :alt="reanalysisResult?.name || ''" class="reanalysis-review-image">
                         <label>

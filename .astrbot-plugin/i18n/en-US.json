@@ -1,708 +1,762 @@
 {
-    "metadata": {
-        "display_name": "Emoji Stealer",
-        "short_desc": "Auto-collect and intelligently send stickers",
-        "desc": "Monitors chat images and uses VLM to auto-classify and store them. Intelligently matches and sends stickers based on conversation mood. Supports LLM proactive sticker search, WebUI management, storage cleanup, scope repair, smart emotion matching, and multi-platform compatibility."
+  "metadata": {
+    "display_name": "Emoji Stealer",
+    "short_desc": "Auto-collect and intelligently send stickers",
+    "desc": "Monitors chat images and uses VLM to auto-classify and store them. Intelligently matches and sends stickers based on conversation mood. Supports LLM proactive sticker search, WebUI management, storage cleanup, scope repair, smart emotion matching, and multi-platform compatibility."
+  },
+  "config": {
+    "_steal_section": {
+      "description": "Steal Settings",
+      "hint": ""
     },
-    "config": {
-        "_steal_section": {
-            "description": "Steal Settings",
-            "hint": ""
-        },
-        "_send_section": {
-            "description": "Send Settings",
-            "hint": ""
-        },
-        "_model_section": {
-            "description": "Models (vision / emotion / embedding)",
-            "hint": ""
-        },
-        "_group_section": {
-            "description": "Target Filtering",
-            "hint": ""
-        },
-        "_storage_section": {
-            "description": "Storage Management",
-            "hint": ""
-        },
-        "steal_meme": {
-            "description": "Enable emoji stealing",
-            "hint": "Listen for and save images from chat. With manual review enabled, save originals first and classify them after approval."
-        },
-        "persona_character_isolation": {
-            "description": "Isolate character memes by persona",
-            "hint": "Prefer suitable memes from the active persona’s character library, falling back to shared memes."
-        },
-        "persona_character_map": {
-            "description": "Persona to character mapping",
-            "hint": "Optional mapping from persona ID to character key. Unmapped personas use their ID."
-        },
-        "steal_mode": {
-            "description": "Steal mode",
-            "hint": "Probability mode: random chance on each received image. Cooldown mode: enforce a minimum interval between collections.",
-            "labels": ["Probability mode", "Cooldown mode"]
-        },
-        "steal_chance": {
-            "description": "Steal probability",
-            "hint": "Set to 0 to never steal, set to 1 to steal every image. Recommended 0.2~0.5. Only takes effect in probability mode."
-        },
-        "content_filtration": {
-            "description": "Content moderation",
-            "hint": "Uses VLM to review image content and block inappropriate images. May increase processing time per image."
-        },
-        "qqofficial_steal_mode": {
-            "description": "QQ_Official collection mode",
-            "hint": "Large stickers and sticker packs on QQ_Official are plain image attachments without OneBot's sub_type mark. By default only images carrying the sticker CDN signature are collected (such as store stickers); collecting all images or only GIFs is also available.",
-            "labels": ["All images as stickers", "Sticker CDN signature only", "GIF only"]
-        },
-        "auto_send_meme": {
-            "description": "Auto-send stickers in chat",
-            "hint": "Automatically add a meme when the context and send probability fit. The LLM can also use meme tools proactively."
-        },
-        "auto_meme_cancel_on_new_message": {
-            "description": "Cancel pending auto-send on new message",
-            "hint": "Cancels the previous delayed auto-send when a new message arrives in the same session, preventing outdated replies with incorrect images."
-        },
-        "meme_chance": {
-            "description": "Emoji send probability",
-            "hint": "Set to 0 to never send, set to 1 to always send. Recommended 0.1~0.3 to avoid spamming."
-        },
-        "send_meme_as_qq_sticker": {
-            "description": "Send as a QQ sticker",
-            "hint": "When enabled, images use QQ's custom sticker display. This applies only to aiocqhttp/NapCat."
-        },
-        "send_meme_as_gif": {
-            "description": "Send as GIF",
-            "hint": "When enabled, always output as GIF. QQ sticker display is controlled separately. When disabled, keep the original image format."
-        },
-        "meme_send_delay": {
-            "description": "Fixed delay (seconds)",
-            "hint": "Delay before sending emoji to avoid conflicts with message-segmentation plugins. Recommended 5.0 s or more. Set to 0 to send immediately."
-        },
-        "smart_meme_selection": {
-            "description": "Smart emoji selection",
-            "hint": "When enabled, uses composite scoring (diversity + relevance + similarity) to pick the best emoji. When disabled, picks randomly (still avoids short-term repeats)."
-        },
-        "_emotion_section": {
-            "description": "Emotion Recognition",
-            "hint": ""
-        },
-        "enable_natural_emotion_analysis": {
-            "description": "Understand conversation context with a model",
-            "hint": "When enabled, sticker usage scenes are extracted from your reply and the user message; if no model is set, the current session model is used. Adds model calls. When disabled, local matching is used."
-        },
-        "emotion_analysis_provider_id": {
-            "description": "Context understanding model (optional)",
-            "hint": "Leave blank to use the current session model. A fast text model is enough; JEV in advanced settings can replace this step."
-        },
-        "enable_jev": {
-            "description": "Enable JEV selection",
-            "hint": "Requires \"Understand conversation context with a model\" above. When disabled, the traditional LLM path is used; when enabled, JEV picks from up to 10 pre-filtered candidates. Uses the official endpoint and jev-latest model by default; a trusted API Base URL and JEV model ID can be set below. Sends candidate metadata, roughly the last 3 turns, and the current exchange; a none pick sends nothing, and a missing key or a failed call falls back to the LLM."
-        },
-        "typesafe_api_key": {
-            "description": "TypeSafe API Key",
-            "hint": "Create one at console.typesafe.ai. Used when both \"Understand conversation context with a model\" and \"Enable JEV selection\" are on; leave blank to fall back to the traditional LLM."
-        },
-        "typesafe_api_base_url": {
-            "description": "TypeSafe API Base URL",
-            "hint": "Uses the official TypeSafe API by default. Usually only the domain is needed; a value ending in /v1 or a full /v1/systemone address also works. The API key is sent to this address, so configure a trusted service only."
-        },
-        "typesafe_model_id": {
-            "description": "JEV model ID",
-            "hint": "Leave blank to use the default jev-latest model. For a compatible proxy, enter its required model ID; for example, Command Code uses typesafe/jev."
-        },
-        "vision_provider_id": {
-            "description": "Vision model",
-            "hint": "Used for image classification. Leave blank to auto-use AstrBot's global default_image_caption_provider_id."
-        },
-        "vision_fallback_provider_ids": {
-            "description": "Vision model fallback",
-            "hint": "Switch to these providers in order when vision model requests fail (same idea as AstrBot's fallback chat model)."
-        },
-        "vision_thinking_effort": {
-            "description": "Vision thinking effort",
-            "hint": "Passed to the vision model as reasoning_effort. 'Follow provider' sends no parameter and keeps the provider's own thinking config. Only effective for OpenAI-compatible providers.",
-            "labels": ["Follow provider", "Low", "Medium", "High"]
-        },
-        "send_target_whitelist": {
-            "description": "Send target whitelist",
-            "hint": "Format: group:group_id or user:user_id. When non-empty, only whitelisted targets can receive stickers."
-        },
-        "send_target_blacklist": {
-            "description": "Send target blacklist",
-            "hint": "Format: group:group_id or user:user_id. Can be combined with whitelist; the priority rule below controls conflict resolution."
-        },
-        "send_target_filter_mode": {
-            "description": "Send filter priority",
-            "hint": "Whitelist first: allow if whitelist hit, otherwise check blacklist. Blacklist first: deny if blacklist hit, otherwise check whitelist.",
-            "labels": ["Whitelist first", "Blacklist first"]
-        },
-        "steal_target_whitelist": {
-            "description": "Steal target whitelist",
-            "hint": "Format: group:group_id or user:user_id. When non-empty, only whitelisted targets allow collection."
-        },
-        "steal_target_blacklist": {
-            "description": "Steal target blacklist",
-            "hint": "Format: group:group_id or user:user_id. Can be combined with whitelist; the priority rule below controls conflict resolution."
-        },
-        "steal_target_filter_mode": {
-            "description": "Steal filter priority",
-            "hint": "Whitelist first: allow if whitelist hit, otherwise check blacklist. Blacklist first: deny if blacklist hit, otherwise check whitelist.",
-            "labels": ["Whitelist first", "Blacklist first"]
-        },
-        "max_reg_num": {
-            "description": "Maximum emoji count",
-            "hint": "Storage limit. When the limit is reached, old emoji are automatically removed per the cleanup strategy."
-        },
-        "eviction_usage_weight": {
-            "description": "Eviction score: low-usage weight",
-            "hint": "Default 0.7; the entry-time weight is 1 minus this value. Both scores are normalised and weighted: rarely used and oldest entries are evicted first. 0 evicts by age only, 1 by least usage only."
-        },
-        "steal_pool_capacity": {
-            "description": "Pending pool capacity",
-            "hint": "Auto-stolen images go to the pending pool first. When this limit is reached, stealing pauses until items are reviewed (approved or deleted) in the WebUI. Changes take effect immediately, no restart needed."
-        },
-        "audit_required": {
-            "description": "Auto-steal requires approval",
-            "hint": "Automatically collected originals wait for manual review before vision analysis. Approval queues background analysis immediately; successful results enter the library. Failed originals are kept for retry. With manual review off, automatic analysis continues; explicit capture commands analyze immediately."
-        },
-        "enable_embedding_search": {
-            "description": "Enable embedding vector search",
-            "hint": "When enabled, remote text embeddings recall stickers by overlay text + usage scenes + description. When disabled, keyword (BM25) search is used. No local CLIP. Falls back to BM25 if no embedding model is configured."
-        },
-        "embedding_provider_id": {
-            "description": "Embedding model ID",
-            "hint": "Leave blank to use the first framework embedding provider. The plugin detects actual output dimensions and rebuilds vectors in the background when the model or dimensions change; local matching remains available. If the service rejects the dimensions request parameter, disable that parameter or use a supported value in the AstrBot provider settings."
-        },
-        "_smart_section": {
-            "description": "Smart selection: text-distance fusion presets",
-            "hint": ""
-        },
-        "_external_source_section": {
-            "description": "External Meme Sources",
-            "hint": ""
-        },
-        "external_sources_enabled": {
-            "description": "Enable external meme sources",
-            "hint": "Supports Meme Manager / AstrBot Meme Pack, GitHub repositories, and constrained JSON APIs. Imports are copied into this plugin."
-        },
-        "external_source_allow_http": {
-            "description": "Allow plaintext HTTP sources",
-            "hint": "HTTPS is required by default. Loopback, private, link-local, and reserved addresses remain blocked."
-        },
-        "external_source_default_review": {
-            "description": "Send external imports to Pending by default",
-            "hint": "External imports also enter Pending automatically when content moderation is enabled."
-        },
-        "external_source_max_items": {
-            "description": "Maximum images per source",
-            "hint": "Default: 2000."
-        },
-        "external_source_max_image_bytes": {
-            "description": "Maximum bytes per external image",
-            "hint": "Default: 32 MiB."
-        },
-        "external_source_max_archive_bytes": {
-            "description": "Maximum compressed pack size",
-            "hint": "Default: 1 GiB."
-        },
-        "external_source_max_uncompressed_bytes": {
-            "description": "Maximum unpacked pack size",
-            "hint": "Default: 4 GiB."
-        },
-        "external_source_max_pixels": {
-            "description": "Maximum pixels per external image",
-            "hint": "Default: 40 million pixels."
-        },
-        "_webui_section": {
-            "description": "WebUI",
-            "hint": ""
-        },
-        "webui_theme": {
-            "description": "Default WebUI theme",
-            "hint": "Theme used when opening the sticker manager. Picking a theme in the page is remembered and takes priority over this setting.",
-            "labels": ["Follow host", "Dark gilded", "Light", "Minecraft", "Fallout 4", "Bili Style"]
-        },
-        "custom_meme_classification_prompt": {
-            "description": "VLM classification prompt",
-            "hint": "Supports placeholder: {emotion_list} (category list). Leave blank to use the default prompt."
-        },
-        "custom_meme_classification_with_filter_prompt": {
-            "description": "VLM classification prompt (with filtering)",
-            "hint": "Used when content moderation is enabled. Supports placeholder: {emotion_list} (category list). Leave blank to use the default prompt."
-        },
-        "emotion_analysis_prompt": {
-            "description": "Emotion analysis prompt",
-            "hint": "Leave blank to use the bundled context prompt. The query keeps the assistant's stance, interaction intent and key lines; custom content still takes effect. Placeholders: {emotion_list}, {llm_reply}, {user_message}."
-        },
-        "sim_weight_preset": {
-            "description": "Text-distance fusion preset",
-            "hint": "Preset controls how multiple similarity algorithms are fused: Balanced (default), Keyword-first (substring/character overlap), Semantic-first (n-gram/cosine), Strict (edit distance & character-level, reduces false sends).",
-            "labels": ["Balanced", "Keyword-first", "Semantic-first", "Strict"]
-        },
-        "show_advanced_settings": {
-            "description": "Show advanced settings",
-            "hint": "Reveal tuning, per-session filters and external-source options. Existing values remain active when hidden."
-        },
-        "meme_send_char_delay": {
-            "description": "Extra delay per reply character (seconds)",
-            "hint": "Default 0 uses the fixed send delay. Enable only to add a reading delay."
-        },
-        "model_request_interval": {
-            "description": "Minimum model request interval (seconds)",
-            "hint": "This plugin sends vision and embedding requests serially per provider, with at least 5 seconds between starts by default. Increase for low free-tier quotas or reduce for paid providers. Rate limits respect Retry-After; failed jobs remain available for retry."
-        }
+    "_send_section": {
+      "description": "Send Settings",
+      "hint": ""
     },
-    "pages": {
-        "dashboard": {
-            "title": "Sticker Dashboard",
-            "header": {
-                "brand": "Henry's Spoils",
-                "subtitle": "Sticker Manager"
-            },
-            "health": {
-                "ok": "Healthy",
-                "slow": "Slow",
-                "error": "Error",
-                "checking": "Checking"
-            },
-            "stats": {
-                "total": "Total",
-                "categories": "Categories",
-                "today": "Today"
-            },
-            "sections": {
-                "pending": "Pending",
-                "library": "Library"
-            },
-            "categories": {
-                "key_hint": "Keys start with a letter and use lowercase letters, numbers, underscores, or hyphens (48 characters maximum). Display names may use any language.",
-                "title": "Categories",
-                "favorites": "Favorites",
-                "all": "All",
-                "add_new": "Add Category"
-            },
-            "pending": {
-                "pool": "Pending Pool",
-                "capacity": "Capacity",
-                "paused": "Paused",
-                "category_filter": "Category Filter",
-                "progress": "Pending",
-                "paused_hint": "Stealing is paused and will resume after review.",
-                "queued_count": "Queued",
-                "processing_count": "Analyzing",
-                "failed_count": "Failed"
-            },
-            "search": {
-                "library": "Text, tags, filename; separate words with spaces",
-                "pending": "Search pending stickers..."
-            },
-            "sort": {
-                "newest": "Newest",
-                "oldest": "Oldest",
-                "most_used": "Most Used",
-                "last_used": "Last Used",
-                "least_used": "Least used"
-            },
-            "actions": {
-                "done": "Done",
-                "batch": "Batch",
-                "categories": "Categories",
-                "add": "Add",
-                "batch_import": "Batch Import",
-                "storage_cleanup": "Storage Cleanup",
-                "unfavorite": "Remove Favorite",
-                "favorite": "Favorite",
-                "approve_all": "Approve All",
-                "delete_all": "Delete All",
-                "delete_blacklist": "Delete + Blacklist",
-                "approve": "Approve",
-                "delete": "Delete",
-                "blacklist": "Blacklist",
-                "download": "Download",
-                "edit": "Edit",
-                "edit_approve": "Edit & Approve",
-                "save_only": "Save Only",
-                "save_and_approve": "Save & Approve",
-                "unset_local": "Unset Local",
-                "set_local": "Set Local",
-                "cancel": "Cancel",
-                "save": "Save",
-                "analyzing": "Analyzing...",
-                "reanalyze": "Re-analyze with VLM",
-                "saving": "Applying...",
-                "apply_vlm": "Apply B result",
-                "auto_analyze": "Auto Analyze",
-                "uploading": "Uploading...",
-                "confirm_add": "Confirm Add",
-                "clear_selection": "Clear Selection",
-                "retry": "Retry",
-                "close": "Close",
-                "confirm_move": "Confirm Move",
-                "confirm_set": "Confirm Set",
-                "select_all": "Select All",
-                "deselect_all": "Deselect All",
-                "move": "Move",
-                "repair_origin": "Repair Origin",
-                "confirm": "Confirm",
-                "characters": "Manage characters",
-                "sources": "Sources",
-                "assign_character": "Assign Character",
-                "open_navigation": "Open navigation",
-                "collapse_sidebar": "Collapse sidebar",
-                "expand_sidebar": "Expand sidebar",
-                "more": "More actions"
-            },
-            "context_menu": {
-                "preview": "View details",
-                "select": "Add to batch selection",
-                "unselect": "Remove from selection"
-            },
-            "empty": {
-                "library_title": "No stickers yet",
-                "library_hint": "Click \"Add\" to upload a new sticker.",
-                "pending_title": "No pending stickers",
-                "pending_hint": "Newly stolen stickers will wait here for review.",
-                "no_categories": "No categories yet",
-                "no_characters": "No characters yet. Add one, then assign stickers in the library."
-            },
-            "pagination": {
-                "prev": "Previous",
-                "next": "Next"
-            },
-            "scope": {
-                "public": "Public",
-                "local": "Local only",
-                "local_short": "Local"
-            },
-            "modal": {
-                "edit": "Edit",
-                "edit_pending": "Edit Pending Sticker",
-                "review_pending": "Review Sticker",
-                "details": "Details",
-                "add_sticker": "Add Sticker",
-                "batch_import": "Batch Import Stickers",
-                "category_manager": "Category Manager",
-                "batch_move": "Batch Move",
-                "batch_scope": "Batch Scope",
-                "confirm": "Confirm Action",
-                "input": "Input",
-                "character_manager": "Character Manager",
-                "batch_character": "Assign Character"
-            },
-            "fields": {
-                "category": "Category",
-                "scope": "Scope",
-                "use_count": "Use Count",
-                "last_used": "Last Used",
-                "favorite": "Favorite",
-                "origin": "Origin",
-                "description": "Description",
-                "tags": "Tags",
-                "scenes": "When to send",
-                "created_at": "Added At",
-                "target_category": "Target Category",
-                "target_scope": "Target Scope",
-                "image_meta": "Image",
-                "added": "Added via",
-                "reviewed_at": "Reviewed",
-                "source": "Source URL",
-                "add_method_auto": "Auto collect",
-                "add_method_manual": "Manual upload",
-                "add_method_llm": "LLM upload",
-                "add_method_api": "API upload",
-                "add_method_external": "External import",
-                "add_method_unknown": "Unknown",
-                "source_channel_pack": "Meme pack",
-                "source_channel_github": "GitHub",
-                "source_channel_http_json": "JSON API",
-                "character": "Character",
-                "overlay_text": "Overlay text",
-                "emotions": "Emotions",
-                "secondary_emotions": "Secondary emotions",
-                "id": "ID"
-            },
-            "units": {
-                "times": "times"
-            },
-            "messages": {
-                "origin_unset": "Not recorded",
-                "origin_group": "Group",
-                "origin_user": "User",
-                "unknown_error": "Unknown error",
-                "unknown": "Unknown",
-                "no_description": "No description",
-                "loading_original": "Loading full image…",
-                "never_used": "Never used",
-                "favorited": "Favorited",
-                "not_favorited": "Not favorited",
-                "no_tags": "No tags",
-                "no_scenes": "No usage lines",
-                "no_overlay_text": "None",
-                "none": "None",
-                "no_preview": "No preview",
-                "scene_separator_hint": "comma separated",
-                "tag_separator_hint": "comma separated",
-                "scene_input_hint": "You can separate scenes with commas or semicolons.",
-                "analysis_pending": "Waiting for review",
-                "analysis_queued": "Approved · queued for analysis",
-                "analysis_processing": "Analyzing in background",
-                "analysis_failed": "Failed · approve again to retry",
-                "analysis_unanalysed": "Waiting for analysis"
-            },
-            "labels": {
-                "hash": "Hash"
-            },
-            "placeholders": {
-                "edit_scene": "Incoming messages: I just worked overtime, I need a hug",
-                "edit_tags": "Example: cute, funny, rare",
-                "select_category": "Select a category...",
-                "upload_scene": "Incoming messages: I just worked overtime, I need a hug",
-                "upload_tags": "Example: cute, funny",
-                "upload_desc": "Describe this sticker...",
-                "category_key": "Key (e.g. happy)",
-                "category_name": "Name (e.g. Happy)",
-                "category_desc": "Description (optional)",
-                "select": "Select...",
-                "character_key": "Key (e.g. neurosama)",
-                "character_name": "Display name (e.g. Neuro-sama)",
-                "overlay_text": "Text printed on the meme"
-            },
-            "upload": {
-                "click_to_upload": "Click to upload an image"
-            },
-            "analysis": {
-                "scenes_title": "Detected usage lines",
-                "scenes_hint": "Click to add or remove a chat line this sticker can reply to.",
-                "reanalysis_title": "VLM re-analysis",
-                "reanalysis_hint": "Run the vision model again and compare the stored labels before applying them.",
-                "current": "Current labels",
-                "new_result": "New VLM result",
-                "reanalysis_preserve": "Character, scope, favorites and usage history stay unchanged."
-            },
-            "reanalysis": {
-                "title": "Batch re-analysis",
-                "progress": "Analysis progress",
-                "request_failed": "Request failed. Please retry.",
-                "confirm": "Analyze {count} selected images?\nResults will wait for individual review. Nothing is saved automatically.",
-                "hint": "Review and confirm each result before saving. Categories, characters, favorites, provenance and scope are kept.",
-                "background_hint": "Analysis continues after closing this panel or page. Reload to resume review. Restarting the plugin ends the task and clears unsaved results.",
-                "interrupted": "The plugin restarted and unsaved analysis results were cleared. Your library was not changed.",
-                "running": "Analyzing",
-                "stopping": "Stopping after current image",
-                "completed": "Analysis complete",
-                "cancelled": "Stopped",
-                "failed": "Task failed to start",
-                "saved": "Saved",
-                "failed_count": "Failed",
-                "skipped": "Skipped",
-                "details": "Failure and skip details",
-                "stop": "Stop after current image",
-                "retry": "Retry failed images",
-                "analyzed": "Analyzed",
-                "pending_review": "Awaiting review",
-                "choose_result": "Choose an image to review",
-                "loading_result": "Loading comparison…",
-                "before": "Before analysis",
-                "after": "New result",
-                "discard_one": "Keep original and continue",
-                "save_one": "Save this image and continue",
-                "no_pending": "No results awaiting review.",
-                "field_desc": "Description",
-                "field_tags": "Tags",
-                "field_scenes": "Scenes",
-                "field_overlay_text": "Image text",
-                "field_emotions": "Emotions"
-            },
-            "batch": {
-                "include_subfolders": "Include subfolders",
-                "selected_count": "Selected {count} image(s)",
-                "more_count": "{count} more...",
-                "drag_upload": "Click or drag to upload multiple images",
-                "supported_formats": "Supports PNG, JPG, GIF, WEBP, BMP",
-                "default_category": "Default Category",
-                "default_category_hint": "Images will be saved into this category unless auto analyze is enabled.",
-                "auto_analyze": "Auto analyze each image and classify automatically",
-                "auto_analyze_disabled_hint": "Clear the selected category before enabling auto analyze.",
-                "auto_analyze_warning": "Images are analyzed one at a time using the configured model request interval. You can close this panel while processing continues.",
-                "start_import": "Start Import ({count})",
-                "processing": "Processing...",
-                "completed": "Import complete",
-                "failed": "Import failed",
-                "success": "success",
-                "failed_count": "failed",
-                "continue_import": "Continue Import",
-                "selected_images": "Selected {count} image(s)",
-                "scope_hint": "Images missing origin group info will be skipped when setting local scope.",
-                "selected_short": "Selected {count}",
-                "character": "Character",
-                "character_hint": "This batch will be tagged with the selected character. You can change it later."
-            },
-            "alerts": {
-                "pending_approved": "Approved {count} item(s).",
-                "pending_saved": "Pending item saved.",
-                "approve_failed": "Approve failed",
-                "and_blacklisted": "(blacklisted)",
-                "pending_deleted": "Deleted {count} item(s).",
-                "delete_failed": "Delete failed",
-                "select_pending_first": "Select pending items first.",
-                "failed_count": "{count} failed.",
-                "batch_approve_failed": "Batch approve failed",
-                "blacklisted_count": "Blacklisted {count} item(s).",
-                "batch_delete_failed": "Batch delete failed",
-                "save_failed": "Save failed",
-                "action_failed": "Action failed",
-                "move_failed": "Move failed",
-                "batch_scope_partial": "Updated {count} image(s). {skipped} skipped because origin group info is missing.",
-                "scope_set_failed": "Scope update failed.",
-                "scope_origin_missing": "This image is missing origin group info and cannot be set to local.",
-                "scope_update_failed": "Scope update failed.",
-                "favorite_failed": "Favorite update failed",
-                "batch_favorite_added": "Favorited {count} image(s).",
-                "batch_favorite_removed": "Removed favorites from {count} image(s).",
-                "batch_action_failed": "Batch action failed",
-                "storage_scan_failed": "Storage scan failed.",
-                "storage_nothing_to_clean": "No storage items need cleanup.",
-                "storage_cleanup_failed": "Storage cleanup failed.",
-                "storage_cleanup_done": "Storage cleanup completed. Processed {count} item(s).",
-                "scope_repaired": "Repaired origin scope for {count} image(s).",
-                "scope_repair_failed": "Origin scope repair failed.",
-                "select_category_or_auto": "Select a category or enable auto analyze.",
-                "upload_failed": "Upload failed.",
-                "upload_error": "Upload error.",
-                "duplicate_image": "This sticker already exists; skipped the duplicate.",
-                "similar_image": "A similar sticker exists; added as a new image.",
-                "batch_import_failed": "Batch import failed.",
-                "select_image_first": "Select an image first.",
-                "analyze_failed": "Analyze failed.",
-                "reanalyze_failed": "Re-analysis failed.",
-                "reanalyze_apply_failed": "Failed to apply VLM result.",
-                "reanalyze_applied": "VLM result applied.",
-                "no_valid_info": "No valid information recognized.",
-                "add_failed": "Add failed.",
-                "invalid_category_key": "Category keys must start with a letter and contain only lowercase letters, numbers, underscores, or hyphens (48 characters maximum).",
-                "reserved_category_key": "This category key is reserved by the operating system. Choose another key.",
-                "duplicate_category_name": "This category display name is already in use.",
-                "pending_queued": "{count} item(s) queued for background analysis."
-            },
-            "confirm": {
-                "pending_approve_batch": "Approve {count} pending item(s)?",
-                "pending_delete_blacklist_batch": "Delete and blacklist {count} pending item(s)?",
-                "pending_delete_batch": "Delete {count} pending item(s)?",
-                "delete_and_blacklist_image": "Delete and blacklist this image?\nIt will no longer be auto-collected.",
-                "delete_image": "Delete this image? This action cannot be undone.",
-                "delete_selected_images": "Delete {count} selected image(s)?",
-                "storage_cleanup": "Found {count} cleanable item(s). This will remove stale indexes, orphan files, thumbnail cache, and temp files. Continue?",
-                "update_existing_category": "Category {key} already exists. Update it?",
-                "delete_category": "Delete category {key}? Images in this category will be deleted permanently.",
-                "delete_character": "Delete character {key}? Stickers stay; only the character tag is removed."
-            },
-            "prompt": {
-                "origin_scope": "Enter the origin scope, for example group:123456 or user:123456."
-            },
-            "themes": {
-                "title": "Theme",
-                "auto": "Follow host",
-                "dark": "Dark Side of X",
-                "light": "Light",
-                "minecraft": "Minecraft",
-                "fallout": "Fallout 4",
-                "bili": "Bili Style",
-                "group_original": "Original",
-                "group_game": "Game inventory",
-                "group_special": "Featured",
-                "save_hint": "Your pick is saved as the default theme.",
-                "saved_default": "Default"
-            },
-            "view": {
-                "grid": "Grid view",
-                "list": "List view"
-            },
-            "kbd": {
-                "navigate": "Navigate",
-                "preview": "Preview",
-                "clear_focus": "Clear focus"
-            },
-            "characters": {
-                "persona_isolation": "Enable persona library isolation",
-                "no_personas_available": "No personas found. Create one in AstrBot first.",
-                "persona_hint": "When isolation is enabled, suitable character memes are preferred; otherwise shared memes are used. A character can have multiple personas.",
-                "unlink_persona": "Unlink",
-                "no_persona": "No linked personas",
-                "select_persona": "Select persona",
-                "bind_persona": "Link",
-                "title": "Characters",
-                "all": "All characters",
-                "unassigned": "General library",
-                "hint": "You assign characters in the dashboard. VLM does not detect them. Create a character first, then edit a card or batch-assign.",
-                "manage": "Manage characters",
-                "bar_hint": "Filter the library by character. Use Manage characters to add or remove them."
-            },
-            "sources": {
-                "title": "External Sources",
-                "copy_title": "Safe local copy",
-                "copy_hint": "Imports are validated, deduplicated, and copied into this plugin. Other plugins' original files remain unchanged.",
-                "pack": "Import resource pack",
-                "pack_hint": "ZIP / .meme-pack export",
-                "github": "GitHub meme repository",
-                "api": "External JSON catalog",
-                "preflight": "Preflight",
-                "checking": "Checking source...",
-                "format_title": "Accepted pack format",
-                "format_hint": "Preferred AstrBot Meme Pack v2: manifest.json + memes/, optionally semantic_metadata.json. ZIPs containing PNG/JPG/GIF/WEBP/BMP images are also accepted; previews/ is skipped.",
-                "license": "License",
-                "attribution": "Attribution",
-                "capacity_note": "This pack exceeds the native collection limit. External copies use a protected retention class.",
-                "auto_map": "Auto map",
-                "review": "Send imports to Pending first",
-                "scope": "Scope",
-                "assign_character": "Assign a character to this series",
-                "character_placeholder": "Existing or new character key",
-                "character_hint": "Existing keys are reused; a new key is created during import.",
-                "import": "Import",
-                "sync": "Sync",
-                "import_job": "Import job",
-                "available": "Available sources",
-                "empty": "No registered sources. Same-instance Meme Manager packs appear automatically.",
-                "forget": "Forget",
-                "forget_confirm": "Forget this source? Imported images will remain in your library."
-            },
-            "libraries": {
-                "all": "All stickers",
-                "general": "General library",
-                "favorites": "Favorites",
-                "characters": "Character library",
-                "quota": "Automatic eviction quota",
-                "hint": "Only ordinary general stickers are automatically evicted. Favorites, character stickers and protected imports are managed separately. Removing favorite or character protection returns ordinary stickers to the quota."
-            },
-            "layout": {
-                "libraries": "Libraries",
-                "emotions": "Emotions in this library",
-                "all_emotions": "All emotions",
-                "collection": "STICKER COLLECTION",
-                "all_characters": "All characters",
-                "favorite": "Favorite protected",
-                "character": "Character protected",
-                "protected": "Protected copy",
-                "automatic": "Automatic eviction"
-            },
-            "guide": {
-                "title": "Get started · Match the conversation",
-                "collect": "Prepare the library",
-                "collect_hint": "Upload and analyze images, or enable collection and choose a vision model in plugin settings.",
-                "review": "Check the content",
-                "review_hint": "Approve collected images, check the overlay text and incoming messages they suit, then assign characters.",
-                "chat": "Chat naturally",
-                "chat_hint": "The bot can express emotion, share a joke or react with a meme during ordinary conversation. It chooses images that fit the conversation.",
-                "pending_hint": "Pending images are not sent. If an approved image matches poorly, preview a new analysis and confirm before saving.",
-                "upload": "Upload and analyze",
-                "pending": "Review images",
-                "auto": "Auto send",
-                "context": "Context analysis",
-                "embedding": "Semantic search",
-                "on": "On",
-                "off": "Off"
-            }
-        }
+    "_model_section": {
+      "description": "Models (vision / emotion / embedding)",
+      "hint": ""
+    },
+    "_group_section": {
+      "description": "Target Filtering",
+      "hint": ""
+    },
+    "_storage_section": {
+      "description": "Storage Management",
+      "hint": ""
+    },
+    "steal_meme": {
+      "description": "Enable emoji stealing",
+      "hint": "Listen for and save images from chat. With manual review enabled, save originals first and classify them after approval."
+    },
+    "persona_character_isolation": {
+      "description": "Isolate character memes by persona",
+      "hint": "Prefer suitable memes from the active persona’s character library, falling back to shared memes."
+    },
+    "persona_character_map": {
+      "description": "Persona to character mapping",
+      "hint": "Optional mapping from persona ID to character key. Unmapped personas use their ID."
+    },
+    "steal_mode": {
+      "description": "Steal mode",
+      "hint": "Probability mode: random chance on each received image. Cooldown mode: enforce a minimum interval between collections.",
+      "labels": [
+        "Probability mode",
+        "Cooldown mode"
+      ]
+    },
+    "steal_chance": {
+      "description": "Steal probability",
+      "hint": "Set to 0 to never steal, set to 1 to steal every image. Recommended 0.2~0.5. Only takes effect in probability mode."
+    },
+    "content_filtration": {
+      "description": "Content moderation",
+      "hint": "Uses VLM to review image content and block inappropriate images. May increase processing time per image."
+    },
+    "qqofficial_steal_mode": {
+      "description": "QQ_Official collection mode",
+      "hint": "Large stickers and sticker packs on QQ_Official are plain image attachments without OneBot's sub_type mark. By default only images carrying the sticker CDN signature are collected (such as store stickers); collecting all images or only GIFs is also available.",
+      "labels": [
+        "All images as stickers",
+        "Sticker CDN signature only",
+        "GIF only"
+      ]
+    },
+    "auto_send_meme": {
+      "description": "Auto-send stickers in chat",
+      "hint": "Automatically add a meme when the context and send probability fit. The LLM can also use meme tools proactively."
+    },
+    "auto_meme_cancel_on_new_message": {
+      "description": "Cancel pending auto-send on new message",
+      "hint": "Cancels the previous delayed auto-send when a new message arrives in the same session, preventing outdated replies with incorrect images."
+    },
+    "meme_chance": {
+      "description": "Emoji send probability",
+      "hint": "Set to 0 to never send, set to 1 to always send. Recommended 0.1~0.3 to avoid spamming."
+    },
+    "send_meme_as_qq_sticker": {
+      "description": "Send as a QQ sticker",
+      "hint": "When enabled, images use QQ's custom sticker display. This applies only to aiocqhttp/NapCat."
+    },
+    "send_meme_as_gif": {
+      "description": "Send as GIF",
+      "hint": "When enabled, always output as GIF. QQ sticker display is controlled separately. When disabled, keep the original image format."
+    },
+    "meme_send_delay": {
+      "description": "Fixed delay (seconds)",
+      "hint": "Delay before sending emoji to avoid conflicts with message-segmentation plugins. Recommended 5.0 s or more. Set to 0 to send immediately."
+    },
+    "smart_meme_selection": {
+      "description": "Smart emoji selection",
+      "hint": "When enabled, uses composite scoring (diversity + relevance + similarity) to pick the best emoji. When disabled, picks randomly (still avoids short-term repeats)."
+    },
+    "_emotion_section": {
+      "description": "Emotion Recognition",
+      "hint": ""
+    },
+    "enable_natural_emotion_analysis": {
+      "description": "Understand conversation context with a model",
+      "hint": "When enabled, sticker usage scenes are extracted from your reply and the user message; if no model is set, the current session model is used. Adds model calls. When disabled, local matching is used."
+    },
+    "emotion_analysis_provider_id": {
+      "description": "Context understanding model (optional)",
+      "hint": "Leave blank to use the current session model. A fast text model is enough; JEV in advanced settings can replace this step."
+    },
+    "enable_jev": {
+      "description": "Enable JEV selection",
+      "hint": "Requires \"Understand conversation context with a model\" above. When disabled, the traditional LLM path is used; when enabled, JEV picks from up to 10 pre-filtered candidates. Uses the official endpoint and jev-latest model by default; a trusted API Base URL and JEV model ID can be set below. Sends candidate metadata, roughly the last 3 turns, and the current exchange; a none pick sends nothing, and a missing key or a failed call falls back to the LLM."
+    },
+    "typesafe_api_key": {
+      "description": "TypeSafe API Key",
+      "hint": "Create one at console.typesafe.ai. Used when both \"Understand conversation context with a model\" and \"Enable JEV selection\" are on; leave blank to fall back to the traditional LLM."
+    },
+    "typesafe_api_base_url": {
+      "description": "TypeSafe API Base URL",
+      "hint": "Uses the official TypeSafe API by default. Usually only the domain is needed; a value ending in /v1 or a full /v1/systemone address also works. The API key is sent to this address, so configure a trusted service only."
+    },
+    "typesafe_model_id": {
+      "description": "JEV model ID",
+      "hint": "Leave blank to use the default jev-latest model. For a compatible proxy, enter its required model ID; for example, Command Code uses typesafe/jev."
+    },
+    "vision_provider_id": {
+      "description": "Vision model",
+      "hint": "Used for image classification. Leave blank to auto-use AstrBot's global default_image_caption_provider_id."
+    },
+    "vision_fallback_provider_ids": {
+      "description": "Vision model fallback",
+      "hint": "Switch to these providers in order when vision model requests fail (same idea as AstrBot's fallback chat model)."
+    },
+    "vision_thinking_effort": {
+      "description": "Vision thinking effort",
+      "hint": "Passed to the vision model as reasoning_effort. 'Follow provider' sends no parameter and keeps the provider's own thinking config. Only effective for OpenAI-compatible providers.",
+      "labels": [
+        "Follow provider",
+        "Low",
+        "Medium",
+        "High"
+      ]
+    },
+    "send_target_whitelist": {
+      "description": "Send target whitelist",
+      "hint": "Format: group:group_id or user:user_id. When non-empty, only whitelisted targets can receive stickers."
+    },
+    "send_target_blacklist": {
+      "description": "Send target blacklist",
+      "hint": "Format: group:group_id or user:user_id. Can be combined with whitelist; the priority rule below controls conflict resolution."
+    },
+    "send_target_filter_mode": {
+      "description": "Send filter priority",
+      "hint": "Whitelist first: allow if whitelist hit, otherwise check blacklist. Blacklist first: deny if blacklist hit, otherwise check whitelist.",
+      "labels": [
+        "Whitelist first",
+        "Blacklist first"
+      ]
+    },
+    "steal_target_whitelist": {
+      "description": "Steal target whitelist",
+      "hint": "Format: group:group_id or user:user_id. When non-empty, only whitelisted targets allow collection."
+    },
+    "steal_target_blacklist": {
+      "description": "Steal target blacklist",
+      "hint": "Format: group:group_id or user:user_id. Can be combined with whitelist; the priority rule below controls conflict resolution."
+    },
+    "steal_target_filter_mode": {
+      "description": "Steal filter priority",
+      "hint": "Whitelist first: allow if whitelist hit, otherwise check blacklist. Blacklist first: deny if blacklist hit, otherwise check whitelist.",
+      "labels": [
+        "Whitelist first",
+        "Blacklist first"
+      ]
+    },
+    "max_reg_num": {
+      "description": "Maximum emoji count",
+      "hint": "Storage limit. When the limit is reached, old emoji are automatically removed per the cleanup strategy."
+    },
+    "eviction_usage_weight": {
+      "description": "Eviction score: low-usage weight",
+      "hint": "Default 0.7; the entry-time weight is 1 minus this value. Both scores are normalised and weighted: rarely used and oldest entries are evicted first. 0 evicts by age only, 1 by least usage only."
+    },
+    "steal_pool_capacity": {
+      "description": "Pending pool capacity",
+      "hint": "Auto-stolen images go to the pending pool first. When this limit is reached, stealing pauses until items are reviewed (approved or deleted) in the WebUI. Changes take effect immediately, no restart needed."
+    },
+    "audit_required": {
+      "description": "Auto-steal requires approval",
+      "hint": "Automatically collected originals wait for manual review before vision analysis. Approval queues background analysis immediately; successful results enter the library. Failed originals are kept for retry. With manual review off, automatic analysis continues; explicit capture commands analyze immediately."
+    },
+    "enable_embedding_search": {
+      "description": "Enable embedding vector search",
+      "hint": "When enabled, remote text embeddings recall stickers by overlay text + usage scenes + description. When disabled, keyword (BM25) search is used. No local CLIP. Falls back to BM25 if no embedding model is configured."
+    },
+    "embedding_provider_id": {
+      "description": "Embedding model ID",
+      "hint": "Leave blank to use the first framework embedding provider. The plugin detects actual output dimensions and rebuilds vectors in the background when the model or dimensions change; local matching remains available. If the service rejects the dimensions request parameter, disable that parameter or use a supported value in the AstrBot provider settings."
+    },
+    "_smart_section": {
+      "description": "Smart selection: text-distance fusion presets",
+      "hint": ""
+    },
+    "_external_source_section": {
+      "description": "External Meme Sources",
+      "hint": ""
+    },
+    "external_sources_enabled": {
+      "description": "Enable external meme sources",
+      "hint": "Supports Meme Manager / AstrBot Meme Pack, GitHub repositories, and constrained JSON APIs. Imports are copied into this plugin."
+    },
+    "external_source_allow_http": {
+      "description": "Allow plaintext HTTP sources",
+      "hint": "HTTPS is required by default. Loopback, private, link-local, and reserved addresses remain blocked."
+    },
+    "external_source_default_review": {
+      "description": "Send external imports to Pending by default",
+      "hint": "External imports also enter Pending automatically when content moderation is enabled."
+    },
+    "external_source_max_items": {
+      "description": "Maximum images per source",
+      "hint": "Default: 2000."
+    },
+    "external_source_max_image_bytes": {
+      "description": "Maximum bytes per external image",
+      "hint": "Default: 32 MiB."
+    },
+    "external_source_max_archive_bytes": {
+      "description": "Maximum compressed pack size",
+      "hint": "Default: 1 GiB."
+    },
+    "external_source_max_uncompressed_bytes": {
+      "description": "Maximum unpacked pack size",
+      "hint": "Default: 4 GiB."
+    },
+    "external_source_max_pixels": {
+      "description": "Maximum pixels per external image",
+      "hint": "Default: 40 million pixels."
+    },
+    "_webui_section": {
+      "description": "WebUI",
+      "hint": ""
+    },
+    "webui_theme": {
+      "description": "Default WebUI theme",
+      "hint": "Theme used when opening the sticker manager. Picking a theme in the page is remembered and takes priority over this setting.",
+      "labels": [
+        "Follow host",
+        "Night",
+        "Day",
+        "Minecraft",
+        "Fallout 4",
+        "Bili Style"
+      ]
+    },
+    "custom_meme_classification_prompt": {
+      "description": "VLM classification prompt",
+      "hint": "Supports placeholder: {emotion_list} (category list). Leave blank to use the default prompt."
+    },
+    "custom_meme_classification_with_filter_prompt": {
+      "description": "VLM classification prompt (with filtering)",
+      "hint": "Used when content moderation is enabled. Supports placeholder: {emotion_list} (category list). Leave blank to use the default prompt."
+    },
+    "emotion_analysis_prompt": {
+      "description": "Emotion analysis prompt",
+      "hint": "Leave blank to use the bundled context prompt. The query keeps the assistant's stance, interaction intent and key lines; custom content still takes effect. Placeholders: {emotion_list}, {llm_reply}, {user_message}."
+    },
+    "sim_weight_preset": {
+      "description": "Text-distance fusion preset",
+      "hint": "Preset controls how multiple similarity algorithms are fused: Balanced (default), Keyword-first (substring/character overlap), Semantic-first (n-gram/cosine), Strict (edit distance & character-level, reduces false sends).",
+      "labels": [
+        "Balanced",
+        "Keyword-first",
+        "Semantic-first",
+        "Strict"
+      ]
+    },
+    "show_advanced_settings": {
+      "description": "Show advanced settings",
+      "hint": "Reveal tuning, per-session filters and external-source options. Existing values remain active when hidden."
+    },
+    "meme_send_char_delay": {
+      "description": "Extra delay per reply character (seconds)",
+      "hint": "Default 0 uses the fixed send delay. Enable only to add a reading delay."
+    },
+    "model_request_interval": {
+      "description": "Minimum model request interval (seconds)",
+      "hint": "This plugin sends vision and embedding requests serially per provider, with at least 5 seconds between starts by default. Increase for low free-tier quotas or reduce for paid providers. Rate limits respect Retry-After; failed jobs remain available for retry."
+    },
+    "reanalysis_concurrency": {
+      "description": "Batch semanticization concurrency",
+      "hint": "Maximum background vision model concurrency for batch re-analysis and missing-semantics backfill (default 2). Set to 1 for low free-tier quotas, or increase for paid/local models."
     }
+  },
+  "pages": {
+    "dashboard": {
+      "title": "Sticker Dashboard",
+      "header": {
+        "brand": "Henry's Spoils",
+        "subtitle": "Sticker Manager"
+      },
+      "health": {
+        "ok": "Healthy",
+        "slow": "Slow",
+        "error": "Error",
+        "checking": "Checking"
+      },
+      "stats": {
+        "total": "Total",
+        "categories": "Categories",
+        "today": "Today"
+      },
+      "sections": {
+        "pending": "Pending",
+        "library": "Library"
+      },
+      "categories": {
+        "key_hint": "Keys start with a letter and use lowercase letters, numbers, underscores, or hyphens (48 characters maximum). Display names may use any language.",
+        "title": "Categories",
+        "favorites": "Favorites",
+        "all": "All",
+        "add_new": "Add Category",
+        "edit_title": "Edit Category",
+        "update_action": "Save Changes",
+        "cancel_edit": "Cancel",
+        "clear_filters": "Clear filters"
+      },
+      "pending": {
+        "pool": "Pending Pool",
+        "capacity": "Capacity",
+        "paused": "Paused",
+        "category_filter": "Category Filter",
+        "progress": "Pending",
+        "paused_hint": "Stealing is paused and will resume after review.",
+        "queued_count": "Queued",
+        "processing_count": "Analyzing",
+        "failed_count": "Failed"
+      },
+      "search": {
+        "library": "Text, tags, filename; separate words with spaces",
+        "pending": "Search pending stickers..."
+      },
+      "sort": {
+        "newest": "Newest",
+        "oldest": "Oldest",
+        "most_used": "Most Used",
+        "last_used": "Last Used",
+        "least_used": "Least used"
+      },
+      "actions": {
+        "done": "Done",
+        "batch": "Batch",
+        "categories": "Categories",
+        "add": "Add",
+        "batch_import": "Batch Import",
+        "storage_cleanup": "Storage Cleanup",
+        "unfavorite": "Remove Favorite",
+        "favorite": "Favorite",
+        "approve_all": "Approve All",
+        "delete_all": "Delete All",
+        "delete_blacklist": "Delete + Blacklist",
+        "approve": "Approve",
+        "delete": "Delete",
+        "blacklist": "Blacklist",
+        "download": "Download",
+        "edit": "Edit",
+        "edit_approve": "Edit & Approve",
+        "save_only": "Save Only",
+        "save_and_approve": "Save & Approve",
+        "unset_local": "Unset Local",
+        "set_local": "Set Local",
+        "cancel": "Cancel",
+        "save": "Save",
+        "analyzing": "Analyzing...",
+        "reanalyze": "Re-analyze with VLM",
+        "saving": "Applying...",
+        "apply_vlm": "Apply B result",
+        "auto_analyze": "Auto Analyze",
+        "uploading": "Uploading...",
+        "confirm_add": "Confirm Add",
+        "clear_selection": "Clear Selection",
+        "retry": "Retry",
+        "close": "Close",
+        "confirm_move": "Confirm Move",
+        "confirm_set": "Confirm Set",
+        "select_all": "Select All",
+        "deselect_all": "Deselect All",
+        "move": "Move",
+        "repair_origin": "Repair Origin",
+        "confirm": "Confirm",
+        "characters": "Manage characters",
+        "sources": "Sources",
+        "assign_character": "Assign Character",
+        "open_navigation": "Open navigation",
+        "collapse_sidebar": "Collapse sidebar",
+        "expand_sidebar": "Expand sidebar",
+        "more": "More actions"
+      },
+      "context_menu": {
+        "preview": "View details",
+        "select": "Add to batch selection",
+        "unselect": "Remove from selection"
+      },
+      "empty": {
+        "library_title": "No stickers yet",
+        "library_hint": "Click \"Add\" to upload a new sticker.",
+        "pending_title": "No pending stickers",
+        "pending_hint": "Newly stolen stickers will wait here for review.",
+        "no_categories": "No categories yet",
+        "no_characters": "No characters yet. Add one, then assign stickers in the library."
+      },
+      "pagination": {
+        "prev": "Previous",
+        "next": "Next"
+      },
+      "scope": {
+        "public": "Public",
+        "local": "Local only",
+        "local_short": "Local"
+      },
+      "modal": {
+        "edit": "Edit",
+        "edit_pending": "Edit Pending Sticker",
+        "review_pending": "Review Sticker",
+        "details": "Details",
+        "add_sticker": "Add Sticker",
+        "batch_import": "Batch Import Stickers",
+        "category_manager": "Category Manager",
+        "batch_move": "Batch Move",
+        "batch_scope": "Batch Scope",
+        "confirm": "Confirm Action",
+        "input": "Input",
+        "character_manager": "Character Manager",
+        "batch_character": "Assign Character"
+      },
+      "fields": {
+        "category": "Category",
+        "scope": "Scope",
+        "use_count": "Use Count",
+        "last_used": "Last Used",
+        "favorite": "Favorite",
+        "origin": "Origin",
+        "description": "Description",
+        "tags": "Tags",
+        "scenes": "When to send",
+        "created_at": "Added At",
+        "target_category": "Target Category",
+        "target_scope": "Target Scope",
+        "image_meta": "Image",
+        "added": "Added via",
+        "reviewed_at": "Reviewed",
+        "source": "Source URL",
+        "add_method_auto": "Auto collect",
+        "add_method_manual": "Manual upload",
+        "add_method_llm": "LLM upload",
+        "add_method_api": "API upload",
+        "add_method_external": "External import",
+        "add_method_unknown": "Unknown",
+        "source_channel_pack": "Meme pack",
+        "source_channel_github": "GitHub",
+        "source_channel_http_json": "JSON API",
+        "character": "Character",
+        "overlay_text": "Overlay text",
+        "emotions": "Emotions",
+        "secondary_emotions": "Secondary emotions",
+        "id": "ID"
+      },
+      "units": {
+        "times": "times"
+      },
+      "messages": {
+        "origin_unset": "Not recorded",
+        "origin_group": "Group",
+        "origin_user": "User",
+        "unknown_error": "Unknown error",
+        "unknown": "Unknown",
+        "no_description": "No description",
+        "loading_original": "Loading full image…",
+        "never_used": "Never used",
+        "favorited": "Favorited",
+        "not_favorited": "Not favorited",
+        "no_tags": "No tags",
+        "no_scenes": "No usage lines",
+        "no_overlay_text": "None",
+        "none": "None",
+        "no_preview": "No preview",
+        "scene_separator_hint": "comma separated",
+        "tag_separator_hint": "comma separated",
+        "scene_input_hint": "You can separate scenes with commas or semicolons.",
+        "analysis_pending": "Waiting for review",
+        "analysis_queued": "Approved · queued for analysis",
+        "analysis_processing": "Analyzing in background",
+        "analysis_failed": "Failed · approve again to retry",
+        "analysis_unanalysed": "Waiting for analysis"
+      },
+      "labels": {
+        "hash": "Hash"
+      },
+      "placeholders": {
+        "edit_scene": "Incoming messages: I just worked overtime, I need a hug",
+        "edit_tags": "Example: cute, funny, rare",
+        "select_category": "Select a category...",
+        "upload_scene": "Incoming messages: I just worked overtime, I need a hug",
+        "upload_tags": "Example: cute, funny",
+        "upload_desc": "Describe this sticker...",
+        "category_key": "Key (e.g. happy)",
+        "category_name": "Name (e.g. Happy)",
+        "category_desc": "Description (optional)",
+        "select": "Select...",
+        "character_key": "Key (e.g. neurosama)",
+        "character_name": "Display name (e.g. Neuro-sama)",
+        "overlay_text": "Text printed on the meme"
+      },
+      "upload": {
+        "click_to_upload": "Click to upload an image"
+      },
+      "analysis": {
+        "scenes_title": "Detected usage lines",
+        "scenes_hint": "Click to add or remove a chat line this sticker can reply to.",
+        "reanalysis_title": "VLM re-analysis",
+        "reanalysis_hint": "Run the vision model again and compare the stored labels before applying them.",
+        "current": "Current labels",
+        "new_result": "New VLM result",
+        "reanalysis_preserve": "Character, scope, favorites and usage history stay unchanged."
+      },
+      "reanalysis": {
+        "title": "Batch re-analysis",
+        "progress": "Analysis progress",
+        "request_failed": "Request failed. Please retry.",
+        "confirm": "Analyze {count} selected images?\nResults will wait for individual review. Nothing is saved automatically.",
+        "hint": "Review and confirm each result before saving. Categories, characters, favorites, provenance and scope are kept.",
+        "background_hint": "Analysis continues after closing this panel or page. Reload to resume review. Restarting the plugin ends the task and clears unsaved results.",
+        "interrupted": "The plugin restarted and unsaved analysis results were cleared. Your library was not changed.",
+        "running": "Analyzing",
+        "stopping": "Stopping after current image",
+        "completed": "Analysis complete",
+        "cancelled": "Stopped",
+        "failed": "Task failed to start",
+        "saved": "Saved",
+        "failed_count": "Failed",
+        "skipped": "Skipped",
+        "details": "Failure and skip details",
+        "stop": "Stop after current image",
+        "retry": "Retry failed images",
+        "analyzed": "Analyzed",
+        "pending_review": "Awaiting review",
+        "choose_result": "Choose an image to review",
+        "loading_result": "Loading comparison…",
+        "before": "Before analysis",
+        "after": "New result",
+        "discard_one": "Keep original and continue",
+        "save_one": "Save this image and continue",
+        "no_pending": "No results awaiting review.",
+        "field_desc": "Description",
+        "field_tags": "Tags",
+        "field_scenes": "Scenes",
+        "field_overlay_text": "Image text",
+        "field_emotions": "Emotions",
+        "missing_short": "Backfill Semantics",
+        "missing_title": "Semanticize all images missing metadata",
+        "no_missing": "All stickers already have complete semantic metadata.",
+        "no_missing_scoped": "All stickers in \"{scope}\" already have complete semantic metadata.",
+        "scope_notice": "Current scope: {scope}",
+        "confirm_missing": "Analyze {count} image(s) missing semantic metadata?\nYou can save all at once or inspect individually.",
+        "token_warning": "Too many images pending analysis ({count} total). Please watch your token usage. Continue?",
+        "capped_notice": "Found {total} images missing semantics; processing the first {count} in this batch.",
+        "concurrency_badge": "Concurrency {n}",
+        "bulk_hint": "{count} awaiting review · Save all in one click or inspect individually below",
+        "save_all": "Save All ({count})",
+        "discard_all": "Discard All"
+      },
+      "batch": {
+        "include_subfolders": "Include subfolders",
+        "selected_count": "Selected {count} image(s)",
+        "more_count": "{count} more...",
+        "drag_upload": "Click or drag to upload multiple images",
+        "supported_formats": "Supports PNG, JPG, GIF, WEBP, BMP",
+        "default_category": "Default Category",
+        "default_category_hint": "Selected category is preserved during fast import; leave empty with auto-analyze to classify automatically.",
+        "auto_analyze": "Auto-semanticize on import (keeps chosen category & character; auto-classifies when category is empty)",
+        "auto_analyze_disabled_hint": "Clear the selected category before enabling auto analyze.",
+        "auto_analyze_warning": "Images are semanticized in the background using your configured concurrency and request interval.",
+        "start_import": "Start Import ({count})",
+        "processing": "Processing...",
+        "completed": "Import complete",
+        "failed": "Import failed",
+        "success": "success",
+        "failed_count": "failed",
+        "continue_import": "Continue Import",
+        "selected_images": "Selected {count} image(s)",
+        "scope_hint": "Images missing origin group info will be skipped when setting local scope.",
+        "selected_short": "Selected {count}",
+        "character": "Character",
+        "character_hint": "This batch will be tagged with the selected character. You can change it later."
+      },
+      "alerts": {
+        "pending_approved": "Approved {count} item(s).",
+        "pending_saved": "Pending item saved.",
+        "approve_failed": "Approve failed",
+        "and_blacklisted": "(blacklisted)",
+        "pending_deleted": "Deleted {count} item(s).",
+        "delete_failed": "Delete failed",
+        "select_pending_first": "Select pending items first.",
+        "failed_count": "{count} failed.",
+        "batch_approve_failed": "Batch approve failed",
+        "blacklisted_count": "Blacklisted {count} item(s).",
+        "batch_delete_failed": "Batch delete failed",
+        "save_failed": "Save failed",
+        "action_failed": "Action failed",
+        "move_failed": "Move failed",
+        "batch_scope_partial": "Updated {count} image(s). {skipped} skipped because origin group info is missing.",
+        "scope_set_failed": "Scope update failed.",
+        "scope_origin_missing": "This image is missing origin group info and cannot be set to local.",
+        "scope_update_failed": "Scope update failed.",
+        "favorite_failed": "Favorite update failed",
+        "batch_favorite_added": "Favorited {count} image(s).",
+        "batch_favorite_removed": "Removed favorites from {count} image(s).",
+        "batch_action_failed": "Batch action failed",
+        "storage_scan_failed": "Storage scan failed.",
+        "storage_nothing_to_clean": "No storage items need cleanup.",
+        "storage_cleanup_failed": "Storage cleanup failed.",
+        "storage_cleanup_done": "Storage cleanup completed. Processed {count} item(s).",
+        "scope_repaired": "Repaired origin scope for {count} image(s).",
+        "scope_repair_failed": "Origin scope repair failed.",
+        "select_category_or_auto": "Select a category or enable auto analyze.",
+        "upload_failed": "Upload failed.",
+        "upload_error": "Upload error.",
+        "duplicate_image": "This sticker already exists; skipped the duplicate.",
+        "similar_image": "A similar sticker exists; added as a new image.",
+        "batch_import_failed": "Batch import failed.",
+        "select_image_first": "Select an image first.",
+        "analyze_failed": "Analyze failed.",
+        "reanalyze_failed": "Re-analysis failed.",
+        "reanalyze_apply_failed": "Failed to apply VLM result.",
+        "reanalyze_applied": "VLM result applied.",
+        "no_valid_info": "No valid information recognized.",
+        "add_failed": "Add failed.",
+        "invalid_category_key": "Category keys must start with a letter and contain only lowercase letters, numbers, underscores, or hyphens (48 characters maximum).",
+        "reserved_category_key": "This category key is reserved by the operating system. Choose another key.",
+        "duplicate_category_name": "This category display name is already in use.",
+        "pending_queued": "{count} item(s) queued for background analysis."
+      },
+      "confirm": {
+        "pending_approve_batch": "Approve {count} pending item(s)?",
+        "pending_delete_blacklist_batch": "Delete and blacklist {count} pending item(s)?",
+        "pending_delete_batch": "Delete {count} pending item(s)?",
+        "delete_and_blacklist_image": "Delete and blacklist this image?\nIt will no longer be auto-collected.",
+        "delete_image": "Delete this image? This action cannot be undone.",
+        "delete_selected_images": "Delete {count} selected image(s)?",
+        "storage_cleanup": "Found {count} cleanable item(s). This will remove stale indexes, orphan files, thumbnail cache, and temp files. Continue?",
+        "update_existing_category": "Category {key} already exists. Update it?",
+        "delete_category": "Delete category {key}? Images in this category will be deleted permanently.",
+        "delete_character": "Delete character {key}? Stickers stay; only the character tag is removed."
+      },
+      "prompt": {
+        "origin_scope": "Enter the origin scope, for example group:123456 or user:123456."
+      },
+      "themes": {
+        "title": "Theme",
+        "auto": "Follow host",
+        "dark": "Night",
+        "light": "Day",
+        "minecraft": "Minecraft",
+        "fallout": "Fallout 4",
+        "bili": "Bili Style",
+        "group_original": "Original",
+        "group_game": "Game inventory",
+        "group_special": "Featured",
+        "save_hint": "Your pick is saved as the default theme.",
+        "saved_default": "Default"
+      },
+      "view": {
+        "grid": "Grid view",
+        "list": "List view"
+      },
+      "kbd": {
+        "navigate": "Navigate",
+        "preview": "Preview",
+        "clear_focus": "Clear focus"
+      },
+      "characters": {
+        "persona_isolation": "Enable persona library isolation",
+        "no_personas_available": "No personas found. Create one in AstrBot first.",
+        "persona_hint": "When isolation is enabled, suitable character memes are preferred; otherwise shared memes are used. A character can have multiple personas.",
+        "unlink_persona": "Unlink",
+        "no_persona": "No linked personas",
+        "select_persona": "Select persona",
+        "bind_persona": "Link",
+        "title": "Characters",
+        "all": "All characters",
+        "unassigned": "General library",
+        "hint": "You assign characters in the dashboard. VLM does not detect them. Create a character first, then edit a card or batch-assign.",
+        "manage": "Manage characters",
+        "bar_hint": "Filter the library by character. Use Manage characters to add or remove them."
+      },
+      "sources": {
+        "title": "External Sources",
+        "copy_title": "Safe local copy",
+        "copy_hint": "Imports are validated, deduplicated, and copied into this plugin. Other plugins' original files remain unchanged.",
+        "pack": "Import resource pack",
+        "pack_hint": "ZIP / .meme-pack export",
+        "github": "GitHub meme repository",
+        "api": "External JSON catalog",
+        "preflight": "Preflight",
+        "checking": "Checking source...",
+        "format_title": "Accepted pack format",
+        "format_hint": "Preferred AstrBot Meme Pack v2: manifest.json + memes/, optionally semantic_metadata.json. ZIPs containing PNG/JPG/GIF/WEBP/BMP images are also accepted; previews/ is skipped.",
+        "license": "License",
+        "attribution": "Attribution",
+        "capacity_note": "This pack exceeds the native collection limit. External copies use a protected retention class.",
+        "auto_map": "Auto map",
+        "review": "Send imports to Pending first",
+        "auto_analyze": "Auto-semanticize images missing metadata after import (keeps category & character)",
+        "missing_count": "{count} missing",
+        "analyzing_phase": "analyzing",
+        "analyzed_stat": "semanticized {done}/{total}",
+        "scope": "Scope",
+        "assign_character": "Assign a character to this series",
+        "character_placeholder": "Existing or new character key",
+        "character_hint": "Existing keys are reused; a new key is created during import.",
+        "import": "Import",
+        "sync": "Sync",
+        "import_job": "Import job",
+        "available": "Available sources",
+        "empty": "No registered sources. Same-instance Meme Manager packs appear automatically.",
+        "forget": "Forget",
+        "forget_confirm": "Forget this source? Imported images will remain in your library."
+      },
+      "libraries": {
+        "all": "All stickers",
+        "general": "General library",
+        "favorites": "Favorites",
+        "characters": "Character library",
+        "quota": "Automatic eviction quota",
+        "hint": "Only ordinary general stickers are automatically evicted. Favorites, character stickers and protected imports are managed separately. Removing favorite or character protection returns ordinary stickers to the quota."
+      },
+      "layout": {
+        "libraries": "Libraries",
+        "emotions": "Emotions in this library",
+        "all_emotions": "All emotions",
+        "collection": "STICKER COLLECTION",
+        "all_characters": "All characters",
+        "favorite": "Favorite protected",
+        "character": "Character protected",
+        "protected": "Protected copy",
+        "automatic": "Automatic eviction"
+      },
+      "guide": {
+        "title": "Get started · Match the conversation",
+        "collect": "Prepare the library",
+        "collect_hint": "Upload and analyze images, or enable collection and choose a vision model in plugin settings.",
+        "review": "Check the content",
+        "review_hint": "Approve collected images, check the overlay text and incoming messages they suit, then assign characters.",
+        "chat": "Chat naturally",
+        "chat_hint": "The bot can express emotion, share a joke or react with a meme during ordinary conversation. It chooses images that fit the conversation.",
+        "pending_hint": "Pending images are not sent. If an approved image matches poorly, preview a new analysis and confirm before saving.",
+        "upload": "Upload and analyze",
+        "pending": "Review images",
+        "auto": "Auto send",
+        "context": "Context analysis",
+        "embedding": "Semantic search",
+        "on": "On",
+        "off": "Off"
+      }
+    }
+  }
 }

@@ -132,6 +132,7 @@ async def test_http_retry_preserves_ready_results(http_flow):
 @pytest.mark.asyncio
 async def test_http_stop_and_conflicting_confirmation(http_flow):
     flow = http_flow
+    flow.cfg.reanalysis_concurrency = 1
     started, release = asyncio.Event(), asyncio.Event()
     valid = flow.llm.return_value
 
@@ -185,3 +186,112 @@ async def test_reanalysis_rejects_emotion_removed_before_review(http_flow):
     response = await flow.client.post(BASE + "/review", json={"task_id": task_id, "hash": flow.hashes[0], "decision": "save"})
     assert response.status_code == 409
     assert flow.db.get_emoji(flow.paths[0]) == before
+
+
+@pytest.mark.asyncio
+async def test_http_default_concurrency_2_missing_filter_and_save_all(http_flow, tmp_path):
+    flow = http_flow
+    assert flow.cfg.reanalysis_concurrency == 2
+
+    extra_hashes = []
+    extra_paths = []
+    for idx, (desc, tags) in enumerate((("", []), ("", ["保留标签"]), ("仅有描述无标签场景", []))):
+        path = tmp_path / f"missing-{idx}.png"
+        Image.new("RGB", (32, 32), (idx * 40, 120, 200)).save(path)
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        await flow.db.insert_batch([{
+            "path": str(path), "hash": digest, "category": "sad",
+            "desc": desc, "tags": tags, "scenes": [], "overlay_text": "",
+        }])
+        extra_paths.append(str(path))
+        extra_hashes.append(digest)
+
+    missing_resp = await flow.client.get(BASE + "/missing")
+    assert missing_resp.status_code == 200
+    missing_data = (await missing_resp.get_json())["missing"]
+    assert missing_data["total_missing"] == 3
+    assert set(missing_data["hashes"]) == set(extra_hashes)
+
+    active = 0
+    max_active = 0
+    both_started = asyncio.Event()
+    release = asyncio.Event()
+    valid = flow.llm.return_value
+
+    async def concurrent_model(**kwargs):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        if active >= 2:
+            both_started.set()
+        await release.wait()
+        active -= 1
+        return valid
+
+    flow.llm.side_effect = concurrent_model
+    started = await flow.client.post(BASE, json={"hashes": extra_hashes, "fill_empty_only": True})
+    assert started.status_code == 200
+    task = (await started.get_json())["task"]
+    assert task["concurrency"] == 2 and task["fill_empty_only"] is True
+    await asyncio.wait_for(both_started.wait(), timeout=2.0)
+    assert max_active == 2
+    release.set()
+    await finish(flow)
+
+    saved_all = await flow.client.post(BASE + "/review", json={
+        "task_id": task["id"], "decision": "save", "all": True,
+    })
+    assert saved_all.status_code == 200
+    done_task = (await saved_all.get_json())["task"]
+    assert done_task["saved"] == 3 and done_task["pending"] == 0
+
+    item0 = flow.db.get_emoji(extra_paths[0])
+    item1 = flow.db.get_emoji(extra_paths[1])
+    item2 = flow.db.get_emoji(extra_paths[2])
+    assert item0["desc"] == EXPECTED["desc"] and item0["tags"] == EXPECTED["tags"]
+    assert item1["desc"] == EXPECTED["desc"] and item1["tags"] == ["保留标签"]
+    assert item2["desc"] == "仅有描述无标签场景" and item2["tags"] == EXPECTED["tags"]
+
+    after_missing = (await (await flow.client.get(BASE + "/missing")).get_json())["missing"]
+    assert after_missing["total_missing"] == 0
+
+
+@pytest.mark.asyncio
+async def test_http_missing_semantics_filters_by_library_category_and_character(http_flow, tmp_path):
+    flow = http_flow
+    flow.cfg.update_config({"characters": ["mika"], "character_info": {"mika": {"name": "美香"}}})
+
+    specs = [
+        ("gen-sad", "sad", "", 0, ["happy"]),
+        ("char-mika", "happy", "mika", 0, ["sad"]),
+        ("fav-happy", "happy", "", 1, []),
+    ]
+    seeded = {}
+    for name, category, character, is_fav, emotions in specs:
+        path = tmp_path / f"{name}.png"
+        Image.new("RGB", (28, 28), (len(name) * 15, 80, 160)).save(path)
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        await flow.db.insert_batch([{
+            "path": str(path), "hash": digest, "category": category,
+            "character": character, "is_favorite": is_fav,
+            "desc": "", "tags": [], "scenes": [], "emotions": emotions,
+        }])
+        seeded[name] = digest
+
+    all_missing = (await (await flow.client.get(BASE + "/missing")).get_json())["missing"]
+    assert set(all_missing["hashes"]) == set(seeded.values())
+
+    gen_only = (await (await flow.client.get(BASE + "/missing?library=general")).get_json())["missing"]
+    assert gen_only["hashes"] == [seeded["gen-sad"]]
+
+    char_only = (await (await flow.client.get(
+        BASE + "/missing?library=characters&character=mika"
+    )).get_json())["missing"]
+    assert char_only["hashes"] == [seeded["char-mika"]]
+
+    fav_only = (await (await flow.client.get(BASE + "/missing?library=favorites")).get_json())["missing"]
+    assert fav_only["hashes"] == [seeded["fav-happy"]]
+
+    # 次要情绪（emotions_json）同样跟随分类筛选口径
+    sad_with_secondary = (await (await flow.client.get(BASE + "/missing?category=sad")).get_json())["missing"]
+    assert set(sad_with_secondary["hashes"]) == {seeded["gen-sad"], seeded["char-mika"]}

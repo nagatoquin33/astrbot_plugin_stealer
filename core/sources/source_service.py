@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 import copy
 import hashlib
 import io
@@ -20,14 +21,21 @@ from PIL import Image, UnidentifiedImageError
 
 from astrbot.api import logger
 from astrbot.api.star import StarTools
-from ..db.index_manager import invalidate_search, refresh_search_entry
+from ..db.index_manager import invalidate_search, refresh_search_entries, refresh_search_entry
 
+from ..util.model_requests import model_request_context
 from ..util.normalization import (
     normalize_category_key,
     normalize_character_key,
     normalize_scope_mode,
 )
 from ..util.safe_io import write_image_file
+from ..processing.library_analysis import (
+    ANALYSIS_FIELDS,
+    analyze_library_image,
+    is_missing_semantics,
+    merge_empty_fields,
+)
 from ..processing.phash_dedup_service import PHashDedupService
 from .github_source import GitHubSource
 from .http_source import HTTPSource
@@ -58,6 +66,7 @@ class _SourceImportPlan:
     scope_mode: str
     origin_target: str
     character: str
+    auto_analyze: bool = False
 
 
 class SourceService:
@@ -487,6 +496,7 @@ class SourceService:
         job = {
             "job_id": job_id,
             "status": "queued",
+            "phase": "importing",
             "total": 0,
             "processed": 0,
             "imported": 0,
@@ -494,6 +504,10 @@ class SourceService:
             "pending": 0,
             "stale": 0,
             "failed": 0,
+            "analyze_total": 0,
+            "analyze_processed": 0,
+            "analyzed": 0,
+            "analyze_failed": 0,
             "errors": [],
             "created_at": now,
             "updated_at": now,
@@ -510,6 +524,7 @@ class SourceService:
         self._jobs[job_id] = {
             "job_id": job_id,
             "status": "queued",
+            "phase": "importing",
             "total": 0,
             "processed": 0,
             "imported": 0,
@@ -517,6 +532,10 @@ class SourceService:
             "pending": 0,
             "stale": 0,
             "failed": 0,
+            "analyze_total": 0,
+            "analyze_processed": 0,
+            "analyzed": 0,
+            "analyze_failed": 0,
             "errors": [],
             "created_at": now,
             "updated_at": now,
@@ -553,8 +572,9 @@ class SourceService:
         job = self._jobs[job_id]
         source_id = ""
         reader: Any = None
+        reconciled = False
         try:
-            job.update(status="running", updated_at=time.time())
+            job.update(status="running", phase="importing", updated_at=time.time())
             inspection, reader = await self.inspect(spec)
             if not inspection.ok:
                 raise ExternalSourceError("; ".join(inspection.errors))
@@ -566,11 +586,20 @@ class SourceService:
             if self.db and hasattr(self.db, "upsert_source"):
                 await self.db.upsert_source(plan.source)
                 await self.db.update_source_status(source_id, status="syncing")
-            await self._import_inspected_items(job, reader, inspection.items, plan)
-            await self._complete_source_import(job, inspection, source_id)
+            analyze_targets: list[dict[str, Any]] = []
+            await self._import_inspected_items(
+                job, reader, inspection.items, plan, analyze_targets=analyze_targets,
+            )
+            await self._close_reader(reader)
+            reader = None
+            await self._reconcile_source_import(job, inspection, source_id)
+            reconciled = True
+            if plan.auto_analyze and analyze_targets:
+                await self._auto_analyze_imported(job, analyze_targets)
+            job.update(phase="done", status="completed", completed_at=time.time(), updated_at=time.time())
         except asyncio.CancelledError:
             job.update(status="cancelled", completed_at=time.time(), updated_at=time.time())
-            if source_id and self.db and hasattr(self.db, "update_source_status"):
+            if not reconciled and source_id and self.db and hasattr(self.db, "update_source_status"):
                 await self.db.update_source_status(source_id, status="cancelled")
         except Exception as exc:
             message = str(exc)
@@ -580,7 +609,7 @@ class SourceService:
                 completed_at=time.time(),
                 updated_at=time.time(),
             )
-            if source_id and self.db and hasattr(self.db, "update_source_status"):
+            if not reconciled and source_id and self.db and hasattr(self.db, "update_source_status"):
                 await self.db.update_source_status(source_id, status="error", last_error=message)
             logger.error(f"[Source] 外部源导入失败: {exc}", exc_info=True)
         finally:
@@ -614,6 +643,10 @@ class SourceService:
         character = self._prepare_character(spec)
         if character:
             spec["character"] = character
+        raw_auto = spec.get("auto_analyze", False)
+        auto_analyze = (
+            raw_auto.lower() == "true" if isinstance(raw_auto, str) else bool(raw_auto)
+        )
         return _SourceImportPlan(
             source=self._source_record(inspection, spec),
             category_map=category_map,
@@ -621,6 +654,7 @@ class SourceService:
             scope_mode=scope_mode,
             origin_target=origin_target,
             character=character,
+            auto_analyze=auto_analyze,
         )
 
     async def _import_inspected_items(
@@ -629,6 +663,8 @@ class SourceService:
         reader: Any,
         items: list[SourceItem],
         plan: _SourceImportPlan,
+        *,
+        analyze_targets: list[dict[str, Any]] | None = None,
     ) -> None:
         for item in items:
             raw: bytes | None = None
@@ -643,6 +679,7 @@ class SourceService:
                     scope_mode=plan.scope_mode,
                     origin_target=plan.origin_target,
                     character=plan.character,
+                    analyze_targets=analyze_targets if plan.auto_analyze else None,
                 )
                 job[outcome] = int(job.get(outcome, 0)) + 1
             except asyncio.CancelledError:
@@ -658,7 +695,7 @@ class SourceService:
                 job["processed"] += 1
                 job["updated_at"] = time.time()
 
-    async def _complete_source_import(
+    async def _reconcile_source_import(
         self,
         job: dict[str, Any],
         inspection: SourceInspection,
@@ -669,7 +706,6 @@ class SourceService:
                 source_id,
                 [item.external_id for item in inspection.items],
             )
-        job.update(status="completed", completed_at=time.time(), updated_at=time.time())
         if self.db and hasattr(self.db, "count_stale_source_items"):
             job["stale"] = self.db.count_stale_source_items(source_id)
         if self.db and hasattr(self.db, "update_source_status"):
@@ -680,6 +716,108 @@ class SourceService:
                 last_sync_at=int(time.time()),
             )
         invalidate_search(self.plugin)
+
+    async def _auto_analyze_imported(
+        self,
+        job: dict[str, Any],
+        analyze_targets: list[dict[str, Any]],
+    ) -> None:
+        """先快速落盘入库后，后台并发补全缺失的语义字段，保留原有分类与角色。"""
+        processor = getattr(self.plugin, "image_processor_service", None)
+        if processor is None or self.db is None:
+            if len(job["errors"]) < 20:
+                job["errors"].append("auto_analyze skipped: image processor unavailable")
+            return
+        config = getattr(self.plugin, "plugin_config", None)
+        categories = (
+            list(config.get_categories())
+            if config and hasattr(config, "get_categories")
+            else list(getattr(config, "categories", []) or [])
+        )
+        if not categories:
+            return
+        try:
+            concurrency = max(1, min(8, int(self._cfg("reanalysis_concurrency", 2) or 2)))
+        except (TypeError, ValueError):
+            concurrency = 2
+
+        job.update(
+            phase="analyzing",
+            analyze_total=len(analyze_targets),
+            analyze_processed=0,
+            analyzed=0,
+            analyze_failed=0,
+            updated_at=time.time(),
+        )
+        queue = deque(analyze_targets)
+        saved_library_paths: list[str] = []
+
+        async def worker() -> None:
+            while queue:
+                entry = queue.popleft()
+                path = entry["path"]
+                image_hash = entry["hash"]
+                is_review = bool(entry["review"])
+                try:
+                    if not await asyncio.to_thread(Path(path).is_file):
+                        continue
+                    with model_request_context(concurrency=concurrency, priority=1):
+                        result = await analyze_library_image(processor, path, categories)
+                    fresh = {key: result[key] for key in ANALYSIS_FIELDS}
+                    if is_review:
+                        pending = (
+                            await asyncio.to_thread(self.db.get_pending_by_hash, image_hash)
+                            if hasattr(self.db, "get_pending_by_hash")
+                            else None
+                        )
+                        if pending and pending.get("id") and hasattr(self.db, "update_pending"):
+                            updates = merge_empty_fields(pending, fresh)
+                            allowed = {*categories, str(pending.get("category") or "")}
+                            updates["emotions"] = [
+                                emo for emo in updates.get("emotions", []) if emo in allowed
+                            ]
+                            await self.db.update_pending(
+                                int(pending["id"]), updates, from_analysis=True,
+                            )
+                            job["analyzed"] += 1
+                    else:
+                        current = await asyncio.to_thread(self.db.get_emoji, path)
+                        if current is not None:
+                            updates = merge_empty_fields(current, fresh)
+                            allowed = {*categories, str(current.get("category") or "")}
+                            updates["emotions"] = [
+                                emo for emo in updates.get("emotions", []) if emo in allowed
+                            ]
+                            async with self.db.file_lock:
+                                updated = await self.db.update_path(path, updates)
+                            if updated:
+                                saved_library_paths.append(path)
+                                job["analyzed"] += 1
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    job["analyze_failed"] += 1
+                    if len(job["errors"]) < 20:
+                        job["errors"].append(f"analyze {image_hash[:12]}: {exc}")
+                    logger.warning(f"[Source] 入库后自动语义化失败 {image_hash[:12]}: {exc}")
+                finally:
+                    job["analyze_processed"] += 1
+                    job["updated_at"] = time.time()
+
+        workers = [
+            asyncio.create_task(worker())
+            for _ in range(min(concurrency, len(analyze_targets)))
+        ]
+        try:
+            await asyncio.gather(*workers)
+        except asyncio.CancelledError:
+            for w in workers:
+                w.cancel()
+            await asyncio.gather(*workers, return_exceptions=True)
+            raise
+        finally:
+            if saved_library_paths:
+                await refresh_search_entries(self.plugin, saved_library_paths)
 
     @staticmethod
     async def _close_reader(reader: Any) -> None:
@@ -710,6 +848,7 @@ class SourceService:
         scope_mode: str,
         origin_target: str,
         character: str,
+        analyze_targets: list[dict[str, Any]] | None = None,
     ) -> str:
         image_hash = hashlib.sha256(raw).hexdigest()
         if self.db and await asyncio.to_thread(self.db.is_blacklisted, image_hash):
@@ -800,6 +939,12 @@ class SourceService:
                               pending_path=str(target) if review else "")
         if not review:
             await refresh_search_entry(self.plugin, str(target), metadata)
+        if analyze_targets is not None and is_missing_semantics(metadata):
+            analyze_targets.append({
+                "path": str(target),
+                "hash": image_hash,
+                "review": review,
+            })
         return "pending" if review else "imported"
 
     def _prepare_character(self, spec: dict[str, Any]) -> str:

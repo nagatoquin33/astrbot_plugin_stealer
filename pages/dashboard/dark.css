@@ -753,5 +753,55 @@
     contain-intrinsic-size: auto 96px;
 }
 
-/* 默认主题列表行（行高约 84-96px） */
+/* ── 月之暗面（Moonshot）黑夜主题：新增分类导航与筛选控件适配 ── */
+
+[data-theme="dark"] .category-item::before {
+    background: #9fb6ff;
+}
+
+[data-theme="dark"] .sidebar-head-btn {
+    background: rgba(255, 255, 255, 0.03);
+    border-color: rgba(255, 255, 255, 0.08);
+    color: var(--text-secondary);
+}
+
+[data-theme="dark"] .sidebar-head-btn:hover {
+    background: rgba(127, 155, 255, 0.12);
+    border-color: rgba(127, 155, 255, 0.35);
+    color: #dbe6ff;
+}
+
+[data-theme="dark"] .active-filter-pill {
+    background: rgba(127, 155, 255, 0.12);
+    border-color: rgba(127, 155, 255, 0.3);
+    color: #dbe6ff;
+}
+
+[data-theme="dark"] .category-quick-rail {
+    background: rgba(16, 17, 22, 0.72);
+    border-bottom-color: rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="dark"] .category-rail-chip {
+    background: #15161c;
+    border-color: rgba(255, 255, 255, 0.08);
+    color: var(--text-secondary);
+}
+
+[data-theme="dark"] .category-rail-chip.active {
+    background: rgba(127, 155, 255, 0.14);
+    border-color: rgba(127, 155, 255, 0.36);
+    color: #dbe6ff;
+}
+
+[data-theme="dark"] .category-add-panel.is-editing,
+[data-theme="dark"] .category-manager-row.is-editing {
+    background: rgba(127, 155, 255, 0.06);
+    border-color: rgba(127, 155, 255, 0.36);
+}
+
+[data-theme="dark"] .category-manager-count {
+    background: rgba(127, 155, 255, 0.14);
+    color: #c7d6ff;
+}
 

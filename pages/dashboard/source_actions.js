@@ -121,6 +121,7 @@ export function createSourceActions({
             ...payload,
             category_map: mapping,
             review: !!sourceForm.review,
+            auto_analyze: !!sourceForm.auto_analyze,
             scope_mode: sourceForm.scope_mode,
             origin_target: String(sourceForm.origin_target || '').trim(),
             character: sourceForm.assign_character
@@ -172,13 +173,33 @@ export function createSourceActions({
     };
 
     const startSourceImport = async (source = sourceSelected.value) => {
-        sourceLoading.value = true;
         sourceError.value = '';
+        let payload;
         try {
-            const payload = sourcePayloadFor(source);
+            payload = sourcePayloadFor(source);
             if (!payload.source_id && !payload.path && !payload.endpoint && !payload.repository) {
                 throw new Error('Choose a pack, GitHub repository, or enter an API URL first');
             }
+        } catch (error) {
+            sourceError.value = error.message || String(error);
+            return;
+        }
+        if (payload.auto_analyze) {
+            const estCount = Number(
+                sourceInspection.value?.missing_semantics_count
+                ?? sourceInspection.value?.item_count
+                ?? 0
+            );
+            if (estCount > 20 && typeof showConfirm === 'function') {
+                const warnMsg = t(
+                    'pages.dashboard.reanalysis.token_warning',
+                    '待分析图片过多（共 {count} 张），请注意 token 消耗，是否继续？',
+                ).replace('{count}', estCount);
+                if (!await showConfirm(warnMsg)) return;
+            }
+        }
+        sourceLoading.value = true;
+        try {
             const res = await apiFetch('api/sources/import', {
                 method: 'POST',
                 body: JSON.stringify(payload),
@@ -202,6 +223,7 @@ export function createSourceActions({
         if (source?.discovered) {
             resetSourceCategoryMap();
             sourceForm.review = !!sourceDefaults.value.review;
+            sourceForm.auto_analyze = false;
             sourceForm.scope_mode = 'public';
             sourceForm.origin_target = '';
             sourceForm.assign_character = false;

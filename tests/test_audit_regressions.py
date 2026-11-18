@@ -246,3 +246,70 @@ async def test_unload_cancels_registered_batch_upload_without_writing(flow, monk
     await flow.plugin.task_scheduler.cleanup()
     assert flow.db.count_total() == 0
     assert flow.api.batch_upload_tasks[result["task_id"]]["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_batch_upload_with_category_and_auto_analyze_preserves_category_and_character(flow, monkeypatch):
+    from PIL import Image
+    import io
+
+    flow.cfg.update_config({"characters": ["mika"], "character_info": {"mika": {"name": "美香"}}})
+    flow.cfg.reanalysis_concurrency = 2
+
+    files_payload = []
+    for idx in range(2):
+        buf = io.BytesIO()
+        Image.new("RGB", (24, 24), (idx * 80, 100, 180)).save(buf, format="PNG")
+        files_payload.append({
+            "name": f"img-{idx}.png",
+            "base64": base64.b64encode(buf.getvalue()).decode(),
+        })
+
+    active = 0
+    max_active = 0
+    both_started = asyncio.Event()
+
+    async def classify_image(**kwargs):
+        nonlocal active, max_active
+        # 第一阶段已落盘入库，因此在调模型时图库内应当已经有这 2 张图片
+        assert flow.db.count_total() == 2
+        active += 1
+        max_active = max(max_active, active)
+        if active >= 2:
+            both_started.set()
+        else:
+            await asyncio.wait_for(both_started.wait(), timeout=1.5)
+        await asyncio.sleep(0.02)
+        active -= 1
+        return ("happy", ["批量标签"], "批量自动描述", "happy", ["批量场景"], "TEXT", ["happy"])
+
+    flow.plugin.image_processor_service = SimpleNamespace(
+        CATEGORY_FILTERED="__filtered__",
+        CATEGORY_NOT_EMOJI="__not_emoji__",
+        classify_image=classify_image,
+    )
+    payload(monkeypatch, image_mutations, {
+        "_files": files_payload,
+        "category": "sad",
+        "character": "mika",
+        "auto_analyze": True,
+    })
+    created = await flow.api.handle_batch_upload()
+    assert created["success"] is True
+    task_name = "batch_upload_" + created["task_id"]
+    if task_name in flow.plugin.task_scheduler._tasks:
+        await flow.plugin.task_scheduler._tasks[task_name]
+
+    task_info = flow.api.batch_upload_tasks[created["task_id"]]
+    assert task_info["status"] == "completed"
+    assert task_info["success"] == 2
+    assert max_active == 2
+
+    items, total, _ = flow.db.get_emojis_paginated(page=1, page_size=10)
+    assert total == 2
+    for row in items:
+        assert row["category"] == "sad"
+        assert row["character"] == "mika"
+        assert row["desc"] == "批量自动描述"
+        assert row["tags"] == ["批量标签"]
+        assert row["scenes"] == ["批量场景"]

@@ -31,12 +31,13 @@ def test_split_route_groups_keep_all_registered_endpoints():
 
     api.register(context)
 
-    assert len(routes) == 46
+    assert len(routes) == 47
     assert len({path for path, *_ in routes}) == len(routes)
     assert all(handler.__self__ is api for _, handler, _, _ in routes)
     registered = {path: (handler.__name__, tuple(methods)) for path, handler, methods, _ in routes}
     for suffix, handler, method in (
         ("", "handle_batch_reanalyze", "POST"),
+        ("/missing", "handle_batch_reanalyze_missing", "GET"),
         ("/status", "handle_batch_reanalyze_status", "GET"),
         ("/cancel", "handle_batch_reanalyze_cancel", "POST"),
         ("/result", "handle_batch_reanalyze_result", "GET"),

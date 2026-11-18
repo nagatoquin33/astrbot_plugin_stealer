@@ -65,6 +65,11 @@ async def test_bridge_js_and_static_assets_served():
             ("/app.js", "createApp"),
             ("/template.js", "TEMPLATE"),
             ("/app.css", "{"),
+            ("/light.css", '[data-theme="light"]'),
+            ("/dark.css", '[data-theme="dark"]'),
+            ("/minecraft.css", '[data-theme="minecraft"]'),
+            ("/fallout.css", '[data-theme="fallout"]'),
+            ("/bili.css", '[data-theme="bili"]'),
             ("/vendor/vue.global.prod.js", "Vue"),
         ):
             resp = await client.get(path)
@@ -270,23 +275,258 @@ def test_dashboard_font_assets_are_pinned():
 
 
 def test_fallout_theme_avoids_fullpage_compositing():
-    """验证辐射 4 主题的组件、装饰资源及合成效果配置。"""
-    css = (DASHBOARD_DIR / "app.css").read_text(encoding="utf-8")
-    template = (DASHBOARD_DIR / "template.js").read_text(encoding="utf-8")
-    start = css.find('[data-theme="fallout"]')
+    """验证辐射 4 主题避免使用引发整页 GPU 重合成的混合模式与对比度滤镜。"""
+    app_css = (DASHBOARD_DIR / "app.css").read_text(encoding="utf-8")
+    fallout_css = (DASHBOARD_DIR / "fallout.css").read_text(encoding="utf-8")
+    start = app_css.find('[data-theme="fallout"]')
     assert start != -1
-    fallout = css[start:]
-    assert "mix-blend-mode" not in fallout
-    assert "filter: contrast" not in fallout
-    assert "html[data-theme=\"fallout\"]::after" not in css
-    assert ".fo-chassis" in css
-    assert ".fo-pip-tabs" in css
-    assert ".fo-hud" in css
-    assert "vaultboy.png" in css
-    assert "fo-vaultboy" in template
-    assert "PIP-BOY 3000 MK IV" in template
-    assert "ROBCO INDUSTRIES" in template
-    assert "loadDashboardPrefs" in (DASHBOARD_DIR / "app.js").read_text(encoding="utf-8")
+    for sheet in (app_css[start:], fallout_css):
+        assert "mix-blend-mode" not in sheet
+        assert "filter: contrast" not in sheet
+    assert 'html[data-theme="fallout"]::after' not in app_css
+    assert 'html[data-theme="fallout"]::after' not in fallout_css
+
+
+def test_night_and_day_theme_labels_and_preserved_keys():
+    """验证黑夜/白天主题文案已统一，同时保留 dark/light 存储键值兼容。"""
+    repo_root = DASHBOARD_DIR.parents[1]
+    schema = json.loads((repo_root / "_conf_schema.json").read_text(encoding="utf-8"))
+    theme_conf = schema["webui_theme"]
+    assert theme_conf["options"][1:3] == ["dark", "light"]
+    assert theme_conf["labels"][1:3] == ["黑夜", "白天"]
+
+    zh = json.loads((repo_root / ".astrbot-plugin" / "i18n" / "zh-CN.json").read_text(encoding="utf-8"))
+    en = json.loads((repo_root / ".astrbot-plugin" / "i18n" / "en-US.json").read_text(encoding="utf-8"))
+    ru = json.loads((repo_root / ".astrbot-plugin" / "i18n" / "ru-RU.json").read_text(encoding="utf-8"))
+
+    assert zh["pages"]["dashboard"]["themes"]["dark"] == "黑夜"
+    assert zh["pages"]["dashboard"]["themes"]["light"] == "白天"
+    assert en["pages"]["dashboard"]["themes"]["dark"] == "Night"
+    assert en["pages"]["dashboard"]["themes"]["light"] == "Day"
+    assert ru["pages"]["dashboard"]["themes"]["dark"] == "Ночь"
+    assert ru["pages"]["dashboard"]["themes"]["light"] == "День"
+
+
+def test_vue_templates_compile_without_errors():
+    """使用真实 Vue 编译器校验全量多主题模板 AST，拦截 v-if/v-else-if/标签闭合语法回归。"""
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is needed to compile Vue templates")
+    script = r"""
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+import { pathToFileURL } from 'node:url';
+
+const [vuePath, templatePath] = process.argv.slice(1);
+const ctx = {
+    window: {},
+    document: { createElement: () => ({ children: [{ getAttribute: () => '' }], textContent: '' }) },
+};
+ctx.globalThis = ctx;
+vm.runInNewContext(fs.readFileSync(vuePath, 'utf8'), ctx);
+const { TEMPLATE, EMOTION_LABELS_TEMPLATE } = await import(pathToFileURL(templatePath));
+
+for (const [name, tpl] of [['TEMPLATE', TEMPLATE], ['EMOTION_LABELS_TEMPLATE', EMOTION_LABELS_TEMPLATE]]) {
+    const errors = [];
+    const render = ctx.Vue.compile(tpl, {
+        decodeEntities: (raw) => raw,
+        onError: (err) => { errors.push(err.message || String(err)); },
+    });
+    assert.equal(errors.length, 0, `${name} compile errors: ${errors.join('; ')}`);
+    assert.equal(typeof render, 'function');
+}
+// 反向自检：确认编译器在遇到非法 v-else 时确实报错而非静默放行
+const negativeErrors = [];
+ctx.Vue.compile('<div><span v-else></span></div>', {
+    decodeEntities: (raw) => raw,
+    onError: (err) => { negativeErrors.push(err); },
+});
+assert.equal(negativeErrors.length, 1);
+"""
+    result = subprocess.run(
+        [
+            node, "--input-type=module", "-e", script,
+            str(DASHBOARD_DIR / "vendor" / "vue.global.prod.js"),
+            str(DASHBOARD_DIR / "template.js"),
+        ],
+        capture_output=True, text=True, encoding="utf-8",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_dashboard_setup_category_edit_theme_routing_and_scoped_missing():
+    """在真实 Vue 响应式上下文中运行 app.js，验证情绪标签折叠、分类原位编辑、主题路由与范围化语义补充。"""
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is needed to execute the frontend setup")
+    script = r"""
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+import { pathToFileURL } from 'node:url';
+
+const [vuePath, dashboardDir] = process.argv.slice(1);
+const vueCtx = { window: {}, document: { createElement: () => ({}) } };
+vueCtx.globalThis = vueCtx;
+vm.runInNewContext(fs.readFileSync(vuePath, 'utf8'), vueCtx);
+
+const { TEMPLATE, EMOTION_LABELS_TEMPLATE } = await import(pathToFileURL(`${dashboardDir}/template.js`));
+const { ImagePreviewClient } = await import(pathToFileURL(`${dashboardDir}/image_preview_client.js`));
+const { createSourceActions } = await import(pathToFileURL(`${dashboardDir}/source_actions.js`));
+const { createBatchReanalysis } = await import(pathToFileURL(`${dashboardDir}/batch_reanalysis.js`));
+const { formatItemOriginLabel } = await import(pathToFileURL(`${dashboardDir}/source_labels.js`));
+
+let appOptions = null;
+const requests = [];
+const Vue = {
+    ...vueCtx.Vue,
+    onMounted: () => {},
+    onUnmounted: () => {},
+    createApp(opts) {
+        appOptions = opts;
+        return { mount() {} };
+    },
+};
+
+const docEl = { dataset: {}, setAttribute(k, v) { this[k] = v; }, getAttribute(k) { return this[k]; } };
+const sandbox = {
+    Vue,
+    TEMPLATE,
+    EMOTION_LABELS_TEMPLATE,
+    ImagePreviewClient,
+    createSourceActions,
+    createBatchReanalysis,
+    formatItemOriginLabel,
+    URL,
+    URLSearchParams,
+    FormData: class { constructor() { this.items = []; } append(k, v) { this.items.push([k, v]); } },
+    setTimeout: () => 1,
+    clearTimeout: () => {},
+    setInterval: () => 1,
+    clearInterval: () => {},
+    localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+    matchMedia: () => ({ matches: true, addEventListener: () => {}, removeEventListener: () => {} }),
+    document: {
+        documentElement: docEl,
+        querySelectorAll: () => [],
+        addEventListener: () => {},
+        removeEventListener: () => {},
+    },
+    window: {
+        location: { search: '', pathname: '/', origin: 'http://127.0.0.1:8091' },
+        AstrBotPluginPage: {
+            apiGet: async (endpoint, params) => {
+                requests.push({ endpoint, method: 'GET', params: params ? { ...params } : null });
+                if (endpoint === 'images/reanalyze/missing') {
+                    return { success: true, missing: { hashes: [], total_missing: 0, max_images: 500 } };
+                }
+                if (endpoint === 'emotions') {
+                    return { success: true, emotions: [{ key: 'happy', name: '超开心', desc: '更新描述' }] };
+                }
+                if (endpoint === 'images') {
+                    return {
+                        success: true, total: 1, page: 1, size: 24, images: [],
+                        categories: [{ key: 'happy', name: '超开心', count: 1 }],
+                        characters: [{ key: 'mika', name: '美香', count: 1 }],
+                        libraries: { general: 0, favorites: 0, characters: 1, automatic: 0 },
+                    };
+                }
+                return { success: true };
+            },
+            apiPost: async (endpoint, body) => {
+                requests.push({ endpoint, method: 'POST', body: body ? JSON.parse(JSON.stringify(body)) : null });
+                return { success: true };
+            },
+            t: (_k, fb) => fb,
+        },
+        addEventListener: () => {},
+        removeEventListener: () => {},
+    },
+    console,
+};
+sandbox.globalThis = sandbox;
+const appSource = fs.readFileSync(`${dashboardDir}/app.js`, 'utf8').replace(/^import .*?;\r?\n/gm, '');
+vm.runInNewContext(appSource, sandbox);
+
+// 1. EmotionLabels 组件去重与紧凑折叠逻辑
+const comp = appOptions.components.EmotionLabels;
+const makeChipCtx = (item, compact) => {
+    const c = { item, compact };
+    c.keys = comp.computed.keys.call(c);
+    c.visibleKeys = comp.computed.visibleKeys.call(c);
+    c.overflowCount = comp.computed.overflowCount.call(c);
+    return c;
+};
+const compactChips = makeChipCtx({ category: 'happy', emotions: ['happy', 'sad', 'angry', 'tired'] }, true);
+assert.deepEqual([...compactChips.visibleKeys], ['happy', 'sad']);
+assert.equal(compactChips.overflowCount, 2);
+const fullChips = makeChipCtx({ category: 'happy', emotions: ['happy', 'sad', 'angry', 'tired'] }, false);
+assert.deepEqual([...fullChips.visibleKeys], ['happy', 'sad', 'angry', 'tired']);
+assert.equal(fullChips.overflowCount, 0);
+
+// 2. 运行真实 setup() 状态机
+const state = appOptions.setup();
+
+// 主题切换路由互斥性（辐射 4 / 我的世界 / B站风 / 黑夜白天）
+state.setThemeMode('fallout', false);
+assert.equal(state.isFalloutTheme.value, true);
+assert.equal(state.isMinecraftTheme.value, false);
+assert.equal(state.isBiliTheme.value, false);
+
+state.setThemeMode('minecraft', false);
+assert.equal(state.isFalloutTheme.value, false);
+assert.equal(state.isMinecraftTheme.value, true);
+
+state.setThemeMode('light', false);
+assert.equal(state.isFalloutTheme.value, false);
+assert.equal(state.isMinecraftTheme.value, false);
+assert.equal(state.isBiliTheme.value, false);
+
+// 分类原位编辑：不弹重复覆盖确认框，直接就地替换原 key 对应的名称与描述
+state.availableEmotions.value = [
+    { key: 'happy', name: '开心', desc: '旧描述' },
+    { key: 'sad', name: '难过', desc: '' },
+];
+state.startEditEmotion({ key: 'happy', name: '开心', desc: '旧描述' });
+assert.equal(state.editingEmotionKey.value, 'happy');
+state.newEmotion.name = '超开心';
+state.newEmotion.desc = '更新描述';
+await state.addEmotion();
+const editReq = requests.find((r) => r.endpoint === 'categories' && r.method === 'POST');
+assert.ok(editReq);
+assert.deepEqual(editReq.body, {
+    categories: [
+        { key: 'happy', name: '超开心', desc: '更新描述' },
+        { key: 'sad', name: '难过', desc: '' },
+    ],
+});
+assert.equal(state.editingEmotionKey.value, '');
+
+// 切换子库/角色/情绪后，补充表情包语义请求自动携带完整当前筛选范围，且一键清空筛选生效
+state.selectLibraryCharacter('mika');
+state.selectLibraryCategory('happy');
+assert.equal(state.selectedLibrary.value, 'characters');
+assert.equal(state.hasActiveLibraryFilters.value, true);
+await state.startMissingReanalysis();
+const missingReq = requests.find((r) => r.endpoint === 'images/reanalyze/missing');
+assert.ok(missingReq);
+assert.deepEqual(missingReq.params, { library: 'characters', category: 'happy', character: 'mika' });
+
+state.clearLibraryFilters();
+assert.equal(state.selectedCategory.value, '');
+assert.equal(state.selectedCharacter.value, '');
+assert.equal(state.hasActiveLibraryFilters.value, false);
+"""
+    result = subprocess.run(
+        [
+            node, "--input-type=module", "-e", script,
+            str(DASHBOARD_DIR / "vendor" / "vue.global.prod.js"),
+            str(DASHBOARD_DIR).replace("\\", "/"),
+        ],
+        capture_output=True, text=True, encoding="utf-8",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_server_theme_overrides_host_query_after_prefs_load():

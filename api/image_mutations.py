@@ -1,6 +1,7 @@
 """ImageMutationRoutes methods for PluginAPI."""
 
 import asyncio
+from collections import deque
 import hashlib
 import uuid
 from pathlib import Path
@@ -10,8 +11,15 @@ from quart import jsonify, request
 
 from astrbot.api import logger
 
-from ..core.db.index_manager import delete_index_paths
+from ..core.db.index_manager import delete_index_paths, refresh_search_entries
+from ..core.processing.library_analysis import (
+    ANALYSIS_FIELDS,
+    analyze_library_image,
+    is_missing_semantics,
+    merge_empty_fields,
+)
 from ..core.processing.semantic_schema import validate_emotion_labels
+from ..core.util.model_requests import model_request_context
 from ..core.util.safe_io import protect_file, safe_remove_file
 
 class ImageMutationRoutes:
@@ -365,69 +373,174 @@ class ImageMutationRoutes:
     async def _process_batch(
         self, task_id: str, files_data: list[dict], category: str, auto_analyze: bool, fallback: str, character: str = ""
     ) -> None:
+        workers: list[asyncio.Task[Any]] = []
+        refreshed_paths: list[str] = []
         try:
             task = self.batch_upload_tasks.get(task_id)
             if not task:
                 return
-            for fd in files_data:
-                tmp: Path | None = None
-                try:
-                    tags, desc, scenes = [], "", []
-                    overlay_text, emotions = "", []
-                    final_cat = category or fallback
-                    if auto_analyze:
-                        try:
-                            img_hash = fd["hash"]
-                            tmp = self._data_dir / "temp" / f"{img_hash}{fd['ext']}"
-                            with protect_file(tmp):
-                                tmp.parent.mkdir(parents=True, exist_ok=True)
-                                await asyncio.to_thread(lambda: tmp.write_bytes(fd["content"]))
-                                proc = self.plugin.image_processor_service
-                                if proc:
-                                    classified = await proc.classify_image(
-                                        event=None,
-                                        file_path=str(tmp),
-                                        categories=list(self._cfg.categories or []),
-                                        content_filtration=False,
-                                    )
-                                    rc, rt, rd, _, rs, overlay_text, emotions = classified
-                                    if rc and rc != getattr(proc, "CATEGORY_FILTERED", None):
-                                        final_cat = rc
-                                        tags = rt or []
-                                        desc = rd or ""
-                                        scenes = rs or []
-                                        overlay_text = overlay_text or ""
-                                        emotions = emotions or []
-                        except Exception as e:
-                            logger.warning(f"自动分析失败: {e}")
-                        finally:
-                            if tmp is not None:
-                                await safe_remove_file(str(tmp))
+            try:
+                concurrency = max(1, min(8, int(getattr(self._cfg, "reanalysis_concurrency", 2) or 2)))
+            except (TypeError, ValueError):
+                concurrency = 2
 
-                    img = await self._persist_image(
-                        file_content=fd["content"],
-                        file_ext=fd["ext"],
-                        category=final_cat,
-                        file_hash=fd["hash"],
-                        tags=tags,
-                        desc=desc,
-                        scenes=scenes,
-                        overlay_text=overlay_text,
-                        emotions=emotions,
-                        character=character,
-                    )
-                    task["results"].append(
-                        {"hash": img["hash"], "category": img["category"], "success": True}
-                    )
-                    task["success"] += 1
-                except Exception as e:
-                    logger.error(f"处理文件 {fd['filename']} 失败: {e}")
-                    task["results"].append(
-                        {"filename": fd["filename"], "success": False, "error": str(e)}
-                    )
-                    task["failed"] += 1
-                task["processed"] += 1
-                task["updated_at"] = self._task_now()
+            # 当已指定目标分类时：先快速落盘入库，再后台并发补全空语义字段并保留原分类与角色。
+            if category:
+                persisted: list[tuple[dict, dict]] = []
+                for fd in files_data:
+                    try:
+                        img = await self._persist_image(
+                            file_content=fd["content"],
+                            file_ext=fd["ext"],
+                            category=category,
+                            file_hash=fd["hash"],
+                            tags=[],
+                            desc="",
+                            scenes=[],
+                            overlay_text="",
+                            emotions=[],
+                            character=character,
+                        )
+                        if auto_analyze:
+                            persisted.append((fd, img))
+                        else:
+                            task["results"].append(
+                                {"hash": img["hash"], "category": img["category"], "success": True}
+                            )
+                            task["success"] += 1
+                            task["processed"] += 1
+                            task["updated_at"] = self._task_now()
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as e:
+                        logger.error(f"处理文件 {fd['filename']} 失败: {e}")
+                        task["results"].append(
+                            {"filename": fd["filename"], "success": False, "error": str(e)}
+                        )
+                        task["failed"] += 1
+                        task["processed"] += 1
+                        task["updated_at"] = self._task_now()
+
+                if auto_analyze and persisted:
+                    queue = deque(persisted)
+                    proc = getattr(self.plugin, "image_processor_service", None)
+                    categories = list(self._cfg.categories or [])
+
+                    async def analyze_worker() -> None:
+                        while queue:
+                            _fd, img = queue.popleft()
+                            try:
+                                found = self._find_index_entry_by_hash(img["hash"])
+                                if proc and found and categories:
+                                    path, current = found
+                                    if is_missing_semantics(current):
+                                        with model_request_context(concurrency=concurrency, priority=1):
+                                            result = await analyze_library_image(proc, path, categories)
+                                        fresh = {key: result[key] for key in ANALYSIS_FIELDS}
+                                        updates = merge_empty_fields(current, fresh)
+                                        allowed = {*categories, str(current.get("category") or "")}
+                                        updates["emotions"] = [
+                                            emo for emo in updates.get("emotions", []) if emo in allowed
+                                        ]
+                                        async with self._db.file_lock:
+                                            if await self._db.update_path(path, updates):
+                                                refreshed_paths.append(path)
+                            except asyncio.CancelledError:
+                                raise
+                            except Exception as e:
+                                logger.warning(f"批量入库后自动语义化失败 ({img['hash'][:12]}): {e}")
+                            finally:
+                                task["results"].append(
+                                    {"hash": img["hash"], "category": img["category"], "success": True}
+                                )
+                                task["success"] += 1
+                                task["processed"] += 1
+                                task["updated_at"] = self._task_now()
+
+                    workers = [
+                        asyncio.create_task(analyze_worker())
+                        for _ in range(min(concurrency, len(persisted)))
+                    ]
+                    await asyncio.gather(*workers)
+            else:
+                # 未指定分类且勾选自动分析时：并发调用模型识别分类与语义后落盘（仍保留所选角色）。
+                queue_files = deque(files_data)
+
+                async def classify_and_save_worker() -> None:
+                    while queue_files:
+                        fd = queue_files.popleft()
+                        tmp: Path | None = None
+                        try:
+                            tags, desc, scenes = [], "", []
+                            overlay_text, emotions = "", []
+                            final_cat = fallback
+                            if auto_analyze:
+                                try:
+                                    img_hash = fd["hash"]
+                                    tmp = self._data_dir / "temp" / f"{img_hash}_{uuid.uuid4().hex[:8]}{fd['ext']}"
+                                    with protect_file(tmp):
+                                        tmp.parent.mkdir(parents=True, exist_ok=True)
+                                        await asyncio.to_thread(lambda p=tmp, c=fd["content"]: p.write_bytes(c))
+                                        proc = getattr(self.plugin, "image_processor_service", None)
+                                        if proc:
+                                            with model_request_context(concurrency=concurrency, priority=1):
+                                                classified = await proc.classify_image(
+                                                    event=None,
+                                                    file_path=str(tmp),
+                                                    categories=list(self._cfg.categories or []),
+                                                    content_filtration=False,
+                                                )
+                                            rc, rt, rd, _, rs, overlay_text, emotions = classified
+                                            if rc and rc != getattr(proc, "CATEGORY_FILTERED", None):
+                                                final_cat = rc
+                                                tags = rt or []
+                                                desc = rd or ""
+                                                scenes = rs or []
+                                                overlay_text = overlay_text or ""
+                                                emotions = emotions or []
+                                except asyncio.CancelledError:
+                                    raise
+                                except Exception as e:
+                                    logger.warning(f"自动分析失败: {e}")
+                                finally:
+                                    if tmp is not None:
+                                        await safe_remove_file(str(tmp))
+
+                            img = await self._persist_image(
+                                file_content=fd["content"],
+                                file_ext=fd["ext"],
+                                category=final_cat,
+                                file_hash=fd["hash"],
+                                tags=tags,
+                                desc=desc,
+                                scenes=scenes,
+                                overlay_text=overlay_text,
+                                emotions=emotions,
+                                character=character,
+                            )
+                            task["results"].append(
+                                {"hash": img["hash"], "category": img["category"], "success": True}
+                            )
+                            task["success"] += 1
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception as e:
+                            logger.error(f"处理文件 {fd['filename']} 失败: {e}")
+                            task["results"].append(
+                                {"filename": fd["filename"], "success": False, "error": str(e)}
+                            )
+                            task["failed"] += 1
+                        task["processed"] += 1
+                        task["updated_at"] = self._task_now()
+
+                workers = [
+                    asyncio.create_task(classify_and_save_worker())
+                    for _ in range(min(concurrency if auto_analyze else 1, len(files_data)))
+                ]
+                await asyncio.gather(*workers)
+
+            if refreshed_paths:
+                await refresh_search_entries(self.plugin, refreshed_paths)
             if not self._db:
                 task["status"] = "failed"
                 task["error"] = "db_service unavailable"
@@ -436,6 +549,12 @@ class ImageMutationRoutes:
             task["completed_at"] = self._task_now()
             task["updated_at"] = task["completed_at"]
         except asyncio.CancelledError:
+            for w in workers:
+                w.cancel()
+            if workers:
+                await asyncio.gather(*workers, return_exceptions=True)
+            if refreshed_paths:
+                await refresh_search_entries(self.plugin, refreshed_paths)
             task = self.batch_upload_tasks.get(task_id)
             if task:
                 task.update(status="failed", error="插件卸载，批量上传已停止", completed_at=self._task_now())

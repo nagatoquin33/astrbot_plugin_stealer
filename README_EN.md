@@ -88,7 +88,7 @@ Open the plugin detail panel in the AstrBot Dashboard and click **Emoji Manager*
 - **Batch import**: Category selection and auto-analysis are mutually exclusive. Selecting a category skips VLM; auto-analysis processes images sequentially using the configured model request interval.
 - **Maintenance**: Scan and clean stale index rows, orphan files, thumbnail cache, and temporary files.
 - **Categories**: Add, edit, and delete categories.
-- **Themes**: Choose host default, dark, light, Minecraft, or Fallout. The page choice persists, while `webui_theme` supplies the default.
+- **Themes**: Choose host default, Night, Day, Minecraft, Fallout 4, or Bili Style. The page choice persists, while `webui_theme` supplies the default.
 
 ## 🔌 v3 External Meme Sources
 

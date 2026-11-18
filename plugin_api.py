@@ -76,6 +76,7 @@ class PluginAPI(
             ("/images/scope-repair", "handle_scope_repair", ["POST"]),
             ("/analyze", "handle_analyze_image", ["POST"]),
             ("/images/reanalyze", "handle_batch_reanalyze", ["POST"]),
+            ("/images/reanalyze/missing", "handle_batch_reanalyze_missing", ["GET"]),
             ("/images/reanalyze/status", "handle_batch_reanalyze_status", ["GET"]),
             ("/images/reanalyze/cancel", "handle_batch_reanalyze_cancel", ["POST"]),
             ("/images/reanalyze/result", "handle_batch_reanalyze_result", ["GET"]),

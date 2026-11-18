@@ -809,3 +809,194 @@ async def test_source_registry_reconciles_only_after_successful_catalog(tmp_path
     rows = {row["external_id"]: row for row in db.get_source_items("pack:test")}
     assert rows["present"]["stale"] == 0
     assert rows["missing"]["stale"] == 1
+
+
+@pytest.mark.asyncio
+async def test_pack_import_auto_analyze_fills_empty_fields_concurrently_and_preserves_category_character(tmp_path):
+    import asyncio
+
+    service, db = _service(tmp_path)
+    service.plugin.plugin_config.reanalysis_concurrency = 2
+
+    pack_zip = tmp_path / "mixed-pack.zip"
+    with zipfile.ZipFile(pack_zip, "w") as zf:
+        zf.writestr(
+            "manifest.json",
+            json.dumps({"id": "mixed-pack", "name": "Mixed Pack", "version": "1.0.0"}),
+        )
+        zf.writestr(
+            "memes_data.json",
+            json.dumps({
+                "items": [
+                    {"id": "raw-1", "relative_path": "memes/sad/raw1.png", "category": "sad"},
+                    {
+                        "id": "partial-2",
+                        "relative_path": "memes/sad/raw2.png",
+                        "category": "sad",
+                        "tags": ["已有标签"],
+                    },
+                    {
+                        "id": "complete-3",
+                        "relative_path": "memes/happy/done.png",
+                        "category": "happy",
+                        "caption": "自带完整描述",
+                        "tags": ["完备"],
+                        "scenes": ["打招呼"],
+                    },
+                ]
+            }),
+        )
+        zf.writestr("memes/sad/raw1.png", _png_bytes((20, 40, 200)))
+        zf.writestr("memes/sad/raw2.png", _png_bytes((40, 80, 180)))
+        zf.writestr("memes/happy/done.png", _png_bytes((220, 180, 30)))
+
+    inspected = await service.inspect_dict({"source_type": "meme_pack", "path": str(pack_zip)})
+    assert inspected["item_count"] == 3
+    assert inspected["missing_semantics_count"] == 2
+
+    active = 0
+    max_active = 0
+    both_started = asyncio.Event()
+
+    async def classify_image(*, event, file_path, categories, content_filtration):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        if active >= 2:
+            both_started.set()
+        else:
+            await asyncio.wait_for(both_started.wait(), timeout=1.5)
+        await asyncio.sleep(0.02)
+        active -= 1
+        return ("happy", ["AI标签"], "AI补全描述", "happy", ["AI场景"], "字幕", ["happy"])
+
+    service.plugin.image_processor_service = SimpleNamespace(
+        CATEGORY_FILTERED="__filtered__",
+        CATEGORY_NOT_EMOJI="__not_emoji__",
+        classify_image=classify_image,
+    )
+
+    job = await service.import_now({
+        "source_type": "meme_pack",
+        "path": str(pack_zip),
+        "auto_analyze": True,
+        "character": "mika",
+        "create_character": True,
+    })
+    assert job["status"] == "completed"
+    assert job["imported"] == 3
+    assert job["analyze_total"] == 2
+    assert job["analyzed"] == 2
+    assert max_active == 2
+
+    items, total, _ = db.get_emojis_paginated(page=1, page_size=10)
+    assert total == 3
+    by_name = {row["original_name"]: row for row in items}
+
+    # 原分类 sad 与角色 mika 均被保留，缺失语义被补全，已有标签不被覆盖
+    assert by_name["raw1.png"]["category"] == "sad"
+    assert by_name["raw1.png"]["character"] == "mika"
+    assert by_name["raw1.png"]["desc"] == "AI补全描述"
+    assert by_name["raw1.png"]["tags"] == ["AI标签"]
+    assert by_name["raw1.png"]["scenes"] == ["AI场景"]
+
+    assert by_name["raw2.png"]["category"] == "sad"
+    assert by_name["raw2.png"]["character"] == "mika"
+    assert by_name["raw2.png"]["desc"] == "AI补全描述"
+    assert by_name["raw2.png"]["tags"] == ["已有标签"]
+    assert by_name["raw2.png"]["scenes"] == ["AI场景"]
+
+    # 原本已有完整语义的条目不重复消耗 VLM
+    assert by_name["done.png"]["category"] == "happy"
+    assert by_name["done.png"]["character"] == "mika"
+    assert by_name["done.png"]["desc"] == "自带完整描述"
+    assert by_name["done.png"]["tags"] == ["完备"]
+
+
+@pytest.mark.asyncio
+async def test_pack_import_auto_analyze_isolates_vlm_failure_and_supports_pending_review_mode(tmp_path):
+    """验证入库自动语义化在单图模型报错时不丢失已入库图片，且支持先入待审核池（review=True）补全语义。"""
+    service, db = _service(tmp_path)
+
+    pack_zip = tmp_path / "fault-pack.zip"
+    with zipfile.ZipFile(pack_zip, "w") as zf:
+        zf.writestr("memes/happy/fail_vlm.png", _png_bytes((200, 30, 30)))
+        zf.writestr("memes/sad/ok_vlm.png", _png_bytes((30, 180, 90)))
+
+    calls = 0
+
+    async def flaky_classify(*, event, file_path, categories, content_filtration):
+        nonlocal calls
+        calls += 1
+        if "fail_vlm" in Path(file_path).name:
+            raise RuntimeError("upstream VLM 503")
+        return ("happy", ["稳态标签"], "稳态描述", "happy", ["稳态场景"], "", ["happy"])
+
+    service.plugin.image_processor_service = SimpleNamespace(
+        CATEGORY_FILTERED="__filtered__",
+        CATEGORY_NOT_EMOJI="__not_emoji__",
+        classify_image=flaky_classify,
+    )
+
+    job = await service.import_now({
+        "source_type": "meme_pack",
+        "path": str(pack_zip),
+        "auto_analyze": True,
+    })
+    assert job["status"] == "completed"
+    assert job["imported"] == 2
+    assert job["analyzed"] == 1
+    assert job["analyze_failed"] == 1
+    assert db.get_sources()[0]["status"] == "ready"
+
+    items, total, _ = db.get_emojis_paginated(page=1, page_size=10)
+    assert total == 2
+    by_name = {row["original_name"]: row for row in items}
+    assert by_name["fail_vlm.png"]["desc"] == ""
+    assert by_name["ok_vlm.png"]["desc"] == "稳态描述"
+    assert by_name["ok_vlm.png"]["category"] == "sad"
+
+    # 验证勾选 review=True（先进入待审核池）+ auto_analyze=True 时，pending 行获得语义且不污染 manual_fields
+    pending_root = tmp_path / "pending-case"
+    pending_root.mkdir()
+    pending_service, pending_db = _service(pending_root)
+    pending_pack = tmp_path / "pending-pack.zip"
+    with zipfile.ZipFile(pending_pack, "w") as zf:
+        zf.writestr("memes/sad/review_me.png", _png_bytes((90, 60, 210)))
+
+    async def ok_classify(*, event, file_path, categories, content_filtration):
+        return ("happy", ["待审标签"], "待审补全描述", "happy", ["待审场景"], "TEXT", ["happy"])
+
+    pending_service.plugin.image_processor_service = SimpleNamespace(
+        CATEGORY_FILTERED="__filtered__",
+        CATEGORY_NOT_EMOJI="__not_emoji__",
+        classify_image=ok_classify,
+    )
+    pjob = await pending_service.import_now({
+        "source_type": "meme_pack",
+        "path": str(pending_pack),
+        "review": True,
+        "auto_analyze": True,
+        "character": "alice",
+        "create_character": True,
+    })
+    assert pjob["status"] == "completed"
+    assert pjob["pending"] == 1
+    assert pjob["analyzed"] == 1
+
+    pending_rows, ptotal, _ = pending_db.get_pending_paginated(page=1, page_size=10)
+    assert ptotal == 1
+    prow = pending_rows[0]
+    assert prow["category"] == "sad"
+    assert prow["character"] == "alice"
+    assert prow["desc"] == "待审补全描述"
+    assert prow["tags"] == ["待审标签"]
+    assert prow["scenes"] == ["待审场景"]
+    assert prow["analysis_state"] == "ready"
+    with pending_db._get_connection() as conn:
+        raw_pending = conn.execute(
+            "SELECT manual_fields, analysis_state FROM emoji_pending WHERE id = ?",
+            (prow["id"],),
+        ).fetchone()
+    assert raw_pending["analysis_state"] == "ready"
+    assert json.loads(raw_pending["manual_fields"] or "[]") == []
