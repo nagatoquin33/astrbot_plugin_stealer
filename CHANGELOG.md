@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.4] - 2026-11-20
+
+### fixed
+- WebUI 的「跟随宿主」「黑夜」和「白天」均支持透出 AstrBot 调色盘壁纸。白天和黑夜保留各自的配色，图库和审核区使用独立半透明卡片。
+- 修复窄屏下表情管理页的主题菜单弹出到屏幕外的问题。
+
 ## [3.2.3] - 2026-11-18
 
 ### added

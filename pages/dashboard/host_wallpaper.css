@@ -1,0 +1,65 @@
+/* 壁纸由 AstrBot 宿主绘制，iframe 只调节自身的底色。 */
+:root[data-host-wallpaper="on"] {
+    /* 色彩方案跟随 iframe 外框，页面配色仍由 data-theme 控制。 */
+    color-scheme: light;
+    background: transparent;
+    --wallpaper-panel: color-mix(in srgb, var(--bg-elevated) 90%, transparent);
+    --wallpaper-card: color-mix(in srgb, var(--bg-card) 86%, transparent);
+}
+
+:root[data-host-wallpaper="on"][data-host-theme="dark"] {
+    color-scheme: dark;
+}
+
+[data-host-wallpaper="on"] body {
+    background: transparent;
+    transition-property: color;
+}
+
+[data-host-wallpaper="on"][data-theme="dark"] body {
+    color-scheme: dark;
+}
+
+[data-host-wallpaper="on"][data-theme="light"] body {
+    color-scheme: light;
+}
+
+[data-host-wallpaper="on"] :is(.codex-header, .sidebar) {
+    background: var(--wallpaper-panel);
+}
+
+[data-host-wallpaper="on"] .inventory-panel {
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
+}
+
+[data-host-wallpaper="on"] .inventory-panel > :is(
+    .library-heading, .usage-guide, .inventory-toolbar, .category-quick-rail,
+    .character-filter-bar, .kbd-hints, .empty-state, .pagination-bar
+) {
+    background: var(--wallpaper-panel);
+    border-radius: var(--r-md);
+}
+
+[data-host-wallpaper="on"] .inventory-panel > :is(.library-heading, .usage-guide) {
+    margin-bottom: 10px;
+}
+
+[data-host-wallpaper="on"] :is(.item-slot, .pending-card, .skeleton-card) {
+    background: var(--wallpaper-card);
+}
+
+[data-host-wallpaper="on"] :is(.item-slot, .pending-card):hover {
+    background: var(--wallpaper-panel);
+}
+
+[data-host-wallpaper="on"][data-theme="light"] :is(.card-bottom-row, .card-usage) {
+    color: var(--text-secondary);
+}
+
+@media (max-width: 768px) {
+    [data-host-wallpaper="on"] .sidebar {
+        background: var(--bg-elevated);
+    }
+}

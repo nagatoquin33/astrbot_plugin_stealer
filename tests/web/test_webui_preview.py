@@ -47,7 +47,7 @@ async def test_index_injects_bridge_and_i18n():
         assert "./vendor/vue.global.prod.js" in html
         assert 'rel="icon"' in html
         assert (DASHBOARD_DIR / "vendor" / "vue.global.prod.js").is_file()
-        for css_name in ("app.css", "light.css", "dark.css", "minecraft.css", "fallout.css", "bili.css"):
+        for css_name in ("app.css", "light.css", "dark.css", "minecraft.css", "fallout.css", "bili.css", "host_wallpaper.css"):
             assert f'href="./{css_name}"' in html
             assert (DASHBOARD_DIR / css_name).is_file()
 
@@ -70,6 +70,7 @@ async def test_bridge_js_and_static_assets_served():
             ("/minecraft.css", '[data-theme="minecraft"]'),
             ("/fallout.css", '[data-theme="fallout"]'),
             ("/bili.css", '[data-theme="bili"]'),
+            ("/host_wallpaper.css", '[data-host-wallpaper="on"]'),
             ("/vendor/vue.global.prod.js", "Vue"),
         ):
             resp = await client.get(path)
@@ -478,10 +479,31 @@ state.setThemeMode('minecraft', false);
 assert.equal(state.isFalloutTheme.value, false);
 assert.equal(state.isMinecraftTheme.value, true);
 
+sandbox.window.parent = sandbox.window;
+state.setThemeMode('auto', false);
+assert.equal(docEl.dataset.hostWallpaper, 'off');
+sandbox.window.parent = {};
+state.setThemeMode('auto', false);
+assert.equal(docEl.getAttribute('data-theme'), 'dark');
+assert.equal(docEl.dataset.hostWallpaper, 'on');
+assert.equal(state.THEME_OPTIONS.some(({ value }) => value === 'palette'), false);
+assert.equal(state.isMinecraftTheme.value, false);
+
 state.setThemeMode('light', false);
+assert.equal(docEl.getAttribute('data-theme'), 'light');
+assert.equal(docEl.dataset.hostTheme, 'dark');
+assert.equal(docEl.dataset.hostWallpaper, 'on');
 assert.equal(state.isFalloutTheme.value, false);
 assert.equal(state.isMinecraftTheme.value, false);
 assert.equal(state.isBiliTheme.value, false);
+
+state.setThemeMode('dark', false);
+assert.equal(docEl.dataset.hostWallpaper, 'on');
+state.setThemeMode('bili', false);
+assert.equal(docEl.dataset.hostWallpaper, 'off');
+sandbox.window.parent = sandbox.window;
+state.setThemeMode('light', false);
+assert.equal(docEl.dataset.hostWallpaper, 'off');
 
 // 分类原位编辑：不弹重复覆盖确认框，直接就地替换原 key 对应的名称与描述
 state.availableEmotions.value = [

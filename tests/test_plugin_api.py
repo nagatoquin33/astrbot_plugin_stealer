@@ -315,6 +315,18 @@ class TestDashboardPrefs:
         updated = await api._update_dashboard_prefs({"theme": "not-a-theme"})
         assert updated["theme"] == "fallout"
 
+    @pytest.mark.asyncio
+    async def test_legacy_palette_preference_follows_host(self):
+        plugin = types.SimpleNamespace(
+            plugin_config=types.SimpleNamespace(webui_theme="minecraft"),
+            _dashboard_prefs={"theme": "palette", "view": "list"},
+        )
+        assert await PluginAPI(plugin)._load_dashboard_prefs() == {
+            "theme": "auto",
+            "view": "list",
+            "sidebar": "expanded",
+        }
+
     def test_normalize_theme_and_unknown(self):
         api = _build_api([])
         assert api._normalize_theme("dark") == "dark"

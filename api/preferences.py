@@ -62,6 +62,8 @@ class PreferenceRoutes:
     ) -> dict[str, str]:
         config_theme = config_theme or self._config_default_theme()
         stored_theme = str(stored.get("theme") or "").strip()
+        if stored_theme == "palette":
+            stored_theme = "auto"
         theme = stored_theme if stored_theme in self.VALID_THEMES else config_theme
         return {
             "theme": self._normalize_theme(theme),

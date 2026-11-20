@@ -87,6 +87,7 @@
 - **存储维护**：扫描并清理失效索引、孤儿文件、缩略图缓存和临时文件。
 - **分类管理**：新增、编辑和删除表情包分类。
 - **主题**：支持跟随宿主、黑夜、白天、我的世界、辐射 4 和 B站风；页面选择会持续保存，配置中的 `webui_theme` 可作为默认值。
+- **AstrBot 调色盘**：「跟随宿主」「黑夜」和「白天」都能透出 [AstrBot 调色盘](https://github.com/Sisyphbaous-DT-Project/astrbot_plugin_palette) 设置的壁纸。白天和黑夜各自保留原有配色。
 
 ## 🔌 v3 外部表情包源
 
@@ -252,7 +253,7 @@ LLM 情绪模式会用轻量模型提取检索词和情绪先验；被动检索�
 
 | 配置项 | 默认值 | 说明 |
 |:---|:---|:---|
-| **WebUI 默认主题** | `auto` | 可选 `auto`、`dark`、`light`、`minecraft`、`fallout`；页面内选择会持久化 |
+| **WebUI 默认主题** | `auto` | 可选 `auto`、`dark`、`light`、`minecraft`、`fallout`、`bili`；页面内选择会持久化 |
 
 </details>
 

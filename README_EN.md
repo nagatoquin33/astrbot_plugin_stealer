@@ -89,6 +89,7 @@ Open the plugin detail panel in the AstrBot Dashboard and click **Emoji Manager*
 - **Maintenance**: Scan and clean stale index rows, orphan files, thumbnail cache, and temporary files.
 - **Categories**: Add, edit, and delete categories.
 - **Themes**: Choose host default, Night, Day, Minecraft, Fallout 4, or Bili Style. The page choice persists, while `webui_theme` supplies the default.
+- **AstrBot Palette**: **Follow host**, **Night**, and **Day** show the wallpaper set by [AstrBot Palette](https://github.com/Sisyphbaous-DT-Project/astrbot_plugin_palette). Night and Day retain their own color palettes.
 
 ## 🔌 v3 External Meme Sources
 
@@ -254,7 +255,7 @@ Approval returns before vision analysis, allowing continuous review. The review 
 
 | Setting | Default | Description |
 |:---|:---|:---|
-| **WebUI default theme** | `auto` | `auto`, `dark`, `light`, `minecraft`, or `fallout`; page-level choices persist |
+| **WebUI default theme** | `auto` | `auto`, `dark`, `light`, `minecraft`, `fallout`, or `bili`; page-level choices persist |
 
 </details>
 

@@ -443,11 +443,15 @@ createApp({
         // 不能当作用户选择，否则每次重开页面都会压过已保存主题。
         const themeMode = ref(resolveThemeValue(readStored(THEME_STORAGE_KEY) || 'auto'));
         const contextIsDark = ref(hostThemeFromQuery !== 'light');
-        const effectiveTheme = computed(() => (
-            themeMode.value !== 'auto' ? themeMode.value : (contextIsDark.value ? 'dark' : 'light')
-        ));
+        const hostTheme = computed(() => contextIsDark.value ? 'dark' : 'light');
+        const effectiveTheme = computed(() => themeMode.value === 'auto' ? hostTheme.value : themeMode.value);
         const applyTheme = () => {
-            document.documentElement.setAttribute('data-theme', effectiveTheme.value);
+            const root = document.documentElement;
+            const theme = effectiveTheme.value;
+            const usesHostWallpaper = window.parent !== window && (theme === 'dark' || theme === 'light');
+            root.setAttribute('data-theme', theme);
+            root.dataset.hostTheme = hostTheme.value;
+            root.dataset.hostWallpaper = usesHostWallpaper ? 'on' : 'off';
         };
         let preferenceWriteQueue = Promise.resolve();
         const persistPrefs = (patch) => {

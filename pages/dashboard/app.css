@@ -4228,6 +4228,13 @@ textarea {
 
 .theme-popover { position: fixed; top: auto; bottom: 70px; right: 12px; left: 12px; min-width: 0; }
 
+.codex-header .theme-popover {
+    top: calc(var(--header-height) + 8px);
+    bottom: auto;
+    max-height: calc(100dvh - var(--header-height) - 20px);
+    overflow-y: auto;
+}
+
 
 }
 

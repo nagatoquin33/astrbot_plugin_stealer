@@ -356,6 +356,7 @@ class PreviewServer:
             "minecraft.css",
             "fallout.css",
             "bili.css",
+            "host_wallpaper.css",
             "template.js",
             "image_preview_client.js",
             "source_actions.js",
