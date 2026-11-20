@@ -7,7 +7,9 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from astrbot_plugin_stealer.core.config.config import PluginConfig
+from astrbot_plugin_stealer.core.db.database_service import DatabaseService
 from astrbot_plugin_stealer.core.events import emoji_delivery
+from astrbot_plugin_stealer.core.search.meme_selector import MemeSelector
 
 
 @pytest.fixture
@@ -86,6 +88,52 @@ async def test_send_failure_logs_and_allows_fallback(qq_delivery, monkeypatch):
     assert not await emoji_delivery.send_qq_image_as_sticker(event, path)
     logger.warning.assert_called_once()
     assert "send failed" in logger.warning.call_args.args[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error, first_delivered, expected_success, expected_usage",
+    [
+        pytest.param(None, True, True, 1, id="success"),
+        pytest.param("send failed", False, True, 1, id="rejected"),
+        pytest.param("waitForSelfEcho timeout", True, False, 0, id="echo_timeout"),
+    ],
+)
+@pytest.mark.parametrize("as_gif", [False, True])
+async def test_auto_delivery_sends_once_and_counts_only_confirmed_success(
+    qq_delivery, tmp_path, error, first_delivered, expected_success, expected_usage, as_gif
+):
+    event, path = qq_delivery
+    delivered = []
+
+    async def send_sticker(raw_message, message):
+        if first_delivered:
+            delivered.append(message)
+        if error:
+            raise RuntimeError(
+                "<ActionFailed status='failed', retcode=1200, data=None, "
+                f"message={error!r}, wording={error!r}, echo={{'seq': 1}}>"
+            )
+
+    event.bot.send.side_effect = send_sticker
+    event.send = AsyncMock(side_effect=delivered.append)
+    event.get_platform_name = lambda: "aiocqhttp"
+    db = DatabaseService(tmp_path / "usage.db")
+    await db.insert_batch([{"path": path, "hash": "meme", "category": "happy"}])
+    state = types.SimpleNamespace(is_active_sent=lambda: False, is_auto_claimed=lambda: False)
+    plugin = types.SimpleNamespace(
+        plugin_config=PluginConfig({"send_meme_as_gif": as_gif}),
+        image_render_service=types.SimpleNamespace(file_to_gif_base64=AsyncMock(return_value="gif")),
+        is_send_enabled_for_event=lambda event: True,
+        _emoji_sender_engine=types.SimpleNamespace(emoji_turn_state=lambda event: state),
+        db_service=db,
+    )
+
+    result = await MemeSelector(plugin).send_emoji_with_text(event, path, "hello")
+
+    assert len(delivered) == 1
+    assert result is expected_success
+    assert db.get_emoji(path)["use_count"] == expected_usage
 
 
 @pytest.mark.asyncio

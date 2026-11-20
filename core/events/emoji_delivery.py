@@ -28,8 +28,6 @@ async def send_qq_image_as_sticker(
     if not file_path or not os.path.exists(file_path):
         return False
 
-    # 这里使用适配器内部接口做 QQ 专属优化；任何失败都交给调用方的标准
-    # event.send 路径回退，避免平台版本变化中断回复。
     try:
         file_source: str = file_path
         if plugin and plugin.plugin_config.send_meme_as_gif:
@@ -46,5 +44,9 @@ async def send_qq_image_as_sticker(
         await event.bot.send(event.message_obj.raw_message, onebot_message)
         return True
     except Exception as e:
-        logger.warning(f"[Stealer] QQ 表情发送失败，回退为普通图片: {e}")
+        if "waitForSelfEcho timeout" in str(e):
+            # 回执超时时消息可能已送达，继续回退会重复发送。
+            logger.warning("[Stealer] QQ 表情发送回执超时，发送状态待确认，停止补发")
+            raise
+        logger.warning(f"[Stealer] QQ 表情发送失败，改用通用图片接口发送: {e}")
         return False
