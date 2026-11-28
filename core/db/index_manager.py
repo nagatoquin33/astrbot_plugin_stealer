@@ -17,10 +17,7 @@ def invalidate_search(plugin) -> None:
     try:
         selector = getattr(plugin, "meme_selector", None)
         if selector is not None:
-            selector._invalidate_bm25_index()
-            smart = getattr(selector, "_smart_select_service", None)
-            if smart is not None:
-                smart._invalidate_embedding_index()
+            selector.invalidate_search_cache()
     except Exception as exc:
         logger.warning(f"检索缓存失效失败: {exc}")
 
@@ -52,8 +49,7 @@ async def refresh_search_entry(plugin, path: str, entry=None, *, previous_path: 
 async def _refresh_embedding_entry(plugin, path: str, entry=None, *, previous_path: str | None = None) -> None:
     """后台 worker 未运行时同步条目，模型故障不回滚图库写入。"""
     try:
-        smart = getattr(getattr(plugin, "meme_selector", None), "_smart_select_service", None)
-        embedding = getattr(smart, "_embedding_service", None)
+        embedding = getattr(getattr(plugin, "meme_selector", None), "embedding_service", None)
         if embedding is None:
             return
         db = getattr(plugin, "db_service", None)
@@ -113,26 +109,9 @@ class IndexManager:
 
     async def drain_search_refresh(self) -> int:
         """Refresh a bounded batch; failed provider calls retain durable jobs."""
-        smart = getattr(getattr(self.plugin, "meme_selector", None), "_smart_select_service", None)
-        embedding = getattr(smart, "_embedding_service", None)
-        if embedding is None or not embedding._embedding_enabled():
+        embedding = getattr(getattr(self.plugin, "meme_selector", None), "embedding_service", None)
+        if embedding is None or not await embedding.prepare_refresh():
             return 0
-        available = getattr(embedding, "is_available", None)
-        if callable(available) and not available():
-            return 0
-        prepare = getattr(embedding, '_ensure_provider_ready', None)
-        if callable(prepare):
-            # Model changes enqueue fresh generations before this batch takes
-            # its snapshot, so a successful rebuild is acknowledged once.
-            try:
-                await prepare()
-            except Exception as exc:
-                logger.warning(f'[Embedding] 模型检测等待后台重试: {exc}')
-                return 0
-            # Creating a cold Faiss store can enqueue new generations too;
-            # finish backend selection before taking the durable job snapshot.
-            if callable(available) and not available():
-                return 0
         jobs = await asyncio.to_thread(self.db_service.get_search_refresh_jobs)
         for job in jobs:
             path = job["path"]

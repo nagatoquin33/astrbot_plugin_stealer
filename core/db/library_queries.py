@@ -39,7 +39,7 @@ class LibraryQueries:
                 "ORDER BY created_at ASC, path ASC LIMIT ?",
                 (max(0, int(limit)),),
             ).fetchall()
-            return [r["path"] for r in rows]
+            return [self._resolve_path(r["path"]) for r in rows]
 
     def list_hashes_missing_semantics(
         self,

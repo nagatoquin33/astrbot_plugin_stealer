@@ -8,6 +8,10 @@ from astrbot.api.event import AstrMessageEvent, MessageChain
 from astrbot.api.message_components import Image
 
 
+class EmojiDeliveryUncertain(RuntimeError):
+    """平台回执超时，图片可能已经送达。"""
+
+
 async def send_qq_image_as_sticker(
     event: AstrMessageEvent,
     file_path: str,
@@ -41,12 +45,16 @@ async def send_qq_image_as_sticker(
         onebot_message[0]["data"]["summary"] = summary
         # NapCat: 0 为普通图片，1 为自定义表情；summary 只修改摘要。
         onebot_message[0]["data"]["sub_type"] = 1
-        await event.bot.send(event.message_obj.raw_message, onebot_message)
-        return True
-    except Exception as e:
-        if "waitForSelfEcho timeout" in str(e):
-            # 回执超时时消息可能已送达，继续回退会重复发送。
-            logger.warning("[Stealer] QQ 表情发送回执超时，发送状态待确认，停止补发")
-            raise
-        logger.warning(f"[Stealer] QQ 表情发送失败，改用通用图片接口发送: {e}")
+    except Exception as exc:
+        logger.warning(f"[Stealer] 构建 QQ 表情消息失败，改用通用图片接口发送: {exc}")
         return False
+
+    try:
+        await event.bot.send(event.message_obj.raw_message, onebot_message)
+    except Exception as exc:
+        if "waitForSelfEcho timeout" in str(exc):
+            logger.warning("[Stealer] QQ 表情发送回执超时，发送状态待确认，停止补发")
+            raise EmojiDeliveryUncertain("QQ 表情发送状态待确认") from exc
+        logger.warning(f"[Stealer] QQ 表情发送失败，改用通用图片接口发送: {exc}")
+        return False
+    return True

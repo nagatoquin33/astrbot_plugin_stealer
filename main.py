@@ -82,7 +82,7 @@ class Main(MemeSearchToolWorkflow, MemeStealToolWorkflow, Star):
         # 配置统一通过 self.plugin_config 读取（pydantic 模型）。
 
         # 初始化核心服务类
-        self.db_service = DatabaseService(self.cache_dir / "emoji.db")
+        self.db_service = DatabaseService(self.cache_dir / "emoji.db", data_root=self.base_dir)
         self.source_service = SourceService(self)
         self.command_handler = CommandHandler(self)
         self.image_commands = ImageManagementCommand(self)
@@ -796,7 +796,7 @@ class Main(MemeSearchToolWorkflow, MemeStealToolWorkflow, Star):
         if not normalized_text or self._emoji_sender_engine.is_command_event(event):
             return False
         turn_state = self._emoji_sender_engine.emoji_turn_state(event)
-        if turn_state.is_active_sent():
+        if turn_state.should_skip_auto_send():
             return False
 
         turn_allowed = await self._emoji_sender_engine._resolve_with_log(event)
@@ -940,8 +940,7 @@ class Main(MemeSearchToolWorkflow, MemeStealToolWorkflow, Star):
         if not self.plugin_config.enable_embedding_search:
             return
         try:
-            smart_service = getattr(self.meme_selector, "_smart_select_service", None)
-            embedding_service = getattr(smart_service, "_embedding_service", None)
+            embedding_service = self.meme_selector.embedding_service
             if embedding_service is None:
                 return
             if core_loaded:
@@ -984,9 +983,9 @@ class Main(MemeSearchToolWorkflow, MemeStealToolWorkflow, Star):
                 pass
         # 关闭嵌入向量服务
         try:
-            smart_service = getattr(self.meme_selector, "_smart_select_service", None)
-            if smart_service and smart_service._embedding_service:
-                await smart_service._embedding_service.close()
+            embedding_service = self.meme_selector.embedding_service
+            if embedding_service is not None:
+                await embedding_service.close()
         except Exception:
             pass
 

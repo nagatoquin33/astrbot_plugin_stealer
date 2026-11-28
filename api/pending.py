@@ -67,7 +67,7 @@ class PendingRoutes:
         try:
             db = self._db
             pending = db.count_pending() if db and hasattr(db, "count_pending") else 0
-            capacity = int(getattr(self.plugin, "steal_pool_capacity", 200) or 200)
+            capacity = self.plugin.plugin_config.steal_pool_capacity
             states = db.pending_analysis_stats() if db and hasattr(db, 'pending_analysis_stats') else {}
             return jsonify(
                 {

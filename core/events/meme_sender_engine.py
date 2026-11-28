@@ -26,6 +26,7 @@ class _MemeTurnState:
 
     def __init__(self) -> None:
         self._active_sent = False
+        self._delivery_uncertain = False
         self._candidates: list[dict] = []
         self._auto_decided = False
         self._auto_allowed = False
@@ -52,6 +53,16 @@ class _MemeTurnState:
     def is_active_sent(self) -> bool:
         """检查当前回合是否已主动发送过表情包。"""
         return self._active_sent
+
+    def mark_delivery_uncertain(self) -> None:
+        """记录本轮有一张图可能已送达。"""
+        self._delivery_uncertain = True
+
+    def is_delivery_uncertain(self) -> bool:
+        return self._delivery_uncertain
+
+    def should_skip_auto_send(self) -> bool:
+        return self.is_active_sent() or self.is_delivery_uncertain()
 
     def set_candidates(self, candidates: list[dict]) -> None:
         """设置候选列表。"""
@@ -93,6 +104,7 @@ class _MemeTurnState:
     def reset_for_new_turn(self) -> None:
         """重置回合状态，为新的一轮对话做准备。"""
         self._active_sent = False
+        self._delivery_uncertain = False
         self._candidates = []
         self._auto_decided = False
         self._auto_allowed = False
@@ -362,7 +374,7 @@ class MemeSenderEngine:
         turn_state = self.emoji_turn_state(event)
         if event.get_extra("stealer_auto_emoji_turn_claimed"):
             return False
-        if turn_state.is_active_sent():
+        if turn_state.should_skip_auto_send():
             return False
         if not turn_state.claim_auto_send_meme():
             return False

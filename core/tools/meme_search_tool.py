@@ -6,6 +6,7 @@ import os
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
+from ..events.emoji_delivery import EmojiDeliveryUncertain
 from ..events.event_context import unwrap_event
 from ..events.persona_library import prepare_persona_scope
 from ..util.normalization import normalize_label_list
@@ -161,6 +162,9 @@ class MemeSearchToolWorkflow:
         turn_state = self._emoji_sender_engine.emoji_turn_state(event)
 
         try:
+            if turn_state.is_delivery_uncertain():
+                yield "发送状态待确认：本轮发出的表情包可能已送达，请继续用文字回复。"
+                return
             if not self.is_send_enabled_for_event(event):
                 yield "发送失败：reason=send_disabled。当前会话已禁用表情包发送功能，请不要继续调用发送工具。"
                 return
@@ -201,7 +205,14 @@ class MemeSearchToolWorkflow:
                 return
 
             logger.info(f"[Tool] 发送选中的表情包: {path} (emotion={emotion})")
-            send_mode = await self.meme_selector.send_emoji_message(event, path)
+            try:
+                send_mode = await self.meme_selector.send_emoji_message(event, path)
+            except EmojiDeliveryUncertain:
+                turn_state.mark_delivery_uncertain()
+                turn_state.set_candidates([])
+                self._emoji_sender_engine.invalidate_auto_emoji_source(event)
+                yield "发送状态待确认：表情包可能已送达，请继续用文字回复。"
+                return
             if not send_mode:
                 yield "发送失败：reason=send_failed。表情包编码或平台发送失败，请重新搜索或选择其他候选。"
                 return

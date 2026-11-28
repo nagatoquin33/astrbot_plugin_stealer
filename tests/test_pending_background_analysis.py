@@ -171,13 +171,17 @@ async def test_cancel_during_sqlite_claim_requeues_committed_job(review, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_pending_capacity_is_enforced_at_commit(review):
+async def test_pending_capacity_is_enforced_at_commit(review, monkeypatch):
     review.plugin.plugin_config.steal_pool_capacity = 1
     await collect(review)
     path = review.root / 'overflow.png'
     Image.new('RGB', (32, 32), 'blue').save(path)
     assert (await review.processor.process_image(None, str(path), is_temp=True, to_pending=True))[0] is False
     assert review.db.count_pending() == 1 and path.exists()
+    import astrbot_plugin_stealer.api.pending as module
+    monkeypatch.setattr(module, 'jsonify', lambda result: result)
+    stats = (await review.api.handle_pending_stats())['stats']
+    assert (stats['pending'], stats['capacity'], stats['paused']) == (1, 1, True)
 
 
 @pytest.mark.asyncio

@@ -41,6 +41,7 @@ class PendingRepository:
             return await asyncio.to_thread(self._insert_pending_sync, meta)
 
     def _insert_pending_sync(self, meta: dict[str, Any]) -> int | None:
+        path = self._store_path(meta["path"])
         created_at = int(meta.get("created_at") or int(time.time()))
         with self._get_connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -57,7 +58,7 @@ class PendingRepository:
                     VALUES ({", ".join("?" * len(self._PENDING_INSERT_COLUMNS))})
                     """,
                     (
-                        meta.get("path"),
+                        path,
                         meta.get("hash", ""),
                         meta.get("phash"),
                         meta.get("category"),
@@ -83,7 +84,6 @@ class PendingRepository:
                         str(meta.get("analysis_state") or "ready"),
                     ),
                 )
-                path = str(meta.get("path") or "")
                 # 标签/场景写入关联表（与正式表 emoji_tag/emoji_scene 同构）
                 for tag in self._normalize_multi_value(meta.get("tags")):
                     conn.execute(
@@ -105,7 +105,7 @@ class PendingRepository:
     async def approve_pending(self, pending_id: int, path: str, category: str) -> bool:
         """Promote metadata and source links in one transaction."""
         async with self._write_lock:
-            return await asyncio.to_thread(self._approve_pending_sync, pending_id, path, category)
+            return await asyncio.to_thread(self._approve_pending_sync, pending_id, self._store_path(path), category)
 
     def _approve_pending_sync(self, pending_id: int, path: str, category: str) -> bool:
         with self._get_connection() as conn:
@@ -273,7 +273,7 @@ class PendingRepository:
                 "FROM emoji_pending WHERE hash = ? LIMIT 1",
                 (hash_val,),
             ).fetchone()
-            return dict(row) if row else None
+            return dict(row, path=self._resolve_path(row["path"])) if row else None
 
     def get_pending_phash_map(self) -> dict[str, str]:
         """返回待审核池的 path→phash 映射，用于视觉去重。"""
@@ -281,7 +281,7 @@ class PendingRepository:
             rows = conn.execute(
                 "SELECT path, phash FROM emoji_pending WHERE phash IS NOT NULL AND phash != ''"
             ).fetchall()
-            return {r["path"]: r["phash"] for r in rows}
+            return {self._resolve_path(r["path"]): r["phash"] for r in rows}
 
     def list_pending_missing_phash(self, limit: int = 500) -> list[dict[str, Any]]:
         """列出缺少感知哈希的待审核记录，供启动回填。"""
@@ -292,7 +292,7 @@ class PendingRepository:
                 "ORDER BY id LIMIT ?",
                 (max(0, int(limit)),),
             ).fetchall()
-            return [dict(row) for row in rows]
+            return [dict(row, path=self._resolve_path(row["path"])) for row in rows]
 
     async def set_pending_phash(self, path: str, phash: str) -> bool:
         """只更新待审核记录的感知哈希，不触碰审核状态和人工字段。"""
@@ -306,7 +306,7 @@ class PendingRepository:
             cur = conn.execute(
                 "UPDATE emoji_pending SET phash = ? "
                 "WHERE path = ? AND (phash IS NULL OR phash = '')",
-                (phash, path),
+                (phash, self._store_path(path)),
             )
             return bool(cur.rowcount)
 
@@ -532,7 +532,7 @@ class PendingRepository:
                 return None
             conn.execute("DELETE FROM emoji_pending WHERE id = ?", (pending_id,))
             conn.execute('COMMIT')
-            return {"path": row["path"], "hash": row["hash"]}
+            return {"path": self._resolve_path(row["path"]), "hash": row["hash"]}
 
     def delete_pending_batch(self, ids: list[int]) -> list[dict[str, Any]]:
         """批量删除待审核记录，返回每条被删行的 {path, hash}。"""
@@ -550,4 +550,4 @@ class PendingRepository:
                 f"DELETE FROM emoji_pending WHERE id IN ({placeholders}) AND review_status != 'processing'", clean_ids
             )
             conn.execute('COMMIT')
-            return [{"path": r["path"], "hash": r["hash"]} for r in rows]
+            return [{"path": self._resolve_path(r["path"]), "hash": r["hash"]} for r in rows]

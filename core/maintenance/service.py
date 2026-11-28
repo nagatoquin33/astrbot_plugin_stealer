@@ -33,6 +33,8 @@ class MaintenanceService:
 
     async def run_startup_cleanup(self) -> None:
         """启动阶段调用：执行一次性清理（遗留文件 + 孤儿扫描）。"""
+        if self.plugin.db_service.get_meta_value("image_path_migration_pending"):
+            return
         await self._clean_legacy_files()
         await self._cleanup_orphans()
 

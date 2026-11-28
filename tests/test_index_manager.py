@@ -23,13 +23,13 @@ async def test_bulk_delete_invalidates_and_wakes_only_once(tmp_path):
     await db.insert_batch([
         {"path": "a.png", "hash": "a"}, {"path": "b.png", "hash": "b"},
     ])
-    selector = SimpleNamespace(_invalidate_bm25_index=Mock())
+    selector = SimpleNamespace(invalidate_search_cache=Mock())
     manager = SimpleNamespace(search_worker_running=lambda: True, _search_wakeup=Mock())
     plugin = SimpleNamespace(db_service=db, meme_selector=selector, index_manager=manager)
 
     assert await delete_index_paths(plugin, ["a.png", "b.png", "a.png"]) == 2
 
-    selector._invalidate_bm25_index.assert_called_once()
+    selector.invalidate_search_cache.assert_called_once()
     manager._search_wakeup.set.assert_called_once()
     assert {job["path"] for job in db.get_search_refresh_jobs()} == {"a.png", "b.png"}
 
@@ -124,8 +124,8 @@ async def test_index_commit_refreshes_changed_metadata_and_removes_deleted_vecto
     plugin = SimpleNamespace(
         db_service=db,
         meme_selector=SimpleNamespace(
-            _invalidate_bm25_index=Mock(),
-            _smart_select_service=SimpleNamespace(_embedding_service=embedding, _invalidate_embedding_index=Mock()),
+            invalidate_search_cache=Mock(),
+            embedding_service=embedding,
         ),
     )
     manager = IndexManager(plugin)
@@ -154,8 +154,8 @@ async def test_index_commit_refreshes_changed_metadata_and_removes_deleted_vecto
 async def test_vector_move_removes_old_path_and_failure_does_not_raise():
     embedding = SimpleNamespace(delete_by_path=AsyncMock(), insert_emoji=AsyncMock())
     plugin = SimpleNamespace(meme_selector=SimpleNamespace(
-        _invalidate_bm25_index=Mock(),
-        _smart_select_service=SimpleNamespace(_embedding_service=embedding, _invalidate_embedding_index=Mock()),
+        invalidate_search_cache=Mock(),
+        embedding_service=embedding,
     ))
     entry = {"desc": "新路径"}
     await refresh_search_entry(plugin, "new.png", entry, previous_path="old.png")

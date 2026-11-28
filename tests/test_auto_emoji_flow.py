@@ -5,7 +5,9 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
+from unittest.mock import AsyncMock
 
+from astrbot_plugin_stealer.core.events.emoji_delivery import EmojiDeliveryUncertain
 from astrbot_plugin_stealer.core.events.meme_sender_engine import MemeSenderEngine
 
 
@@ -217,6 +219,38 @@ class AutoEmojiFlowTests(unittest.IsolatedAsyncioTestCase):
         result_text = "\n".join(results)
         self.assertIn("send_meme(emoji_id=", result_text)
         self.assertNotIn("send_emoji_by_id", result_text)
+
+    async def test_uncertain_meme_tool_send_blocks_retries_and_passive_meme(self):
+        main = _build_main(1.0)
+        main.meme_selector = types.SimpleNamespace(
+            send_emoji_message=AsyncMock(side_effect=EmojiDeliveryUncertain()),
+            is_path_allowed_for_event=lambda path, event: True,
+            record_emoji_usage=AsyncMock(),
+        )
+        main._emoji_sender_engine.mark_auto_emoji_sent = AsyncMock()
+        event = DummyEvent("final reply")
+        state = main._emoji_sender_engine.emoji_turn_state(event)
+        candidates = [{"path": __file__, "desc": "desc", "emotion": "happy"}]
+        state.set_candidates(candidates)
+        state.set_llm_reply("final reply")
+
+        first = [chunk async for chunk in main.send_meme(event, 1)]
+        # 同一轮重新搜索获得候选后，仍然不能再次调用发送工具。
+        state.set_candidates(candidates)
+        retry = [chunk async for chunk in main.send_meme(event, 1)]
+
+        self.assertIn("发送状态待确认", first[0])
+        self.assertIn("发送状态待确认", retry[0])
+        self.assertIsNone(state.get_llm_reply())
+        self.assertFalse(state.is_active_sent())
+        self.assertFalse(await main._prepare_emoji_after_llm(event, DummyLLMResponse("final reply")))
+        self.assertFalse(await main._prepare_emoji_response(event))
+        main.meme_selector.send_emoji_message.assert_awaited_once_with(event, __file__)
+        main.meme_selector.record_emoji_usage.assert_not_awaited()
+        main._emoji_sender_engine.mark_auto_emoji_sent.assert_not_awaited()
+
+        main._emoji_sender_engine.reset_turn_state(event)
+        self.assertFalse(state.should_skip_auto_send())
 
     async def test_generic_image_tool_send_suppresses_passive_meme(self):
         main = _build_main(1.0)

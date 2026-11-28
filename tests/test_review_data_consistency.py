@@ -199,7 +199,7 @@ async def test_unavailable_provider_does_not_consume_vector_refresh_jobs(tmp_pat
     plugin = SimpleNamespace(db_service=db, plugin_config=SimpleNamespace(enable_embedding_search=True, embedding_provider_id=""),
                              context=SimpleNamespace(get_all_embedding_providers=lambda: []))
     service = EmbeddingService(plugin)
-    plugin.meme_selector = SimpleNamespace(_smart_select_service=SimpleNamespace(_embedding_service=service))
+    plugin.meme_selector = SimpleNamespace(embedding_service=service)
     assert await IndexManager(plugin).drain_search_refresh() == 0
     assert db.get_search_refresh_jobs()[0]["attempts"] == 0
 
@@ -229,3 +229,97 @@ async def test_fallback_rejects_model_change_during_embedding_request(tmp_path):
     provider.get_embedding.side_effect = changed
     assert not await service._fallback_insert("a", "picture")
     assert db.get_all_embedding_paths() == []
+
+
+@pytest.mark.asyncio
+async def test_moved_v8_library_keeps_related_rows_and_uses_new_root(tmp_path):
+    old = tmp_path / "old" / "astrbot_plugin_stealer"
+    restored = tmp_path / "restored" / old.name
+    final = tmp_path / "second" / old.name
+    image = "categories/happy/emoji.png"
+    waiting = "pending/review.png"
+    for relative in (image, waiting):
+        path = old / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"image")
+    cache = Path("cache") / "emoji.db"
+    db = DatabaseService(old / cache)
+    db.set_meta_value("schema_version", "8")
+    # 用另一系统的旧路径验证数据库迁移不依赖宿主路径语法。
+    foreign = r"/srv/astrbot/data/plugin_data/astrbot_plugin_stealer"
+    image_old, waiting_old = f"{foreign}/{image}", f"{foreign}/{waiting}"
+    await db.insert_batch([{"path": image_old, "hash": "main", "category": "happy",
+                            "is_favorite": 1, "tags": ["tag"], "scenes": ["scene"]}])
+    pending_id = await db.insert_pending({"path": waiting_old, "hash": "waiting", "tags": ["review"]})
+    db.upsert_embedding(image_old, b"vector", 1, "test")
+    generation = db.get_search_refresh_generations([image_old])[image_old]
+    db.finish_search_refresh(image_old, generation, "retry")
+    await db.upsert_source({"source_id": "source"})
+    await db.link_source_item({"source_id": "source", "external_id": "approved", "path": image_old})
+    await db.link_source_item({"source_id": "source", "external_id": "pending",
+                               "metadata": {"pending_path": waiting_old}})
+
+    restored.parent.mkdir()
+    old.rename(restored)
+    db = DatabaseService(restored / cache, data_root=restored)
+    with db._get_connection() as conn:
+        assert conn.execute("SELECT path FROM emoji").fetchone()[0] == image
+        assert conn.execute("SELECT path FROM emoji_pending").fetchone()[0] == waiting
+        assert tuple(conn.execute("SELECT path, generation, attempts FROM search_refresh").fetchone()) == (
+            image, generation, 1
+        )
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+
+    final.parent.mkdir()
+    restored.rename(final)
+    db = DatabaseService(final / cache, data_root=final)
+    plugin = SimpleNamespace(db_service=db, plugin_config=SimpleNamespace(
+        categories_dir=final / "categories", pending_dir=final / "pending",
+    ))
+    await MaintenanceService(plugin).run_startup_cleanup()
+    path = str(final / image)
+    assert (final / image).is_file() and (final / waiting).is_file()
+    assert db.get_all_paths() == [path]
+    entry = db.get_entries([path])[path]
+    assert entry["is_favorite"] == 1 and entry["tags"] == ["tag"] and entry["scenes"] == ["scene"]
+    assert db.load_embeddings_by_sig("test")[0]["path"] == path
+    assert db.get_source_item("source", "approved")["path"] == path
+    assert db.get_pending(pending_id)["path"] == str(final / waiting)
+
+    new_image = str(final / "categories" / "happy" / "review.png")
+    assert await db.approve_pending(pending_id, new_image, "happy")
+    assert db.get_emoji(new_image)["tags"] == ["review"]
+    assert db.get_source_item("source", "pending")["path"] == new_image
+    assert await db.update_path(path, {"desc": "edit"})
+    assert db.increment_usage_sync(path)
+    assert db.get_emoji(path)["desc"] == "edit"
+
+
+@pytest.mark.asyncio
+async def test_incomplete_v8_restore_retries_before_cleaning(tmp_path):
+    root = tmp_path / "astrbot_plugin_stealer"
+    categories, pending = root / "categories", root / "pending"
+    categories.mkdir(parents=True)
+    pending.mkdir()
+    database = root / "cache" / "emoji.db"
+    db = DatabaseService(database)
+    db.set_meta_value("schema_version", "8")
+    old_path = "/backup/astrbot_plugin_stealer/categories/happy/missing.png"
+    await db.insert_batch([{"path": old_path, "hash": "old", "category": "happy"}])
+
+    fresh = categories / "happy" / "fresh.png"
+    fresh.parent.mkdir()
+    fresh.write_bytes(b"new")
+    await db.insert_batch([{"path": str(fresh), "hash": "fresh", "category": "happy"}])
+    db = DatabaseService(database, data_root=root)
+    plugin = SimpleNamespace(db_service=db, plugin_config=SimpleNamespace(
+        categories_dir=categories, pending_dir=pending,
+    ))
+    await MaintenanceService(plugin).run_startup_cleanup()
+    assert db.get_emoji(old_path) and fresh.is_file()
+
+    restored = fresh.with_name("missing.png")
+    restored.write_bytes(b"restored")
+    db = DatabaseService(database, data_root=root)
+    assert db.get_meta_value("image_path_migration_pending") is None
+    assert db.get_emoji(str(restored))["hash"] == "old"

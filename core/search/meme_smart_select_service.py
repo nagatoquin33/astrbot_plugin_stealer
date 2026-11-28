@@ -32,7 +32,7 @@ class MemeSmartSelectService:
         self._search_engine = search_engine
         self._selection_strategy = selection_strategy
         self._scope_service = scope_service
-        self._embedding_service = EmbeddingService(plugin_instance) if plugin_instance else None
+        self.embedding_service = EmbeddingService(plugin_instance) if plugin_instance else None
 
     def _text_recall_paths(self, idx, context_text, event, field, limit):
         """Shared literal matching with the same scope and phrase boundaries."""
@@ -141,7 +141,7 @@ class MemeSmartSelectService:
 
         if self._is_embedding_ready() and context_text.strip():
             try:
-                emb_results = await self._embedding_service.search(
+                emb_results = await self.embedding_service.search(
                     context_text, k=self.SMART_RECALL_K
                 )
                 emb_paths: list[str] = []
@@ -430,14 +430,9 @@ class MemeSmartSelectService:
 
     def _is_embedding_ready(self) -> bool:
         """嵌入检索是否就绪。"""
-        if not self._embedding_service:
+        if not self.embedding_service:
             return False
-        return self._embedding_service.is_available()
-
-    def _invalidate_embedding_index(self) -> None:
-        """标记嵌入索引为过期（新增/删除 emoji 时调用）。"""
-        if self._embedding_service:
-            self._embedding_service.invalidate_cache()
+        return self.embedding_service.is_available()
 
     def _prefer_character_candidates(self, candidates, idx, event):
         """专属候选通过相关性筛选时优先使用，否则保留通用候选。"""

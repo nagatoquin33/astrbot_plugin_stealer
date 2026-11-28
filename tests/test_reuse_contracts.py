@@ -103,7 +103,7 @@ async def test_vector_delete_failure_is_retained_in_durable_queue(tmp_path):
     service, db, sdk, plugin = embedding_fixture(tmp_path)
     await db.insert_batch([{"path": "a", "hash": "h", "category": "happy"}])
     sdk.delete_documents.side_effect = RuntimeError("delete failed")
-    plugin.meme_selector = SimpleNamespace(_smart_select_service=SimpleNamespace(_embedding_service=service))
+    plugin.meme_selector = SimpleNamespace(embedding_service=service)
     assert await IndexManager(plugin).drain_search_refresh() == 1
     with db._get_connection() as conn:
         job = conn.execute("SELECT * FROM search_refresh WHERE path='a'").fetchone()

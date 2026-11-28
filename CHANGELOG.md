@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.5] - 2026-11-28
+
+### fixed
+- 修复备份恢复到不同安装目录后，正式库和待审核记录可能被启动清理误删的问题。数据库改存相对于插件数据目录的图片路径，升级时迁移旧路径并保留标签、收藏、来源和 SQLite 向量。旧备份缺少图片时会暂缓启动清理，补齐后下次启动继续迁移（[#128](https://github.com/nagatoquin33/astrbot_plugin_stealer/issues/128)）。
+- QQ 自定义表情发送回执超时后，停止补发普通图片。主动发送状态待确认时，本轮跳过再次调用发送工具和自动配图，只在确认发送成功后更新使用统计（[#127](https://github.com/nagatoquin33/astrbot_plugin_stealer/pull/127)）。
+- 修复 WebUI 待审核统计使用默认容量的问题。容量和暂停状态现在与自动收录使用的配置一致。
+
+### changed
+- 嵌入服务统一处理提供商准备和检索后端初始化。索引刷新在后端就绪后再读取队列。
+
 ## [3.2.4] - 2026-11-20
 
 ### fixed

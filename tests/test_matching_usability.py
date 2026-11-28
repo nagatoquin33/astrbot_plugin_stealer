@@ -72,7 +72,7 @@ def test_semantic_embedding_recall_passes_without_character_or_literal_overlap(t
     }
     selector = selector_for(index, tmp_path)
     service = selector._smart_select_service
-    service._embedding_service = SimpleNamespace(
+    service.embedding_service = SimpleNamespace(
         is_available=lambda: True,
         search=AsyncMock(return_value=[("sleepy", 0.40)]),
     )

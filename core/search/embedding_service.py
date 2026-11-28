@@ -7,6 +7,8 @@ import asyncio
 import hashlib
 import json
 from pathlib import Path
+
+from ..db.storage_paths import resolve_image_path, store_image_path
 from typing import Any
 
 import numpy as np
@@ -269,6 +271,18 @@ class EmbeddingService:
     #  可用性
     # ═══════════════════════════════════════════════════
 
+    async def prepare_refresh(self) -> bool:
+        """取刷新任务前先完成提供商探测及后端初始化。"""
+        if not self._embedding_enabled() or not self.is_available():
+            return False
+        try:
+            await self._ensure_provider_ready()
+        except Exception as exc:
+            logger.warning(f"[Embedding] 模型检测等待后台重试: {exc}")
+            return False
+        # 模型探测与新 Faiss 后端均可能更新持久化任务的代次。
+        return self.is_available()
+
     def is_available(self) -> bool:
         """嵌入检索是否可用。"""
         if not self.plugin.plugin_config.enable_embedding_search:
@@ -310,8 +324,8 @@ class EmbeddingService:
         try:
             data_dir = self._resolve_data_dir()
             signature = self._fallback_signature(provider).split(':')[-1][:24]
-            db_path = f"{data_dir}/emoji_faiss_{signature}.db"
-            index_path = f"{data_dir}/emoji_faiss_{signature}.index"
+            db_path = f"{data_dir}/emoji_faiss_relative_{signature}.db"
+            index_path = f"{data_dir}/emoji_faiss_relative_{signature}.index"
             needs_backfill = not Path(db_path).is_file() or not Path(index_path).is_file()
 
             self._faiss_db = FaissVecDB(db_path, index_path, EmbeddingProviderAdapter(self, provider))
@@ -527,10 +541,11 @@ class EmbeddingService:
         if self._init_faiss() and self._faiss_db is not None:
             try:
                 await self._ensure_faiss_initialized()
+                stored_path = store_image_path(path, Path(self._resolve_data_dir()))
                 async with self._faiss_operation_lock:
                     ids = await self._faiss_db.insert_batch(
                         contents=[text],
-                        metadatas=[{"path": path, "category": str(entry.get("category", ""))}],
+                        metadatas=[{"path": stored_path, "category": str(entry.get("category", ""))}],
                         tasks_limit=1,
                     )
                 return len(ids) == 1
@@ -546,8 +561,9 @@ class EmbeddingService:
         await self._ensure_provider_ready()
         if self._init_faiss() and self._faiss_db is not None:
             await self._ensure_faiss_initialized()
+            stored_path = store_image_path(path, Path(self._resolve_data_dir()))
             async with self._faiss_operation_lock:
-                await self._faiss_db.delete_documents(metadata_filters={"path": path})
+                await self._faiss_db.delete_documents(metadata_filters={"path": stored_path})
             return True
 
         db = getattr(self.plugin, "db_service", None)
@@ -620,6 +636,7 @@ class EmbeddingService:
                     results = await self._faiss_db.retrieve(
                         query=processed, k=k, fetch_k=k * 2, rerank=False
                     )
+                root = Path(self._resolve_data_dir())
                 out: list[tuple[str, float]] = []
                 for r in results:
                     data = getattr(r, "data", None)
@@ -631,14 +648,14 @@ class EmbeddingService:
                         if isinstance(meta, dict):
                             p = meta.get("path", "")
                             if p:
-                                out.append((p, float(r.similarity)))
+                                out.append((resolve_image_path(p, root), float(r.similarity)))
                         elif isinstance(meta, str):
                             # metadata 被序列化成了 JSON 字符串
                             try:
                                 meta_dict = json.loads(meta)
                                 p = meta_dict.get("path", "")
                                 if p:
-                                    out.append((p, float(r.similarity)))
+                                    out.append((resolve_image_path(p, root), float(r.similarity)))
                             except (json.JSONDecodeError, TypeError):
                                 pass
                     elif isinstance(data, str):
@@ -652,7 +669,7 @@ class EmbeddingService:
                                 meta = json.loads(meta)
                                 p = meta.get("path", "") if isinstance(meta, dict) else ""
                             if p:
-                                out.append((p, float(r.similarity)))
+                                out.append((resolve_image_path(p, root), float(r.similarity)))
                         except (json.JSONDecodeError, TypeError):
                             pass
                 return out
@@ -739,6 +756,7 @@ class EmbeddingService:
         batch_size = max(1, int(batch_size or self.BACKFILL_BATCH_SIZE))
         using_faiss = self._init_faiss() and self._faiss_db is not None
         if using_faiss:
+            root = Path(self._resolve_data_dir())
             await self._ensure_faiss_initialized()
             docs = await self._faiss_db.document_storage.get_documents(metadata_filters={}, limit=None, offset=None)
             embedded = set()
@@ -747,7 +765,7 @@ class EmbeddingService:
                 if isinstance(metadata, str):
                     metadata = json.loads(metadata)
                 if isinstance(metadata, dict) and metadata.get("path"):
-                    embedded.add(metadata["path"])
+                    embedded.add(resolve_image_path(metadata["path"], root))
         else:
             provider = self._get_provider()
             if provider is None:
@@ -768,7 +786,10 @@ class EmbeddingService:
                     async with self._faiss_operation_lock:
                         ids = await self._faiss_db.insert_batch(
                             contents=[text for _, _, text in items],
-                            metadatas=[{"path": path, "category": entry.get("category", "")} for path, entry, _ in items],
+                            metadatas=[
+                                {"path": store_image_path(path, root), "category": entry.get("category", "")}
+                                for path, entry, _ in items
+                            ],
                             batch_size=batch_size, tasks_limit=1,
                         )
                     if len(ids) != len(items):
@@ -779,7 +800,9 @@ class EmbeddingService:
                     # Older SDK versions can leave partial documents after a failed batch.
                     for path in failed_paths:
                         try:
-                            await self._faiss_db.delete_documents(metadata_filters={"path": path})
+                            await self._faiss_db.delete_documents(
+                                metadata_filters={"path": store_image_path(path, root)}
+                            )
                         except Exception:
                             pass
                     await asyncio.to_thread(db.enqueue_search_refresh, failed_paths)

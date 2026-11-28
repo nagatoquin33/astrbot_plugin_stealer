@@ -12,10 +12,10 @@ class EmbeddingRepository:
         generations = {}
         with self._get_connection() as conn:
             for start in range(0, len(paths), self._RELATED_FETCH_CHUNK_SIZE):
-                batch = paths[start:start + self._RELATED_FETCH_CHUNK_SIZE]
+                batch = [self._store_path(path) for path in paths[start:start + self._RELATED_FETCH_CHUNK_SIZE]]
                 placeholders = ",".join("?" for _ in batch)
                 rows = conn.execute(f"SELECT path, generation FROM search_refresh WHERE path IN ({placeholders})", batch)
-                generations.update({row["path"]: row["generation"] for row in rows})
+                generations.update({self._resolve_path(row["path"]): row["generation"] for row in rows})
         return generations
 
     def enqueue_search_refresh(self, paths: list[str]) -> None:
@@ -23,7 +23,7 @@ class EmbeddingRepository:
             conn.executemany(
                 "INSERT INTO search_refresh(path) VALUES (?) ON CONFLICT(path) "
                 "DO UPDATE SET generation = generation + 1, retry_at = 0",
-                [(path,) for path in dict.fromkeys(paths)],
+                [(path,) for path in dict.fromkeys(map(self._store_path, paths))],
             )
 
     def clear_all_embeddings(self) -> None:
@@ -36,10 +36,11 @@ class EmbeddingRepository:
                 "SELECT * FROM search_refresh WHERE retry_at <= ? ORDER BY retry_at, path LIMIT ?",
                 (int(time.time()), max(1, limit)),
             ).fetchall()
-            return [dict(row) for row in rows]
+            return [dict(row, path=self._resolve_path(row["path"])) for row in rows]
 
     def finish_search_refresh(self, path: str, generation: int, error: str = "") -> None:
         """A newer committed change must survive an older worker's completion."""
+        path = self._store_path(path)
         with self._get_connection() as conn:
             if error:
                 conn.execute(
@@ -75,12 +76,12 @@ class EmbeddingRepository:
                     model_sig = excluded.model_sig,
                     updated_at = excluded.updated_at
                 """,
-                (path, sqlite3.Binary(vector_blob), int(dim), model_sig, now),
+                (self._store_path(path), sqlite3.Binary(vector_blob), int(dim), model_sig, now),
             )
 
     def delete_embedding(self, path: str) -> None:
         with self._get_connection() as conn:
-            conn.execute("DELETE FROM emoji_embedding WHERE path = ?", (path,))
+            conn.execute("DELETE FROM emoji_embedding WHERE path = ?", (self._store_path(path),))
 
     def load_embeddings_by_sig(self, model_sig: str) -> list[dict[str, Any]]:
         """加载某 model_sig 的所有向量行，用于构建内存索引矩阵。"""
@@ -91,7 +92,7 @@ class EmbeddingRepository:
             ).fetchall()
             return [
                 {
-                    "path": r["path"],
+                    "path": self._resolve_path(r["path"]),
                     "vector": bytes(r["vector"]),
                     "dim": int(r["dim"]),
                 }
@@ -112,4 +113,4 @@ class EmbeddingRepository:
             rows = conn.execute("SELECT path FROM emoji_embedding" if model_sig is None else
                                 "SELECT path FROM emoji_embedding WHERE model_sig = ?",
                                 () if model_sig is None else (model_sig,)).fetchall()
-            return [r["path"] for r in rows]
+            return [self._resolve_path(r["path"]) for r in rows]

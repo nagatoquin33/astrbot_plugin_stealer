@@ -142,7 +142,10 @@ class MemeSearchEngine:
                         for item in cached_documents:
                             if isinstance(item, (list, tuple)):
                                 normalized_docs.append([str(tok) for tok in item if str(tok)])
-                        if normalized_docs and len(normalized_docs) == len(cached_doc_paths):
+                        if (
+                            normalized_docs and len(normalized_docs) == len(cached_doc_paths)
+                            and all(path in idx for path in cached_doc_paths)
+                        ):
                             self._bm25_index = await asyncio.to_thread(BM25, normalized_docs)
                             self._bm25_doc_paths = [str(p) for p in cached_doc_paths]
                             self._bm25_signature = signature

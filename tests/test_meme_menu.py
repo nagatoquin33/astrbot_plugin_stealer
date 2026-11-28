@@ -15,6 +15,7 @@ from core.commands.qq_panel_interactions import BUTTON_PREFIX
 from core.commands.panel_actions import PANEL_ACTIONS
 from core.commands.qq_menu import PanelButton, build_keyboard, panel_content, panel_rows, send_keyboard
 from core.db.database_service import DatabaseService
+from core.events.emoji_delivery import EmojiDeliveryUncertain
 from core.search.meme_scope_service import MemeScopeService
 
 
@@ -334,6 +335,26 @@ async def test_random_failure_can_retry_and_disabled_or_empty_library_does_not_s
     await library.menu_commands.random_image(event, token)
     assert "禁用" in event.messages[-1].text
     assert library.meme_selector.send_emoji_message.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_random_delivery_timeout_skips_same_image_without_counting(library):
+    event = Event(platform="aiocqhttp")
+    token = library.menu_commands._session_for(event)
+    session = library.menu_commands._sessions[token]
+    visible = await library.menu_commands._visible_index(event)
+    only = next(iter(visible))
+    session.sent.update(path for path in visible if path != only)
+    library.meme_selector.send_emoji_message.side_effect = EmojiDeliveryUncertain()
+
+    await library.menu_commands.random_image(event, token)
+    assert "可能已送达" in event.messages[-1].text
+    await library.menu_commands.random_image(event, token)
+
+    assert "暂无未试发" in event.messages[-1].text
+    library.meme_selector.send_emoji_message.assert_awaited_once_with(event, only)
+    library.meme_selector.record_emoji_usage.assert_not_awaited()
+    library._emoji_sender_engine.mark_auto_emoji_sent.assert_not_awaited()
 
 
 @pytest.mark.asyncio

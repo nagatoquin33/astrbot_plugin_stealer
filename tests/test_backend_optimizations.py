@@ -92,7 +92,7 @@ async def test_recall_fusion_keeps_embedding_and_bm25_channels():
     service._character_recall_paths = lambda *a: [f"p{i}" for i in range(16, 32)]
     service._scene_recall_paths = lambda *a: [f"p{i}" for i in range(32, 48)]
     service._is_embedding_ready = lambda: True
-    service._embedding_service = SimpleNamespace(search=AsyncMock(return_value=[("p48", 0.99)]))
+    service.embedding_service = SimpleNamespace(search=AsyncMock(return_value=[("p48", 0.99)]))
     service._search_engine._bm25_index = SimpleNamespace(get_top_k=lambda *a, **k: [(0, 10)])
     service._search_engine._bm25_doc_paths = ["p49"]
     paths, _ = await service._recall_candidate_paths(index, "query", None, set())
@@ -155,10 +155,10 @@ async def test_partial_sync_reads_only_submitted_paths_and_noop_keeps_revision(t
 async def test_refresh_failure_survives_restart_and_newer_generation(tmp_path):
     db = DatabaseService(tmp_path / "emoji.db")
     await db.insert_batch([{"path": "a", "hash": "h", "category": "happy"}])
-    embedding = SimpleNamespace(_embedding_enabled=lambda: True, delete_by_path=AsyncMock(),
+    embedding = SimpleNamespace(prepare_refresh=AsyncMock(return_value=True), delete_by_path=AsyncMock(),
                                 insert_emoji=AsyncMock(return_value=False))
     plugin = SimpleNamespace(db_service=db, meme_selector=SimpleNamespace(
-        _smart_select_service=SimpleNamespace(_embedding_service=embedding)))
+        embedding_service=embedding))
     manager = IndexManager(plugin)
     assert await manager.drain_search_refresh() == 1
     restarted = DatabaseService(db._db_path)

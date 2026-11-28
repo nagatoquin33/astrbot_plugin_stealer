@@ -8,6 +8,7 @@ from typing import Any
 
 from astrbot.api import logger
 
+from ..events.emoji_delivery import EmojiDeliveryUncertain
 from ..events.event_context import get_event_platform_name, get_event_session_key
 from ..events.persona_library import prepare_persona_scope
 from ..search.meme_scope_service import MemeScopeService
@@ -211,6 +212,10 @@ class MemeMenuCommand:
             if not mode:
                 await event.send(event.plain_result("随机发送失败，可以点击重试。"))
                 return
+        except EmojiDeliveryUncertain:
+            session.sent.add(path)
+            await event.send(event.plain_result("表情包可能已送达，请查看聊天记录确认。"))
+            return
         except Exception as exc:
             logger.error(f"[MemeMenu] 随机发送失败: {exc}", exc_info=True)
             await event.send(event.plain_result("随机发送失败，可以点击重试。"))

@@ -154,8 +154,15 @@ class SourceRepository:
             if not row:
                 return None
             result = dict(row)
-            result["metadata"] = self._decode_json_object(result.pop("metadata_json", None))
-            return result
+            return self._source_item_from_row(result)
+
+    def _source_item_from_row(self, item: dict[str, Any]) -> dict[str, Any]:
+        item["path"] = self._resolve_path(item["path"])
+        metadata = self._decode_json_object(item.pop("metadata_json", None))
+        if metadata.get("pending_path"):
+            metadata["pending_path"] = self._resolve_path(metadata["pending_path"])
+        item["metadata"] = metadata
+        return item
 
     async def link_source_item(self, item: dict[str, Any]) -> bool:
         if not isinstance(item, dict) or not item.get("source_id") or not item.get("external_id"):
@@ -166,6 +173,9 @@ class SourceRepository:
     def _link_source_item_sync(self, item: dict[str, Any]) -> bool:
         now = int(time.time())
         metadata = item.get("metadata", item.get("metadata_json", {}))
+        decoded = self._decode_json_object(metadata) if isinstance(metadata, str) else metadata
+        if isinstance(decoded, dict) and decoded.get("pending_path"):
+            metadata = dict(decoded, pending_path=self._store_path(decoded["pending_path"]))
         metadata_json = (
             str(metadata)
             if isinstance(metadata, str)
@@ -193,7 +203,7 @@ class SourceRepository:
                 (
                     str(item.get("source_id"))[:190],
                     str(item.get("external_id"))[:180],
-                    item.get("path"),
+                    self._store_path(item.get("path")),
                     str(item.get("source_category") or "")[:160],
                     str(item.get("source_url") or "")[:2000],
                     str(item.get("license") or "")[:160],
@@ -212,12 +222,7 @@ class SourceRepository:
                 "SELECT * FROM meme_source_item WHERE source_id = ? ORDER BY external_id",
                 (source_id,),
             ).fetchall()
-            result: list[dict[str, Any]] = []
-            for row in rows:
-                item = dict(row)
-                item["metadata"] = self._decode_json_object(item.pop("metadata_json", None))
-                result.append(item)
-            return result
+            return [self._source_item_from_row(dict(row)) for row in rows]
 
     async def mark_source_items_stale(self, source_id: str) -> int:
         if not source_id:
@@ -288,7 +293,7 @@ class SourceRepository:
 
     def _promote_source_pending_path_sync(self, pending_path: str, path: str) -> int:
         with self._get_connection() as conn:
-            return self._promote_source_pending_in_connection(conn, pending_path, path)
+            return self._promote_source_pending_in_connection(conn, self._store_path(pending_path), self._store_path(path))
 
     def _promote_source_pending_in_connection(self, conn, pending_path: str, path: str) -> int:
         updated = 0

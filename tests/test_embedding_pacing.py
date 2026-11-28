@@ -142,10 +142,13 @@ async def test_cold_backend_generations_are_captured_before_refresh(tmp_path):
         state['ready'] = True
     async def delete(path):
         available()
-    embedding = SimpleNamespace(_embedding_enabled=lambda: True, is_available=available,
-        _ensure_provider_ready=prepare, delete_by_path=delete, insert_emoji=AsyncMock(return_value=True))
-    plugin = SimpleNamespace(db_service=db, meme_selector=SimpleNamespace(
-        _smart_select_service=SimpleNamespace(_embedding_service=embedding)))
+    plugin = SimpleNamespace(db_service=db, plugin_config=SimpleNamespace(enable_embedding_search=True))
+    embedding = EmbeddingService(plugin)
+    embedding.is_available = available
+    embedding._ensure_provider_ready = prepare
+    embedding.delete_by_path = delete
+    embedding.insert_emoji = AsyncMock(return_value=True)
+    plugin.meme_selector = SimpleNamespace(embedding_service=embedding)
     assert await IndexManager(plugin).drain_search_refresh() == 1
     assert db.get_search_refresh_jobs() == []
     embedding.insert_emoji.assert_awaited_once()

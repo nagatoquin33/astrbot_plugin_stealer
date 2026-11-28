@@ -19,6 +19,7 @@ from ..processing.semantic_schema import SEARCH_METADATA_FIELDS
 from .schema import DatabaseSchema
 from .source_repository import SourceRepository
 from .library_queries import LibraryQueries
+from .storage_paths import resolve_image_path, store_image_path
 from .pending_repository import PendingRepository
 from .embedding_repository import EmbeddingRepository
 
@@ -45,21 +46,24 @@ class DatabaseService(
     _RELATED_FETCH_CHUNK_SIZE = 400
 
     # 表结构版本，用于迁移检测
-    SCHEMA_VERSION = 8
+    SCHEMA_VERSION = 9
     EXTERNAL_SCHEMA_VERSION = 1
 
-    def __init__(self, db_path: str | Path | None = None):
+    def __init__(self, db_path: str | Path | None = None, *, data_root: Path | None = None):
         """初始化数据库服务。
 
         Args:
             db_path: 数据库文件路径，默认为插件数据目录下的 emoji.db
+            data_root: 插件数据目录，用于保存和解析图库相对路径
         """
         if db_path is None:
             from astrbot.api.star import StarTools
 
-            db_path = Path(StarTools.get_data_dir("astrbot_plugin_stealer")) / "emoji.db"
+            data_root = data_root or Path(StarTools.get_data_dir("astrbot_plugin_stealer"))
+            db_path = data_root / "emoji.db"
 
         self._db_path = Path(db_path)
+        self._data_root = Path(data_root).resolve() if data_root is not None else None
         self._ensure_db_dir()
 
         # 初始化数据库表结构
@@ -71,6 +75,12 @@ class DatabaseService(
         self._snapshot_lock = threading.RLock()
         self._snapshot_revision: str | None = None
         self._snapshot: dict[str, Any] = {}
+
+    def _store_path(self, path: str | None) -> str | None:
+        return store_image_path(path, self._data_root)
+
+    def _resolve_path(self, path: str | None) -> str | None:
+        return resolve_image_path(path, self._data_root)
 
     def _ensure_db_dir(self) -> None:
         """确保数据库目录存在。"""
@@ -142,6 +152,7 @@ class DatabaseService(
         return None
 
     def _hydrate_entry(self, entry: dict[str, Any]) -> dict[str, Any]:
+        entry["path"] = self._resolve_path(entry["path"])
         entry["emotions"] = self._load_emotions_json(entry.get("emotions_json"))
         if not entry.get("overlay_text"):
             entry["overlay_text"] = ""
@@ -168,7 +179,7 @@ class DatabaseService(
                         conn.execute(f"UPDATE {table} SET emotions_json = ? WHERE path = ?",
                                      (self._dump_emotions_json(remaining), row["path"]))
                         if table == "emoji":
-                            changed_paths.append(row["path"])
+                            changed_paths.append(self._resolve_path(row["path"]))
                 rows = conn.execute("SELECT path, manual_fields FROM emoji_pending WHERE category = ?", (label,)).fetchall()
                 for row in rows:
                     manual = set(json.loads(row["manual_fields"] or "[]"))
@@ -419,6 +430,7 @@ class DatabaseService(
 
     def get_emoji(self, path: str) -> dict[str, Any] | None:
         """获取单个表情包的完整信息。"""
+        path = self._store_path(path)
         with self._get_connection() as conn:
             row = conn.execute("SELECT * FROM emoji WHERE path = ?", (path,)).fetchone()
             if not row:
@@ -462,13 +474,13 @@ class DatabaseService(
                 "SELECT scene FROM emoji_scene WHERE path = ? ORDER BY rowid", (path,)
             ).fetchall()
             result["scenes"] = [r["scene"] for r in scenes]
-            return path, self._hydrate_entry(result)
+            return self._resolve_path(path), self._hydrate_entry(result)
 
     def get_all_paths(self) -> list[str]:
         """获取所有表情包路径。"""
         with self._get_connection() as conn:
             rows = conn.execute("SELECT path FROM emoji").fetchall()
-            return [r["path"] for r in rows]
+            return [self._resolve_path(r["path"]) for r in rows]
 
     def get_paths_sorted_newest(self) -> list[str]:
         """按列表指令的稳定顺序返回路径，无需加载全量元数据。"""
@@ -476,7 +488,7 @@ class DatabaseService(
             rows = conn.execute(
                 "SELECT path FROM emoji ORDER BY created_at DESC, path DESC"
             ).fetchall()
-            return [row["path"] for row in rows]
+            return [self._resolve_path(row["path"]) for row in rows]
 
     def hash_exists(self, hash_val: str) -> bool:
         """O(1) 哈希查重，不走全量索引加载。"""
@@ -490,7 +502,7 @@ class DatabaseService(
             rows = conn.execute(
                 "SELECT path, phash FROM emoji WHERE phash IS NOT NULL AND phash != ''"
             ).fetchall()
-            return {r["path"]: r["phash"] for r in rows}
+            return {self._resolve_path(r["path"]): r["phash"] for r in rows}
 
     def count_total(self) -> int:
         """统计表情包总数。"""
@@ -565,7 +577,7 @@ class DatabaseService(
         with self._get_connection() as conn:
             updated = conn.execute(
                 "UPDATE emoji SET use_count = use_count + 1, last_used_at = ? WHERE path = ?",
-                (now, path),
+                (now, self._store_path(path)),
             )
             if updated.rowcount:
                 return True
@@ -575,7 +587,7 @@ class DatabaseService(
             matches = [
                 row["path"]
                 for row in conn.execute("SELECT path FROM emoji")
-                if canonicalize_path(row["path"]) == wanted
+                if canonicalize_path(self._resolve_path(row["path"])) == wanted
             ]
             if len(matches) != 1:
                 return False
@@ -600,7 +612,7 @@ class DatabaseService(
                 conn.execute("BEGIN IMMEDIATE")
                 transaction_started = True
                 for path in paths:
-                    cur = conn.execute("DELETE FROM emoji WHERE path = ?", (path,))
+                    cur = conn.execute("DELETE FROM emoji WHERE path = ?", (self._store_path(path),))
                     deleted += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
                 conn.execute("COMMIT")
             except Exception:
@@ -615,7 +627,7 @@ class DatabaseService(
         if not path or not updates:
             return False
         async with self._write_lock:
-            return await asyncio.to_thread(self._update_path_sync, path, updates, expected)
+            return await asyncio.to_thread(self._update_path_sync, self._store_path(path), updates, expected)
 
     def _update_path_sync(
         self, path: str, updates: dict[str, Any], expected: dict[str, Any] | None = None,
@@ -678,6 +690,7 @@ class DatabaseService(
         category: str,
         updates: dict[str, Any] | None = None,
     ) -> bool:
+        old_path, new_path = self._store_path(old_path), self._store_path(new_path)
         if not old_path or not new_path or old_path == new_path:
             return False
         async with self._write_lock:
@@ -800,7 +813,7 @@ class DatabaseService(
 
             try:
                 for emoji in emojis:
-                    path = emoji.get("path")
+                    path = self._store_path(emoji.get("path"))
                     if not path:
                         continue
 
@@ -852,7 +865,7 @@ class DatabaseService(
             )}
             revision = versions["library_revision"]
             if revision != self._snapshot_revision:
-                self._snapshot = self._read_index(conn)
+                self._snapshot = {entry["path"]: entry for entry in self._read_index(conn).values()}
                 self._snapshot_revision = revision
             snapshot = {
                 path: {key: value.copy() if isinstance(value, list) else value for key, value in entry.items()}
@@ -861,7 +874,7 @@ class DatabaseService(
             return IndexSnapshot(snapshot, self._snapshot), f"{versions['corpus_id']}:{versions['corpus_revision']}"
 
     def _read_index(self, conn: sqlite3.Connection, paths: list[str] | None = None) -> dict[str, Any]:
-        """Hydrate a coherent snapshot or a bounded set of submitted paths."""
+        """按存储路径查询和分组，元数据中的路径还原后交给业务层。"""
         result: dict[str, Any] = {}
         if paths is None:
             rows = conn.execute("SELECT * FROM emoji").fetchall()
@@ -892,12 +905,13 @@ class DatabaseService(
                 paths.extend(row["path"] for row in conn.execute(
                     f"SELECT path FROM emoji WHERE hash IN ({placeholders})", batch,
                 ))
-            return self._read_index(conn, paths)
+            return {entry["path"]: entry for entry in self._read_index(conn, paths).values()}
 
     def get_entries(self, paths: list[str]) -> dict[str, Any]:
         with self._get_connection() as conn:
             conn.execute("BEGIN")
-            return self._read_index(conn, list(dict.fromkeys(paths)))
+            stored_paths = list(dict.fromkeys(map(self._store_path, paths)))
+            return {entry["path"]: entry for entry in self._read_index(conn, stored_paths).values()}
 
     async def save_index(self, idx: dict[str, Any]) -> None:
         """用传入的索引替换数据库内容，先清空数据再批量插入。
@@ -944,10 +958,11 @@ class DatabaseService(
             try:
                 conn.execute("BEGIN IMMEDIATE")
                 transaction_started = True
-                current_index = self._read_index(conn, list(desired_index))
+                stored_paths = {path: self._store_path(path) for path in desired_index}
+                current_index = self._read_index(conn, list(stored_paths.values()))
 
                 desired_paths = set(desired_index.keys())
-                existing_paths = set(current_index.keys())
+                existing_paths = {path for path, stored in stored_paths.items() if stored in current_index}
                 changed_paths = set(desired_paths - existing_paths)
 
                 for path in desired_paths - existing_paths:
@@ -961,26 +976,26 @@ class DatabaseService(
                     now = int(time.time())
                     conn.execute(
                         self._INSERT_EMOJI_SQL,
-                        self._emoji_insert_values(path, meta, now=now),
+                        self._emoji_insert_values(stored_paths[path], meta, now=now),
                     )
                     self._insert_related_values_sync(
                         conn,
                         table="emoji_tag",
                         value_column="tag",
-                        path=path,
+                        path=stored_paths[path],
                         values=meta.get("tags") or [],
                     )
                     self._insert_related_values_sync(
                         conn,
                         table="emoji_scene",
                         value_column="scene",
-                        path=path,
+                        path=stored_paths[path],
                         values=meta.get("scenes") or [],
                     )
 
                 for path in desired_paths & existing_paths:
                     meta = desired_index[path]
-                    current = current_index[path]
+                    current = current_index[stored_paths[path]]
                     if baseline is not None:
                         if path not in baseline:
                             continue  # 新路径已由另一写入提交，保留那次提交的完整元数据。
@@ -990,7 +1005,7 @@ class DatabaseService(
                                 and current.get(key) == before.get(key)}
                     if self._sync_existing_emoji_sync(
                         conn,
-                        path=path,
+                        path=stored_paths[path],
                         current=current,
                         desired=meta,
                     ):

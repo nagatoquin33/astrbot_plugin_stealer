@@ -4,6 +4,8 @@ import sqlite3
 
 from astrbot.api import logger
 
+from .storage_paths import legacy_image_path
+
 
 
 class DatabaseSchema:
@@ -69,8 +71,74 @@ class DatabaseSchema:
 
             # 为每个数据库补齐外部源表结构和检索修订信息。
             self._ensure_external_schema(conn)
+            if self._data_root is not None and (current_version < 9 or conn.execute(
+                "SELECT 1 FROM meta WHERE key = 'image_path_migration_pending'"
+            ).fetchone()):
+                self._migrate_image_paths(conn)
             self._ensure_search_revision_schema(conn)
             conn.execute("COMMIT")
+
+    def _migrate_image_paths(self, conn: sqlite3.Connection) -> None:
+        """改写存储路径和关联键，保留已有语义、向量及队列状态。"""
+        root = self._data_root
+        if root is None:
+            return
+        changes = {}
+        missing = set()
+        for row in conn.execute("SELECT path FROM emoji UNION SELECT path FROM emoji_pending"):
+            old = row["path"]
+            new = legacy_image_path(old, root)
+            if new == old:
+                continue
+            if new != self._store_path(old) and not (root / new).is_file():
+                missing.add(old)
+                continue
+            changes[old] = new
+
+        # 旧库的刷新队列还可能含已删除图片的路径。
+        has_queue = conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'search_refresh'").fetchone()
+        if has_queue:
+            for row in conn.execute("SELECT path FROM search_refresh"):
+                old = row["path"]
+                new = legacy_image_path(old, root)
+                if old != new and old not in missing:
+                    changes.setdefault(old, new)
+
+        if missing:
+            conn.execute("INSERT OR REPLACE INTO meta VALUES ('image_path_migration_pending', '1')")
+            logger.warning(f"[DB] 有 {len(missing)} 张旧库图片未在新目录找到，保留记录并暂停启动清理")
+        else:
+            conn.execute("DELETE FROM meta WHERE key = 'image_path_migration_pending'")
+        if not changes:
+            return
+
+        conn.execute("PRAGMA defer_foreign_keys = ON")
+        conn.execute("CREATE TEMP TABLE image_path_map (old TEXT PRIMARY KEY, new TEXT NOT NULL)")
+        conn.executemany("INSERT INTO image_path_map VALUES (?, ?)", changes.items())
+        # 这里只换路径，不重新计算已有向量或重置失败重试时间。
+        for table in ("emoji", "emoji_tag", "emoji_scene"):
+            for operation in ("insert", "update", "delete"):
+                conn.execute(f"DROP TRIGGER IF EXISTS revision_{table}_{operation}")
+                conn.execute(f"DROP TRIGGER IF EXISTS corpus_{table}_{operation}")
+        tables = (
+            "emoji", "emoji_tag", "emoji_scene", "emoji_pending", "emoji_pending_tag",
+            "emoji_pending_scene", "emoji_embedding", "meme_source_item",
+        )
+        if has_queue:
+            tables += ("search_refresh",)
+        for table in tables:
+            conn.execute(f"UPDATE {table} SET path = (SELECT new FROM image_path_map WHERE old = path) "
+                         "WHERE path IN (SELECT old FROM image_path_map)")
+        conn.execute("""
+            UPDATE meme_source_item
+            SET metadata_json = json_set(metadata_json, '$.pending_path', mapping.new)
+            FROM image_path_map AS mapping
+            WHERE CASE WHEN json_valid(metadata_json)
+                  THEN json_extract(metadata_json, '$.pending_path') END = mapping.old
+        """)
+        conn.execute("UPDATE meta SET value = CAST(value AS INTEGER) + 1 "
+                     "WHERE key IN ('library_revision', 'corpus_revision')")
+        logger.info(f"[DB] 已将 {len(changes)} 个图库路径迁移为相对路径")
 
     def _ensure_search_revision_schema(self, conn: sqlite3.Connection) -> None:
         """创建图库修订信息和可合并同路径任务的持久化向量刷新队列。"""

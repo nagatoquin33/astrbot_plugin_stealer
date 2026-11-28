@@ -109,9 +109,15 @@ class MemeSelector:
             return await asyncio.to_thread(db.get_entries, paths)
         return await asyncio.to_thread(self._get_index)
 
-    def _invalidate_bm25_index(self) -> None:
-        """委托给 MemeSearchEngine。"""
+    @property
+    def embedding_service(self):
+        return self._smart_select_service.embedding_service
+
+    def invalidate_search_cache(self) -> None:
+        """提交图库改动后失效两种检索缓存。"""
         self._search_engine._invalidate_bm25_index()
+        if self.embedding_service is not None:
+            self.embedding_service.invalidate_cache()
 
     def _check_group_allowed(self, event: AstrMessageEvent) -> bool:
         """检查当前群组是否允许使用表情包功能。
