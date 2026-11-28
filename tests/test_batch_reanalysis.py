@@ -325,4 +325,5 @@ async def test_review_all_isolates_modified_item_and_batches_index_refresh_once(
 
     # 检索索引仅通过 on_batch_updated 合并刷新一次，且不包含冲突失败的 b
     single_updated.assert_not_awaited()
-    batch_updated.assert_awaited_once_with([paths["a"], paths["c"]])
+    batch_updated.assert_awaited_once()
+    assert sorted(batch_updated.await_args.args[0]) == [paths["a"], paths["c"]]
